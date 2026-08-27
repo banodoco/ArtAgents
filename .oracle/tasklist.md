@@ -1,38 +1,62 @@
-# MEGADO TASKLIST — unified execution (frozen after pre-execution review)
+# Frozen Tasklist — megado/oracle-run-storyboard (plan v7 FINAL, STABLE)
 
-Base: b4c70e0a · Worktree: ../Astrid-unified-oracle · Models: all openrouter:stealth/ox-alpha (user-pinned both classes)
+All tasks classified `normal` (no [XHARD]: each is bounded, mechanically specifiable, and testable by file-level + managed-store assertions; the design risk was absorbed during planning).
 
-## Batch 1 — completion relaxation + docs v2 (parallel-safe)
-| # | Task | Class | Verify |
-|---|---|---|---|
-| 1.1 | Relax TaskRepository.complete: optional `result: Mapping` param; rule becomes ≥1 output OR non-empty result; exactly-one-primary only when outputs exist. Update _normalize_completion_outputs. Tests: zero-output complete w/ result replays via receipt; stale/losing unaffected; existing media-output paths unchanged. | normal | tests/core/test_task_executor.py + new cases |
-| 1.2 | docs/contracts/run-ledger-contract.md v2: single-ledger contract (kernel = execution authority; FS run.json = derived projection written once from kernel state at finalize, stamped `"authority":"kernel"`, `kernel_task_id`, `kernel_run_id`; never read back as authority). SKILL.md + async-completion.md + creating-tools.md aligned. | normal | grep gates + docs-alignment |
+Model policy: normal executor = GLM-5.3 Flash (zhipu:glm-5.3, fallback zhipu:glm-5.2). Oracle/checkins = grok-4.6 CLI.
 
-Checkpoint B1: full tests/v10/test_task_executor.py green; conformance meta-test against new doc table green; `import astrid` clean.
+Each batch ends at its checkpoint with a grok review whose brief embeds the North Star, agent goal amendments 1-4, the supersession matrix, and the batch delta. Commits between batches.
 
-## Batch 2 — CapabilityTaskHandler + sdk.invoke rewiring
-| # | Task | Class | Verify |
-|---|---|---|---|
-| 2.1 | astrid/core/task_executor/capability_handler.py: CapabilityTaskHandler(TaskHandler) — ExecutorRunRequest(execution_mode="in_process", out=staging/out) → run_executor; orchestrator variant run_orchestrator; harvest outputs: prefer capability manifest.json else walk staging/out; classify extension/mime → PreparedMedia vs evidence entry; complete via relaxed contract. ASTRID_INTERNAL_INVOCATION=1 env. | normal | roundtrip vs direct-mode byte-compare (generation.generate_image) |
-| 2.2 | sdk.invoke rewiring: admit run+one child task (RunRepository.create, compute_spec_hash idempotency key), claim/start, CapabilityTaskHandler execute, complete/fail; InvocationResult gains kernel ids (public shape stable). Update ~48 run.json-shape test files per E7 census; update run-ledger-contract conformance meta-tests. | normal | full sdk invoke suite + conformance |
-| 2.3 | Self-managing pack orchestrators: event_talks/run.py:648, hype/project_adapter.py:86, thumbnail_maker/run.py:550 → shared admission shim. | normal | pack test slices |
+# Megado plan v8 FINAL — declarative storyboard layer (single-authority model)
 
-Checkpoint B2: ≥3 executors via sdk.invoke → kernel events/receipts/succeeded, zero authoritative run.json writes; suite slices green.
+v8 resolves all prior findings: single unified variant/resolution model, VO audio sourcing, kernel-sole-authority clarification, gates enumerated, provenance schema defined. This text supersedes earlier drafts entirely.
 
-## Batch 3 — remaining writers + orchestrator children
-| # | Task | Class | Verify |
-|---|---|---|---|
-| 3.1 | Remaining run.json writers: experiment_import/run.py:527, threads/record.py:24 → kernel-first or documented non-authority. | normal | grep zero unauthorized writers |
-| 3.2 | Orchestrator children as kernel child tasks where plans are static; dynamic planned_commands stay runtime-admitted. | normal | orchestrator slice |
+## Roles/gates
+Oracle: grok-4.6 (fallback GPT-5.6 Sol via codex). Explorer/executor normal: GLM-5.3 Flash (zhipu:glm-5.3, fallback zhipu:glm-5.2).
+Every batch B1..B6 ends with a grok-4.6 gate whose brief embeds North Star + agent goal (incl Amendments 1-4) + batch delta; verdict PASS/issues → .oracle/checkins/batch-N.md. Final overall review after B6: GLM pass(es) + grok synthesis (≤3 total).
 
-## Batch 4 — reader flip + final verification
-| # | Task | Class | Verify |
-|---|---|---|---|
-| 4.1 | Flip internal readers (doctor, threads attribution/provenance, timeline_visualize/frozen.py:553-587 ownership checks, experiments, project listings) to kernel-first with FS fallback; delete prepare/finalize_project_run authority semantics; keep load_run_record for historical dirs. | normal | full suite green |
-| 4.2 | Empirical process harness (df-pattern): ≥6 representative capabilities each asserted as kernel run+task with correct events/receipts/terminal status and zero authoritative run.json. | normal | harness output |
+## Canonical authored input: storyboards/astrid-intro.storyboard.json (tracked)
+AUTHORED INPUT ARTIFACT (analogous to scripts/prompts — source content + lineage). Execution/durable state lives ONLY in SQLite; this file is versioned source content, exempt from the every-durable-fact rule which governs execution/ledger data. It NEVER receives kernel-derived values (no media_id/content_hash/resolved write-backs — those live in compiled config/registry each render).
 
-## North Star alignment
-Every batch advances ONE store / ONE execution path / every-run-observable / honest-docs / KISS. Anti-patterns guarded: no second authority (projection write-once-from-kernel), no silent divergence (fail-closed binding), no ghost claims, no per-executor adapters, no serve/GPU supervision scope creep.
+Section = {
+  id, nav:{tabs[2],active}, 
+  image:{ variants:[{source:"asset",path,label} | {source:"gen",prompt,model?,refs[],alt_render_path(required-in-v1),gen_kernel_run_id?,label}], active_index },
+  vo:{text, audio_asset:"build/segments/<slug>.wav"},
+  provenance?:{prompt,generator}
+}
+meta {title, canvas:"1920x1080@30", style:"pixel-terminal", timing.default_hold:3.0}
 
-## Classification rationale
-All tasks normal: bounded, mechanically specified, locally verifiable; no irreducible judgment kernel exceeds the normal pool. Zero [XHARD].
+## Compiler (scripts/build_storyboard.py)
+validate(story)->problems | compile(story,*,vo_plan=None)->(config,registry,resolution_report)
+Resolution contract per variant:
+ - source=asset → MediaService.import_file(path) → CAS
+ - source=gen → import_file(alt_render_path) [v1 requires alt_render_path; NO paid gen branch]
+resolution_report[slug] = section.image.resolved (mirrors variants order) → consumed ONLY into this render's registry/config (kernel-owned), never written back to the storyboard file.
+Registry entries emitted per resolved asset: {"file":<CAS>,"content_sha256":<digest>,"origin":json(section.provenance||{}), "generationId": <variant.gen_kernel_run_id when present, else absent>}. gen_kernel_run_id is an AUTHORED lineage field captured at generation time (kernel run id from the sdk.invoke manifest); resolved identifiers (content_hash/media_id) remain compiler-output-side only and are never written into the authored storyboard. Absence-free validation applies to entries lacking gen_kernel_run_id; presence path is also validated (string).
+Parity rule: baked-PNG active images compile exactly 3 clips/section + brand ⇒ intro compiles 76 clips / 50 assets / ~177.53s vs main v13 oracle. Non-baked apps may later add text-clip synthesis — out of v1 scope.
+
+## Batches (each gated by grok check-in; commits between)
+B1 validator+loader module astrid/core/storyboard/ + tests/test_storyboard_schema.py (schema embedded as Python validator module; loader handles str|Path env conventions too? no—only schema+load). Acceptance: intro sample valid; malformed lists ALL problems typed StoryboardError.
+B2 compiler core + golden parity tests (25-section fixture referencing repo-relative test assets → 76/50/177.53±0.5; counts/order/normalized-hash compare) + ffprobe duration probing.
+B3 CLI (validate|compile [--vo-align F] [--render]) + managed imports wired + integration tests: preflight-before-write; create→CAS-save→version bump; rerun byte-equality of saved config+registry.
+B4 author storyboards/astrid-intro.storyboard.json from today's artifacts (plan.json texts/slugs + pyramid prompts + final-slides image paths); validate.
+B5 intro application sequence (all saves target NEW managed timeline slug `storyboard-intro`; `main` remains untouched):
+  1. compile(--vo-align plan.json) with all sections active_index=0 (final-html images) → managed imports (25 png + 25 wav = 50 assets) → save v1. Parity assert: 25/76/177.53±0.5.
+  2. ex_glitch regeneration proof: sdk.invoke('generation.generate_image', flux-schnell, glitch prompt) → kernel run manifest records the paid generation → MediaService.import_file(output png) → append AUTHORED variant {source:"gen", prompt:<same glitch prompt>, label:"regen-glitch", alt_render_path:<fal png>, gen_kernel_run_id:<run_id from manifest>} → set ex_glitch active_index to it → save v2. Transient asset count 51 is expected and asserted.
+  3. flip back: remove the regen-glitch authored variant and restore active_index=0 → save v3; assert config+registry byte-equal to the step-1 snapshot (excluding version metadata) → proves flip independence without drift.
+     (The regeneration evidence persists in Batch 5 artifacts: kernel run manifest + imported managed media row remain in the kernel/CAS regardless of storyboard reversion.)
+  4. render `storyboard-intro` latest version → OCR spot-checks(open,idea1_vc,cta_agents) → evidence matrix. Clip-count invariant stays exactly 76 per version because flips change only WHICH image resolves for one section, never clip structure.
+B6 docs(README snippet)+final oracle review(≤3 passes: 1 GLM pass + grok synthesis)+push branch megado/oracle-run-storyboard+report.
+
+## Validation commands
+- validate/compile/render commands above against ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects
+- pytest tests/test_storyboard_schema.py
+Estimate ≤1 week ⇒ no huge-run policy.
+
+Note: where this plan references batch gates, batches are B1..B6 (B0 folded into B2).
+
+
+## Checkpoints
+- CP1 after B1+B2+B3 (schema+loader+compiler+CLI+kernel linkage tests): focused pytest suite green; sample storyboard validates.
+- CP2 after B4 (authored tracked storyboard committed): schema-valid, 25 sections matching plan.json slugs.
+- CP3 after B5 (managed imports + save/flip/save/render + OCR spot-checks): rendered astrid-intro-storyboard.mp4 opens; OCR finds headline text in 3 sampled frames; parity assertions pass (25 slides / 76 clips / ~177.53s for final state).
+- CP4 after B6: docs present; branch pushed (authorized); evidence matrix final.

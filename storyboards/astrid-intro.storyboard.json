@@ -1,0 +1,913 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "Astrid Intro",
+    "canvas": "1920x1080@30",
+    "style": "pixel-terminal",
+    "timing": {
+      "default_hold": 3.0
+    }
+  },
+  "sections": [
+    {
+      "id": "open",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/open.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art wide scene, dark cozy hacker desk at night, small orange mink mascot with cream chest peeking over a glowing orange monitor displaying ASTRID, curious alert expression, warm amber screen glow and desk lamp, 16-bit chunky pixels, near-black background, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/open.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Astrid is an extendable agent toolset, focused on the open-source AI art ecosystem.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/open.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art wide scene, dark cozy hacker desk at night, small orange mink mascot with cream chest peeking over a glowing orange monitor displaying ASTRID, curious alert expression, warm amber screen glow and desk lamp, 16-bit chunky pixels, near-black background, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "two_ideas",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/two_ideas.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art split screen with two glowing orange pillars labeled 1 and 2, tiny orange mink standing centered between them holding up two fingers, dark terminal background, chunky 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/two_ideas.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "It's built around two ideas.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/two_ideas.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art split screen with two glowing orange pillars labeled 1 and 2, tiny orange mink standing centered between them holding up two fingers, dark terminal background, chunky 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "recap1",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/recap1.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink wearing tiny tool belt carrying a glowing wrench, standing on a schematic of interconnected blocks, bottom-left hanging off the edge, warm orange on near-black, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/recap1.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "One: giving agents tools and structures that make complex multimedia and AI work easy.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/recap1.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink wearing tiny tool belt carrying a glowing wrench, standing on a schematic of interconnected blocks, bottom-left hanging off the edge, warm orange on near-black, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "recap2",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/recap2.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink sitting curled with thought bubble showing a glowing hive network, top-right placement, reflective pose, 16-bit, near-black, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/recap2.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Two: giving agents reflective, creative, and technical knowledge of each system.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/recap2.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink sitting curled with thought bubble showing a glowing hive network, top-right placement, reflective pose, 16-bit, near-black, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_intro",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_intro.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink looking up at towering tangled wireframe of open-source tools floating above, overwhelmed but determined expression, dark room, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_intro.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Going into the first: there's a lot of complexity to working with open-source models, and Astrid is built to live in that world.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_intro.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art orange mink looking up at towering tangled wireframe of open-source tools floating above, overwhelmed but determined expression, dark room, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_os",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_os.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art dark UI panel showing Comfy-style node graph with wires, orange mink hanging off the right side of the graph peeking in, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_os.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Deep connectors let agents work on top of open-source tools.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_os.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art dark UI panel showing Comfy-style node graph with wires, orange mink hanging off the right side of the graph peeking in, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_vc",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_vc.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art VibeComfy workflow editor interface, orange mink sitting inside the node graph deeply focused studying the wires, small scale, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_vc.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "For example, VibeComfy lets your agent deeply understand VibeComfy workflows and the ecosystem around them \u2014 and work within them.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_vc.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art VibeComfy workflow editor interface, orange mink sitting inside the node graph deeply focused studying the wires, small scale, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_more",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_more.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art AI Toolkit training dashboard with loss curves and GPU bars on a dark monitor, orange mink perched on top wearing tiny hard hat, floating MCP plug icons, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_more.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Connectors to tools like AI Toolkit let it train new models, and it can additionally hook into any MCP server for more.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_more.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art AI Toolkit training dashboard with loss curves and GPU bars on a dark monitor, orange mink perched on top wearing tiny hard hat, floating MCP plug icons, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_mm",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_mm.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art video timeline with colorful clips on dark monitor, orange mink standing on the timeline scrubber holding a magnifying glass, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_mm.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Second, for working with multimedia: we provide tools for agents to work with complex forms like video timelines \u2014 to understand them, and work with them in depth, using both image and video understanding models.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_mm.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art video timeline with colorful clips on dark monitor, orange mink standing on the timeline scrubber holding a magnifying glass, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_data",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_data.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art glowing shelves of organized data folders and generation thumbnails, orange mink curled asleep on top of the stack bottom-left, cozy, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_data.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "And third, there's a built-in data structure that automatically organizes all of your actions and all of your generations, and gives agents tools to work with them.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_data.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art glowing shelves of organized data folders and generation thumbnails, orange mink curled asleep on top of the stack bottom-left, cozy, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_defaults",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea1_defaults.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art modular building blocks assembling, orange mink holding out a glowing plugin chip offering forward, center-left, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_defaults.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "For each of these, we provide strong defaults that you can customize as you please. Everything is built to be a plugin.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_defaults.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art modular building blocks assembling, orange mink holding out a glowing plugin chip offering forward, center-left, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea2_intro",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 1
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea2_intro.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art vast glowing hive network floating in dark indigo space, orange mink floating in center looking around in awe, tiny relative to hive, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea2_intro.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "The second is Hivemind \u2014 an open collection of messages and workflows from the community.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea2_intro.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art vast glowing hive network floating in dark indigo space, orange mink floating in center looking around in awe, tiny relative to hive, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea2_bestprac",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 1
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea2_bestprac.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art open library with holographic guide screens, orange mink sitting reading a glowing book, blinking, warm light, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea2_bestprac.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "When you ask a query, it references and understands best practices from across the ecosystem, as well as guides others have added from their own experience.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea2_bestprac.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art open library with holographic guide screens, orange mink sitting reading a glowing book, blinking, warm light, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea2_contribute",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 1
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/idea2_contribute.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art thousands of tiny message bubbles and workflow icons raining into a central glowing repository, orange mink at bottom-left adding one more bubble, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea2_contribute.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "While Hivemind already has thousands of workflows and a million-plus messages \u2014 and lots more right now \u2014 the goal is that your agents add to it as you discover things, as you learn best practices. It automatically adds to this repository that you just use and learn from.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea2_contribute.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' dimmed gray, '2 COLLECTIVE KNOWLEDGE' highlighted bright orange, indicating subsection of 2; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art thousands of tiny message bubbles and workflow icons raining into a central glowing repository, orange mink at bottom-left adding one more bubble, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "example_intro",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/example_intro.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art director's desk with floating storyboard frames in air, orange mink sitting in director chair with clapperboard, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/example_intro.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "So here's an example of all of this in action.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/example_intro.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art director's desk with floating storyboard frames in air, orange mink sitting in director chair with clapperboard, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_desert",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_desert.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art desert at golden hour, single green sprout in cracked soil, orange mink crouching next to it examining closely, dithered sky, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_desert.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "I wanted to make this exact video, and the first clip is a plant growing out of the soil in the desert.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_desert.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art desert at golden hour, single green sprout in cracked soil, orange mink crouching next to it examining closely, dithered sky, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_flux",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_flux.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art wall of sample frames contact sheet, orange mink walking along the top edge inspecting each, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_flux.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "I use Flux Kline to generate a lot of different samples and find ones I eventually like.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_flux.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art wall of sample frames contact sheet, orange mink walking along the top edge inspecting each, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_gpt",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_gpt.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art monitor showing detailed sprout painting, orange mink pointing at screen with glowing connector cables linking to icons, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_gpt.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Then, for the hard shot, I use GPT Image \u2014 all of these, through built-in connectors.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_gpt.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art monitor showing detailed sprout painting, orange mink pointing at screen with glowing connector cables linking to icons, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_minimax",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_minimax.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art film strip with multiple variant frames scrolling, orange mink hanging off the side of the strip, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_minimax.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Then I use Minimax to generate a bunch of different variants.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_minimax.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art film strip with multiple variant frames scrolling, orange mink hanging off the side of the strip, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_glitch",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_glitch.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art corrupted glitch frame with rainbow channel displacement and blocky tearing, orange mink looking shocked hanging off side, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_glitch.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "So I have this one that looks good, but then there's a weird glitch in it that I need to replace.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_glitch.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art corrupted glitch frame with rainbow channel displacement and blocky tearing, orange mink looking shocked hanging off side, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_match",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_match.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art robotic arm plugging a glowing module into a server rack, orange mink riding on the arm, sparks, dark datacenter, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_match.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "It finds the matching workflow for using masks with Minimax, and generates the fixed clip \u2014 even spinning up a RunPod instance, because my GPU is too slow for this.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_match.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art robotic arm plugging a glowing module into a server rack, orange mink riding on the arm, sparks, dark datacenter, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_map",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_map.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art storyboard with music waveform and transition markers on a desk, orange mink tapping a timeline point with paw, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_map.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Now that I have the first shot, I map out the rest \u2014 based on the timing of the music, it suggests transition points, and I work with it to get them perfect.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_map.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art storyboard with music waveform and transition markers on a desk, orange mink tapping a timeline point with paw, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "ex_prompts",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/ex_prompts.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art LLM chat interface generating floating prompt cards for video segments, orange mink looking up at cards blinking, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/ex_prompts.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "Then we work with the LLM to generate prompts for each of these segments \u2014 and I keep getting feedback on the overall trajectory of the video.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/ex_prompts.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art LLM chat interface generating floating prompt cards for video segments, orange mink looking up at cards blinking, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "cta_agents",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/cta_agents.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art three friendly agent icons labeled Codex Claude Hermes around a small orange mink in center, group pose, mink different small size, warm, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/cta_agents.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "One more thing \u2014 Astrid works as a tool you use with other agents, like Codex, Claude, or Hermes. Or you can run it independently, all on its own.",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/cta_agents.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art three friendly agent icons labeled Codex Claude Hermes around a small orange mink in center, group pose, mink different small size, warm, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "cta",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/final-slides/cta.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art Discord and GitHub glowing icons on dark background, orange mink waving from bottom-left curled pose, invitation mood, 16-bit, landscape",
+            "label": "codex-pyramid",
+            "alt_render_path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/cta.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "If you want to try Astrid, give feedback, or join me in the Discord where I'm building this \u2014 you'll find instructions on GitHub and Discord. Links are below!",
+        "audio": {"asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/cta.wav"}
+      },
+      "provenance": {
+        "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows two tabs '1 TOOLS & STRUCTURES' and '2 COLLECTIVE KNOWLEDGE' equally bright; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art Discord and GitHub glowing icons on dark background, orange mink waving from bottom-left curled pose, invitation mood, 16-bit, landscape",
+        "generator": {
+          "tool": "codex-image-generation"
+        }
+      }
+    }
+  ]
+}

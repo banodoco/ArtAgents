@@ -1,91 +1,60 @@
-# Agent Goal — unified execution (megado run)
+# Agent Goal — declarative storyboard layer (megado run)
 
-[North Star](./northstar.md)
+[North Star](./northstar.md) — adopted in place from prior campaign; sha256 recorded in custody.md. This run advances the ONE-store principle by making the kernel-managed timeline the compiled output of a versioned storyboard source, with generations/prompts/variations first-class instead of sidecar convention.
 
-## Objective and end-state contribution
+## Objective
+Deliver a general, versioned **storyboard data layer** plus compiler inside the Astrid repo, proven end-to-end by re-rendering the existing Astrid intro (astrid-intro project) from it.
 
-Make the kernel task system the **ONE execution path** for every Astrid capability,
-retiring the filesystem `run.json` ledger as an authority. This run advances the
-North Star by collapsing the two-ledger split into a single event-sourced execution
-record: every invocation becomes a kernel run+task with events, receipts, attempts,
-and managed outputs; `sdk.invoke` becomes the thin admission wrapper; the FS ledger
-becomes a derived projection or disappears.
+Deliverables
+- D1 `storyboard.schema.json` + loader/validator: meta(canvas/style) ; sections[] with nav tabs-state, ordered typed blocks: title, bullets, text, image(gen|asset), vo(text), video(gen|asset), mink slot directive {pose,anchor,scale}; every gen carries full spec {prompt,model,refs,seed?} and resolution fields (media_id|content_hash|path) + variants[] + active_index.
+- D2 Enrichment/linkage conventions documented + implemented where cheap: vo blocks ↔ transcript timing (plan.json), images ↔ prompts persisted beside assets, timeline asset entries use AssetEntry.generationId when the image came from an Astrid generation, section→shot registration via `timelines shots` mount behind a flag.
+- D3 Compiler `scripts/build_storyboard.py`: storyboard.json → managed timeline config+registry → `timelines save <slug>` (+`--render`). Timing model: default constant hold; `timing.hold` per block/section overrides; optional `--vo-align plan.json` snapping section starts to VO segment times (independent-of-length editing requirement).
+- D4 Intro application: author `build/astrid-intro.storyboard.json` (25 slides: verbatim vo_text+captions from plan.json/captions, pyramid title/bullets equivalents, image=final-slides png as asset, original codex prompt preserved under history) → compile → save → render → open.
 
-## North Star link
+## Non-goals
+No UI editor; no kernel core schema changes beyond using existing fields/mounts; no migration of other projects; English only; no style redesign.
 
-This run is the direct implementation of the "ONE store and ONE execution path"
-pillar: it removes the second ledger and the "consistency by convention" fiction,
-and makes every execution observable in the kernel event stream.
+## Model policy (user-pinned)
+- Oracle/planner/[XHARD]: **grok-4.6** (grok CLI). Fallback if unavailable: GPT-5.6 Sol via `codex exec`.
+- Explorer/normal executor: **GLM-5.3 Flash** (`launch_hermes_agent.py --model=zhipu:glm-5.3`, fallback `zhipu:glm-5.2`).
+No automatic routing; pinned models authoritative unless evidence shows unavailability (then report + fallback as declared above).
 
-## Authoritative inputs and immutable source ref
+## Done criteria
+1. Validator accepts sample + intro storyboards; rejects malformed (missing nav/blocks/dup slug).
+2. Compiler compiles intro storyboard to a NEW managed timeline; `timelines show` reports ≥76 clips… expected exact = current main content parity (76 clips/50 assets ± documented deltas).
+3. Render of that timeline ≈177±3s, plays, contains all 25 slide visuals (spot-check 3 frames).
+4. One regeneration variant demonstrably recorded (variant entry + picked active) without changing bytes of others.
+5. Evidence matrix maps every criterion → command/path/result. grok oracle PASS per batch + final review (≤3 passes).
 
-- Source ref: `b4c70e0ac766c69de0298fa19f3d7fede796a97c` (main @ b4c70e0a), worktree
-  `../Astrid-unified-oracle` (branch `oracle-unified-execution`).
-- Custody baseline: `.oracle/custody.md`.
-- The unified-execution design brief (from the host's earlier exploration) is an
-  input artifact; the planner revises it, never treats it as authority.
+## Validation commands
+- `python3 scripts/build_storyboard.py validate build/astrid-intro.storyboard.json`
+- compile/save/render pipeline as in D3/D4 against ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects
+- focused pytest for schema/validator (new tests/test_storyboard_schema.py)
 
-## In-scope work
+## Sync/authorization
+Commit batches on branch megado/oracle-run-storyboard; push that branch to origin authorized at finish. Opening local videos/files authorized. Never merge to main.
 
-1. Completion-contract relaxation: `task.complete` must accept non-media outputs
-   (evidence/attachments) without forcing every output into content-addressed media;
-   `task_outputs` DDL reviewed and migrated if needed (kernel migration 0002).
-2. One generic TaskHandler adapter that invokes the capability runner in-process,
-   classifies outputs (media-like → managed media; files → evidence), and completes
-   under the relaxed contract — no per-executor adapters.
-3. `sdk.invoke` (executor and orchestrator) admits a kernel run+task and executes via
-   the generic adapter; every call path that currently writes run.json is rewired.
-4. The FS `run.json` ledger: becomes a derived projection of the kernel run or is
-   retired; all tests and docs that assert run.json as an authority are migrated.
-5. Docs: run-ledger-contract.md v2 (single ledger), SKILL.md, async-completion,
-   creating-tools; task-execution claims become true, not "test-wired only."
-6. Verification: full suite + empirical process runs (the 20/50-flow pattern) proving
-   every invocation lands as a kernel run+task with correct events/receipts.
+## Stop conditions
+Blocked if grok AND codex both unavailable for oracle (report + halt after safe checkpoint). Escalate scope expansion beyond D1–D5.
 
-## Non-goals / open boundaries
+## Amendment 1 — shots registration removed from D2
+Authorized by the user's blanket no-questions mandate plus the settled-plan wave (synthesis disposition #1): both critics converged that section→shot registration is not 'cheap' on a mount lacking update/delete/unique-name guarantees. D2's shots clause is CUT from v1 scope; revisit only as an explicit future request.
 
-- No per-executor TaskHandler adapters (the generic adapter replaces the need).
-- No serve/GPU process-supervision infrastructure beyond what the kernel task system
-  already provides (leases/attempts) — out of scope unless the design proves it
-  blocks unified execution.
-- No unrelated kernel changes; the existing verified kernel behavior is the substrate.
-- The two existing bespoke adapters (generate_image, timeline_visualize) are kept if
-  they add value; the generic adapter must at minimum make them unnecessary for new
-  capabilities.
+## Amendment 2 — test-path + scope-cut authorization
+Authorized under the user's blanket no-questions mandate: focused tests live at tests/test_storyboard_schema.py (not tests/core/storyboard/); shots/gen-executor-branch/live-text-compilation cuts from the settled waves are ratified as v1 scope boundaries.
 
-## Authorization boundaries
+## Amendment 3 — oracle gates in-scope
+Done criterion 5's per-batch grok gates and final review are IN SCOPE for this run and are executed by the host orchestrator.
 
-- **Mutation**: only inside the worktree `../Astrid-unified-oracle`.
-- **Commits**: after each passed batch gate; stage only reviewed paths.
-- **Sync/promotion**: push `oracle-unified-execution` to origin after the final gate
-  passes; merge to main after the final overall review passes — this is recorded
-  authorization from the user's standing directive this session ("push everything to
-  main" after everything is verified). No other remotes/branches.
-- The user's uncommitted in-flight files in the MAIN worktree are protected and must
-  never be touched by this run (see custody).
+## Amendment 4 — regeneration proof
+Done criterion 4 upgraded: variant selection proof PLUS one real kernel-recorded regeneration (generation executor) imported and activated for at least one section.
 
-## Model policy (user-declared)
-
-- Normal tasks → `openrouter:stealth/ox-alpha`.
-- `[XHARD]` tasks → `openrouter:stealth/ox-alpha` (user-selected for both classes).
-- Oracle (planner, check-ins, final review) → `openrouter:stealth/ox-alpha`.
-- No automatic switching; a pinned model change requires user approval.
-
-## Done and stop criteria
-
-Done: every capability invocation runs as a kernel run+task (verified by process
-runs: events + receipts + terminal status); no code path writes run.json as an
-authority; full suite green; docs honest (task execution is real, single-ledger
-contract); kernel migration verified; oracle final review PASS.
-
-Stop conditions classified explicitly: `blocked` (missing authority/prereq),
-`failed` (reproducible unmet criterion), `undetermined` (insufficient evidence),
-`retryable` (owned safe retry), `escalate` (risk/authority exceeds role).
-
-## Final validation
-
-- `pytest tests/` green (host runs the full suite once at the end).
-- Empirical process run: invoke ≥6 representative capabilities (media, file-only,
-  generation, timeline, orchestrator) → each is a kernel run+task with correct
-  events/receipts/terminal state; zero run.json writes as authority.
-- `python3 -m astrid --help` + docs-alignment test green.
+## Supersession matrix (binding over base sections)
+| Base clause | Final disposition |
+| D1 storyboard.schema.json artifact | REPLACED: single Python validator module astrid/core/storyboard/loader.py |
+| D1 ordered typed blocks title/bullets/text/image/vo/video/mink | FINAL: sections carry exactly image{variants,active_index} + vo{text,audio_asset}; other kinds unsupported-in-v1 (typed error) |
+| D2 transcript/images/generations/variants/shots/clip linkage | FINAL: images+prompts via variants/provenance; vo timing via --vo-align plan.json; shots CUT (Amendment 1) |
+| D1 resolution fields media_id/content_hash/path | KEPT — compiler-filled only (never persisted into authored JSON), asserted in compiled registry/output |
+| AssetEntry.generationId propagation | OMITTED by policy (no qualifying id exists) |
+| Synthesis r1 #4 variants restricted to {path,label}[] | SUPERSEDED by Amendment 4: gen variants carry source:"gen"+prompt(+model,refs)+alt_render_path; resolved records keep path/content_hash (+media_id when imported) |
+| Done criterion 4 variant+active flip | UPGRADED by Amendment 4: includes one real kernel-recorded generation imported & activated (transient asset count 51 allowed mid-proof) |

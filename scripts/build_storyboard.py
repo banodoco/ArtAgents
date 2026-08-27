@@ -531,6 +531,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Compile a storyboard v1 JSON into render-ready timeline sidecars.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    validate_cmd = subparsers.add_parser(
+        "validate", help="Validate a storyboard JSON without compiling."
+    )
+    validate_cmd.add_argument(
+        "--story", required=True, help="Storyboard JSON path (may be relative)."
+    )
+    validate_cmd.set_defaults(handler=_cmd_validate)
     compile_cmd = subparsers.add_parser(
         "compile", help="Compile a storyboard into timeline.json + assets.json."
     )
@@ -579,6 +586,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compile_cmd.set_defaults(handler=_cmd_compile)
     return parser
+
+
+def _cmd_validate(args: argparse.Namespace) -> int:
+    story_path = Path(args.story).expanduser().resolve()
+    try:
+        story = load_storyboard(story_path)
+    except StoryboardError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        for problem in getattr(exc, "problems", []) or []:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+    problems = validate_storyboard(story)
+    if problems:
+        print("error: storyboard validation failed:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+    print(f"OK {story_path} ({len(story.get('sections', []))} sections)")
+    return 0
 
 
 def _cmd_compile(args: argparse.Namespace) -> int:

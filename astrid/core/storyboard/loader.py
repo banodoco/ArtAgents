@@ -10,7 +10,7 @@ Validation semantics (story v1):
 - ``version == 1`` required.
 - ``meta.title`` non-empty; ``meta.canvas`` matches ``^\\d+x\\d+@\\d+$``;
   ``meta.style == "pixel-terminal"``; ``meta.timing.default_hold`` > 0.
-- ``sections``: at least one; unique ids matching ``^[a-z0-9-]+$``.
+- ``sections``: at least one; unique ids matching ``^[a-z0-9_-]+$`` (underscores permitted for legacy VO slug parity).
 - Per section: ``nav.tabs`` length 2; ``nav.active`` is 0 or 1;
   ``image`` present with ``variants >= 1`` and ``active_index`` in range;
   ``vo`` (optional) carries ``audio.asset`` that exists on disk.
@@ -34,7 +34,7 @@ from typing import TypeGuard
 __all__ = ["StoryboardError", "load_storyboard", "validate_storyboard"]
 
 _CANVAS_RE = re.compile(r"^\d+x\d+@\d+$")
-_SECTION_ID_RE = re.compile(r"^[a-z0-9-]+$")
+_SECTION_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _STYLE = "pixel-terminal"
 
 
@@ -126,7 +126,7 @@ def _validate_section(section: object, base: Path, seen_ids: set[str], index: in
     problems: list[str] = []
     section_id = section.get("id")
     if not isinstance(section_id, str) or not _SECTION_ID_RE.match(section_id):
-        problems.append(f"{where}: id must match [a-z0-9-]+, got {section_id!r}")
+        problems.append(f"{where}: id must match [a-z0-9_-]+, got {section_id!r}")
     elif section_id in seen_ids:
         problems.append(f"{where}: duplicate section id {section_id!r}")
     else:
