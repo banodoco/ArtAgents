@@ -5,8 +5,11 @@ import hashlib
 import hmac
 import json
 import random
+import socket
 import string
+import struct
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator
@@ -996,6 +999,192 @@ def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> N
     assert limited.value.code == 429
     assert limited.value.headers["Retry-After"]
     assert limited_body["error"] == "rate_limited"
+
+
+def test_bridge_rejects_oversized_request_body_and_target_before_dispatch(
+    tmp_bridge_root: Path,
+) -> None:
+    """Body and request-target caps fail closed before route services run."""
+
+    with running_server(tmp_bridge_root) as base_url:
+        # Send only the headers: the bridge must reject the declared size
+        # before reading attacker-controlled bytes (and before a client that
+        # keeps writing can hit a broken pipe).
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(base_url)
+        token = _BRIDGE_REQUEST_TOKENS[base_url]
+        connection = socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+        try:
+            connection.sendall(
+                (
+                    f"POST /v1/queue/claim HTTP/1.1\r\n"
+                    f"Host: {parsed.hostname}:{parsed.port}\r\n"
+                    "Content-Type: application/json\r\n"
+                    f"Content-Length: {1024 * 1024 + 1}\r\n"
+                    f"X-Astrid-Request-Token: {token}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii")
+            )
+            connection.settimeout(2)
+            raw_body_response = bytearray()
+            while b'"payload_too_large"' not in raw_body_response:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                raw_body_response.extend(chunk)
+        finally:
+            connection.close()
+        body_status = int(raw_body_response.split(b" ", 2)[1])
+        body_error = json.loads(raw_body_response.split(b"\r\n\r\n", 1)[1])
+        target_status, target_error = _get_error(
+            f"{base_url}/v1/health?{'x' * 9000}"
+        )
+
+    assert body_status == 413
+    assert body_error["error"] == "payload_too_large"
+    assert target_status == 414
+    assert target_error == {
+        "error": "uri_too_long",
+        "detail": "request target exceeds the bridge limit",
+    }
+
+
+def test_bridge_stalled_request_body_times_out_as_typed_invalid_body(
+    tmp_bridge_root: Path,
+    monkeypatch,
+) -> None:
+    """A client that stops sending a declared body cannot hold a worker forever."""
+
+    from urllib.parse import urlsplit
+
+    import astrid.core.integrations.reigh.local_bridge_server as bridge_server
+
+    monkeypatch.setattr(bridge_server, "_REQUEST_SOCKET_TIMEOUT_SEC", 0.05)
+    with running_server(tmp_bridge_root) as base_url:
+        parsed = urlsplit(base_url)
+        token = _BRIDGE_REQUEST_TOKENS[base_url]
+        connection = socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+        started = time.monotonic()
+        try:
+            connection.sendall(
+                (
+                    f"POST /v1/queue/claim HTTP/1.1\r\n"
+                    f"Host: {parsed.hostname}:{parsed.port}\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: 8\r\n"
+                    f"X-Astrid-Request-Token: {token}\r\n"
+                    "Connection: close\r\n\r\n"
+                    "{"
+                ).encode("ascii")
+            )
+            connection.settimeout(2)
+            response = bytearray()
+            while b'"invalid_body"' not in response:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        finally:
+            connection.close()
+
+    assert time.monotonic() - started < 1
+    assert response.startswith(b"HTTP/1.1 400")
+    assert b'"error": "invalid_body"' in response
+
+
+def test_asset_stream_stops_after_client_disconnect(
+    tmp_bridge_root: Path,
+    monkeypatch,
+) -> None:
+    """A dropped media client cancels the active stream and closes its file."""
+
+    from http.client import HTTPConnection
+    from urllib.parse import urlsplit
+
+    timeline_id = "aaaaaad1-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    timeline_ulid = "01jm4k5n7p0000000000000pd1"
+    asset_content = b"disconnect me\n" * (512 * 1024)
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="disconnect-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry={"assets": {"clip": {"file": "clip.bin"}}},
+            media={"clip": (asset_content, "clip.bin")},
+        )
+        from astrid.core.io.media_import import managed_media_path
+
+        stream_path = managed_media_path(
+            composition.projects_root, hashlib.sha256(asset_content).hexdigest()
+        )
+        real_open = Path.open
+        open_count = 0
+        stream_read_started = threading.Event()
+        release_read = threading.Event()
+        stream_closed = threading.Event()
+        read_calls = 0
+
+        class BlockingReader:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.close()
+                return False
+
+            def seek(self, *args):
+                return self.wrapped.seek(*args)
+
+            def read(self, size=-1):
+                nonlocal read_calls
+                read_calls += 1
+                stream_read_started.set()
+                assert release_read.wait(timeout=5)
+                return self.wrapped.read(size)
+
+            def close(self):
+                self.wrapped.close()
+                stream_closed.set()
+
+        def open_hook(path, *args, **kwargs):
+            nonlocal open_count
+            if Path(path) == stream_path:
+                open_count += 1
+                # The first open verifies the content hash; the second is the
+                # response stream itself.
+                if open_count == 2:
+                    return BlockingReader(real_open(path, *args, **kwargs))
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_hook)
+        parsed = urlsplit(base_url)
+        connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+        connection.request(
+            "GET",
+            f"/projects/disconnect-proj/timelines/{timeline_id}/assets/clip",
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert stream_read_started.wait(timeout=5)
+
+        # An abortive close gives the server an immediate RST rather than a
+        # graceful FIN that could let one buffered write succeed.
+        assert connection.sock is not None
+        connection.sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_LINGER,
+            struct.pack("ii", 1, 0),
+        )
+        connection.close()
+        release_read.set()
+        assert stream_closed.wait(timeout=5)
+
+    assert read_calls == 1
 
 
 def test_bridge_concurrency_budget_rejects_then_releases(
