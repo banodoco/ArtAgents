@@ -40,9 +40,9 @@ class IterationVideoError(RuntimeError):
 
 
 def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
-    repo_root = Path(request.inputs.get("repo_root") or REPO_ROOT).expanduser().resolve()
     out_path = Path(request.out).expanduser().resolve()
     args = _parse_passthrough(tuple(getattr(request, "orchestrator_args", ()) or ()))
+    repo_root = Path(args.repo_root or REPO_ROOT).expanduser().resolve()
     thread_ref = str(request.inputs.get("thread") or getattr(request, "thread", None) or args.thread or "@active")
     target_run_id = request.inputs.get("target_run_id") or args.target_run_id
     if request.dry_run:
@@ -396,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _parse_passthrough(argv: tuple[str, ...]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--repo-root", default=None)
     parser.add_argument("--thread", default=None)
     parser.add_argument("--target-run-id", default=None)
     parser.add_argument("--max-iterations", type=int, default=None)

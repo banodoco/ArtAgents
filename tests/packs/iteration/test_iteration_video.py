@@ -58,8 +58,10 @@ def test_iteration_video_renders_attached_and_records_six_output_variant_group(
                 project="demo",
                 project_was_auto_resolved=True,
                 run_root=out_dir,
-                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
+                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
                 orchestrator_args=(
+                    "--repo-root",
+                    str(repo),
                     "--max-iterations",
                     "7",
                     "--direction",
