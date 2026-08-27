@@ -1,13 +1,9 @@
-"""Canonical-versus-legacy kernel database authority resolution.
-
-The v10 application owns ``<projects_root>/.astrid/astrid.sqlite3``. Older
-entrypoints may still leave a separate ``kernel.sqlite3`` ledger behind.
-Readers must never select that legacy ledger merely because it appears first
-on disk: canonical wins whenever it exists, while legacy fallback remains
-available only for roots that have not yet acquired the canonical store.
+"""Resolve the single canonical Astrid database authority.
 
 This module resolves paths only. It never opens, creates, migrates, renames,
 or deletes a database, making it safe for doctor and read-only consumers.
+There is deliberately no historical-path fallback: every caller must use the
+managed store derived from the projects root.
 """
 
 from __future__ import annotations
@@ -15,10 +11,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from astrid.core.foundation.project_paths import derive_database_path
+
 
 @dataclass(frozen=True, slots=True)
 class KernelDatabaseAuthority:
-    """One resolved database authority and its coexistence evidence."""
+    """One resolved canonical database authority.
+
+    ``existing_legacy_paths`` remains as an empty compatibility field for
+    doctor/reporting callers. It is not populated or inspected by authority
+    resolution, so an old file can never become a second database authority.
+    """
 
     projects_root: Path
     canonical_path: Path
@@ -38,55 +41,23 @@ class KernelDatabaseAuthority:
 def resolve_kernel_database_authority(
     projects_root: str | Path,
 ) -> KernelDatabaseAuthority:
-    """Resolve the sole read authority without mutating either ledger.
+    """Resolve the sole read authority without mutating the store."""
 
-    Precedence is deliberately asymmetric:
-
-    1. canonical ``.astrid/astrid.sqlite3`` whenever it exists;
-    2. the first existing historical layout only when canonical is absent;
-    3. canonical path as the not-yet-created default when no database exists.
-
-    Existing legacy paths are always reported so doctor can make coexistence
-    visible while normal readers continue deterministically on canonical.
-    """
-
-    root = Path(projects_root)
-    canonical = root / ".astrid" / "astrid.sqlite3"
-    legacy_candidates = (
-        root / "kernel.sqlite3",
-        root / ".astrid" / "kernel.sqlite3",
-        root / "astrid.sqlite3",
-    )
-    existing_legacy = tuple(path for path in legacy_candidates if path.is_file())
-    if canonical.is_file():
-        return KernelDatabaseAuthority(
-            projects_root=root,
-            canonical_path=canonical,
-            selected_path=canonical,
-            mode="canonical",
-            existing_legacy_paths=existing_legacy,
-        )
-    if existing_legacy:
-        return KernelDatabaseAuthority(
-            projects_root=root,
-            canonical_path=canonical,
-            selected_path=existing_legacy[0],
-            mode="legacy",
-            existing_legacy_paths=existing_legacy,
-        )
+    root = Path(projects_root).expanduser().resolve()
+    canonical = derive_database_path(root)
     return KernelDatabaseAuthority(
         projects_root=root,
         canonical_path=canonical,
         selected_path=canonical,
-        mode="missing",
+        mode="canonical" if canonical.is_file() else "missing",
         existing_legacy_paths=(),
     )
 
 
 def resolve_kernel_database_path(projects_root: str | Path) -> Path:
-    """Return the selected read path under the frozen authority policy."""
+    """Return the canonical read path for a projects root."""
 
-    return resolve_kernel_database_authority(projects_root).selected_path
+    return derive_database_path(Path(projects_root).expanduser().resolve())
 
 
 __all__ = [

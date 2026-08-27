@@ -1,9 +1,8 @@
 """Single kernel reader helper (R3.2).
 
-ONE store, ONE path: callers that previously opened ``kernel.sqlite3`` with
-raw ``sqlite3.connect(..., mode=ro)`` now call these two helpers, which open
-through :func:`astrid.core.store.database.open_database` (read-only, probe)
-and resolve ``slug ↔ ULID`` project identity once.
+ONE store, ONE path: readers resolve the canonical managed database through
+the projects-root path helper and open it read-only through the application
+boundary, resolving ``slug ↔ ULID`` project identity once.
 """
 
 from __future__ import annotations
@@ -14,8 +13,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator
 
-from astrid.core.foundation.project_paths import resolve_projects_root
-from astrid.core.kernel.database import resolve_kernel_database_path
+from astrid.core.foundation.project_paths import derive_database_path, resolve_projects_root
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 _ACTIVE_SCHEMA_REGISTRY: ContextVar[FrozenSchemaPackRegistry | None] = ContextVar(
@@ -24,9 +22,9 @@ _ACTIVE_SCHEMA_REGISTRY: ContextVar[FrozenSchemaPackRegistry | None] = ContextVa
 
 
 def _db_path(projects_root: Path) -> Path | None:
-    """Compatibility wrapper around the shared database-authority policy."""
+    """Return the canonical managed database path."""
 
-    return resolve_kernel_database_path(projects_root)
+    return derive_database_path(projects_root)
 
 
 def _read_registry(

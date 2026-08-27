@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.events.registry import core_only_registry
+from astrid.core.foundation.project_paths import derive_database_path
 from astrid.core.kernel.read import kernel_run_info, kernel_runs_for_project
 from astrid.core.migrations.runner import MigrationTooNewError
 from astrid.core.store.database import open_database
@@ -15,7 +16,7 @@ from astrid.core.store.writer import DatabaseWriter
 
 def test_kernel_reads_accept_standard_pack_migrations(
     tmp_path: Path,
-    standard_database,
+    standard_registry,
 ) -> None:
     """A project DB with references/shots migrations remains readable.
 
@@ -25,9 +26,11 @@ def test_kernel_reads_accept_standard_pack_migrations(
     still using the normal migration validation boundary.
     """
 
-    _connection, _database = standard_database
-    # ``standard_database`` is at ``tmp_path/astrid.sqlite3``, one of the
-    # canonical reader locations.  The calls must complete without the
+    canonical = derive_database_path(tmp_path)
+    canonical.parent.mkdir(parents=True)
+    connection = open_database(canonical, standard_registry)
+    connection.close()
+    # The calls must complete without the
     # ``MigrationTooNewError`` raised by the old core-only composition.
     assert kernel_runs_for_project("missing", projects_root=tmp_path) == []
     assert kernel_run_info("missing", "run-missing", projects_root=tmp_path) is None
@@ -46,7 +49,7 @@ def test_kernel_reads_prefer_canonical_store_over_legacy_shim(
     tmp_path: Path,
     standard_registry,
 ) -> None:
-    canonical = tmp_path / ".astrid" / "astrid.sqlite3"
+    canonical = derive_database_path(tmp_path)
     canonical.parent.mkdir()
     connection = open_database(canonical, standard_registry)
     connection.close()

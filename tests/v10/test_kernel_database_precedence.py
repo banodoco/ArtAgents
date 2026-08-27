@@ -62,7 +62,7 @@ def _checks_by_name(root: Path):
     return {check.name: check for check in run_checks(projects_root=root)}
 
 
-def test_coexistence_reads_only_canonical_and_doctor_names_ignored_legacy(
+def test_canonical_authority_ignores_unmanaged_database_files(
     tmp_path: Path,
     standard_registry,
     core_registry,
@@ -86,8 +86,8 @@ def test_coexistence_reads_only_canonical_and_doctor_names_ignored_legacy(
     authority = resolve_kernel_database_authority(tmp_path)
     assert authority.mode == "canonical"
     assert authority.selected_path == canonical_path
-    assert authority.existing_legacy_paths == (legacy_path,)
-    assert authority.coexists
+    assert authority.existing_legacy_paths == ()
+    assert not authority.coexists
 
     assert kernel_runs_for_project(
         "canonical-project", projects_root=tmp_path
@@ -102,42 +102,36 @@ def test_coexistence_reads_only_canonical_and_doctor_names_ignored_legacy(
 
     checks = _checks_by_name(tmp_path)
     data_paths = checks["data_paths"]
-    assert data_paths.status == "warn"
-    assert data_paths.required is False
-    assert f"canonical database selected: {canonical_path}" in data_paths.detail
-    assert f"ignored legacy database path(s): {legacy_path}" in data_paths.detail
+    assert data_paths.status == "ok"
     assert checks["schema_versions"].status == "ok"
     assert "timeline=" in checks["schema_versions"].detail
 
 
-def test_legacy_only_root_remains_readable_and_doctor_marks_fallback(
+def test_unmanaged_database_only_root_is_not_a_project_store(
     tmp_path: Path,
     core_registry,
 ) -> None:
     legacy_path = tmp_path / "kernel.sqlite3"
-    legacy_run = _seed_run(
+    _seed_run(
         legacy_path,
         core_registry,
         slug="legacy-project",
-        title="Legacy fallback evidence",
+        title="Unmanaged evidence",
     )
 
     authority = resolve_kernel_database_authority(tmp_path)
-    assert authority.mode == "legacy"
-    assert authority.selected_path == legacy_path
+    assert authority.mode == "missing"
+    assert authority.selected_path == tmp_path / ".astrid" / "astrid.sqlite3"
+    assert authority.existing_legacy_paths == ()
     assert not authority.coexists
     assert kernel_runs_for_project(
         "legacy-project", projects_root=tmp_path
-    ) == [legacy_run]
+    ) == []
     assert kernel_run_info(
-        "legacy-project", legacy_run, projects_root=tmp_path
-    )["title"] == "Legacy fallback evidence"
+        "legacy-project", "unmanaged-run", projects_root=tmp_path
+    ) is None
 
     checks = _checks_by_name(tmp_path)
     data_paths = checks["data_paths"]
-    assert data_paths.status == "warn"
+    assert data_paths.status == "uninitialized"
     assert data_paths.required is False
-    assert f"legacy database fallback active: {legacy_path}" in data_paths.detail
-    assert f"canonical database is absent: {authority.canonical_path}" in data_paths.detail
-    assert checks["schema_versions"].status == "ok"
-    assert "core=1" in checks["schema_versions"].detail
