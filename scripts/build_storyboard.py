@@ -270,11 +270,8 @@ def compile_storyboard(
         segment = segments.get(slug) if segments is not None else None
 
         image = section["image"]
-        active_index = image["active_index"]
-        variant = image["variants"][active_index]
-        img_path, img_origin = _variant_import_path(
-            variant, base, f"sections[{slug}].image.variants[{active_index}]"
-        )
+        img_path = image["path"]  # direct path — no variants model
+        img_origin = section.get("provenance", {}).get("prompt")
         img_key = f"img_{slug}"
         if import_asset is not None:
             img_import = import_asset(img_path)
@@ -362,7 +359,7 @@ def compile_storyboard(
                 "hold": hold_r,
             }
             if img_origin:
-                broll["generation"] = dict(img_origin)
+                broll["generation"] = {"prompt": img_origin} if img_origin else {}
             section_clips.append(broll)
         else:
             # No VO: the broll plate stands alone for the authored default hold.
@@ -376,21 +373,18 @@ def compile_storyboard(
                 "hold": hold_r,
             }
             if img_origin:
-                broll["generation"] = dict(img_origin)
+                broll["generation"] = {"prompt": img_origin} if img_origin else {}
             section_clips.append(broll)
 
         cursor = max(cursor, start_r + hold_r)
         total = max(total, start_r + hold_r)
         report_sections[slug] = {
             "image": {
-                "active_index": active_index,
-                "source": variant.get("source"),
-                "source_path": variant.get("path") or variant.get("alt_render_path"),
+                "path": img_path,
                 "asset_key": img_key,
                 "file": img_import.file,
                 "content_sha256": img_import.content_sha256,
                 "media_id": img_import.media_id,
-                "origin": dict(img_origin) if img_origin else None,
             },
             "vo": vo_report,
         }

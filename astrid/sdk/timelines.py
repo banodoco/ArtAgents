@@ -197,6 +197,7 @@ class TimelinesService:
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
         expected_version: int,
+        set_default: bool = False,
         idempotency_key: str | None = None,
     ) -> DomainResult[dict[str, Any]]:
         """Whole-document CAS save of *ref* in *project* and its receipt.

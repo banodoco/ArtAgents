@@ -153,8 +153,14 @@ def _validate_nav(nav: object, where: str) -> list[str]:
 
 def _validate_image(image: object, base: Path, where: str) -> list[str]:
     if not isinstance(image, dict):
-        return [f"{where}: image block is required with variants and active_index"]
+        return [f"{where}: image block is required"]
     problems: list[str] = []
+    # Simplified model: direct path (no variants/active_index)
+    if "path" in image:
+        return _validate_variant(
+            {"source": "asset", "path": image["path"]}, base, f"{where}.image"
+        )
+    # Legacy model: variants + active_index
     variants = image.get("variants")
     if not isinstance(variants, list) or not variants:
         problems.append(f"{where}: image.variants must be a non-empty list, got {variants!r}")
