@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -43,6 +44,11 @@ from .event_construction import (
 )
 
 BRIDGE_CONFIG_VERSION = 1
+
+_LEGACY_UPPERCASE_ULID_RE = re.compile(
+    r"^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$"
+)
+"""Crockford ULID spelling retained by older filesystem bridge projects."""
 
 # Per-timeline save locks. The bridge server is threaded: a save must be
 # atomic across head-read → CAS append → projection → registry.json sidecar,
@@ -251,12 +257,23 @@ def find_bridge_timeline(
                         found_ulid = timeline_home.name
                         break
     else:
-        try:
-            found_ulid = validate_timeline_ulid(timeline)
-            if not timeline_dir(slug, found_ulid, root=projects_root).is_dir():
+        # ``validate_timeline_ulid`` deliberately accepts only Astrid's
+        # canonical lowercase spelling.  Older filesystem projects can expose
+        # an uppercase spelling through ``list_bridge_timelines``; accept that
+        # spelling only as an exact, project-local directory identity.  Do not
+        # normalize it, because the directory name is the authority and a
+        # lowercased alias must not resolve a different (or nonexistent)
+        # timeline.
+        if _LEGACY_UPPERCASE_ULID_RE.fullmatch(timeline) is not None:
+            candidate = timelines_dir(slug, root=projects_root) / timeline
+            found_ulid = timeline if candidate.is_dir() else None
+        else:
+            try:
+                found_ulid = validate_timeline_ulid(timeline)
+                if not timeline_dir(slug, found_ulid, root=projects_root).is_dir():
+                    found_ulid = None
+            except Exception:
                 found_ulid = None
-        except Exception:
-            found_ulid = None
 
         if found_ulid is None:
             try:

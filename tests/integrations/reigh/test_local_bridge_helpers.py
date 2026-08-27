@@ -434,6 +434,29 @@ class TestLocalBridgeHelpers:
         assert row is not None
         assert row.timeline_ulid == ulid
 
+    def test_find_bridge_timeline_accepts_exact_uppercase_legacy_ulid(
+        self, tmp_bridge_root, seed_bridge_project
+    ) -> None:
+        """Filesystem bridge keeps the uppercase identity exposed by list."""
+        ulid = "01KYPVKMW5STB4W6FE05ED8242"
+        seed_bridge_project(slug="by-legacy-ulid", timeline_ulid=ulid)
+
+        listed = list_bridge_timelines("by-legacy-ulid", root=tmp_bridge_root)
+        row = find_bridge_timeline("by-legacy-ulid", ulid, root=tmp_bridge_root)
+        loaded = load_bridge_timeline(
+            "by-legacy-ulid", ulid, root=tmp_bridge_root
+        )
+
+        assert [item.timeline_ulid for item in listed] == [ulid]
+        assert row is not None
+        assert row.timeline_ulid == ulid
+        assert loaded is not None
+        assert loaded["timeline_ulid"] == ulid
+        assert (
+            find_bridge_timeline("by-legacy-ulid", ulid.lower(), root=tmp_bridge_root)
+            is None
+        )
+
     def test_find_bridge_timeline_accepts_uuid(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000014"
         timeline_id = "12345678-1234-1234-1234-1234567890ab"
@@ -1613,4 +1636,3 @@ class TestBridgeIncrementalSave:
         final = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
         assert final.verify_chain().ok is True
         assert final.head().event_count == 1 + 10 * 2
-
