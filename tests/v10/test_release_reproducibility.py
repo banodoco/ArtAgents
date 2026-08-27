@@ -20,8 +20,8 @@ from scripts.reshape.release_reproducibility import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 RUNAWAY_RELEASE_FIXTURE_HASHES = {
-    "audio-reactive-v1.json": "d7925d72b52180e206a2511a5d30cf1638c7007a962fd57d8a6eb9ffb10af886",
-    "timing-manifest.json": "44b5c0eea0aeb8b35a83e3e7620b5dbab27a106bf575fcc6e0ca6591dd4612bb",
+    "audio-reactive-v1.json": "e53d67df26c96d03967f7e2e620bd897ab004bfe45e8451e7ce67c6fc0cb5b8e",
+    "timing-manifest.json": "eba9e6a521200bb57458111315ecb0314a31739980da72b44dac4d66d0fcacf6",
 }
 
 

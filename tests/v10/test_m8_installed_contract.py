@@ -53,9 +53,11 @@ def resource_text(relative):
 
 
 def yaml_section(text, field):
-    match = re.search(rf"(?m)^{re.escape(field)}:\s*$", text)
+    match = re.search(rf"(?m)^{re.escape(field)}:\s*(?P<inline>\{{\}})?\s*$", text)
     if match is None:
         raise AssertionError(f"missing manifest section: {field}")
+    if match.group("inline"):
+        return ""
     remainder = text[match.end():]
     next_field = re.search(r"(?m)^[a-z_]+:\s*", remainder)
     return remainder if next_field is None else remainder[:next_field.start()]
@@ -76,7 +78,7 @@ def manifest_catalog(relative):
         tables_block = re.search(
             r"(?ms)^\s{4}tables:\s*\n((?:^\s{6}-\s+[^\n]+\n?)+)", entry
         )
-        tables = tuple(
+        tables = () if tables_block is None else tuple(
             line.strip()[2:].strip()
             for line in tables_block.group(1).splitlines()
             if line.strip().startswith("-")
@@ -124,6 +126,7 @@ manifest_files = {
     "timeline": "packs/timeline/schema-pack.yaml",
     "shots": "packs/shots/schema-pack.yaml",
     "references": "packs/references/schema-pack.yaml",
+    "runaway": "packs/runaway/schema-pack.yaml",
 }
 manifest_catalogs = {pack: manifest_catalog(path) for pack, path in manifest_files.items()}
 manifest_mounts = {
@@ -270,9 +273,11 @@ assert tables == expected_tables, sorted(tables ^ expected_tables)
 assert migration_rows == {
     ("core", 1),
     ("timeline", 1),
+    ("timeline", 2),
     ("shots", 1),
     ("shots", 2),
     ("references", 1),
+    ("runaway", 1),
 }
 assert {(row.pack, row.version) for row in applied} == migration_rows
 
@@ -346,9 +351,11 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
     assert {tuple(row) for row in payload["migration_rows"]} == {
         ("core", 1),
         ("timeline", 1),
+        ("timeline", 2),
         ("shots", 1),
         ("shots", 2),
         ("references", 1),
+        ("runaway", 1),
     }
     for evidence in payload["too_new"].values():
         assert evidence["before"] == evidence["after"]

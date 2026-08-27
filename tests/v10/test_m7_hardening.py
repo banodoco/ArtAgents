@@ -626,7 +626,7 @@ def test_migration_statement_crashes_reopen_as_complete_schema(
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     ).fetchall()
                 }
-            assert len(migrations) == 5
+            assert len(migrations) == 7
             assert {"projects", "events", "timelines", "shots", "project_references"} <= tables
         finally:
             composition.close()

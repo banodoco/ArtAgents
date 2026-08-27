@@ -39,7 +39,17 @@ _FIRST_PARTY_PACK_IDS = (
 # Internal (non-capability) directories that are allowed in the first-party
 # packs root: the ``_core`` skill-only shell plus the v10 schema packs that
 # own domain tables/repositories (not pack.yaml capability packs).
-_FIRST_PARTY_INTERNAL_DIRS = {"_core", "references", "runaway", "shots", "timeline"}
+_FIRST_PARTY_INTERNAL_DIRS = {
+    "_core",
+    "references",
+    "runaway",
+    "shots",
+    "timeline",
+    # Typed-timeline is an internal capability implementation package. Its
+    # capability manifest is handled by the generic pack loader, but it is
+    # not one of this root inventory's schema-pack directories.
+    "typed_timeline",
+}
 _IGNORED_PACKS_ROOT_DIRS = {"__pycache__"}
 
 

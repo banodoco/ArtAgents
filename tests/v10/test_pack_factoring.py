@@ -2,7 +2,7 @@
 
 Proves the deterministic temporary-copy check in
 :mod:`scripts.reshape.check_pack_factoring`: each in-tree domain pack
-(``timeline``, ``shots``, ``references``) can be removed one at a time from
+(``timeline``, ``shots``, ``references``, ``runaway``) can be removed one at a time from
 a temporary source copy **and** from the explicit registration tuple while
 the complete enumerated kernel lane stays green and the remaining
 manifest-derived catalog is unchanged -- with the real repository tree never
@@ -13,7 +13,7 @@ sketch's declared kernel inventory is compared against ``CORE_MIGRATIONS``
 and cannot silently add (or omit) a kernel table, while the sketch stays a
 read-only source-composition proof rather than generic plugin infrastructure.
 
-The heavy removal proof is parametrized over the three packs; each case runs
+The heavy removal proof is parametrized over the four packs; each case runs
 the real kernel lane once inside the check. The remaining tests are cheap
 and assert the surgery is deterministic, the real tree is untouched, the
 enumerated lane is complete, unknown packs are rejected, and the sketch
@@ -80,17 +80,14 @@ def test_removing_each_domain_pack_keeps_kernel_lane_and_catalog_green(
 
 
 def test_real_repository_tree_is_never_mutated() -> None:
-    """All three pack directories and the explicit registration tuple are
+    """All four pack directories and the explicit registration tuple are
     untouched by the check (no runtime discovery, no uninstall behavior)."""
     import astrid.packs as packs_module
 
     for pack in DOMAIN_PACKS:
         assert (REPO_ROOT / "astrid" / "packs" / pack).is_dir(), pack
     assert packs_module.STANDARD_SCHEMA_PACKS == DOMAIN_PACKS
-    # The in-tree manifests are still exactly the three domain packs.
-    # The standard composition is deliberately closed over the three domain
-    # packs, while separately shipped schema packs (for example ``runaway``)
-    # may exist in-tree without being part of this factoring lane.
+    # The in-tree manifests are still exactly the four domain packs.
     discovered = sorted(
         path.parent.name
         for path in (REPO_ROOT / "astrid" / "packs").glob("*/schema-pack.yaml")
@@ -114,7 +111,7 @@ def test_temp_copy_removes_source_and_registration_deterministically(
             encoding="utf-8"
         )
         assert (
-            'STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "references")'
+            'STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "references", "runaway")'
             in init_text
         )
         # timeline imports survive a shots-only removal.
@@ -134,7 +131,7 @@ def test_timeline_removal_drops_bridge_imports(tmp_path) -> None:
         )
         assert "astrid.packs.timeline" not in init_text
         assert (
-            'STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("shots", "references")'
+            'STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("shots", "references", "runaway")'
             in init_text
         )
     finally:

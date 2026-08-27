@@ -10,7 +10,6 @@ import pytest
 from astrid import AstridClient
 from astrid.core.events.registry import core_only_registry, register_core_vocabulary
 from astrid.core.migrations.runner import MigrationTooNewError
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.packs import register_standard_schema_packs
 
@@ -19,11 +18,6 @@ def _extended_registry() -> object:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
-    registry.register_pack(
-        load_schema_pack_manifest(
-            Path(__file__).parents[2] / "astrid" / "packs" / "runaway" / "schema-pack.yaml"
-        )
-    )
     return registry.freeze()
 
 

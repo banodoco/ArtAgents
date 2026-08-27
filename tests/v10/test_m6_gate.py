@@ -4,11 +4,11 @@ Proves every must/should done criterion of the m6 sprint plan against the
 live tree, end to end:
 
 - ``serve`` boots a clean project: ``compose_standard_bridge`` on a fresh
-  ``tmp_path`` registers exactly the three in-tree schema packs and the
+  ``tmp_path`` registers exactly the four in-tree schema packs and the
   local bridge HTTP server answers ``GET /health``;
 - ``backup create`` -> destroy live data -> ``backup restore`` reopens with
-  matching state: table count (22), event-stream heads, and pack migration
-  state (core + timeline/shots/references) are byte-identical;
+  matching state: table count (23), event-stream heads, and pack migration
+  state (core + timeline/shots/references/runaway) are byte-identical;
 - ``doctor`` is clean (exit 0, every check ok) on a fresh project and on a
   restored project, and fails closed (exit 1, ``"ok": false``) when the
   database is deleted;
@@ -44,8 +44,8 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 )
 """The exactly-eight top-level families (five product + three operational)."""
 
-EXPECTED_TABLE_COUNT = 22
-"""The frozen schema table count (core + timeline/shots/references)."""
+EXPECTED_TABLE_COUNT = 23
+"""The frozen schema table count (core + timeline/shots/references/runaway)."""
 
 
 def _destroy_live_data(root: Path) -> None:
@@ -129,8 +129,8 @@ def _stop_server(server, thread: threading.Thread) -> None:
 def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
     composition = compose_standard_bridge(tmp_path)
     try:
-        # Exactly the three in-tree schema packs are registered.
-        assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
+        # Exactly the four in-tree schema packs are registered.
+        assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references", "runaway")
         assert set(STANDARD_SCHEMA_PACKS) <= set(composition.registry.packs)
         assert "core" in composition.registry.packs
         assert composition.database_path.is_file()
