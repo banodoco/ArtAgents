@@ -55,6 +55,7 @@ from astrid.packs.understanding.executors.visual_understand.run import (
 from tests.packs.rendering.test_timeline_visualize_executor import _rewrite_registry_event
 from tests.packs.rendering.test_timeline_visualize_frozen import (
     _append_v160,
+    _editable_manifest,
     _invoke,
     _prepare_project,
 )
@@ -521,7 +522,7 @@ def test_clip_removal_dangles_sp_with_diagnostic(tmp_projects_root: Path) -> Non
 
     root = _invoke(slug, timeline_source=str(timeline))
     assert root.ok is True, root.error
-    root_manifest = Path(root.manifest_path or "").resolve()
+    root_manifest = _editable_manifest(root, project_root)
 
     # Control: while the SP's clip still exists the frozen view resolves.
     frozen = load_frozen_view(root_manifest, project_root=project_root)
