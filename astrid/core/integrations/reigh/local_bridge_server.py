@@ -110,6 +110,7 @@ def _route_schema(projects_root: Path) -> dict[str, Any]:
             {"method": "GET", "path": "/projects/{project}/tasks/{task_id}"},
             {"method": "POST", "path": "/projects/{project}/tasks"},
             {"method": "POST", "path": "/projects/{project}/tasks/{task_id}/cancel"},
+            {"method": "POST", "path": "/projects/{project}/generations/{generation_id}/viewed"},
             {"method": "POST", "path": "/queue/claim"},
             {"method": "POST", "path": "/tasks/{task_id}/attempts/{attempt_no}/heartbeat"},
             {"method": "POST", "path": "/tasks/{task_id}/attempts/{attempt_no}/complete"},
@@ -1794,6 +1795,48 @@ def make_local_bridge_handler(*, projects_root: Path):
                     self._send_task_error(exc)
                     return
                 self._send_json(status, payload)
+                return
+
+            # POST /projects/:project/generations/:generation/viewed
+            # Body `{}` marks every variant; `{variant_id: string}` marks one.
+            if (
+                len(route_parts) == 5
+                and route_parts[0] == "projects"
+                and route_parts[2] == "generations"
+                and route_parts[4] == "viewed"
+            ):
+                try:
+                    body = self._read_json_body_capped(max_bytes=max_json_body_bytes)
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be a JSON object")
+                    return
+                unknown = set(body).difference({"variant_id"})
+                if unknown:
+                    self._send_error(
+                        400,
+                        "invalid_body",
+                        f"unsupported field(s): {', '.join(sorted(unknown))}",
+                    )
+                    return
+                variant_id = body.get("variant_id")
+                if variant_id is not None and (
+                    not isinstance(variant_id, str) or not variant_id.strip()
+                ):
+                    self._send_error(400, "invalid_body", "variant_id must be a non-empty string")
+                    return
+                try:
+                    payload = self._task_bridge().mark_generation_variant_viewed(
+                        slug=route_parts[1],
+                        generation_id=route_parts[3],
+                        variant_id=variant_id.strip() if isinstance(variant_id, str) else None,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
                 return
 
             if route_parts == ["queue", "claim"]:

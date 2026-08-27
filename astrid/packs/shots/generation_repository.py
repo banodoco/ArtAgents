@@ -728,15 +728,50 @@ class GenerationRepository:
         stamp = viewed_at if viewed_at is not None else utc_now_iso()
         if not isinstance(stamp, str) or not stamp:
             raise GenerationValidationError("viewed_at must be a non-empty string")
-        uow.execute(
-            "UPDATE generation_variants SET viewed_at = ? WHERE id = ?",
-            (stamp, variant_id),
-        )
         row = uow.query_one(
             "SELECT * FROM generation_variants WHERE id = ?", (variant_id,)
         )
         assert row is not None  # just verified above inside the same txn
+        # Viewing is an idempotent transition.  In particular, a retry must
+        # not move the stored timestamp forward (the cloud mutation has the
+        # same NULL-only predicate).
+        if row["viewed_at"] is None:
+            uow.execute(
+                "UPDATE generation_variants SET viewed_at = ? WHERE id = ? "
+                "AND viewed_at IS NULL",
+                (stamp, variant_id),
+            )
+            row = uow.query_one(
+                "SELECT * FROM generation_variants WHERE id = ?", (variant_id,)
+            )
+            assert row is not None
         return _variant_model(row)
+
+    def mark_all_viewed(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        generation_id: str,
+        viewed_at: str | None = None,
+    ) -> int:
+        """Stamp every unviewed variant on one live generation.
+
+        The NULL-only update makes retries safe and keeps the operation scoped
+        to the project-owned, non-deleted generation checked above.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        generation_id = _require_non_empty_string("generation_id", generation_id)
+        _live_generation_row(uow, project_id, generation_id)
+        stamp = viewed_at if viewed_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise GenerationValidationError("viewed_at must be a non-empty string")
+        result = uow.execute(
+            "UPDATE generation_variants SET viewed_at = ? "
+            "WHERE generation_id = ? AND viewed_at IS NULL",
+            (stamp, generation_id),
+        )
+        return max(0, int(result.rowcount))
 
     def delete(
         self,

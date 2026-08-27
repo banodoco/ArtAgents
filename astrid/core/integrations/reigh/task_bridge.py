@@ -1780,6 +1780,66 @@ class ReighTaskBridge:
             }
         }
 
+    def mark_generation_variant_viewed(
+        self,
+        *,
+        slug: str,
+        generation_id: str,
+        variant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark one or all variants viewed through the single writer.
+
+        This is deliberately a small local-editor mutation.  Project
+        resolution and the generation repository's live-generation fence
+        happen before the write, so a variant from another project can never
+        be changed by guessing its id.
+        """
+        from astrid.core.repositories.errors import RepositoryError
+        from astrid.core.store.uow import UnitOfWork
+
+        project_id = self.resolve_project_id(slug)
+        generation_repository = self._generation_repository()
+        try:
+            if variant_id is None:
+                marked_count = UnitOfWork(self._writer).run(
+                    lambda u: generation_repository.mark_all_viewed(
+                        u,
+                        project_id=project_id,
+                        generation_id=generation_id,
+                    )
+                )
+                return {
+                    "generation_id": generation_id,
+                    "marked_count": int(marked_count),
+                }
+            variant = UnitOfWork(self._writer).run(
+                lambda u: generation_repository.mark_viewed(
+                    u,
+                    project_id=project_id,
+                    generation_id=generation_id,
+                    variant_id=variant_id,
+                )
+            )
+            return {
+                "generation_id": generation_id,
+                "variant_id": variant.id,
+                "viewed_at": variant.viewed_at,
+                "marked_count": 1,
+            }
+        except RepositoryError as exc:
+            name = type(exc).__name__
+            if name in ("GenerationNotFoundError", "GenerationDeletedError"):
+                raise BridgeGenerationNotFoundError(
+                    f"generation {generation_id!r} was not found"
+                ) from None
+            if name == "VariantNotFoundError":
+                raise BridgeNotFoundError(
+                    f"variant {variant_id!r} was not found on generation {generation_id!r}"
+                ) from None
+            if name == "GenerationValidationError":
+                raise BridgeBodyError(str(exc)) from None
+            raise
+
     def _generation_placements(
         self, project_id: str, generation_id: str
     ) -> list[dict[str, Any]]:

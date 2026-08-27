@@ -322,6 +322,7 @@ def _dispatch_serve(args: list[str]) -> int:
             "GET /projects/{project}/timelines, "
             "GET /projects/{project}/timelines/{timeline}, "
             "POST /projects/{project}/timelines/{timeline}/save, "
+            "POST /projects/{project}/generations/{generation_id}/viewed, "
             "GET|HEAD /projects/{project}/timelines/{timeline}/assets/{registry_key}"
         )
         print(

@@ -140,6 +140,7 @@ def gallery_server(projects_root: Path) -> Generator[dict[str, Any], None, None]
         yield {
             "base_url": f"http://{host}:{port}",
             "composition": composition,
+            "request_token": server.bridge_request_token,
         }
     finally:
         server.shutdown()
@@ -154,9 +155,13 @@ def _request(
     path: str,
     *,
     headers: dict[str, str] | None = None,
+    body: dict[str, Any] | None = None,
 ) -> tuple[int, Any, bytes]:
     """Raw request returning ``(status, response_headers, body)``."""
-    req = Request(env["base_url"] + path, method=method)
+    encoded_body = json.dumps(body).encode("utf-8") if body is not None else None
+    req = Request(env["base_url"] + path, data=encoded_body, method=method)
+    if encoded_body is not None:
+        req.add_header("Content-Type", "application/json")
     for name, value in (headers or {}).items():
         req.add_header(name, value)
     try:
@@ -168,6 +173,19 @@ def _request(
 
 def _get_json(env: dict[str, Any], path: str) -> tuple[int, dict[str, Any]]:
     status, _, raw = _request(env, "GET", path)
+    return status, json.loads(raw) if raw else {}
+
+
+def _post_json(
+    env: dict[str, Any], path: str, body: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    status, _, raw = _request(
+        env,
+        "POST",
+        path,
+        body=body,
+        headers={"X-Astrid-Request-Token": env["request_token"]},
+    )
     return status, json.loads(raw) if raw else {}
 
 
@@ -540,6 +558,90 @@ def test_generation_detail_is_project_scoped(env) -> None:
     status, body = _get_json(env, f"/projects/scope-b/generations/{foreign_id}")
     assert status == 404
     assert body["error"] == "generation_not_found"
+
+
+def test_generation_viewed_mutation_is_project_scoped_idempotent_and_bulk(env) -> None:
+    composition = env["composition"]
+    project_a = _create_project(composition, "viewed-a")
+    _create_project(composition, "viewed-b")
+    media_a = _seed_media(composition, project_a, b"viewed-a")
+    media_b = _seed_media(composition, project_a, b"viewed-b")
+    generation_id = _seed_generation(
+        composition,
+        project_a,
+        created_at="2026-07-01T00:00:00+00:00",
+        variants=[
+            {"media_id": media_a, "is_primary": True, "created_at": TS},
+            {"media_id": media_b, "created_at": TS},
+        ],
+    )
+    detail_status, detail = _get_json(env, f"/projects/viewed-a/generations/{generation_id}")
+    variant_id = detail["generation"]["variants"][0]["id"]
+
+    status, body = _post_json(
+        env,
+        f"/projects/viewed-a/generations/{generation_id}/viewed",
+        {"variant_id": variant_id},
+    )
+    assert detail_status == 200
+    assert status == 200
+    assert body["variant_id"] == variant_id
+    first_viewed_at = _get_json(
+        env, f"/projects/viewed-a/generations/{generation_id}"
+    )[1]["generation"]["variants"][0]["viewed_at"]
+    assert first_viewed_at
+
+    # Replaying the same request preserves the original timestamp.
+    status, replay = _post_json(
+        env,
+        f"/projects/viewed-a/generations/{generation_id}/viewed",
+        {"variant_id": variant_id},
+    )
+    assert status == 200
+    assert replay["viewed_at"] == first_viewed_at
+
+    status, bulk = _post_json(
+        env, f"/projects/viewed-a/generations/{generation_id}/viewed", {}
+    )
+    assert status == 200
+    assert bulk["marked_count"] == 1
+    status, replay_bulk = _post_json(
+        env, f"/projects/viewed-a/generations/{generation_id}/viewed", {}
+    )
+    assert status == 200
+    assert replay_bulk["marked_count"] == 0
+
+    status, foreign = _post_json(
+        env,
+        f"/projects/viewed-b/generations/{generation_id}/viewed",
+        {"variant_id": variant_id},
+    )
+    assert status == 404
+    assert foreign["error"] == "generation_not_found"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_detail"),
+    [
+        ({"variant_id": 42}, "variant_id must be a non-empty string"),
+        ({"unexpected": True}, "unsupported field(s): unexpected"),
+    ],
+)
+def test_generation_viewed_mutation_rejects_malformed_ids_and_body(env, body, expected_detail) -> None:
+    composition = env["composition"]
+    project_id = _create_project(composition, "viewed-invalid")
+    media_id = _seed_media(composition, project_id, b"invalid")
+    generation_id = _seed_generation(
+        composition,
+        project_id,
+        created_at=TS,
+        variants=[{"media_id": media_id, "is_primary": True, "created_at": TS}],
+    )
+    status, response = _post_json(
+        env, f"/projects/viewed-invalid/generations/{generation_id}/viewed", body
+    )
+    assert status == 400
+    assert response["detail"] == expected_detail
 
 
 # ---------------------------------------------------------------------------
