@@ -17,7 +17,7 @@ Mapping rules kept here:
 - ``:slug`` is validated against the project slug grammar before any read
   (``400 invalid_project``); a missing project is ``404 project_not_found``
   (never an empty authority-dependent view);
-- ``:ref`` is validated as canonical UUID, lowercase ULID, or slug before
+- ``:ref`` is validated as canonical UUID, ULID, or slug before
   any read (``400 invalid_timeline``); the service resolves it project-scoped
   in §8 order;
 - ``POST .../save`` bodies are parsed by
@@ -108,8 +108,11 @@ _UUID_RE = re.compile(
 )
 """Canonical lowercase UUID grammar (bridge §8 order 1)."""
 
-_ULID_RE = re.compile(r"^[0123456789abcdefghjkmnpqrstvwxyz]{26}$")
-"""Lowercase 26-character Crockford ULID grammar (bridge §8 order 2)."""
+_ULID_RE = re.compile(
+    r"^(?:[0123456789abcdefghjkmnpqrstvwxyz]{26}|"
+    r"[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26})$"
+)
+"""26-character Crockford ULID grammar, including legacy uppercase aliases."""
 
 _RUNAWAY_CURSOR_VERSION = 1
 _RUNAWAY_CURSOR_SIGNATURE_BYTES = 18
@@ -149,7 +152,7 @@ def _decode_runaway_cursor(cursor: str, *, key: bytes) -> dict[str, Any]:
 
 
 def _is_timeline_ref(ref: str) -> bool:
-    """Whether *ref* matches one of the three frozen address forms (§8)."""
+    """Whether *ref* matches a frozen address form or legacy ULID alias."""
     return (
         _UUID_RE.fullmatch(ref) is not None
         or _ULID_RE.fullmatch(ref) is not None
@@ -630,15 +633,15 @@ class TimelineBridgeAdapter:
         return str(row[0])
 
     def _validate_timeline_ref(self, ref: str) -> str:
-        """Reject a ``:ref`` matching none of the frozen address forms."""
+        """Reject a ``:ref`` matching none of the address forms."""
         if not isinstance(ref, str) or not ref:
             raise BridgeInvalidTimelineError(
                 "timeline ref must be a non-empty string"
             )
         if not _is_timeline_ref(ref):
             raise BridgeInvalidTimelineError(
-                "timeline ref must be a canonical UUID, lowercase ULID, "
-                f"or immutable slug, got {ref!r}"
+                "timeline ref must be a canonical UUID, ULID, or immutable "
+                f"slug, got {ref!r}"
             )
         return ref
 

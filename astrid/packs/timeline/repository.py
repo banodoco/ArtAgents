@@ -190,6 +190,9 @@ the same ``BEGIN IMMEDIATE`` without colliding.
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 """Immutable slug grammar (same as projects): lowercase letters/digits."""
 
+_UPPERCASE_ULID_RE = re.compile(r"^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$")
+"""Uppercase 26-character ULID grammar for legacy exact lookups."""
+
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -1951,15 +1954,17 @@ class TimelineRepository:
         return timeline_id
 
     def resolve(self, writer: DatabaseWriter, project_id: str, ref: str) -> str:
-        """Resolve a UUID, lowercase ULID, or slug to a timeline id.
+        """Resolve a UUID, ULID, or slug to a timeline id.
 
         A transaction-free read on a separate read-only connection. Resolution
-        is project-scoped (bridge §8 order: canonical UUID, then lowercase
-        26-character Crockford ULID, then immutable slug); an address matching
-        none of the forms raises :class:`TimelineValidationError` (the bridge
-        ``400 invalid_timeline``), a missing project raises
-        :class:`ProjectNotFoundError`, and a missing timeline raises
-        :class:`TimelineNotFoundError`.
+        is project-scoped (bridge §8 order: canonical UUID, then 26-character
+        Crockford ULID, then immutable slug). Lowercase ULIDs are canonical;
+        uppercase ULIDs are accepted only as an exact compatibility lookup for
+        identities already exposed by ``list``. No case normalization occurs.
+        An address matching none of the forms raises
+        :class:`TimelineValidationError` (the bridge ``400 invalid_timeline``),
+        a missing project raises :class:`ProjectNotFoundError`, and a missing
+        timeline raises :class:`TimelineNotFoundError`.
         """
         _require_non_empty_string("project_id", project_id)
         _require_non_empty_string("ref", ref)
@@ -1991,7 +1996,7 @@ class TimelineRepository:
             if row is None:
                 raise TimelineNotFoundError(ref=ref, project_id=project_id)
             return ref
-        if is_lowercase_ulid(ref):
+        if is_lowercase_ulid(ref) or _UPPERCASE_ULID_RE.fullmatch(ref) is not None:
             row = _query_one(
                 reader,
                 "SELECT json_extract(e.payload_json, '$.data.timeline_id') "

@@ -510,6 +510,45 @@ def test_resolve_all_three_address_forms(
     assert repo.show(writer, project.id, "main") == created
 
 
+def test_resolve_exact_uppercase_legacy_ulid_exposed_by_list(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    uppercase = "01JM4K5N7P0000000000000004"
+    created = _create_timeline(
+        repo, writer, project.id, timeline_ulid=uppercase, slug="legacy"
+    )
+
+    listed = repo.list(writer, project.id)
+    assert listed[0].timeline_ulid == uppercase
+    assert repo.resolve(writer, project.id, uppercase) == created.timeline_id
+    assert repo.show(writer, project.id, uppercase) == created
+
+    # Case is never normalized: the lowercase spelling is a different address
+    # and does not resolve this legacy uppercase identity.
+    with pytest.raises(TimelineNotFoundError):
+        repo.resolve(writer, project.id, uppercase.lower())
+
+
+def test_uppercase_legacy_ulid_remains_project_scoped(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project_a = _create_project(project_repo, writer, slug="legacy-a")
+    project_b = _create_project(project_repo, writer, slug="legacy-b")
+    uppercase = "01JM4K5N7P0000000000000005"
+    created = _create_timeline(
+        repo, writer, project_a.id, timeline_ulid=uppercase, slug="legacy"
+    )
+
+    assert repo.resolve(writer, project_a.id, uppercase) == created.timeline_id
+    with pytest.raises(TimelineNotFoundError):
+        repo.resolve(writer, project_b.id, uppercase)
+
+
 def test_resolve_missing_cases_raise_typed_errors(
     repo: TimelineRepository,
     project_repo: ProjectRepository,
@@ -762,7 +801,7 @@ def test_restart_reconstruction_solely_from_events_and_settings(
         default = _create_timeline(
             repo, writer, project.id, slug="main", set_default=True
         )
-        other = _create_timeline(
+        _create_timeline(
             repo,
             writer,
             project.id,

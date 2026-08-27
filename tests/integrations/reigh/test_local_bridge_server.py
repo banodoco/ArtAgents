@@ -470,6 +470,57 @@ def test_projects_timelines_list_route_envelope(
     }
 
 
+def test_uppercase_legacy_ulid_loads_only_when_list_exposes_exact_identity(
+    tmp_bridge_root: Path,
+) -> None:
+    uppercase = "01JM4K5N7P0000000000000006"
+    lowercase = uppercase.lower()
+    timeline_id = "44444444-4444-4444-4444-444444444446"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        legacy = _repo_create_project(composition, slug="legacy-proj", key="proj-1")
+        _repo_create_timeline(
+            composition,
+            project_id=legacy.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=uppercase,
+        )
+        _repo_create_project(composition, slug="other-proj", key="proj-2")
+
+        list_status, listed = _get_json(
+            f"{base_url}/projects/legacy-proj/timelines"
+        )
+        upper_status, upper_loaded = _get_json(
+            f"{base_url}/projects/legacy-proj/timelines/{uppercase}"
+        )
+        lower_status, lower_error = _get_error(
+            f"{base_url}/projects/legacy-proj/timelines/{lowercase}"
+        )
+        foreign_status, foreign_error = _get_error(
+            f"{base_url}/projects/other-proj/timelines/{uppercase}"
+        )
+        malformed_status, malformed_error = _get_error(
+            f"{base_url}/projects/legacy-proj/timelines/{uppercase[:-1]}!"
+        )
+        slug_status, slug_loaded = _get_json(
+            f"{base_url}/projects/legacy-proj/timelines/primary"
+        )
+
+    assert list_status == 200
+    assert listed["timelines"][0]["timeline_ulid"] == uppercase
+    assert upper_status == 200
+    assert upper_loaded["timeline_ulid"] == uppercase
+    assert lower_status == 404
+    assert lower_error["error"] == "timeline_not_found"
+    assert foreign_status == 404
+    assert foreign_error["error"] == "timeline_not_found"
+    assert malformed_status == 400
+    assert malformed_error["error"] == "invalid_timeline"
+    assert slug_status == 200
+    assert slug_loaded["timeline_id"] == timeline_id
+
+
 def test_projects_timelines_list_route_empty_for_project_without_timelines(
     tmp_bridge_root: Path,
 ) -> None:
