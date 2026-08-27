@@ -1365,6 +1365,9 @@ class ReighTaskBridge:
                     "is_primary": is_primary,
                     "role": "result" if is_primary else str(spec_out.get("role", "artifact")),
                     "label": staged.filename,
+                    "variant_type": spec_out.get("variant_type"),
+                    "name": spec_out.get("name"),
+                    "variant_params": spec_out.get("params"),
                     "prepared": prepared,
                 }
             )
@@ -1420,6 +1423,28 @@ class ReighTaskBridge:
                     "type": kind if kind in ("image", "video", "audio") else "other",
                     "params": gen_params or None,
                 }
+                variant_overrides = [
+                    {
+                        "ordinal": entry["ordinal"],
+                        **{
+                            key: entry[key]
+                            for key in ("variant_type", "name")
+                            if entry.get(key) is not None
+                        },
+                        **(
+                            {"params": entry["variant_params"]}
+                            if entry.get("variant_params") is not None
+                            else {}
+                        ),
+                    }
+                    for entry in entries
+                ]
+                # Keep the one-output request shape compatible with receipts
+                # created before multi-output generation support existed.
+                if len(entries) > 1 or any(
+                    len(item) > 1 for item in variant_overrides
+                ):
+                    generation_request["variant_overrides"] = variant_overrides
             visibility = policy.get("timeline_visibility")
             if isinstance(visibility, dict) and visibility.get("timeline_id"):
                 primary_entry = next(e for e in entries if e["is_primary"])

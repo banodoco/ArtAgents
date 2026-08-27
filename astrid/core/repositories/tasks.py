@@ -4172,6 +4172,9 @@ class TaskRepository:
                     "role": entry["role"],
                     "label": entry.get("label"),
                     "path": entry.get("path"),
+                    "variant_type": entry.get("variant_type"),
+                    "name": entry.get("name"),
+                    "variant_params": entry.get("variant_params"),
                     "prepared": entry["prepared"],
                     "media_id": materialized_media.media_id,
                 }
@@ -4322,24 +4325,60 @@ class TaskRepository:
                     "generation_request.type must be a non-empty string"
                 )
             primary_media_id = next(
-                (
-                    entry["media_id"]
-                    for entry in materialized
-                    if entry["is_primary"]
-                ),
+                (entry["media_id"] for entry in materialized if entry["is_primary"]),
                 None,
             )
-            variant: dict[str, Any] = dict(
+            overrides = {
+                int(item["ordinal"]): item
+                for item in (generation_request.get("variant_overrides") or [])
+                if isinstance(item, Mapping) and item.get("ordinal") is not None
+            }
+            requested_primary: dict[str, Any] = dict(
                 generation_request.get("variant") or {}
             )
-            variant.setdefault("media_id", primary_media_id)
+            requested_primary.setdefault("media_id", primary_media_id)
+            generation_variants: list[dict[str, Any]] = []
+            distinct_materialized: list[dict[str, Any]] = []
+            by_media: dict[str, dict[str, Any]] = {}
+            for entry in materialized:
+                existing = by_media.get(entry["media_id"])
+                if existing is None:
+                    by_media[entry["media_id"]] = entry
+                    distinct_materialized.append(entry)
+                elif entry["is_primary"]:
+                    # The generation projection has unique media membership;
+                    # if duplicate bytes were submitted, let the declared
+                    # primary win without creating a second variant row.
+                    existing.update(entry)
+            for entry in distinct_materialized:
+                requested = dict(overrides.get(entry["ordinal"]) or {})
+                if entry["is_primary"]:
+                    requested.update(requested_primary)
+                    requested["media_id"] = entry["media_id"]
+                    requested["is_primary"] = True
+                else:
+                    requested["media_id"] = entry["media_id"]
+                    requested["is_primary"] = False
+                if requested.get("variant_type") is None:
+                    requested["variant_type"] = (
+                        "original" if entry["is_primary"] else entry["role"]
+                    )
+                if requested.get("name") is None and not entry["is_primary"]:
+                    requested["name"] = (
+                        entry.get("name")
+                        or entry.get("label")
+                        or f"variant-{entry['ordinal']}"
+                    )
+                if requested.get("params") is None:
+                    requested["params"] = entry.get("variant_params") or {}
+                generation_variants.append(requested)
             generation_model = generation_repo.record_completion(
                 uow,
                 project_id=project_id,
                 task_id=task_id,
                 type=gtype,
                 params=generation_request.get("params"),
-                variant=variant,
+                variants=generation_variants,
             )
 
         # 6.7 Registry visibility merge when the completion requires it
@@ -4584,6 +4623,21 @@ class TaskRepository:
                                 f"string, got {value!r}"
                             )
                         entry[key] = value
+                for key in ("variant_type", "name"):
+                    if raw.get(key) is not None:
+                        value = raw[key]
+                        if not isinstance(value, str) or not value:
+                            raise TaskValidationError(
+                                f"outputs[{index}].{key} must be a non-empty string, "
+                                f"got {value!r}"
+                            )
+                        entry[key] = value
+                if raw.get("params") is not None:
+                    if not isinstance(raw["params"], Mapping):
+                        raise TaskValidationError(
+                            f"outputs[{index}].params must be a JSON object"
+                        )
+                    entry["variant_params"] = dict(raw["params"])
                 if raw.get("relations") is not None:
                     relations = raw["relations"]
                     if not isinstance(relations, Sequence) or isinstance(
@@ -4691,6 +4745,11 @@ class TaskRepository:
         for key in ("label", "path", "media_id", "realm", "locator"):
             if entry.get(key) is not None:
                 identity[key] = entry[key]
+        for key in ("variant_type", "name"):
+            if entry.get(key) is not None:
+                identity[key] = entry[key]
+        if entry.get("variant_params") is not None:
+            identity["params"] = dict(entry["variant_params"])
         if entry.get("relations") is not None:
             identity["relations"] = list(entry["relations"])
         return identity

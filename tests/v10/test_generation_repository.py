@@ -246,6 +246,75 @@ def test_record_completion_creates_generation_with_one_original_primary(env) -> 
     assert env.writer.submit(_stream_count) == 0
 
 
+def test_record_completion_accepts_all_distinct_variants_in_stable_order(env) -> None:
+    project = _create_project(env)
+    primary = _import_media(env, project_id=project.id)
+    alternate = _import_media(env, project_id=project.id)
+    task_id = _seed_succeeded_task(env, project_id=project.id)
+
+    model = UnitOfWork(env.writer).run(
+        lambda u: env.generations.record_completion(
+            u,
+            project_id=project.id,
+            task_id=task_id,
+            type="image",
+            variants=[
+                {"media_id": primary.id, "is_primary": True},
+                {
+                    "media_id": alternate.id,
+                    "is_primary": False,
+                    "variant_type": "upscale",
+                    "name": "2x",
+                    "params": {"scale": 2},
+                },
+            ],
+            created_at=TS2,
+        )
+    )
+    assert [(v.media_id, v.is_primary) for v in model.variants] == [
+        (primary.id, True),
+        (alternate.id, False),
+    ]
+    assert model.variants[0].variant_type == "original"
+    assert model.variants[1].variant_type == "upscale"
+    assert model.variants[1].name == "2x"
+    assert model.variants[1].params == {"scale": 2}
+
+
+def test_record_completion_rejects_foreign_variant_before_any_generation_write(env) -> None:
+    project = _create_project(env)
+    other_project = _create_project(env, slug="foreign-variants")
+    primary = _import_media(env, project_id=project.id)
+    foreign = _import_media(env, project_id=other_project.id)
+    task_id = _seed_succeeded_task(env, project_id=project.id)
+
+    before = env.writer.submit(
+        lambda conn: conn.execute(
+            "SELECT COUNT(*) FROM generations WHERE project_id = ?", (project.id,)
+        ).fetchone()[0]
+    )
+    with pytest.raises(GenerationMediaError) as foreign_exc:
+        UnitOfWork(env.writer).run(
+            lambda u: env.generations.record_completion(
+                u,
+                project_id=project.id,
+                task_id=task_id,
+                type="image",
+                variants=[
+                    {"media_id": primary.id, "is_primary": True},
+                    {"media_id": foreign.id, "is_primary": False},
+                ],
+            )
+        )
+    assert foreign_exc.value.detail == "foreign"
+    after = env.writer.submit(
+        lambda conn: conn.execute(
+            "SELECT COUNT(*) FROM generations WHERE project_id = ?", (project.id,)
+        ).fetchone()[0]
+    )
+    assert after == before == 0
+
+
 def test_record_completion_rejections_change_zero_rows(env) -> None:
     project = _create_project(env)
     media = _import_media(env, project_id=project.id)

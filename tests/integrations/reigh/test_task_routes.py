@@ -1275,6 +1275,63 @@ class TestCompletion:
         assert variant[0] == 1
         assert variant[1] == "original"
 
+    def test_completion_projects_all_distinct_outputs_as_ordered_variants(
+        self, claimed: dict[str, Any]
+    ) -> None:
+        env = claimed["env"]
+        composition = env["composition"]
+        status, result = _complete_multipart(
+            env,
+            claimed["claim"],
+            claimed["task_id"],
+            key="done-gen-many",
+            files={"out0": b"primary", "out1": b"alternate"},
+            outputs=[
+                {"key": "out0", "is_primary": True},
+                {
+                    "key": "out1",
+                    "is_primary": False,
+                    "variant_type": "upscale",
+                    "name": "alternate",
+                    "params": {"scale": 2},
+                },
+            ],
+        )
+        assert status == 200, result
+        variants = result["generation"]["variants"]
+        assert len(variants) == 2
+        assert variants[0]["is_primary"] is True
+        assert variants[0]["variant_type"] == "original"
+        assert variants[1]["is_primary"] is False
+        assert variants[1]["variant_type"] == "upscale"
+        assert variants[1]["name"] == "alternate"
+        assert variants[1]["params"] == {"scale": 2}
+        assert _db_count(
+            composition, "SELECT COUNT(*) FROM generation_variants"
+        ) == 2
+        status2, replay = _complete_multipart(
+            env,
+            claimed["claim"],
+            claimed["task_id"],
+            key="done-gen-many",
+            files={"out0": b"primary", "out1": b"alternate"},
+            outputs=[
+                {"key": "out0", "is_primary": True},
+                {
+                    "key": "out1",
+                    "is_primary": False,
+                    "variant_type": "upscale",
+                    "name": "alternate",
+                    "params": {"scale": 2},
+                },
+            ],
+        )
+        assert status2 == 200
+        assert replay["generation"] == result["generation"]
+        assert _db_count(
+            composition, "SELECT COUNT(*) FROM generation_variants"
+        ) == 2
+
     def test_registry_visibility_merge_updates_timeline_head(
         self, claimed: dict[str, Any]
     ) -> None:

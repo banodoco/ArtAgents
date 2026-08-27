@@ -24,7 +24,7 @@ their rows and variants survive every command.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -370,7 +370,10 @@ def _generation_models(rows: list[Any], variants_by_generation: dict[str, tuple[
 
 
 _VARIANT_ORDER = (
-    "ORDER BY is_primary DESC, created_at ASC, id ASC"
+    # Completion inserts all variants at one timestamp.  ULIDs contain a
+    # random component, so use SQLite insertion order as the stable tie-break
+    # rather than allowing alternatives to reshuffle in the gallery.
+    "ORDER BY is_primary DESC, created_at ASC, rowid ASC, id ASC"
 )
 """Primary-first deterministic variant ordering shared by all reads."""
 
@@ -400,20 +403,20 @@ class GenerationRepository:
         task_id: str,
         type: str,
         params: Mapping[str, Any] | None = None,
-        variant: Mapping[str, Any],
+        variant: Mapping[str, Any] | None = None,
+        variants: Sequence[Mapping[str, Any]] | None = None,
         generation_id: str | None = None,
         variant_id: str | None = None,
         created_at: str | None = None,
     ) -> GenerationReadModel:
-        """Create one generation plus its initial original variant atomically.
+        """Create one generation plus all materialized variants atomically.
 
         Runs inside the caller's task-completion unit of work (build spec
-        section 5 step 6): one ``generations`` row plus exactly one
-        ``generation_variants`` row with ``is_primary = 1`` and
-        ``variant_type = 'original'``, committed together with everything
-        else in that transaction. No event stream and no receipt exist for
-        generations; the surrounding completion commit is the atomicity
-        record.
+        section 5 step 6): one ``generations`` row plus one
+        ``generation_variants`` row for each distinct materialized output.
+        Exactly one row is primary and always has ``variant_type =
+        'original'``. No event stream and no receipt exist for generations;
+        the surrounding completion commit is the atomicity record.
 
         Rejections happen **before any write**: an unknown project, a
         missing/foreign/not-yet-succeeded task, a type outside
@@ -423,16 +426,85 @@ class GenerationRepository:
         project_id = _require_non_empty_string("project_id", project_id)
         task_id = _require_non_empty_string("task_id", task_id)
         _require_non_empty_string("type", type)
-        if not isinstance(variant, Mapping):
-            raise GenerationValidationError("variant must be a JSON object")
-        media_id = _require_non_empty_string("variant.media_id", variant.get("media_id"))
+        if variant is not None and variants is not None:
+            raise GenerationValidationError(
+                "provide either variant or variants, not both"
+            )
+        if variants is None:
+            variants = [variant] if variant is not None else []
+        if isinstance(variants, (str, bytes)) or not isinstance(variants, Sequence):
+            raise GenerationValidationError("variants must be a sequence")
+        if not variants:
+            raise GenerationValidationError("variants must not be empty")
+        normalized_variants: list[dict[str, Any]] = []
+        seen_media: set[str] = set()
+        seen_variant_ids: set[str] = set()
+        primary_count = 0
+        for index, raw_variant in enumerate(variants):
+            if not isinstance(raw_variant, Mapping):
+                raise GenerationValidationError(
+                    f"variants[{index}] must be a JSON object"
+                )
+            media_id = _require_non_empty_string(
+                f"variants[{index}].media_id", raw_variant.get("media_id")
+            )
+            if media_id in seen_media:
+                raise GenerationValidationError(
+                    f"variant media already member: {media_id!r}"
+                )
+            seen_media.add(media_id)
+            is_primary = raw_variant.get("is_primary", index == 0)
+            if not isinstance(is_primary, bool):
+                raise GenerationValidationError(
+                    f"variants[{index}].is_primary must be a boolean"
+                )
+            primary_count += int(is_primary)
+            variant_name = raw_variant.get("name")
+            if variant_name is not None and not isinstance(variant_name, str):
+                raise GenerationValidationError(
+                    f"variants[{index}].name must be a string"
+                )
+            variant_type = raw_variant.get("variant_type")
+            if variant_type is not None and not isinstance(variant_type, str):
+                raise GenerationValidationError(
+                    f"variants[{index}].variant_type must be a string"
+                )
+            normalized_variants.append(
+                {
+                    "media_id": media_id,
+                    "is_primary": is_primary,
+                    "variant_type": (
+                        ORIGINAL_VARIANT_TYPE
+                        if is_primary
+                        else (variant_type or "variant")
+                    ),
+                    "name": variant_name,
+                    "params": raw_variant.get("params"),
+                    "id": raw_variant.get("id"),
+                }
+            )
+        if primary_count != 1:
+            raise GenerationValidationError(
+                f"variants must contain exactly one primary (got {primary_count})"
+            )
+        # Validate/canonicalize every variant before the first INSERT so a
+        # malformed later alternative cannot leave a generation behind.
+        for index, item in enumerate(normalized_variants):
+            item["params_json"] = _canonical_params(
+                item.pop("params"), f"variants[{index}].params"
+            )
+            if item["id"] is not None:
+                _require_non_empty_string(f"variants[{index}].id", item["id"])
+                if item["id"] in seen_variant_ids:
+                    raise GenerationValidationError(
+                        f"variant id already supplied: {item['id']!r}"
+                    )
+                seen_variant_ids.add(item["id"])
         if generation_id is None:
             generation_id = generate_lowercase_ulid()
         else:
             _require_non_empty_string("generation_id", generation_id)
-        if variant_id is None:
-            variant_id = generate_lowercase_ulid()
-        else:
+        if variant_id is not None:
             _require_non_empty_string("variant_id", variant_id)
 
         # The project must exist before any insert.
@@ -458,18 +530,20 @@ class GenerationRepository:
                 f"type must be one of {sorted(GENERATION_TYPES)}, got {type!r}"
             )
 
-        # Media agreement: the kernel currency pins to the same project.
-        media = uow.query_one(
-            "SELECT id, project_id FROM media WHERE id = ?", (media_id,)
-        )
-        if media is None:
-            raise GenerationMediaError(
-                media_id=media_id, project_id=project_id, detail="missing"
+        # Media agreement: every kernel currency pins to this project.
+        for item in normalized_variants:
+            item_media_id = str(item["media_id"])
+            media = uow.query_one(
+                "SELECT id, project_id FROM media WHERE id = ?", (item_media_id,)
             )
-        if str(media["project_id"]) != project_id:
-            raise GenerationMediaError(
-                media_id=media_id, project_id=project_id, detail="foreign"
-            )
+            if media is None:
+                raise GenerationMediaError(
+                    media_id=item_media_id, project_id=project_id, detail="missing"
+                )
+            if str(media["project_id"]) != project_id:
+                raise GenerationMediaError(
+                    media_id=item_media_id, project_id=project_id, detail="foreign"
+                )
 
         # Duplicate identity rejection before allocation.
         if (
@@ -485,15 +559,6 @@ class GenerationRepository:
             raise GenerationValidationError("created_at must be a non-empty string")
 
         params_json = _canonical_params(params, "generation params")
-        variant_name = variant.get("name")
-        if variant_name is not None and not isinstance(variant_name, str):
-            raise GenerationValidationError("variant.name must be a string")
-        variant_type = variant.get("variant_type") or ORIGINAL_VARIANT_TYPE
-        if not isinstance(variant_type, str):
-            raise GenerationValidationError("variant.variant_type must be a string")
-        variant_params_json = _canonical_params(
-            variant.get("params"), "variant params"
-        )
 
         # 1. The generation row.
         uow.execute(
@@ -512,24 +577,32 @@ class GenerationRepository:
                 stamp,
             ),
         )
-        # 2. The initial original variant: exactly one primary member. The
-        #    UNIQUE (generation_id, media_id) membership and the
-        #    generation_one_primary partial index back this insert.
-        uow.execute(
-            "INSERT INTO generation_variants "
-            "(id, generation_id, media_id, variant_type, name, params_json, "
-            "is_primary, starred, viewed_at, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 1, 0, NULL, ?)",
-            (
-                variant_id,
-                generation_id,
-                media_id,
-                variant_type,
-                variant_name,
-                variant_params_json,
-                stamp,
-            ),
-        )
+        # 2. Materialize all distinct outputs in caller order.  The unique
+        # media membership guard above ensures one row per exact media.
+        for index, item in enumerate(normalized_variants):
+            item_id = item["id"]
+            if item_id is None:
+                item_id = (
+                    variant_id
+                    if item["is_primary"] and variant_id is not None
+                    else generate_lowercase_ulid()
+                )
+            uow.execute(
+                "INSERT INTO generation_variants "
+                "(id, generation_id, media_id, variant_type, name, params_json, "
+                "is_primary, starred, viewed_at, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)",
+                (
+                    item_id,
+                    generation_id,
+                    item["media_id"],
+                    item["variant_type"],
+                    item["name"],
+                    item["params_json"],
+                    int(item["is_primary"]),
+                    stamp,
+                ),
+            )
         return self._read_generation(
             uow, project_id, generation_id, include_deleted=False
         )
