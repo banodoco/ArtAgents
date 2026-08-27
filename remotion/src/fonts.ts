@@ -6,5 +6,5 @@ import {loadFont as loadInter} from '@remotion/google-fonts/Inter';
 import {loadFont as loadJetBrainsMono} from '@remotion/google-fonts/JetBrainsMono';
 
 loadSixtyfour();
-loadInter({weights: ['400','700'], subsets: ['latin']});
-loadJetBrainsMono({weights: ['400','700'], subsets: ['latin']});
+loadInter();
+loadJetBrainsMono();
