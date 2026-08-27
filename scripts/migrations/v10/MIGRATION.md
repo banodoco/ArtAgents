@@ -119,6 +119,41 @@ record. A stale concurrent edit fails closed; rerunning the same repair is a
 receipt-backed no-op. Legitimate `file` locators are retained, while only the
 known UUID-as-`file` alias is removed.
 
+## Repairing the gallery projection
+
+Some local v10 databases contain the migrated kernel `tasks` and
+`task_outputs` rows but predate the shots-pack gallery tables (or have a
+missing generation row for a completed task). The sanctioned repair command
+projects those rows into `generations` and `generation_variants`:
+
+```bash
+# Read-only plan (the default; safe while the bridge owns the database).
+python3 scripts/migrations/v10/repair_generation_gallery.py \
+  --root /path/to/Astrid/projects --project desert-plant-growth
+
+# Explicit mutation (stop astrid serve / any other store owner first).
+python3 scripts/migrations/v10/repair_generation_gallery.py \
+  --root /path/to/Astrid/projects --project desert-plant-growth --apply \
+  --report /path/to/gallery-projection-report.json
+```
+
+Apply opens the standard application so the declared shots schema migration is
+used when the tables are absent, then calls `GenerationRepository` inside a
+`UnitOfWork` for every row. It never writes SQLite directly from product code
+and never edits legacy files. Dry-run and apply both report succeeded-task,
+projected, already-projected, and skipped counts; apply adds a read-only
+verification of task lineage, type, and same-project media. The deterministic
+IDs are derived from `(project_id, task_id[, media_id])`, and the output's
+existing timestamp is retained exactly. Re-running is a no-op for projected
+tasks.
+
+The conservative repair records one `original` variant (the primary output)
+per eligible task. It intentionally does not infer cross-task sibling
+variants from `media_relations`: legacy `variant_of` edges do not always carry
+an unambiguous producing task, so guessing would merge unrelated generations.
+Non-generation media (`text`, `document`, `data`) and capabilities containing
+`storyboard` are reported and skipped.
+
 ## Fidelity paths (generations)
 
 - **Fence path** (completed run with ≥1 importable artifact):
