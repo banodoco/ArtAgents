@@ -473,7 +473,7 @@ def test_projects_timelines_list_route_envelope(
 def test_uppercase_legacy_ulid_loads_only_when_list_exposes_exact_identity(
     tmp_bridge_root: Path,
 ) -> None:
-    uppercase = "01JM4K5N7P0000000000000006"
+    uppercase = "01KYPVKMW5STB4W6FE05ED8242"
     lowercase = uppercase.lower()
     timeline_id = "44444444-4444-4444-4444-444444444446"
     with repository_server(tmp_bridge_root) as (base_url, composition):
