@@ -109,7 +109,9 @@ local clients:
 - Request targets are capped at 8 KiB, JSON request bodies at 8 MiB, request
   socket reads at 15 seconds, and Runaway pages at 1,000 rows.
 - Request admission is bounded to eight concurrent handlers and a process-local
-  token bucket (burst 32, refill 16 requests/second). Exhaustion is
+  token bucket (burst 128, refill 64 requests/second). The larger bounded burst
+  accommodates ordinary browser startup/gallery fan-out across metadata and
+  media assets without making the bridge unbounded. Exhaustion is
   `429 rate_limited` with `Retry-After`; disconnect and shutdown cancellation
   stops chunked asset streaming and always releases the admission permit.
 - JSON and asset data responses carry `X-Astrid-Bridge-Version: v1`,

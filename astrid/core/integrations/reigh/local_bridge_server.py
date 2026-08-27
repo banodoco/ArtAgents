@@ -216,8 +216,12 @@ def _rotate_boot_secret(projects_root: Path, auth_token: str) -> _BootSecret:
 
 _BRIDGE_PROTOCOL_VERSION = "v1"
 _DEFAULT_MAX_CONCURRENT_REQUESTS = 8
-_DEFAULT_RATE_LIMIT_CAPACITY = 32
-_DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 16.0
+# Browser startup and gallery navigation fan out across metadata plus media
+# requests.  Keep that legitimate burst above the old 32-request ceiling while
+# retaining a finite burst and a bounded sustained rate; the eight-request
+# concurrency cap remains the primary protection for work and open streams.
+_DEFAULT_RATE_LIMIT_CAPACITY = 128
+_DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 64.0
 
 
 class _RequestAdmissionController:

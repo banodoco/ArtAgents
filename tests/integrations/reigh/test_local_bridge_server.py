@@ -1052,6 +1052,32 @@ def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> N
     assert limited_body["error"] == "rate_limited"
 
 
+def test_bridge_default_rate_budget_allows_legitimate_burst_above_legacy_limit(
+    tmp_bridge_root: Path,
+) -> None:
+    """The default budget covers metadata/media fan-out beyond the old 32 cap."""
+
+    class FastHealthBridge:
+        def health(self, projects_root: str) -> HealthStatus:
+            return HealthStatus(ok=True, projects_root=projects_root)
+
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=FastHealthBridge(),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        statuses = [_get_json(f"{base}/v1/health")[0] for _ in range(40)]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert statuses == [200] * 40
+
+
 def test_bridge_rejects_oversized_request_body_and_target_before_dispatch(
     tmp_bridge_root: Path,
 ) -> None:
