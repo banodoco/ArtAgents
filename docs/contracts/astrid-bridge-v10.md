@@ -111,7 +111,12 @@ local clients:
 - Request admission is bounded to eight concurrent handlers and a process-local
   token bucket (burst 128, refill 64 requests/second). The larger bounded burst
   accommodates ordinary browser startup/gallery fan-out across metadata and
-  media assets without making the bridge unbounded. Exhaustion is
+  media assets without making the bridge unbounded. Authenticated `GET`/`HEAD`
+  requests for immutable media bytes (`/projects/:slug/media/:id/content` and
+  `/projects/:slug/timelines/:ref/assets/:id`) do not deplete that token bucket,
+  but remain subject to the eight-handler cap and all host, origin, auth, and
+  protocol gates. Dynamic JSON and write routes remain token-bucket limited.
+  Exhaustion is
   `429 rate_limited` with `Retry-After`; disconnect and shutdown cancellation
   stops chunked asset streaming and always releases the admission permit.
 - JSON and asset data responses carry `X-Astrid-Bridge-Version: v1`,

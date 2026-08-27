@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.bridge_service import HealthStatus
 from astrid.core.integrations.reigh.local_bridge_server import (
+    _is_immutable_byte_route,
     _is_loopback_host_header,
     create_local_bridge_server,
 )
@@ -1076,6 +1077,68 @@ def test_bridge_default_rate_budget_allows_legitimate_burst_above_legacy_limit(
         thread.join(timeout=5)
 
     assert statuses == [200] * 40
+
+
+def test_immutable_byte_route_matcher_is_exact_and_method_scoped() -> None:
+    accepted = (
+        ("GET", "/projects/demo/media/media-1/content"),
+        ("HEAD", "/v1/projects/demo/timelines/primary/assets/shot-1"),
+    )
+    rejected = (
+        ("POST", "/projects/demo/media/media-1/content"),
+        ("GET", "/projects/demo/media/media-1/content/extra"),
+        ("GET", "/projects//media/media-1/content"),
+        ("GET", "/projects/%2E%2E/media/media-1/content"),
+        ("GET", "/projects/demo/timelines/primary/assets/shot-1/extra"),
+        ("GET", "/projects/demo/timelines/primary/assets/%2F"),
+        ("GET", "http://["),
+    )
+
+    for method, target in accepted:
+        assert _is_immutable_byte_route(method, target), (method, target)
+    for method, target in rejected:
+        assert not _is_immutable_byte_route(method, target), (method, target)
+
+
+def test_immutable_byte_reads_do_not_consume_dynamic_rate_budget(
+    tmp_bridge_root: Path,
+) -> None:
+    """Media fan-out remains bounded by concurrency without starving JSON reads."""
+    import pytest
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        rate_limit_capacity=1,
+        rate_limit_refill_per_second=0.001,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        media_status, _, _ = _get_bytes(
+            f"{base}/v1/projects/no-such/media/no-such/content"
+        )
+        asset_status, _, _ = _get_bytes(
+            f"{base}/v1/projects/no-such/timelines/no-such/assets/no-such"
+        )
+        health_status, _ = _get_json(f"{base}/v1/health")
+        with pytest.raises(HTTPError) as malformed:
+            urlopen(f"{base}/v1/projects/no-such/media/no-such/content/extra")
+        malformed_body = json.loads(malformed.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        composition.close()
+
+    assert media_status == asset_status == 404
+    assert health_status == 200
+    assert malformed.value.code == 429
+    assert malformed_body["error"] == "rate_limited"
 
 
 def test_bridge_rejects_oversized_request_body_and_target_before_dispatch(

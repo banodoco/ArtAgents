@@ -224,6 +224,50 @@ _DEFAULT_RATE_LIMIT_CAPACITY = 128
 _DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 64.0
 
 
+def _is_immutable_byte_route(method: str, request_target: str) -> bool:
+    """Return whether *request_target* is one of the byte-serving routes.
+
+    Only the exact GET/HEAD route shapes are exempt from token-bucket charge.
+    Keep this matcher stricter than the compatibility dispatcher: empty,
+    traversal, and encoded path-separator segments must not turn malformed
+    requests into unmetered work.
+    """
+
+    if method not in {"GET", "HEAD"}:
+        return False
+    try:
+        path = urlparse(request_target).path
+    except ValueError:
+        return False
+    raw_parts = path.split("/")
+    if not path.startswith("/") or any(not part for part in raw_parts[1:]):
+        return False
+    parts = [unquote(part) for part in raw_parts[1:]]
+    if any(
+        part in {".", ".."}
+        or "/" in part
+        or "\\" in part
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in part)
+        for part in parts
+    ):
+        return False
+    route_parts = parts[1:] if parts[:1] == ["v1"] else parts
+    return (
+        (
+            len(route_parts) == 5
+            and route_parts[0] == "projects"
+            and route_parts[2] == "media"
+            and route_parts[4] == "content"
+        )
+        or (
+            len(route_parts) == 6
+            and route_parts[0] == "projects"
+            and route_parts[2] == "timelines"
+            and route_parts[4] == "assets"
+        )
+    )
+
+
 class _RequestAdmissionController:
     """Thread-safe fixed-capacity concurrency and token-bucket admission."""
 
@@ -243,19 +287,22 @@ class _RequestAdmissionController:
         self._updated_at = time.monotonic()
         self._rate_lock = threading.Lock()
 
-    def try_acquire(self) -> tuple[bool, int]:
-        now = time.monotonic()
-        with self._rate_lock:
-            elapsed = max(0.0, now - self._updated_at)
-            self._tokens = min(
-                self._rate_capacity,
-                self._tokens + elapsed * self._refill_per_second,
-            )
-            self._updated_at = now
-            if self._tokens < 1.0:
-                retry_after = max(1, int((1.0 - self._tokens) / self._refill_per_second) + 1)
-                return False, retry_after
-            self._tokens -= 1.0
+    def try_acquire(self, *, rate_limited: bool = True) -> tuple[bool, int]:
+        if rate_limited:
+            now = time.monotonic()
+            with self._rate_lock:
+                elapsed = max(0.0, now - self._updated_at)
+                self._tokens = min(
+                    self._rate_capacity,
+                    self._tokens + elapsed * self._refill_per_second,
+                )
+                self._updated_at = now
+                if self._tokens < 1.0:
+                    retry_after = max(
+                        1, int((1.0 - self._tokens) / self._refill_per_second) + 1
+                    )
+                    return False, retry_after
+                self._tokens -= 1.0
         if not self._semaphore.acquire(blocking=False):
             return False, 1
         return True, 0
@@ -1340,7 +1387,9 @@ def make_local_bridge_handler(*, projects_root: Path):
             if not self._bridge_admitted:
                 admitted, retry_after = cast(
                     LocalBridgeHTTPServer, self.server
-                ).bridge_admission.try_acquire()
+                ).bridge_admission.try_acquire(
+                    rate_limited=not _is_immutable_byte_route(self.command, self.path)
+                )
                 if not admitted:
                     error = BridgeRateLimitError("the local bridge request budget is exhausted")
                     self._send_json(
