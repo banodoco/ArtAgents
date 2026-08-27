@@ -27,7 +27,8 @@ Every asset registry entry on both sides of the bridge carries the following ove
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `file` | `string` | yes | Relative or absolute path to the local file backing this asset. Must be present or `url` must be present. |
+| `file` | `string?` | no | Relative or absolute source/legacy locator for the local file backing this asset. Retained for compatibility when a managed `media_id` is present. |
+| `media_id` | `string?` | no | Project-scoped managed-media identity. Entries backed only by the repository may omit `file` and `url` when this is present. |
 | `url` | `string?` | no | Fully qualified `https://` URL to an external copy. |
 | `etag` | `string?` | no | HTTP entity tag from the last fetch of this asset's bytes. |
 | `content_sha256` | `string?` | no | Lazy content hash: 64-char lowercase hex, computed only at sync/publish/render-prep time (never during import). |
@@ -53,7 +54,8 @@ Every asset registry entry on both sides of the bridge carries the following ove
 
 ```typescript
 export type AssetRegistryEntry = {
-  file: string;
+  file?: string;
+  media_id?: string;
   url?: string;
   etag?: string;
   content_sha256?: string;
@@ -81,7 +83,7 @@ export type AssetRegistryEntry = {
 
 ```python
 _ASSET_ENTRY_ALLOWED = frozenset({
-    "file", "url", "etag", "content_sha256", "url_expires_at",
+    "file", "media_id", "url", "etag", "content_sha256", "url_expires_at",
     "type", "duration", "resolution", "fps",
     "origin", "derivedFrom", "generationId", "variantId", "thumbnailUrl",
 })

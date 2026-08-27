@@ -12,9 +12,11 @@ Every inventoried timeline becomes one ``TimelineRepository.create``:
   document, registry = ``{"assets": <assets file>}``; no legacy ULID exists
   so ``timeline_ulid`` is derived deterministically from the receipt key.
 
-Registry asset ``file`` locators are rewritten to the imported media id
-when the referenced file was imported by ``migrate_media`` (media_map
-lookup); unresolvable/remote references keep their original value.
+Registry entries for referenced files receive an explicit ``media_id`` when
+the file was imported by ``migrate_media`` (media_map lookup).  The original
+``file``/source locator is retained for compatibility; it is never replaced
+with a media identity.  Unresolvable/remote references keep their original
+value and do not receive a ``media_id``.
 
 ``set_default`` is honored when the container's ``display.json`` marks the
 timeline default or ``project.json.default_timeline_id`` names the ULID —
@@ -60,7 +62,13 @@ def build_registry(
     root: Path,
     files_map: dict[str, dict],
 ) -> dict:
-    """The kernel registry object with locators rewritten to media ids."""
+    """Build the kernel registry with explicit managed-media identities.
+
+    ``file`` is a locator/legacy alias, while ``media_id`` is the
+    project-scoped managed-media identity consumed by the repository bridge.
+    Keeping the source locator avoids breaking older consumers during the
+    v10 transition, but importantly never aliases a UUID into ``file``.
+    """
     assets: dict[str, dict] = {}
     if timeline["kind"] == "container":
         if timeline["registry_path"]:
@@ -76,7 +84,9 @@ def build_registry(
             if isinstance(loaded, dict) and isinstance(loaded.get("assets"), dict):
                 assets = dict(loaded["assets"])
 
-    # Rewrite locators: referenced-file -> imported media id.
+    # Add identities: referenced-file -> imported media id.  Do not overwrite
+    # the source locator: bridge consumers that still understand ``file`` can
+    # continue resolving it, while v10 consumers use the explicit identity.
     for ref in timeline["media_refs"]:
         if not ref["resolved"]:
             continue
@@ -85,7 +95,7 @@ def build_registry(
             continue
         asset = assets.get(ref["key"])
         if isinstance(asset, dict):
-            asset["file"] = entry["media_id"]
+            asset["media_id"] = entry["media_id"]
     return {"assets": assets}
 
 

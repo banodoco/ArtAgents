@@ -3064,10 +3064,29 @@ def test_persisted_registry_asset_serves_registered_media_id(
         )
         url = f"{base_url}/projects/mediaid-proj/timelines/{timeline_id}/assets/clip"
         status, headers, body = _get_bytes(url)
+        head_status, head_headers = _head(url)
+        range_status, range_headers, range_body = _get_bytes(
+            url, range_header="bytes=2-7"
+        )
+        unsatisfiable_status, unsatisfiable_headers, unsatisfiable_body = _get_bytes(
+            url, range_header=f"bytes={len(asset_content)}-"
+        )
 
     assert status == 200
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
     assert body == asset_content
+    assert headers.get("Content-Type") == "application/octet-stream"
+    assert head_status == 200
+    assert int(head_headers.get("Content-Length", "0")) == len(asset_content)
+    assert head_headers.get("Content-Type") == "application/octet-stream"
+    assert range_status == 206
+    assert range_headers.get("Content-Range") == f"bytes 2-7/{len(asset_content)}"
+    assert range_body == asset_content[2:8]
+    assert unsatisfiable_status == 416
+    assert unsatisfiable_headers.get("Content-Range") == (
+        f"bytes */{len(asset_content)}"
+    )
+    assert unsatisfiable_body == b""
 
 
 def test_persisted_registry_asset_404_cross_project_locator_alias(

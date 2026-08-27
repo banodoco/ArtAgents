@@ -230,6 +230,13 @@ Resolution is repository-driven (UUID/ULID/slug within the project); a `:ref` ma
 
 Asset keys resolve **only** from the persisted timeline asset registry; a locator is a locator, never media identity. Local paths are served only after safe-path checks.
 
+For repository-backed managed media, an entry MAY carry `media_id`, a
+project-scoped media identity. The bridge resolves `media_id` before any
+`file` locator alias; a `media_id`-only entry is valid. Migration producers
+MUST NOT place a media id in `file`. When both fields are present, `file` is
+retained only as a compatibility/source locator and does not override the
+managed identity.
+
 ### 9.1 Headers
 
 Every asset response (200/206/304/416) emits CORS headers when allowed, plus:

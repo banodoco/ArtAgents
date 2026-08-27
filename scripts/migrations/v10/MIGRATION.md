@@ -95,6 +95,30 @@ records: already-committed items replay under the same keys, remaining
 items proceed. `migrate_media` additionally skips paths already present in
 `media_map.json`.
 
+### Repairing the pre-fix timeline registry
+
+Older v10 runs could persist an imported media UUID in a registry entry's
+`file` field. `repair_timeline_assets.py` repairs one asset through the
+repository-backed whole-document CAS save; it never edits SQLite or legacy
+deliverables. It is read-only unless `--apply` is supplied:
+
+```bash
+python3 scripts/migrations/v10/repair_timeline_assets.py \
+  --root /path/to/projects --project PROJECT --timeline TIMELINE \
+  --asset-key ASSET_KEY --media-id MEDIA_ID
+python3 scripts/migrations/v10/repair_timeline_assets.py \
+  --root /path/to/projects --project PROJECT --timeline TIMELINE \
+  --asset-key ASSET_KEY --media-id MEDIA_ID --apply
+```
+
+The apply path verifies the media belongs to the project, reads the current
+timeline head, and saves with that exact `expected_version` and a stable
+`v10-repair:timeline-assets:...` idempotency key. The resulting
+`timeline.saved` event contains the repaired registry and is the durable audit
+record. A stale concurrent edit fails closed; rerunning the same repair is a
+receipt-backed no-op. Legitimate `file` locators are retained, while only the
+known UUID-as-`file` alias is removed.
+
 ## Fidelity paths (generations)
 
 - **Fence path** (completed run with ≥1 importable artifact):

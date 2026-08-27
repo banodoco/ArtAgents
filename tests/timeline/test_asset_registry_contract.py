@@ -80,6 +80,12 @@ def test_roundtrip_preserves_media_id(tmp_path) -> None:
     assert loaded == registry
 
 
+def test_validate_registry_accepts_media_id_without_file_or_url() -> None:
+    validate_registry(
+        {"assets": {"managed": {"media_id": "01jpairedreleaseasset000001"}}}
+    )
+
+
 def test_roundtrip_preserves_etag(tmp_path) -> None:
     registry: dict[str, object] = {
         "assets": {
