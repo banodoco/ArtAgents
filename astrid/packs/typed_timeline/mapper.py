@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # PyYAML has no bundled stubs.
 
 from .frames import frame_to_sec, ms_to_frame
 

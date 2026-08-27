@@ -377,9 +377,9 @@ class _ProcessContainment:
         # Continue following a process that reparented after it detached: the
         # PID and process-group/session were recorded in an earlier census.
         for pid in tuple(self._observed_pids):
-            info = snapshot.get(pid)
-            if info is not None:
-                self._observed_groups.add(info.pgid)
+            current = snapshot.get(pid)
+            if current is not None:
+                self._observed_groups.add(current.pgid)
 
     def terminate(self) -> None:
         self.refresh()

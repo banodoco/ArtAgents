@@ -22,6 +22,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import ModuleType
 from typing import Any, Mapping, Sequence
 
 # Raw renderer commands are deliberately executable without an installed
@@ -86,7 +87,9 @@ from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 # Release wheels intentionally exclude authoring scripts.  A provisioned
 # server-owned Remotion bundle carries its generated registry outputs.
 try:
-    gen_effect_registry = importlib.import_module("scripts.gen_effect_registry")
+    gen_effect_registry: ModuleType | None = importlib.import_module(
+        "scripts.gen_effect_registry"
+    )
 except ModuleNotFoundError:  # pragma: no cover - exercised by wheel installs
     gen_effect_registry = None
 

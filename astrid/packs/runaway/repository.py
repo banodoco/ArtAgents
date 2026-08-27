@@ -692,13 +692,14 @@ class RunawayRepository:
         has_more = len(rows) > limit
         visible = rows[:limit]
         models = tuple(_row_to_model(row) for row in visible)
+        next_ordinal: int | None = None
+        next_run_id: str | None = None
+        next_id: str | None = None
         if has_more and models:
             last = models[-1]
             next_ordinal = last.ordinal
             next_run_id = last.run_id
             next_id = last.id
-        else:
-            next_ordinal = next_run_id = next_id = None
         return RunawayTransitionPageReadModel(
             transitions=models,
             snapshot_rowid=snapshot_rowid,

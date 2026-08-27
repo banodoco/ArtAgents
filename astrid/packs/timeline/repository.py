@@ -53,7 +53,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, cast
 
 from astrid.core.events.service import ACTOR_KINDS, EventAppendService
 from astrid.core.ids import generate_lowercase_ulid, is_lowercase_ulid
@@ -1112,7 +1112,11 @@ class TimelineRepository:
         current_bundle = self._parse_project_data(
             str(row["project_data_json"]), timeline_id
         )
-        committed_bundle = current_bundle if bundle is _BUNDLE_MISSING else bundle
+        committed_bundle: Mapping[str, Any] | None = (
+            current_bundle
+            if bundle is _BUNDLE_MISSING
+            else cast(Mapping[str, Any] | None, bundle)
+        )
 
         # Event-backed archive fence (SD1): an archived timeline rejects a
         # later save before any allocation or projection change. The archived
@@ -1519,7 +1523,11 @@ class TimelineRepository:
         current_bundle = self._parse_project_data(
             str(row["project_data_json"]), timeline_id
         )
-        committed_bundle = current_bundle if bundle is _BUNDLE_MISSING else bundle
+        committed_bundle: Mapping[str, Any] | None = (
+            current_bundle
+            if bundle is _BUNDLE_MISSING
+            else cast(Mapping[str, Any] | None, bundle)
+        )
 
         # Event-backed archive fence (SD1): an archived timeline rejects a
         # later replacement before any allocation or projection change.

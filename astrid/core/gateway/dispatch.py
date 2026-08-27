@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from astrid.core.contracts.errors import AstridError
 
@@ -275,7 +275,12 @@ def _dispatch_serve(args: list[str]) -> int:
         except (OSError, ValueError) as exc:
             print(f"serve failed: {exc}", file=sys.stderr)
             return 1
-        host, port = server.server_address
+        # ``ThreadingHTTPServer`` may expose an IPv6 four-tuple in its socket
+        # address; the bridge factory always uses the first two fields as the
+        # host and port. Keep those fields explicitly typed for the readiness
+        # and render-worker URLs below.
+        host = cast(str, server.server_address[0])
+        port = cast(int, server.server_address[1])
 
         # Resolve and open the editor (readiness is printed after bind).
         editor_path: Path | None = None

@@ -13,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
@@ -803,6 +803,8 @@ class ReighTaskBridge:
                 raise BridgeChildAdmissionForbiddenError(
                     f"child_admission.{name} must be a non-empty string"
                 )
+        parent_task_id = cast(str, parent_task_id)
+        parent_attempt_id = cast(str, parent_attempt_id)
         if (
             isinstance(status_version, bool)
             or not isinstance(status_version, int)

@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
@@ -530,7 +530,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             finally:
                 self._bridge_cancelled.set()
                 if self._bridge_admitted:
-                    self.server.bridge_admission.release()
+                    cast(LocalBridgeHTTPServer, self.server).bridge_admission.release()
                     self._bridge_admitted = False
                 self._diag_finish_request()
 
@@ -1071,7 +1071,9 @@ def make_local_bridge_handler(*, projects_root: Path):
                                 break
                             if (
                                 self._bridge_cancelled.is_set()
-                                or self.server.bridge_shutdown_event.is_set()
+                                or cast(
+                                    LocalBridgeHTTPServer, self.server
+                                ).bridge_shutdown_event.is_set()
                             ):
                                 return
                             self.wfile.write(chunk)
@@ -1331,7 +1333,9 @@ def make_local_bridge_handler(*, projects_root: Path):
             """Apply bounded admission, local-origin, auth, and version gates."""
 
             if not self._bridge_admitted:
-                admitted, retry_after = self.server.bridge_admission.try_acquire()
+                admitted, retry_after = cast(
+                    LocalBridgeHTTPServer, self.server
+                ).bridge_admission.try_acquire()
                 if not admitted:
                     error = BridgeRateLimitError("the local bridge request budget is exhausted")
                     self._send_json(
