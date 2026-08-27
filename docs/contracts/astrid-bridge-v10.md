@@ -31,7 +31,7 @@ remain compatibility aliases; `/v1/...` is canonical for new clients.
 | `/v1/projects/:slug/runaway-transitions` | `GET` | snapshot-consistent typed transition pages |
 | any path | `OPTIONS` | CORS preflight (204) |
 
-`:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, or immutable slug (see §8). `:key` is an asset key resolved from the persisted timeline asset registry.
+`:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, immutable slug, or an exact uppercase ULID compatibility alias emitted by a legacy timeline list (see §8). `:key` is an asset key resolved from the persisted timeline asset registry.
 
 Route grammar: exactly the segments above. Any other path returns 404 with the `not_found` envelope.
 
@@ -222,9 +222,16 @@ Internal command receipts are never exposed on any route:
 
 1. canonical lowercase UUID (`8-4-4-4-12` hex groups),
 2. lowercase 26-character Crockford ULID,
-3. immutable project-scoped slug.
+3. immutable project-scoped slug,
+4. uppercase 26-character Crockford ULID, only as an exact compatibility
+   alias for a legacy identity returned by the project's timeline list.
 
-Resolution is repository-driven (UUID/ULID/slug within the project); a `:ref` matching none of the forms yields `400 invalid_timeline`.
+Resolution is repository-driven and project-scoped. Uppercase compatibility
+aliases are compared byte-for-byte against the stored `timeline.created`
+identity; the bridge never case-folds or normalizes them. Mixed-case aliases,
+path separators, Unicode lookalikes, and other strings matching none of these
+forms yield `400 invalid_timeline` (a route with an encoded separator can also
+fail earlier as the required-segment `404 not_found`).
 
 ## 9. Asset serving: `GET`/`HEAD /projects/:slug/timelines/:ref/assets/:key`
 
