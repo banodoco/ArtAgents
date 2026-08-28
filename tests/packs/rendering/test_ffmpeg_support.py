@@ -8,7 +8,7 @@ from astrid.core.rendering.contracts import RenderRequest, SCHEMA_VERSION
 from astrid.packs.rendering.backends.ffmpeg.support import support as evaluate_support
 
 
-def _text_timeline(*, extra_tracks: int = 0, text_params: dict | None = None) -> dict:
+def _text_timeline(*, extra_tracks: int = 0, media_clip: bool = False, text_params: dict | None = None) -> dict:
     """Create a text-only timeline."""
     tracks = [{"id": "v", "kind": "visual", "label": "Video"}]
     if extra_tracks > 0:
@@ -17,34 +17,59 @@ def _text_timeline(*, extra_tracks: int = 0, text_params: dict | None = None) ->
                 {"id": f"v{i}", "kind": "visual", "label": f"Extra {i}", "priority": i + 1}
             )
 
-    clips = [
-        {
-            "id": "t1",
-            "clipType": "text",
-            "track": "v",
-            "at": 0,
-            "hold": 4,
-            "text": {
-                "content": "Hello World",
-                "fontSize": 48,
-                "color": "#FFFFFF",
-                "align": "center",
-            },
-        }
-    ]
+    clips: list[dict] = []
+    if media_clip:
+        clips.append(
+            {
+                "id": "intro",
+                "clipType": "media",
+                "track": "v",
+                "asset": "video1",
+                "at": 0,
+                "hold": 4.0,
+            }
+        )
+    t1: dict = {
+        "id": "t1",
+        "clipType": "text",
+        "track": "v",
+        "at": 0,
+        "hold": 4,
+        "text": {
+            "content": "Hello World",
+            "fontSize": 48,
+            "color": "#FFFFFF",
+            "align": "center",
+        },
+    }
+    if text_params:
+        t1["params"] = text_params
+    clips.append(t1)
     return {"tracks": tracks, "clips": clips}
 
 
 def _assets(tmp_path: Path, *, duration: float = 4.0) -> dict:
-    """Create minimal assets registry."""
-    # Create minimal video asset
+    """Create minimal assets registry with a real probeable video."""
+    import subprocess
+
     video_path = tmp_path / "test_video.mp4"
-    video_path.write_bytes(b"fake video data")
+    # Build a real tiny h264 video (no audio stream) so ffprobe succeeds and
+    # visual clips do not request embedded audio (T3 keeps audio separate).
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=black:s=64x64:d=4:r=30",
+            "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(video_path),
+        ],
+        check=False,
+        capture_output=True,
+    )
     return {
         "assets": {
             "video1": {
                 "type": "video",
-                "path": "test_video.mp4",
+                "file": str(video_path),
                 "duration": duration,
                 "resolution": "1920x1080",
                 "fps": 30,
@@ -71,8 +96,10 @@ def _request(tmp_path: Path, timeline_data: dict, assets: dict) -> RenderRequest
         assets_registry_path=str(assets_path),
         output_name="output.mp4",
         backend_config={},
+    )
 
-    )def _media_timeline(*, include_audio: bool = True) -> dict:
+
+def _media_timeline(*, include_audio: bool = True) -> dict:
     """Create a media-only timeline."""
     tracks = [{"id": "v", "kind": "visual", "label": "Video"}]
     clips = [
@@ -81,7 +108,7 @@ def _request(tmp_path: Path, timeline_data: dict, assets: dict) -> RenderRequest
             "at": 0,
             "track": "v",
             "clipType": "media",
-            "asset": "main",
+            "asset": "video1",
             "from": 0,
             "to": 2,
             "speed": 1,
@@ -96,7 +123,7 @@ def _request(tmp_path: Path, timeline_data: dict, assets: dict) -> RenderRequest
                 "at": 0,
                 "track": "a",
                 "clipType": "media",
-                "asset": "main",
+                "asset": "video1",
                 "from": 0,
                 "to": 2,
                 "speed": 1,
@@ -123,13 +150,13 @@ def test_support_accepts_text_clip() -> None:
     tmp_path.mkdir(exist_ok=True)
 
     # Create a timeline with both visual media and text
-    timeline = _media_timeline()
+    timeline = _media_timeline(include_audio=False)
     timeline["clips"].append(
         {
             "id": "title",
             "at": 0.5,
             "track": "v",
-            "clipType": "text-card",
+            "clipType": "text",
             "hold": 1,
         }
     )
@@ -181,7 +208,7 @@ def test_support_accepts_extra_text_tracks() -> None:
     tmp_path = Path("/tmp/test")
     tmp_path.mkdir(exist_ok=True)
 
-    timeline = _text_timeline(extra_tracks=1)
+    timeline = _text_timeline(extra_tracks=1, media_clip=True)
     report = evaluate_support(
         _request(tmp_path, timeline, _assets(tmp_path)),
         timeline,
@@ -226,7 +253,7 @@ def test_support_accepts_text_fades() -> None:
     tmp_path = Path("/tmp/test")
     tmp_path.mkdir(exist_ok=True)
 
-    timeline = _text_timeline(text_params={"fadeIn": 0.5, "fadeOut": 0.5})
+    timeline = _text_timeline(media_clip=True, text_params={"fadeIn": 0.5, "fadeOut": 0.5})
     report = evaluate_support(
         _request(tmp_path, timeline, _assets(tmp_path)),
         timeline,
@@ -307,7 +334,8 @@ def test_support_rejects_media_with_overlapping_clips() -> None:
                 "track": "v",
                 "asset": "video1",
                 "at": 0,
-                "hold": 4,
+                "from": 0,
+                "to": 4,
             },
             {
                 "id": "m2",
@@ -315,7 +343,8 @@ def test_support_rejects_media_with_overlapping_clips() -> None:
                 "track": "v",
                 "asset": "video1",
                 "at": 2,
-                "hold": 2,
+                "from": 0,
+                "to": 2,
             },
         ],
     }
@@ -447,8 +476,8 @@ def test_support_rejects_media_with_transition() -> None:
     assert any("transition" in reason for reason in report.reasons)
 
 
-def test_support_rejects_media_with_hold() -> None:
-    """Test that media clips with hold are rejected."""
+def test_support_accepts_media_with_hold() -> None:
+    """Test that media clips with hold (stills) are supported (T2)."""
     tmp_path = Path("/tmp/test")
     tmp_path.mkdir(exist_ok=True)
 
@@ -471,18 +500,25 @@ def test_support_rejects_media_with_hold() -> None:
         timeline,
         _assets(tmp_path),
     )
-    assert not report.supported
-    assert any("hold" in reason for reason in report.reasons)
+    assert report.supported, f"Media still with hold should be supported: {report.reasons}"
 
 
-def test_support_rejects_audio_fades_on_text() -> None:
-    """Test that text clips don't accept audio fades."""
+def test_support_accepts_text_fades2() -> None:
+    """Text clips support the fade envelope (T2: text fades supported)."""
     tmp_path = Path("/tmp/test")
     tmp_path.mkdir(exist_ok=True)
 
     timeline = {
         "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
         "clips": [
+            {
+                "id": "intro",
+                "clipType": "media",
+                "track": "v",
+                "asset": "video1",
+                "at": 0,
+                "hold": 4,
+            },
             {
                 "id": "t1",
                 "clipType": "text",
@@ -505,8 +541,7 @@ def test_support_rejects_audio_fades_on_text() -> None:
         timeline,
         _assets(tmp_path),
     )
-    assert not report.supported
-    assert any("fades" in reason for reason in report.reasons)
+    assert report.supported, f"Text fades should be supported: {report.reasons}"
 
 
 def test_support_rejects_unsupported_clip_kind() -> None:
@@ -542,7 +577,7 @@ def test_support_text_params_validation() -> None:
     tmp_path.mkdir(exist_ok=True)
 
     # Test invalid color format
-    timeline = _text_timeline(text_params={"color": "not-a-color"})
+    timeline = _text_timeline(media_clip=True, text_params={"color": "not-a-color"})
     report = evaluate_support(
         _request(tmp_path, timeline, _assets(tmp_path)),
         timeline,
@@ -560,6 +595,14 @@ def test_support_text_to_rgba_png_integration() -> None:
     timeline = {
         "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
         "clips": [
+            {
+                "id": "intro",
+                "clipType": "media",
+                "track": "v",
+                "asset": "video1",
+                "at": 0,
+                "hold": 4,
+            },
             {
                 "id": "t1",
                 "clipType": "text",
@@ -590,7 +633,7 @@ def test_support_text_fallback_to_bold_variant() -> None:
     tmp_path = Path("/tmp/test")
     tmp_path.mkdir(exist_ok=True)
 
-    timeline = _text_timeline(text_params={"bold": True})
+    timeline = _text_timeline(media_clip=True, text_params={"bold": True})
     report = evaluate_support(
         _request(tmp_path, timeline, _assets(tmp_path)),
         timeline,

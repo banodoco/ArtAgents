@@ -11,7 +11,7 @@ import importlib.util
 
 
 _BUNDLED_FONT_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent
+    Path(__file__).resolve().parent.parent.parent
     / "executors"
     / "timeline_visualize"
     / "fonts"

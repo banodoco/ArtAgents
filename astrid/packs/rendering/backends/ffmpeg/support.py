@@ -222,6 +222,8 @@ def _validate_clip_semantics(
                 reasons.append(
                     f"Clip {clip_id!r} uses unsupported media fades: {', '.join(fades)}"
                 )
+            # `fadeIn`/`fadeOut` params on TEXT clips are the text fade envelope
+            # (T2: text fades supported). No rejection here.
         text_params = sorted(
             set(params) - {"fadeIn", "fadeOut"} - set(params for params in fades)
         )
@@ -229,16 +231,31 @@ def _validate_clip_semantics(
             reasons.append(
                 f"Clip {clip_id!r} uses unsupported media params: {', '.join(text_params)}"
             )
+        if text_params and clip.get("clipType") == "text":
+            # Validate text params format
+            for tp in text_params:
+                if tp == "color":
+                    color_val = params.get("color")
+                    if isinstance(color_val, str) and not (color_val.startswith("#") and len(color_val) in (4, 7, 9)):
+                        reasons.append(
+                            f"Text clip {clip_id!r} has invalid color format: {color_val!r}, expected #RGB, #RRGGBB, or #RRGGBBAA"
+                        )
 
     if clip.get("clipType") == "media":
+        # Stills use `hold` (T2): a media clip with NO from/to and a hold is a
+        # held still; a clip with from/to is a bounded source. Only reject when
+        # the clip has neither (nothing to time-bound the render).
         if _nonempty(clip.get("hold")):
-            reasons.append(
-                f"Clip {clip_id!r} uses unsupported media hold semantics"
-            )
-        try:
-            _clip_range(clip)
-        except ValueError as exc:
-            reasons.append(str(exc))
+            if clip.get("from") is None and clip.get("to") is None:
+                if clip.get("asset") is None:
+                    reasons.append(
+                        f"Clip {clip_id!r} must declare a source to bound"
+                    )
+        else:
+            try:
+                _clip_range(clip)
+            except ValueError as exc:
+                reasons.append(str(exc))
         try:
             effective_gain(track, clip)
         except ValueError as exc:
@@ -264,6 +281,7 @@ def structural_reasons(
 
     tracks: dict[str, Mapping[str, Any]] = {}
     visual_track_ids: set[str] = set()
+    visual_media_tracks: set[str] = set()
     for index, raw_track in enumerate(raw_tracks):
         if not isinstance(raw_track, Mapping):
             reasons.append(f"Track at index {index} must be an object")
@@ -283,8 +301,9 @@ def structural_reasons(
             visual_track_ids.add(track_id)
         reasons.extend(_validate_track_semantics(raw_track))
 
-    if len(visual_track_ids) != 1:
-        reasons.append("rendering.ffmpeg requires exactly one visual track")
+    # Intro-shaped: exactly one visual track that carries MEDIA clips; text-only
+    # tracks (brand, captions) are overlays and must NOT count toward the limit.
+    # visual_media_tracks is filled below during clip classification.
 
     clips: list[Mapping[str, Any]] = []
     seen_clip_ids: set[str] = set()
@@ -318,11 +337,16 @@ def structural_reasons(
             reasons.append(
                 f"Clip {clip_id!r} has unsupported clip kind {clip_type!r}"
             )
-        elif clip_type == "text" and len(visual_track_ids) != 1:
+        elif clip_type == "text" and track.get("kind") != "visual":
             reasons.append(
-                "text clip requires exactly one visual track"
+                "text clip requires a visual track"
             )
+        elif clip_type == "media" and track.get("kind") == "visual":
+            visual_media_tracks.add(str(raw_clip.get("track")))
         reasons.extend(_validate_clip_semantics(raw_clip, track))
+
+    if len(visual_media_tracks) != 1:
+        reasons.append("rendering.ffmpeg requires exactly one visual media track")
 
     if reactive_count:
         if reactive_count != 1:
@@ -337,29 +361,31 @@ def structural_reasons(
         if clip.get("clipType") not in ("media", "text"):
             continue
         track = tracks.get(str(clip.get("track")), {})
+        # Stills (media + hold, no from/to) have no source bound; they still
+        # need a visual media clip present, which is tracked separately.
+        if clip.get("clipType") == "media" and clip.get("from") is None and clip.get("to") is None:
+            continue
         try:
             bounds = _clip_range(clip)
         except ValueError:
             continue
-        if track.get("kind") == "visual":
+        if track.get("kind") == "visual" and clip.get("clipType") == "media":
             visual_ranges.append(bounds)
         elif track.get("kind") == "audio":
             audio_ranges.append(bounds)
 
     visual_ranges.sort(key=lambda item: item.at)
-    if not visual_ranges:
-            reasons.append(
-                "rendering.ffmpeg needs at least one visual media clip"
-            )
-    else:
+    if not visual_media_tracks:
+        reasons.append(
+            "rendering.ffmpeg needs at least one visual media clip"
+        )
+    elif visual_ranges:
         cursor = 0.0
         for bounds in visual_ranges:
             clip_id = bounds.clip.get("id")
-            if bounds.at > cursor + _TIMELINE_EPSILON_SECONDS:
-                reasons.append(
-                    f"Visual gap before clip {clip_id!r}: starts at {bounds.at:.6f}, expected {cursor:.6f}"
-                )
-            elif bounds.at < cursor - _TIMELINE_EPSILON_SECONDS:
+            # Overlap check only: sequential stills may have gaps (T2 allows
+            # gaps; overlap is what the media concat cannot express).
+            if bounds.at < cursor - _TIMELINE_EPSILON_SECONDS:
                 reasons.append(
                     f"Visual overlap at clip {clip_id!r}: starts at {bounds.at:.6f}, previous visual ends at {cursor:.6f}"
                 )

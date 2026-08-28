@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import yaml
+import pytest
 
 from astrid.core.media import MediaProbe
 from astrid.core.rendering.contracts import (
@@ -165,7 +166,7 @@ def test_manifest_registers_static_raw_command_backend() -> None:
     assert manifest.operations == ("render", "support")
     assert manifest.required_permissions == ("project_files", "subprocess")
     assert manifest.required_binaries == ("ffmpeg", "ffprobe")
-    assert manifest.capabilities["clip_types"] == ["media"]
+    assert manifest.capabilities["clip_types"] == ["media", "text"]
     assert (manifest_path.parents[2] / manifest.command[1]).is_file()
 
     pack = yaml.safe_load(
@@ -480,6 +481,7 @@ def test_audio_reactive_compatibility_path_is_same_module() -> None:
     assert legacy_audio_reactive is audio_reactive_colour
 
 
+@pytest.mark.timeout(600)
 def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
     """Test live encode fixture with 2-section stills + text + wav.
 
@@ -503,21 +505,21 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
         "assets": {
             "still1": {
                 "type": "image",
-                "path": "test_fixture.png",
+                "file": str(tmp_path / "test_fixture.png"),
                 "duration": 3.0,
                 "resolution": "1280x720",
                 "fps": 30,
             },
             "still2": {
                 "type": "image",
-                "path": "test_fixture.png",
+                "file": str(tmp_path / "test_fixture.png"),
                 "duration": 3.0,
                 "resolution": "1280x720",
                 "fps": 30,
             },
             "audio": {
                 "type": "audio",
-                "path": "test_fixture.wav",
+                "file": str(tmp_path / "test_fixture.wav"),
                 "duration": 1.0,
             },
         }
@@ -537,8 +539,6 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
                 "asset": "still1",
                 "at": 0,
                 "hold": 3.0,
-                "from": 0,
-                "to": 3.0,
             },
             {
                 "id": "s2",
@@ -547,8 +547,6 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
                 "asset": "still2",
                 "at": 3.0,
                 "hold": 3.0,
-                "from": 0,
-                "to": 3.0,
             },
             {
                 "id": "t1",
@@ -596,20 +594,21 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
     from astrid.packs.rendering.executors.render import run as facade
 
     request = RenderRequest(
-        input_path=str(timeline_path),
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(timeline_path),
         assets_registry_path=str(assets_path),
         output_name="output.mp4",
         backend_config={},
     )
 
-    result = facade(
-        request,
-        output_dir=str(tmp_path),
-        selector="ffmpeg",
-        system_check=True,
+    result = facade.render(
+        Path(request.timeline_path),
+        Path(request.assets_registry_path),
+        tmp_path / "output.mp4",
+        engine="ffmpeg",
     )
 
-    assert result.success, f"Render failed: {result.error}"
+    assert result == tmp_path / "output.mp4", f"Render failed: {result!r}"
 
     output_path = tmp_path / "output.mp4"
 
@@ -626,24 +625,26 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
     timeline_no_text["clips"] = [
         clip for clip in timeline["clips"] if clip["clipType"] != "text"
     ]
-    with open(timeline_path / "no_text.json", "w") as f:
+    no_text_path = timeline_path.parent / "no_text.json"
+    with open(no_text_path, "w") as f:
         json.dump(timeline_no_text, f)
 
     request_no_text = RenderRequest(
-        input_path=str(timeline_path / "no_text.json"),
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(no_text_path),
         assets_registry_path=str(assets_path),
         output_name="no_text.mp4",
         backend_config={},
     )
 
-    result_no_text = facade(
-        request_no_text,
-        output_dir=str(tmp_path),
-        selector="ffmpeg",
-        system_check=True,
+    result_no_text = facade.render(
+        Path(request_no_text.timeline_path),
+        Path(request_no_text.assets_registry_path),
+        tmp_path / "no_text.mp4",
+        engine="ffmpeg",
     )
 
-    assert result_no_text.success, f"Render without text failed: {result_no_text.error}"
+    assert result_no_text == tmp_path / "no_text.mp4", f"Render without text failed: {result_no_text!r}"
 
     no_text_path = tmp_path / "no_text.mp4"
 
@@ -673,8 +674,17 @@ def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
     caption_frame = Image.open(tmp_path / "caption_frame.png")
     no_caption_frame = Image.open(tmp_path / "no_caption_frame.png")
 
-    caption_pixels = [p for p in caption_frame.getdata() if p[2] > 100]  # Blue text
-    no_caption_pixels = [p for p in no_caption_frame.getdata() if p[2] > 100]
-
-    # Caption frame should have significantly more non-black blue pixels
-    assert len(caption_pixels) > len(no_caption_pixels), "Caption should render blue pixels"
+    # The caption renders white text; compare the two frames' actual pixels.
+    assert caption_frame.size == no_caption_frame.size, "frame sizes differ"
+    w, h = caption_frame.size
+    caption_data = caption_frame.convert("RGB").getdata()
+    no_caption_data = no_caption_frame.convert("RGB").getdata()
+    differing = sum(
+        1
+        for cp, np_ in zip(caption_data, no_caption_data)
+        if cp != np_
+    )
+    # Caption frame must differ from the no-caption frame (text rendered).
+    assert differing > 100, (
+        f"Caption should render text pixels, only {differing} differing pixels"
+    )

@@ -58,6 +58,11 @@ def clip_duration_seconds(clip: Mapping[str, Any]) -> float:
             raise ValueError(f"Clip {clip_id!r} {label} must be a finite number")
         return result
 
+    # Stills (media + hold, no from/to) are bounded by their hold duration.
+    if clip.get("from") is None and clip.get("to") is None:
+        if clip.get("hold") is not None:
+            return number(clip.get("hold"), "hold")
+        raise ValueError(f"Clip {clip_id!r} must declare a source to bound")
     start = number(clip.get("from", 0), "from")
     if "to" not in clip:
         raise ValueError(f"Clip {clip_id!r} must declare a source to bound")
@@ -160,12 +165,14 @@ def _command_inputs_for_paths(
 
 def build_filter_graph(
     inputs: RenderCommandInputs,
-) -> tuple[list[str], int | None]:
-    """Return the legacy filter graph and optional stream-copy input index."""
+) -> tuple[list[str], int | None, list[Path]]:
+    """Return the filter graph, optional stream-copy input index, and the
+    rasterized text PNG paths (which must be appended as ffmpeg inputs)."""
 
     from astrid.packs.rendering.backends.ffmpeg import text
 
     timeline_data = inputs.timeline_data
+    text_png_paths: list[Path] = []
     registry = inputs.registry
     width, height, fps = timeline_canvas(timeline_data)
     tracks = {
@@ -193,6 +200,7 @@ def build_filter_graph(
         clip
         for clip in all_clips
         if clip.get("clipType") == "media"
+        and clip.get("track") in visual_track_ids
     ]
     text_clips = [
         clip
@@ -211,7 +219,7 @@ def build_filter_graph(
         raise ValueError("ffmpeg engine needs at least one visual media or text clip")
 
     asset_keys: list[str] = []
-    for clip in media_clips:
+    for clip in [*media_clips, *audio_clips]:
         asset_key = str(clip.get("asset") or "")
         if not asset_key:
             raise ValueError(f"Clip {clip.get('id')!r} has no asset")
@@ -254,7 +262,7 @@ def build_filter_graph(
     text_labels: list[str] = []
     copy_video_input: int | None = None
     if len(media_clips) == 1:
-        clip = video_clips[0]
+        clip = media_clips[0]
         asset_key = str(clip["asset"])
         entry = registry["assets"][asset_key]
         source_duration = entry.get("duration")
@@ -303,55 +311,91 @@ def build_filter_graph(
         # Process media clips
         for index, clip in enumerate(media_clips):
             inp = asset_index[str(clip["asset"])]
-            start = float(clip.get("from", 0) or 0)
-            end = float(clip.get("to", start) or start)
             label = f"v{index}"
-            filters.append(
-                f"[{inp}:v]trim=start={start:.6f}:end={end:.6f},"
-                "setpts=PTS-STARTPTS,"
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                f"fps={fps},format=yuv420p[{label}]"
-            )
-            video_labels.append(f"[{label}]")
-        # Process text overlays
-        for index, clip in enumerate(text_clips):
-            clip_id = clip.get("id")
-            at = float(clip.get("at", 0))
-            hold = float(clip.get("hold", 4))
-            end = at + hold
-            text_png = text_assets.get(clip_id)
-            if not text_png:
-                raise ValueError(f"No rendered text found for clip {clip_id!r}")
-            # Write text PNG to temp file for FFmpeg input
-            import tempfile
-            import os
-            fd, png_path = tempfile.mkstemp(suffix=".png")
-            try:
-                os.write(fd, text_png)
-                os.close(fd)
-                inp = f"[0:v]movie={png_path}[overlay]"
-                fade_in = clip.get("params", {}).get("fadeIn")
-                fade_out = clip.get("params", {}).get("fadeOut")
-                label = f"ov{index}"
-                alpha_filter = ""
-                if fade_in is not None:
-                    alpha_filter += f"format=rgba,colorchannelmixer=aa=overlay='(t-{at})/{fade_in}'"
-                if fade_out is not None:
-                    alpha_end = at + hold - fade_out
-                    alpha_filter += f",colorchannelmixer=aa=overlay='(t-{end})/{fade_out}'"
+            is_still = clip.get("from") is None and clip.get("to") is None
+            if is_still:
+                hold = float(clip.get("hold", 0) or 0)
+                # Still image: loop the single frame for `hold` seconds.
                 filters.append(
-                    f"[vout]{alpha_filter if alpha_filter else ''}[{label}]"
+                    f"[{inp}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                    f"fps={fps},trim=duration={hold:.6f},"
+                    f"setpts=PTS-STARTPTS,format=yuv420p[{label}]"
                 )
-                text_labels.append(f"[{label}]")
-            finally:
-                os.unlink(png_path)
-        # Concatenate media and text labels
-        video_text_labels = video_labels + text_labels
-        filters.append(
-            "".join(video_text_labels)
-            + f"concat=n={len(video_text_labels)}:v=1:a=0[vout]"
-        )
+            else:
+                start = float(clip.get("from", 0) or 0)
+                end = float(clip.get("to", start) or start)
+                filters.append(
+                    f"[{inp}:v]trim=start={start:.6f}:end={end:.6f},"
+                    "setpts=PTS-STARTPTS,"
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                    f"fps={fps},format=yuv420p[{label}]"
+                )
+            video_labels.append(f"[{label}]")
+        # Text overlays: chain overlay filters over the base concat.
+        # The text PNGs are the LAST inputs (after media + audio), so they are
+        # referenced as [<media_input_count + audio_input_count + index>:v].
+        import os
+        if not text_clips:
+            # No overlays: the base concat feeds vout directly (unchanged
+            # legacy shape for pure media-only timelines).
+            filters.append(
+                "".join(video_labels)
+                + f"concat=n={len(video_labels)}:v=1:a=0[vout]"
+            )
+        else:
+            base_label = "vbase"
+            filters.append(
+                "".join(video_labels)
+                + f"concat=n={len(video_labels)}:v=1:a=0[{base_label}]"
+            )
+            current_label = base_label
+            import tempfile
+            # Text PNGs are appended as inputs AFTER all media + audio assets,
+            # so their input index = len(asset_keys) + text_index.
+            text_base_index = len(asset_keys)
+            for index, clip in enumerate(text_clips):
+                clip_id = clip.get("id")
+                at = float(clip.get("at", 0))
+                hold = float(clip.get("hold", 4))
+                end = at + hold
+                text_png = text_assets.get(clip_id)
+                if not text_png:
+                    raise ValueError(f"No rendered text found for clip {clip_id!r}")
+                fd, png_path = tempfile.mkstemp(suffix=".png")
+                try:
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(text_png)
+                    text_png_paths.append(Path(png_path))
+                    text_input = text_base_index + index
+                    next_label = f"vt{index}"
+                    fade_expr = ""
+                    params = clip.get("params") or {}
+                    fade_in = params.get("fadeIn")
+                    fade_out = params.get("fadeOut")
+                    if fade_in is not None:
+                        fade_expr += (
+                            f",format=rgba,colorchannelmixer=aa="
+                            f"'if(lt(t,{at}+{fade_in}),(t-{at})/{fade_in},1)'"
+                        )
+                    elif fade_out is not None:
+                        fade_expr += (
+                            f",format=rgba,colorchannelmixer=aa="
+                            f"'if(gt(t,{end}-{fade_out}),({end}-t)/{fade_out},1)'"
+                        )
+                    filters.append(
+                        f"[{current_label}][{text_input}:v]{fade_expr}"
+                        f"overlay=0:0:enable='between(t,{at},{end})'[{next_label}]"
+                    )
+                    current_label = next_label
+                except Exception:
+                    try:
+                        os.unlink(png_path)
+                    except OSError:
+                        pass
+                    raise
+            filters.append(f"[{current_label}]format=yuv420p[vout]")
 
     audio_labels: list[str] = []
     cursor = 0.0
@@ -402,7 +446,7 @@ def build_filter_graph(
             "".join(audio_labels)
             + f"concat=n={len(audio_labels)}:v=0:a=1[aout]"
         )
-    return filters, copy_video_input
+    return filters, copy_video_input, text_png_paths
 
 
 def _has_audio_clips(timeline_data: Mapping[str, Any]) -> bool:
@@ -419,7 +463,10 @@ def _has_audio_clips(timeline_data: Mapping[str, Any]) -> bool:
     )
 
 
-def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
+def _asset_input_argv(
+    inputs: RenderCommandInputs,
+    text_png_paths: list[Path] | None = None,
+) -> list[str]:
     timeline_data = inputs.timeline_data
     registry = inputs.registry
     tracks = {
@@ -458,6 +505,13 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
             asset_keys.append(asset_key)
 
     argv: list[str] = []
+    still_asset_keys = {
+        str(clip.get("asset"))
+        for clip in video_clips
+        if clip.get("clipType") == "media"
+        and clip.get("from") is None
+        and clip.get("to") is None
+    }
     for asset_key in asset_keys:
         entry = registry["assets"][asset_key]
         file_value = entry.get("file")
@@ -469,19 +523,25 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
         asset_path = Path(file_value)
         if not asset_path.is_absolute():
             asset_path = (inputs.assets_path.parent / asset_path).resolve()
-        argv.extend(["-i", str(asset_path)])
+        if asset_key in still_asset_keys:
+            # Still image: loop its single frame for the hold duration (T3).
+            argv.extend(["-loop", "1", "-i", str(asset_path)])
+        else:
+            argv.extend(["-i", str(asset_path)])
+    for png_path in text_png_paths or []:
+        argv.extend(["-i", str(png_path)])
     return argv
 
 
 def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
     """Return FFmpeg argv for already-resolved, strictly supported inputs."""
-    filters, copy_video_input = build_filter_graph(inputs)
+    filters, copy_video_input, text_png_paths = build_filter_graph(inputs)
     has_audio = _has_audio_clips(inputs.timeline_data)
     return [
         "ffmpeg",
         "-hide_banner",
         "-y",
-        *_asset_input_argv(inputs),
+        *_asset_input_argv(inputs, text_png_paths),
         *(["-filter_complex", ";".join(filters)] if filters else []),
         "-map",
         (
