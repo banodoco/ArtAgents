@@ -53,7 +53,7 @@ Every criterion → command/path/result. Reviewer dispositions: B1/B2/B3 grok or
 |---|---|
 | `build_storyboard.py validate --story storyboards/astrid-intro.storyboard.json` | PASS (schema suite green) |
 | compile `--shots` (project astrid-intro) | PASS: 25 shots / 50 assets / 26-clip parent |
-| `pytest tests/ -k storyboard` | PASS: 92 passed / 0 failed / 0 skipped (incl. real shots + expansion-equality tests; FF f2/f60/f140 frames + 177.529s aac render) |
+| 7-file suite (ffmpeg_support, ffmpeg_backend, expand_shots, managed_timeline_render, compiler_shots, compiler_golden, storyboard_schema) | PASS: 92 passed / 0 failed / 0 skipped (incl. real shots + expansion-equality tests; frames f2/f60/f140 + 177.529s h264+aac render) |
 | `timelines show main` counts | 26 stored clips; expanded summary derived |
 | `timelines render main --backend rendering.ffmpeg` | PASS (run succeeded); direct render exit 0 |
 | ffprobe duration + frame spot-checks | 177.43s; captions visible in 3 frames |
