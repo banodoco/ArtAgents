@@ -1,0 +1,12 @@
+ISSUES
+
+Plan↔code claims verified: `_clip_duration_seconds` (validators/timeline.py:128, hold/≥0 semantics) matches; `run.py:121` stream_copy relay exists; `unknown_clip_kind` sets `clipType: "text"` (test_ffmpeg_support.py:236); `test_ffmpeg_backend.py:168` pins `clip_types == ["media"]`; `_text_timeline()` uses `text-card` (test_ffmpeg_backend.py:82); `test_cli.py:82` prefix claim holds; `service.py:152-177` confirms selector "remotion" → (`rendering.ffmpeg`, `rendering.remotion`) with `auto_route=True`, and `service.py:1014-1054` statically rejects clipTypes outside the manifest (yaml-last is safe); hype text clips use `at`/`hold`/`params`/`rgba()` shadows as pinned; `/System/Library/Fonts/Supplemental/Arial.ttf` and `Arial Bold.ttf` exist on this host; `timeout = 120` (pyproject:213). Tasks 1–8 map 1:1 to B1–B6; wave-3 micro-items all present (W3B-1…5); classifications (zero XHARD) defensible.
+
+1. **B1 validation command 2 under-verifies its stated purpose.** `-k "not live"` deselects pre-existing packs regression tests containing "live" (test_timeline_visualize_frozen.py:274, test_timeline_visualize_transcripts.py:345, test_timeline_visualize_matrix.py:1819) and is redundant with `--ignore=test_ffmpeg_text.py`. The gate claims "no pre-existing packs regression". Fix: drop `-k` and run the full glob minus the ignored new file (the repo's real live-marker idiom is `-m "not live"`, per test_timeline_visualize_adversarial.py:743).
+
+2. **B2 acceptance criteria omit the `whole_media` half of veto #1.** T2 pins "force `whole_media` / `stream_copy` false", but B2 crit 2/3 assert only `stream_copy is False`. Add `report.features["whole_media"] is False` to both accept cases.
+
+3. **No completion step owns finish authorization.** Batches pin commits only ("Do not push yet", B1). Nothing schedules: push `HEAD:megado/oracle-run-ffmpeg-text` → origin, the authoritative host run of the full `python -m pytest tests/packs/rendering/ -x -q`, or the `git diff c6c505af..HEAD -- astrid/packs/rendering/backends/ffmpeg/` oracle review. Add one host/oracle-owned completion batch, mirroring T7's ownership pattern.
+
+North Star disposition: aligned. Routing truth is enforced structurally (support feature asserts + yaml dict-equality + auto-route deferred to B4), font/params/`text from`/x-y handling is fail-closed with required reject tests, parsers are single-sourced, and every batch names the anti-patterns it avoids. No directional misalignment found.
+0

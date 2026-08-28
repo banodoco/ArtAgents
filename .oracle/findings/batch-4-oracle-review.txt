@@ -1,0 +1,42 @@
+PASS
+
+**ACs**
+1. PASS — `_render_ffmpeg_media_to_path`: `with TemporaryDirectory` run.py:175, rasterize :178, `build_render_command_from_data(..., text_overlays=)` :181-189, `(subprocess.run if runner is None else runner)(...)` :191 — all inside the block. `_protocol_render`: `with TemporaryDirectory` :631, rasterize :637, `build_render_command(request, workspace, text_overlays=)` :641-643, `subprocess.run(...)` :640-645 — all inside.
+2. PASS — fades only via `_parse_fades` at run.py:121 (import :62-66); no second extractor in diff.
+3. PASS — run.py:187 `stream_copy_allowed=bool(report.features.get("stream_copy"))` unchanged; no overlay re-check (grep: only command.py veto at command.py:280-282).
+4. PASS — test_ffmpeg_text.py:437-481: rasterize monkeypatched :447, windows via `_text_window` :468-471, fades via `_parse_fades` :472-477, track-order precedence asserted :465-471.
+5. PASS — provenance `engine="ffmpeg"` run.py:662; audio-reactive branch :628-629 calls `audio_reactive_colour.render(specialization_spec, output_path)` with zero overlay wiring; overlays confined to `else` :631-645.
+6. PASS — renderer.yaml:12 description "Render legacy media and text-overlay timelines with FFmpeg."; :14-25 matches contract block exactly (`clip_types: [media, text]`, features dict as specified).
+7. PASS — test_ffmpeg_backend.py:168 `== ["media", "text"]`, :169-175 full features dict-equality; retarget in commit diff.
+8. PASS — `test_cli.py` absent from `git diff 84557393..4ea29d62` (stat lists exactly 4 files).
+9. PASS — no planner/`service.py` changes; diff = run.py, renderer.yaml, test_ffmpeg_backend.py, test_ffmpeg_text.py only.
+10. PASS — T4+T5 both in commit `4ea29d62`; yaml did not lead (single commit).
+
+**Load-bearing hunts** — all PASS:
+- Media path: rasterize+build+run all in `with` (run.py:175-191). ✓
+- Protocol path: run.py:631-645. ✓
+- Audio-reactive: run.py:628-629, no overlay wiring. ✓
+- No third veto: grep run.py shows only :187 relay; veto stays in command.py:280-282. ✓
+- Sort = track-array order, `at`, clip index: run.py:110-114. ✓
+- Canvas from `timeline_canvas`: run.py:98, fed to rasterize :119. ✓
+- One private helper in run.py; no new package. ✓
+- yaml `stream_copy: true` capability; support stays request-sensitive (support.py:860-873: `stream_copy=whole_media`, which requires `not has_text_overlay`). B2 pre-exists in parent: support accepts text (support.py:386), reports `text_overlay` :869 / `fade_envelope` :870. yaml truthful, not leading.
+
+**North Star**
+- Simplest sufficient toolchain: ALIGNED — one private helper, no new mechanism.
+- Capability-driven routing: ALIGNED — yaml now matches implemented support; support fail-closed.
+- Output parity: N/A (B3 filtergraph covered).
+- Offline/fast: ALIGNED — PNGs temp-dir local; no network.
+- Routing lies / undeclared capability: ALIGNED — declared = implemented, both directions.
+- yaml/support agreement: ALIGNED — test_ffmpeg_backend.py:168-175 pins the pair.
+- Speculative abstraction / parallel mechanisms / unread config: ALIGNED — none added.
+- Silent fallbacks: ALIGNED — `renderer: "ffmpeg"` in fragment run.py:673.
+- Scope creep: ALIGNED — planner/legacy_hybrid/service/test_cli untouched; no auto-route test.
+
+**Elegance nits**
+- run.py:117 `enumerate(text_clips)` shadows the already-carried clip index as `order` (`_index` discarded) — could use `_index` directly; cosmetic.
+- run.py imports pack-private names (`_parse_fades`, `_text_window`) from `text.py` — intra-pack privacy leak; acceptable, mirrors test usage.
+- `timeline_data` parsed twice in `_protocol_render` only across mutually exclusive branches (:611 vs :634) — no real double-parse.
+
+Issues: none.
+0

@@ -1,0 +1,12 @@
+**Findings (ranked, small — the plan is already tight):**
+
+1. **Delete `_parse_color` — use `PIL.ImageColor`.** Task 1 hand-rolls a color parser, but Pillow ≥12.2 (already the floor, E3 §2) parses `#ffffff`, `rgb()`, `rgba()`, and named colors via `ImageColor.getrgb/getrgba`. Golden fixtures use exactly `#ffffff` and `rgba(0,0,0,0.75)` forms. One helper gone, one test case gone.
+
+2. **Stream-copy veto lives in three places; two suffice.** Plan puts it in support features (task 2), the command builder ("never take the stream-copy branch", task 3), *and* run.py "defense in depth" (task 4). `run.py:121` merely relays `report.features["stream_copy"]`, and support already forces that `False` when text is present — so the run.py re-check is dead weight. Keep the command-builder guard (it owns argv correctness: with `copy_video_input` set there is no `[vout]` to overlay onto) plus the support feature; drop the third.
+
+3. **Task 2 re-implements what task 1 already builds.** Support must "parse/validate `hold`/`to` duration" while `text._text_window(clip)` does precisely that. The plan's artificial dependency limit ("font resolver only; do not rasterize") forces duplicate duration logic. Let support import `_text_window`; the no-rasterize rule still holds. Cuts a parser and a divergence risk.
+
+**Checked and consciously kept (not cuts):** support-report `text_overlay`/`fade_envelope` features have no consumer today (repo grep: only unrelated arrangement `text_overlay` fields), but they're the yaml-agreement surface the North Star mandates — one dict line each. The `params` allowlist reject is not overengineering: ignoring unknown layout keys would silently diverge from Three output. `enable='between(t,…)'` is load-bearing (fade_out=0 + overlay's default `eof_action=repeat` would freeze the last PNG frame after END). Always-emit-both-fades is already the KISS-optimal no-branch shape.
+
+Net: ~3 helpers/checks removable; no structural change.
+0

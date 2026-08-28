@@ -1,0 +1,32 @@
+**B5 complete.** Commit `5fd08a28` on `megado/oracle-run-ffmpeg-text`.
+
+## T6 — `test_live_media_plus_text_smoke` (authored)
+
+File: `tests/packs/rendering/test_ffmpeg_text.py` only (+214/−1: docstring line, imports, test).
+
+- **Fixture (tmp_path only):** 4s constant-color `0x2255aa` plate, 320x180@30, lavfi → libx264 yuv420p `-an` (compositor-smoke pattern); optional audio per spec = 4s lavfi sine WAV.
+- **Timeline:** `theme: banodoco-default`, canvas 320x180@30, visual track (`volume: 0` media clip `from 0 to 4`), audio track (`volume 0.4` wav clip), one `clipType: "text"` clip `at=1.0 hold=1.0` → window `[1, 2]`, `params.anchor: "center"`, `text: {content: SMOKE, fontSize 24, color #ffffff}`, `effects: {fade_in 0.2, fade_out 0.2}`.
+- **Invocation:** `ffmpeg_run.support(RenderRequest, workspace=tmp_path)` → assert `supported is True`; then `ffmpeg_run.render(...)` directly (same style as sibling backend tests).
+- **Hang guard:** output exists; `ffprobe_metadata_strict` succeeds; `video_stream_present`, duration finite and `0 < d <= 4.5`. Suite-wide `pytest-timeout = 120` (pyproject, signal method) is the backstop; termination comes from input `-t` (B3 contract).
+- **W3B-4:** mid-window extract at `t=1.5` (full-ink region, fades [1.0–1.2]/[1.8–2.0]) — `mid_high >= plate_high + 40` (white ink over blue plate; not luma-blank).
+- **Parity:** post-END extract at `t=2.6` — `abs(post_mean − plate_mean) <= 8` and `post_high <= plate_high + 20` (plate again, no ink; encoder noise allowed, no checksum, not pixel-identity). Pre-AT plate reference measured at `t=0.5`.
+- **Skip guards:** missing ffmpeg/ffprobe → skip; `_skip_if_no_font()` (resolver returns None) → skip. No intro storyboard, no new fixture files.
+
+## T6 validation (executor's one local check)
+
+```
+tests/packs/rendering/test_ffmpeg_text.py::test_live_media_plus_text_smoke
+1 passed in 67.57s   (first run, cold caches)
+```
+Full file: `python -m pytest tests/packs/rendering/test_ffmpeg_text.py -q` → **22 passed in 52.58s** (21 pre-existing + 1 new; smoke well under the 120s backstop warm).
+
+## Commit
+
+`5fd08a288c2dac1d95dd529a74a8f2bb23835fe9` — `megado B5: live media+text smoke (hang, window, parity guards)`. Not pushed. Only the test file staged; pre-existing `.oracle/` state untouched.
+
+## Deviations
+
+None from spec. Two in-spec judgment calls: (1) "optional audio" included (suite's canonical `include_audio=True` shape); (2) pre-AT plate luma measured from a `t=0.5` extract rather than computed analytically — direct reading of "luma ≈ the pre-AT plate", still zero fixture files.
+
+**T7 remains with host/oracle:** `python -m pytest tests/packs/rendering/test_ffmpeg_text.py::test_live_media_plus_text_smoke -x -q` — not run by me, per contract.
+0

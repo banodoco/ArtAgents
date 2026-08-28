@@ -1,0 +1,33 @@
+PASS
+
+**AC 1–7**
+1. PASS — test at `test_ffmpeg_text.py:534`; media clip `from:0/to:4` (:598-599), text `at:1.0/hold:1.0`, `params.anchor:"center"`, `fade_in/out:0.2` (:616-626); optional audio track in-spec (:589, :604-613).
+2. PASS — mid-window extract `t=1.5` (:679) for window [1,2]; not AT (1.0), not window start.
+3. PASS — pre-AT plate `t=0.5` (:678), mid `t=1.5` (:679), post-END `t=2.6` (:680); `mid_high >= plate_high + 40` (:688), `abs(post_mean-plate_mean) <= 8`, `post_high <= plate_high + 20` (:693-694).
+4. PASS — `output.exists()` (:665); `ffprobe_metadata_strict` (:669), `video_stream_present` (:670), `duration_seconds` not-None (:671), `math.isfinite` (:672), bounded `<= 4.5` (:673). T7 evidence `1 passed in 11.12s` in `.oracle/evidence/batch-5-live-smoke.txt:2`.
+5. PASS — `shutil.which` ffmpeg/ffprobe → `pytest.skip` (:535-536); `_skip_if_no_font` resolver-None → `pytest.skip` (:30-33, called :537).
+6. PASS — diff is one file (+214/-1), no hashlib/sha256/md5/fixture/storyboard (grep: no matches); media+audio generated in `tmp_path` (:540, :563).
+7. PASS — `.oracle/evidence/batch-5-live-smoke.txt` shows the authoritative T7 result; local green not double-counted.
+
+**Load-bearing hunts**
+- Window strictly inside: media [0,4], text at=1 hold=1 → [1,2] — PASS (:598-599, :616-619).
+- Mid extract 1.5, not 1.0 — PASS (:679).
+- Post-END 2.6 > 2.0 — PASS (:680).
+- Pre-AT 0.5 < 1.0 — PASS (:678).
+- Finite duration via ffprobe (`isfinite` + bound), not just `exists()` — PASS (:671-673).
+- `supported is True` before render — PASS (:658-659).
+- Pack-direct: `ffmpeg_run.support/render` from `backends.ffmpeg.run` (:26, :658, :661); signatures match `run.py:195,314`; no Remotion path.
+- Skips via `pytest.skip`, not fail/raise — PASS (:536, :33).
+- No `@pytest.mark.timeout` as the fix — PASS (grep none); suite 120s backstop `pyproject.toml:213-214`.
+- Delta = test file only — PASS (git name-only).
+
+**North Star**
+- Simplest sufficient toolchain: ALIGNED — lavfi→libx264, zero new fixtures.
+- Capability-driven routing: N/A (test-only; smoke asserts `supported is True`, consistent with B4 declarations).
+- Output parity: ALIGNED — post-END luma-vs-plate parity guard is the smoke's core.
+- Offline/fast: ALIGNED — no network; 11.12s.
+- Routing lies / yaml-support lag: N/A. Speculative abstraction: ALIGNED — three plain helpers. Silent fallback: ALIGNED — skip is explicit. Scope creep: ALIGNED — one test, no production edits.
+
+**Elegance**: none.
+
+Issues: none.

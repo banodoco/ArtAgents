@@ -1,60 +1,54 @@
-# Agent Goal — declarative storyboard layer (megado run)
+# Agent goal — FFmpeg text rendering extension (megado run, 2026-08-28)
 
-[North Star](./northstar.md) — adopted in place from prior campaign; sha256 recorded in custody.md. This run advances the ONE-store principle by making the kernel-managed timeline the compiled output of a versioned storyboard source, with generations/prompts/variations first-class instead of sidecar convention.
+Advances [North Star](./northstar.md): moves text rendering from the Chrome/webpack/CDN Remotion path into the single-binary FFmpeg path, directly serving "simplest sufficient toolchain" and "offline and fast by default", bounded by "output parity" and the capability/support-check agreement principle.
 
 ## Objective
-Deliver a general, versioned **storyboard data layer** plus compiler inside the Astrid repo, proven end-to-end by re-rendering the existing Astrid intro (astrid-intro project) from it.
+Implement `docs/ffmpeg-text-extension.md` (committed at base SHA `c6c505af`) in this worktree so that timelines containing **media + text clips** render end-to-end through the `rendering.ffmpeg` backend, with Remotion unchanged as the fallback for complex segments.
 
-Deliverables
-- D1 `storyboard.schema.json` + loader/validator: meta(canvas/style) ; sections[] with nav tabs-state, ordered typed blocks: title, bullets, text, image(gen|asset), vo(text), video(gen|asset), mink slot directive {pose,anchor,scale}; every gen carries full spec {prompt,model,refs,seed?} and resolution fields (media_id|content_hash|path) + variants[] + active_index.
-- D2 Enrichment/linkage conventions documented + implemented where cheap: vo blocks ↔ transcript timing (plan.json), images ↔ prompts persisted beside assets, timeline asset entries use AssetEntry.generationId when the image came from an Astrid generation, section→shot registration via `timelines shots` mount behind a flag.
-- D3 Compiler `scripts/build_storyboard.py`: storyboard.json → managed timeline config+registry → `timelines save <slug>` (+`--render`). Timing model: default constant hold; `timing.hold` per block/section overrides; optional `--vo-align plan.json` snapping section starts to VO segment times (independent-of-length editing requirement).
-- D4 Intro application: author `build/astrid-intro.storyboard.json` (25 slides: verbatim vo_text+captions from plan.json/captions, pyramid title/bullets equivalents, image=final-slides png as asset, original codex prompt preserved under history) → compile → save → render → open.
+## Authoritative inputs
+- `docs/ffmpeg-text-extension.md` @ `46f1aff0` — the seed plan
+- Base code state @ `c6c505af` (custody: `./custody.md`)
+- User run declaration (below)
+
+## In scope
+1. `astrid/packs/rendering/backends/ffmpeg/renderer.yaml` — declare `text` clip type, `media_only: false`, `text_overlay: true`, `fade_envelope: true`.
+2. `astrid/packs/rendering/backends/ffmpeg/run.py` — text clip handling: PIL rasterization to transparent PNG (font, size, color, weight, alignment, position/anchor, maxWidth wrap, textShadow), overlay chaining in ONE filtergraph per section, timing via `enable='between(t,start,end)'`.
+3. Fade envelope (`effects.fade_in`/`fade_out`) applied to text overlay alpha.
+4. `astrid/packs/rendering/backends/ffmpeg/support.py` — return `supported` for media+text timelines the backend can actually render; stay fail-closed otherwise.
+5. Tests covering the new behavior; docs update if behavior/claims change.
 
 ## Non-goals
-No UI editor; no kernel core schema changes beyond using existing fields/mounts; no migration of other projects; English only; no style redesign.
+- Transitions between media clips; media fade envelopes beyond what the seed plan's fade-envelope step requires.
+- Changes to `rendering.remotion`, the `legacy_hybrid` planner, or any other backend/pack.
+- A new cross-backend font-management subsystem (font sourcing stays an ffmpeg-backend-local concern).
+- Storyboard compile pipeline changes.
 
-## Model policy (user-pinned)
-- Oracle/planner/[XHARD]: **grok-4.6** (grok CLI). Fallback if unavailable: GPT-5.6 Sol via `codex exec`.
-- Explorer/normal executor: **GLM-5.3 Flash** (`launch_hermes_agent.py --model=zhipu:glm-5.3`, fallback `zhipu:glm-5.2`).
-No automatic routing; pinned models authoritative unless evidence shows unavailability (then report + fallback as declared above).
+## Settled decisions
+- Model declaration (user-pinned 2026-08-28, restated, not asked again): **Grok 4.6** = planner/revision/tasklist/oracle/`[XHARD]` (the judgment slots); **GLM 5.3 Flash** (`openrouter:z-ai/glm-5.3-flash` via hermes launcher) = sense-checkers/explorers/normal executors. No switches without user approval.
+- The seed plan doc is the starting plan; it is revised through the megado loop, not rewritten from scratch.
+- Worktree/branch per custody.md; never `main`.
 
-## Done criteria
-1. Validator accepts sample + intro storyboards; rejects malformed (missing nav/blocks/dup slug).
-2. Compiler compiles intro storyboard to a NEW managed timeline; `timelines show` reports ≥76 clips… expected exact = current main content parity (76 clips/50 assets ± documented deltas).
-3. Render of that timeline ≈177±3s, plays, contains all 25 slide visuals (spot-check 3 frames).
-4. One regeneration variant demonstrably recorded (variant entry + picked active) without changing bytes of others.
-5. Evidence matrix maps every criterion → command/path/result. grok oracle PASS per batch + final review (≤3 passes).
+## Open boundaries (planner resolves within scope)
+- Font sourcing: system fonts vs bundled TTF; PIL cannot load `woff2` directly (fonttools conversion or bundled TTF needed).
+- Whether "fade envelope" extends to media clips or is text-overlay-only (seed plan wording covers text overlay alpha).
+- Exact wrap/shadow fidelity expectations vs Remotion output (parity bar: visibly equivalent for slide-style text, not pixel-identical browser text).
 
-## Validation commands
-- `python3 scripts/build_storyboard.py validate build/astrid-intro.storyboard.json`
-- compile/save/render pipeline as in D3/D4 against ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects
-- focused pytest for schema/validator (new tests/test_storyboard_schema.py)
+## Authorization boundaries
+- Mutate this worktree only. Commit on `megado/oracle-run-ffmpeg-text` after each passing batch.
+- Push at finish: explicit refspec `HEAD:megado/oracle-run-ffmpeg-text` → origin. Never main, never deploy/promote.
 
-## Sync/authorization
-Commit batches on branch megado/oracle-run-storyboard; push that branch to origin authorized at finish. Opening local videos/files authorized. Never merge to main.
+## Done criteria (all required)
+1. A media+text timeline renders through `rendering.ffmpeg`: text visible, positioned per anchor/offset, timed, faded per envelope; output plays.
+2. `support.py` accepts media+text timelines the backend renders, and remains fail-closed for unsupported features.
+3. `renderer.yaml` capabilities match implemented reality (North Star: no routing lies).
+4. `python -m pytest tests/packs/rendering/ -x -q` passes; no pre-existing test regressions in touched surfaces.
+5. A short live render smoke test (real ffmpeg invocation on a minimal media+text timeline) succeeds.
+6. Docs touched only where behavior changed (e.g. the seed plan's claims now match reality).
 
-## Stop conditions
-Blocked if grok AND codex both unavailable for oracle (report + halt after safe checkpoint). Escalate scope expansion beyond D1–D5.
+## Final validation commands
+- `python -m pytest tests/packs/rendering/ -x -q` (authoritative suite run once by host)
+- Live smoke render of a minimal media+text timeline via the ffmpeg backend (command finalized in tasklist)
+- `git diff c6c505af..HEAD -- astrid/packs/rendering/backends/ffmpeg/` reviewed by oracle
 
-## Amendment 1 — shots registration removed from D2
-Authorized by the user's blanket no-questions mandate plus the settled-plan wave (synthesis disposition #1): both critics converged that section→shot registration is not 'cheap' on a mount lacking update/delete/unique-name guarantees. D2's shots clause is CUT from v1 scope; revisit only as an explicit future request.
-
-## Amendment 2 — test-path + scope-cut authorization
-Authorized under the user's blanket no-questions mandate: focused tests live at tests/test_storyboard_schema.py (not tests/core/storyboard/); shots/gen-executor-branch/live-text-compilation cuts from the settled waves are ratified as v1 scope boundaries.
-
-## Amendment 3 — oracle gates in-scope
-Done criterion 5's per-batch grok gates and final review are IN SCOPE for this run and are executed by the host orchestrator.
-
-## Amendment 4 — regeneration proof
-Done criterion 4 upgraded: variant selection proof PLUS one real kernel-recorded regeneration (generation executor) imported and activated for at least one section.
-
-## Supersession matrix (binding over base sections)
-| Base clause | Final disposition |
-| D1 storyboard.schema.json artifact | REPLACED: single Python validator module astrid/core/storyboard/loader.py |
-| D1 ordered typed blocks title/bullets/text/image/vo/video/mink | FINAL: sections carry exactly image{variants,active_index} + vo{text,audio_asset}; other kinds unsupported-in-v1 (typed error) |
-| D2 transcript/images/generations/variants/shots/clip linkage | FINAL: images+prompts via variants/provenance; vo timing via --vo-align plan.json; shots CUT (Amendment 1) |
-| D1 resolution fields media_id/content_hash/path | KEPT — compiler-filled only (never persisted into authored JSON), asserted in compiled registry/output |
-| AssetEntry.generationId propagation | OMITTED by policy (no qualifying id exists) |
-| Synthesis r1 #4 variants restricted to {path,label}[] | SUPERSEDED by Amendment 4: gen variants carry source:"gen"+prompt(+model,refs)+alt_render_path; resolved records keep path/content_hash (+media_id when imported) |
-| Done criterion 4 variant+active flip | UPGRADED by Amendment 4: includes one real kernel-recorded generation imported & activated (transient asset count 51 allowed mid-proof) |
+## Sync/promotion policy
+- Commit per batch checkpoint; push branch at completion; no merge to main, no deploy. Stop conditions: `blocked` / `failed` / `undetermined` / `retryable` / `escalate` per megado skill — stop and escalate rather than silently widen scope.

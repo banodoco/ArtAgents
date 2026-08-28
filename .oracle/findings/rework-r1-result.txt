@@ -1,0 +1,24 @@
+R1 complete. Commit `88937480` on `megado/oracle-run-ffmpeg-text`, not pushed.
+
+## Per-item confirmation
+
+**R1-1 (BLOCKER) — fade d=0 no longer emitted.** `command.py` overlay chain now builds the PNG filter step-wise: `fade=t=in` only when `fade_in > 0`, `fade=t=out` only when `fade_out > 0`, each side independent. No-envelope spec → `[N:v]format=rgba[ovk]` only — zero fade filters. `-t END` cap, spine-first wiring, `enable='between(t,AT,END)'`, and no-`-shortest` untouched (asserted by existing tests `test_overlay_input_t_is_absolute_end_not_duration`, `test_overlay_chain_spine_first_png_secondary`, `test_no_shortest_with_overlays` — all green). `test_both_fades_emitted_even_at_zero_duration` replaced by `test_fade_filters_omitted_per_side_at_zero_duration`: asserts absence of `fade=t=` at (0,0) plus the bare `format=rgba` chain, then per-side presence/absence for (0.25, 0) and (0, 0.5).
+
+**R1-2 — text past media coverage rejected.** `support.py::structural_reasons` computes `media_coverage_end = max(bounds.end for bounds in visual_ranges)` inside the non-empty-visual-ranges branch and rejects any text clip whose `_text_window` end exceeds it (epsilon-guarded). New parametrized case `text_past_media` (`at=3.5, hold=2` vs 4s media) → `supported=False` with reason `beyond the visual media coverage`.
+
+**R1-3 — fade envelope vs window rejected.** `_validate_text_semantics` now captures both `_parse_fades` and `_text_window` results and rejects when `fade_in + fade_out > (end − at)`. New case `text_fade_envelope_too_long` (0.75+0.5 vs 1.0s window). Disclosed judgment call: the comparison carries `_TIMELINE_EPSILON_SECONDS` (1e-9) so an exact-fit envelope (0.5+0.5 in a 1.0s window) is not rejected by float noise; strict `>` semantics preserved. New `test_support_accepts_text_window_boundaries` pins both boundaries (text ending exactly at media end; envelope exactly filling window) as legal.
+
+**R1-4 — bold predicate single surface.** `text.py` gains module-level `text_wants_bold(clip)` (`text.bold is True or params.weight >= 600`); `rasterize_text_clip` calls it (inline duplicate deleted), `support.py` imports and calls it; the `_text_wants_bold` mirror is deleted. Grep confirmed no other references.
+
+**R1-5 — hygiene.** `command.py` line 1 → `"""Pure FFmpeg command builders for the media-spine and text-overlay renderer.`; `run.py::_support_load_failure` features now include `"text_overlay": False, "fade_envelope": False` alongside `media_only`, matching the success-path key order.
+
+## Validation
+
+- `pytest tests/packs/rendering/test_ffmpeg_text.py tests/packs/rendering/test_ffmpeg_support.py tests/packs/rendering/test_ffmpeg_backend.py -x -q` → **91 passed** in 10.42s
+- `pytest tests/core/rendering/test_cli.py -q` → **16 passed** in 6.35s
+- Includes the live ffmpeg smoke (`test_live_media_plus_text_smoke`) on this machine.
+
+## Deviations
+
+- None from spec. One process incident, self-caught: a single edit call carrying two ops (mirror deletion + validator rework) applied the second op against shifted numbering, briefly corrupting `_validate_text_semantics` (lost the non-empty-content append body, left one orphan line). Detected in the edit response, re-read, repaired in the immediately following edits; the final diff was reviewed hunk-by-hunk and the `text_missing_content` fail-closed case passes, proving the restored line. Final state is exactly as specified.
+0

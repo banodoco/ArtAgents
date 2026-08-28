@@ -1,0 +1,10 @@
+**Ranked findings (wave 2, lens: validation-goal-coverage)**
+
+**1. Authoritative validation command misses a touched surface (done-criterion 4).** Task 5 asserts `tests/core/rendering/test_cli.py:82` (`assert "clip_types: media" in text`) "still holds", but the pinned command `pytest tests/packs/rendering/ -x -q` never executes that file — it's outside the pack root. The claim is unverifiable by the run's own validation. Fix: add `python -m pytest tests/core/rendering/test_cli.py -q` to the Validation section (or one full `tests/` run before docs).
+
+**2. Declaration observable contracts ship unasserted (criteria 2–3).** Task 2 sets support report `stream_copy: false` / `media_only: False` / `text_overlay: True`; `run.py:121` really relays `stream_copy` into the command builder, so it's load-bearing, yet task 2's test list never asserts report features — task 3 tests only veto #2. Likewise task 5 retypes `clip_types` (`test_ffmpeg_backend.py:168`) but nothing asserts the yaml `features` block (`text_overlay: true`, `fade_envelope: true`) — a typo'd key ships green. Fix: one line in an existing accept test for report features; one dict-equality line for yaml features.
+
+**3. Live smoke proves visible + finite, not timed (criterion 1).** The luma/alpha probe samples only mid-window; overlay-window end (`enable='between(t,AT,END)'`) is argv-asserted, never observed live. E1 already validated absence at t=2.6 manually — carry it into task 6: assert a post-END frame's luma ≈ a pre-AT frame. One extra extract, no new fixture.
+
+**Checked, not findings:** `test_conformance.py`/`test_raw_command_fixture.py` feature-equality asserts target fixture packs only (`FIXTURE_ROOT`), unaffected; `test_layer_stack._backend_accepts` is a mock-resolver mirror, unaffected; no test pins media+text auto-route to remotion; `fade_envelope` has no consumer in `astrid/core/rendering` so its numeric-report-vs-bool-yaml typing is inert. No ceremonial tests remain — wave 1 already removed checksum/duplicate `-t`.
+0

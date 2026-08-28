@@ -1,0 +1,21 @@
+**B3 complete. Commit `84557393` on `megado/oracle-run-ffmpeg-text`.**
+
+## Files changed
+- `astrid/packs/rendering/backends/ffmpeg/command.py` (+297/−7 across both files):
+  - New frozen `TextOverlaySpec` (`path`, `at`, `end`, `fade_in`, `fade_out`); `RenderCommandInputs.text_overlays: tuple[TextOverlaySpec, ...] = ()`; exported in `__all__`.
+  - `build_filter_graph`: visual + audio clip collection filtered to `clip.get("clipType") == "media"` (text clips never demand an asset); stream-copy condition gains `and not inputs.text_overlays`; after the `[vout]` concat, per-overlay chain emits `[N:v]format=rgba,fade=t=in:st=AT:d=FI:alpha=1,fade=t=out:st=END−FO:d=FO:alpha=1[ovK]` + `[{spine}][ovK]overlay=0:0:enable='between(t,AT,END)':format=auto[{next}]` — both fades always, all numbers `:.6f`, last label `[vout]`, intermediates `[voutK]`.
+  - `_asset_input_argv`: same media-only filter; after asset `-i`s appends `-loop 1 -t {END:.6f} -i {png}` per overlay.
+  - `build_render_command` / `build_render_command_from_data` / `build_render_command_for_paths` accept `*, text_overlays=()` from the caller; no rasterization, no `_parse_fades` here. `run.py`/`renderer.yaml` untouched (commit touches exactly 2 files).
+- `tests/packs/rendering/test_ffmpeg_text.py`: 9 new argv tests mapping 1:1 onto checkpoint criteria (PNG-after-assets, single `-t`-equals-END assertion, spine-first/PNG-secondary, one-element filtergraph with literal quotes, both fades at `d=0.000000`, stream-copy veto + still-available-without-overlays, no `-shortest`, text-clip-needs-no-asset, multi-overlay caller-order chaining).
+
+## Validation
+- Mandated: `test_ffmpeg_text.py + test_ffmpeg_support.py + test_ffmpeg_backend.py` → **86 passed** (was 52 before; +34).
+- Adjacent command-builder suites: `test_ffmpeg_compositor.py` fully green; `test_render_facade.py`/`test_render_facade_run_ownership.py`/`test_legacy_renderer_characterization.py` show 8 failures — **verified pre-existing at B2 HEAD** via stash/re-run (identical 8 failed, 44 passed baseline; output-name policy, run.json ownership, provenance key set — facade-level, unrelated to argv).
+
+## Empirical verification performed (not deviations)
+- ffmpeg 7.1.1 accepts the final overlay re-emitting `[vout]` (label defined twice) and `-map [vout]` binds to the **overlay output**: pixel probe showed composed blue box over red spine at frame 10.
+- Observed for B5 awareness: overlay's default `shortest=0` means output runs to `max(spine, PNG −t cap)` — with PNG cap > spine the video extends to END (probe: 1.966667s from 1s spine + 2s cap). `-t` semantics are as decided; E1's verified shape (cap == spine end) terminates at exactly spine duration.
+
+## Deviations
+None.
+0

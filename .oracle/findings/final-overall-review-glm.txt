@@ -1,0 +1,33 @@
+PASS
+
+**1. One-system coherence (A.1–A.13)**
+
+- A.1 MATCH — single definitions in `text.py`; `support.py:28-35` and `run.py:62-66` import `_parse_fades`/`_text_window`/`_parse_text_shadow`/`_resolve_font_path`; support never re-splits CSS (`support.py:313` calls `_parse_text_shadow`) and has no PIL import.
+- A.2 MATCH — `TextOverlaySpec` `path/at/end/fade_in/fade_out` (`command.py:31-35`) == what `_text_overlay_specs` passes (`run.py:122-129`); ordering track-array→`at`→clip index (`run.py:110-114`).
+- A.3 MATCH — both paths rasterize into `TemporaryDirectory` and run ffmpeg inside it: `run.py:175-191`, `run.py:631-645`; same helper `_text_overlay_specs`.
+- A.4 MATCH — `-loop 1 -t {END:.6f} -i` (`command.py:450-453`), `overlay=0:0` spine-first with dual fades always emitted (`command.py:310-325`), literal-quoted `enable='between(t,AT,END)'` (`command.py:322`), one argv element (`command.py:466`), no `-shortest`/`-framerate` anywhere in the argv (`command.py:461-489`), PNG secondary.
+- A.5 MATCH — media-only asset collection (`support.py:740-748`, `command.py:200-221`); test `test_ffmpeg_text.py:399-407`.
+- A.6 MATCH — exactly two vetoes: features (`support.py:858-873`) and builder (`command.py:281-282`); run.py only relays `features["stream_copy"]` (`run.py:187`; `command.py:520-522`).
+- A.7 MATCH — yaml block matches spec (`renderer.yaml:12-25`); description says text-overlay.
+- A.8 MATCH — accept/reject set implemented as specified (`support.py:276-316`, `399-411`, `188-246` incl. `_POSITION_KEYS` reuse at 188, no second checker); media `effects` via `_EFFECT_KEYS` (`support.py:202-209`); no new text-card test.
+- A.9 MATCH — candidates incl. `Arial Bold.ttf` (`text.py:36-40`), `None` → `FileNotFoundError` (`text.py:301-307`) → support reject (`support.py:755-761`); visual_understand comment (`text.py:68-69`); no `load_default()`.
+- A.10 MATCH — `text.py:81-134`.
+- A.11 MATCH — wraps imported canonical `_clip_duration_seconds` (`text.py:21,252`), positive-duration required (`text.py:253-256`).
+- A.12 MATCH — `engine: "ffmpeg"` provenance unchanged (`run.py:218,662`); audio-reactive path untouched (not in diff).
+- A.13 MATCH — `service.py:171-177` remotion/None → `(ffmpeg, remotion) auto_route=True`; fallback only on `unsupported`/`binary_missing` (`service.py:717-728`). Remotion/legacy_hybrid/legacy_engine/storyboard absent from production delta.
+
+**2. Done criteria**
+
+1. PASS — `.oracle/evidence/batch-5-live-smoke.txt` (1 passed, 11.12s); guards verified in `test_ffmpeg_text.py:666-694`.
+2. PASS — static read + 15-case fail-closed parametrize (`test_ffmpeg_support.py:743-824`).
+3. PASS — `renderer.yaml` vs `test_ffmpeg_backend.py:168-175` dict-equal.
+4. PASS — `.oracle/evidence/final-suite.txt`: 540 collected; all touched-surface files (collection #14–135) pass — every dot before test #152 is green. The 4 F's are at #152 `test_legacy_renderer_characterization.py::test_render_provenance_v1_key_set`, #243 `test_render_facade.py::test_render_validates_output_name_extension`, #291 `test_timeline_visualize_adversarial.py`, #364 `test_timeline_visualize_executor.py` — none of these files are in the diff and each exercises unchanged code (legacy_engine provenance, facade name validation, visualize pack), so not caused by this run. Note: evidence truncates at test 413/540 with no summary; remainder is untouched visualize tests. The anticipated `banodoco_timeline_schema` collection error did not occur.
+5. PASS — host evidence above.
+6. PASS — docs diff = `docs/ffmpeg-text-extension.md` only; content matches shipped behavior.
+
+**3. North Star** — all ALIGNED: simplest toolchain (PIL PNG + one binary, no Chrome/CDN); capability routing honest (yaml ↔ support agree); parity semantics documented to match ThreeTimelineComposition and smoke-verified; offline (system TTFs, fail-closed). Anti-patterns all avoided: no routing lie, no silent font fallback, no speculative layer, no scope creep (delta is 5 backend files + docs + 3 tests; forbidden tokens appear only in comments/docs/negative assertions).
+
+**4. Elegance** — nothing failing KISS. Non-issue notes: `_text_overlay_specs` scans text clips twice (`run.py:93-97` guard, then build); `_text_wants_bold` is a declared mirror of the rasterizer decision (`support.py:266-273`) — necessary for support-time font rejection without rasterizing.
+
+Issues: none.
+0

@@ -1,0 +1,20 @@
+## E3 findings — font availability + PIL reality
+
+**1. Arial filenames (macOS, this machine, Darwin 24.4.0):** `/System/Library/Fonts/Supplemental/` contains `Arial.ttf`, `Arial Bold.ttf` (space, exact), `Arial Italic.ttf`, `Arial Bold Italic.ttf`, `Arial Black.ttf`, `Arial Narrow*`, `Arial Rounded Bold.ttf`, `Arial Unicode.ttf`. Plan's Bold filename confirmed.
+
+**2. Load test:** `python3` = pyenv **3.11.11** (`~/.pyenv/versions/3.11.11`), Pillow **12.3.0** (pyproject allows `>=12.2,<13`). `ImageFont.truetype(..., 30)` → OK: `('Arial','Regular')` and `('Arial','Bold')`.
+
+**3. Suite env:** pytest pinned `9.0.2` + `pytest-timeout` (suite-wide `timeout=120`, `timeout_method="signal"`), `testpaths = ["tests", "scripts/migrations"]`. No `.python-version`, no repo `.venv`; CI (`ci.yml`) pins **3.11** (`m4-gate`/`m8-installed` matrices add 3.12; `m8` also runs `macos-latest`; `bridge-latency` 3.12; `timeline-vlm-gate` 3.14). **No font/DejaVu setup step anywhere in CI or Makefile** — Linux tests run with whatever the `ubuntu-latest` image ships ([INFERENCE: dejavu-core present, since existing path-based lookups pass there]).
+
+**4. woff2 — premise disproven empirically:** `ImageFont.truetype('examples/themes/ados-paris-2026/fonts/Pilowlava.woff2', 30)` **loaded successfully** → `('Pilowlava','Regular')`. WOFF2 support depends on the bundled FreeType having brotli — present in this Pillow 12 wheel, but not guaranteed on all builds; the resolver targets TTF paths only, so this is moot. **fonttools: not a declared dependency** (checked pyproject deps — absent) though importable in this env transitively; resolver needs none (path-based only). Verified bundled-TTF precedent loads: `PowerGrotesk-Regular.ttf` → `('Power Grotesk','Regular')`.
+
+**5. Existing references the resolver must stay consistent with:**
+- `astrid/packs/rendering/understanding/executors/visual_understanding/run.py:198-208` — exact precedent: candidate list `/System/Library/Fonts/Supplemental/Arial Bold.ttf`, `/Library/Fonts/Arial Bold.ttf`, `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`, then `load_default()`.
+- `astrid/packs/rendering/executors/timeline_storyboard/run.py:385-390` — bare-name `DejaVuSans-Bold.ttf` + `load_default()` fallback.
+- `astrid/packs/rendering/executors/timeline_visualize/render_png.py:72-89` — repo-bundled TTF, docstring says "no system-font lookup", raises `FileNotFoundError` (fail-hard, not fallback) — closest to the plan's fail-closed posture; `packs/**/*.ttf` ships in the wheel (`pyproject.toml:132`).
+- `astrid/packs/rendering/executors/video_editing/orchestrators/{animate_image,logo_ideas,vary_grid}/run.py` — hardcoded Supplemental Arial paths + `load_default()` fallback.
+- `tests/core/test_style_scope.py:44` — "Arial" as theme family name (CSS-level only, no path).
+- `remotion` components use CSS stacks (`'Chillax, Inter, Arial, sans-serif'`); no Python-side overlap.
+
+**Risks:** (a) DejaVu exists on this Mac only as user-installed fonts in `~/Library/Fonts/` — macOS has no system DejaVu, so the Linux path never resolves here (fine; Arial is primary); (b) pre-10.15 macOS kept Arial in `/Library/Fonts/` — keep that fallback candidate as `visual_understanding` already does; (c) existing repo convention is `load_default()` fallback, not raise — plan's fail-closed differs; align deliberately, don't silently diverge.
+0

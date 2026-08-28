@@ -1,0 +1,35 @@
+PASS
+
+**AC 1–10**
+1. PASS — `command.py:450-453` appends `-loop 1 -t {end:.6f} -i png` after asset `-i`s (`:438-449`); test asserts slice `test_ffmpeg_text.py:305-311`.
+2. PASS — single assertion `argv[i_png-5:i_png] == ["-loop","1","-t","3.000000","-i"]` with index 1 (`test:314-321`) — END 3.0, not duration 2.0; production uses `overlay.end` (`command.py:452`), never `end-at`.
+3. PASS — `[{spine}][ov{k}]overlay=0:0:enable='between(...)':format=auto[...]` (`command.py:320-324`); spine always main (`command.py:321`), test pins exact string (`test:343-346`).
+4. PASS — literal quotes in f-string `command.py:322`; one argv element `";".join(filters)` (`command.py:466`); test `test:349-355` (`count("'")==2`).
+5. PASS — both fades unconditional, no zero-guard (`command.py:312-315`); `d=0.000000` asserted (`test:358-373`).
+6. PASS — veto `and not inputs.text_overlays` in stream-copy eligibility (`command.py:282`), independent of run.py; test:376-387 (libx264+`[vout]` with overlays; `copy` with `text_overlays=()`).
+7. PASS — grep of command.py: no `-shortest` anywhere; test:324-326.
+8. PASS — `text_overlays` default `()` (`command.py:52`); with empty tuple veto no-ops, both overlay loops no-op (`:310,450`); delta touches only the two named files; host: 100 passed.
+9. PASS — `clipType == "media"` filter on visual/audio clip collection in `build_filter_graph` (`:206,217`) and `_asset_input_argv` (`:415,426`); text clip has no asset and demands none (`test:390-398`, `argv.count("-i")==1`); `clip_duration_seconds`/visual-max only over media lists (`:356,360-363`).
+10. PASS — `git diff --name-only b66a83ab..84557393` = command.py + test_ffmpeg_text.py only.
+
+**Hang-fix hunt**
+- `-t` = absolute END (`:452`), never omitted — PASS. `-loop 1` per PNG (`:451`) — PASS. PNG after assets (`:438-453`) — PASS. Spine-first overlay (`:321`) — PASS. Both fades incl `d=0` (`:312-315`) — PASS. No `-shortest` — PASS. No `-framerate` — PASS. Stream-copy veto `:282`, run.py-independent — PASS. Media-only collection `:206,217,415,426` — PASS. No rasterize/PIL/`_parse_fades`/font (grep clean; docstrings only) — PASS. Callers inject overlays: `build_render_command:496,528`, `from_data:542,558`, `for_paths:568,575` — no invention — PASS. Last label `[vout]` (`:317-319`; test:422-429 shows `vout1`→`vout`) — PASS. Single `-filter_complex` element (`:466`) — PASS. Literal quotes (`:322`) — PASS.
+
+**North Star**
+- Simplest sufficient toolchain: ALIGNED — one binary, looped PNGs, no deps.
+- Capability-driven routing: ALIGNED — stream-copy stays probe-evidence-gated (`:281`), overlay veto makes it honest; support.py/renderer.yaml untouched so the pair cannot drift.
+- Output parity: ALIGNED — absolute-END windows, dual fades, `enable` guard match caller-side text window semantics.
+- Offline/fast: ALIGNED — local PNGs, no network, no `-shortest` cost games.
+- Routing lies / implementing-without-declaring: N/A — no capability surface touched.
+- support/capabilities divergence: ALIGNED — neither changed.
+- Speculative abstraction / parallel mechanisms / unread config: ALIGNED — one frozen spec tuple, zero new config.
+- Silent engine fallbacks: ALIGNED — encode vs copy explicit in argv (`:474-475`).
+- Scope creep: ALIGNED — delta is exactly command.py + its tests; no transitions, effects, or font subsystem.
+
+**Elegance nits**
+1. `clipType == "media"` now repeated in four clip-collection sites (`:206,217,415,426`) — pre-existing duplication between `build_filter_graph` and `_asset_input_argv`; a shared collector would remove it. Out of scope; not a failure.
+2. `for_paths` uses `dataclasses.replace` (`:573-576`) while `from_data` passes the kwarg directly (`:558`) — cosmetic asymmetry.
+3. Tests 305-311 and 314-321 assert the same argv slice twice; AC 2 mandates the second form, so acceptable.
+
+Issues: none.
+0

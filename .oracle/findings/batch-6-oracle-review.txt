@@ -1,0 +1,31 @@
+PASS
+
+AC 1: PASS — `git diff 5fd08a28..a5fc84f8` = 1 file, `docs/ffmpeg-text-extension.md` (121+/72−).
+
+AC 2: PASS — all 15 MATCH:
+1. `build_filter_graph` command.py:179; run.py builds specs (run.py:81) + executes (run.py:641); `section` grep absent in run.py.
+2. `_parse_fades` text.py:155; reused support.py:297,852; run.py:63,121.
+3. text.py:31-40 Arial/DejaVu candidates; `_resolve_font_path` fail-closed text.py:67-74; support up-front reject support.py:755-761; bold-or-fail (separate bold list); no load_default (text.py:68 comment only); fontFamily/italic unread — fixed stack.
+4. text.py:81-84 ImageColor + hand-parsed rgba; support calls `_parse_color`/`_parse_text_shadow` (support.py:307,313), no re-split.
+5. text.py:343 `GaussianBlur(radius=shadow.blur / 2)`.
+6. text.py:252 wraps `_clip_duration_seconds` (import :21); text `from` rejected support.py:285-288.
+7. command.py:452 `["-loop","1","-t",f"{overlay.end:.6f}","-i",…]`; filter command.py:312-324 `overlay=0:0` + `between(t,AT,END)`; no `-shortest`/`END-AT`.
+8. service.py:167-177 None→"remotion"→(ffmpeg,remotion) `auto_route=True`.
+9. service.py:717-723 kinds `unsupported`/`binary_missing` continue, else re-raise; :724-727 `not report.supported` continues. Fail-closes real: unknown kinds support.py:386-389; hold :249-252; extra media-visual tracks :405-408; font :755-761; text from :285-288; crops :193-201; transition :210-211; speed :180-184; x/y via `_POSITION_KEYS` :43.
+10. service.py:720-721 re-raise other kinds.
+11. service.py:114 class; fires :729-736 at auto-route index 0 (ffmpeg).
+12. service.py:178-183 hybrid→planner `rendering.legacy_hybrid`, no auto_route.
+13. Smoke uses lavfi color plate + sine (test:551,574), not intro storyboard.
+14. yaml:24 `stream_copy: true`; support.py:860-873 sets feature only via `_whole_media_optimization` (:531-589 probe+registry, h264/yuv420p, duration/res/fps/timebase :574-588); gate command.py:280-289 (8 conjuncts); run.py:187 forwards, no third veto. Protocol path (run.py:641) delegates to `build_render_command`, which re-queries support inside command.py:515-521 — veto still lives in support + command builder; run.py summary is directionally true, not a lie.
+15. test:673 finite ≤4.5; frames 0.5/1.5/2.6 (:678-680); mid visible :688; post within ±8 :693.
+
+AC 3: PASS — no "intercept"/"not enough" claims; load_default/fonttools/woff2/PowerGrotesk/-shortest/END-AT appear only as explicit negations (doc:45-46,90); `legacy_hybrid` only as mapping (doc:34).
+
+AC 4: PASS — `git diff --name-only c6c505af..HEAD -- docs/` = one file.
+
+North Star: simplest-toolchain ALIGNED (one binary, no CDN claims match code); capability-routing ALIGNED (yaml:14-24 agrees with support.py semantics); output-parity ALIGNED (anchor/wrap parity documented, doc:65-66); offline ALIGNED; anti-patterns (routing lies, yaml/support drift, speculative abstraction, silent fallback, scope creep) — none VIOLATED.
+
+Elegance: Right-sized: one file, claim-correction only, honest out-of-scope section, no new docs surface. "Explicitly out of scope" earns its keep. Minor redundancy: the shadow/color/window bullets restate support-parity twice (doc:50-51, 112-113), and the `-t END` explanation (doc:87-91) is slightly over-explained for the invariant it carries. No leftover v1 lies found; nothing demands cutting to a second file.
+
+Issues: none.
+0

@@ -1,0 +1,10 @@
+**Ranked findings (wave 2, lens simplicity-reuse-order):**
+
+**1. `clip.effects` fades get two parsers; only one is specified.** Task 2 lets support accept fades as map **or a list of objects**; task 4's run.py helper extracts "fade numbers" with no word on the list form. Today there is exactly one rejection point (`_validate_clip_semantics`, support.py:190-196 via `_EFFECT_KEYS`); the plan replaces it with validate-in-support + extract-in-run — a parallel mechanism. Drift scenario is concrete: support accepts list-form, run.py normalizes map-only → silent no-fade or crash. Fix (reuse, not new scope): one normalizer in `text.py` (task 1), e.g. `_parse_fades(effects) -> (fade_in, fade_out)`, consumed by both task 2 and task 4.
+
+**2. Same parse-once issue for shadow strings.** Task 2 says a bad shadow color is rejected "with `_parse_color`" — that implies support re-splits the CSS shadow `"0 2px 10px rgba(...)"` to reach the color, duplicating task 1's `_parse_text_shadow`. Make support call `_parse_text_shadow` (which returns the color) instead of hand-splitting. Task 1's helpers should be the single parse surface for both consumers.
+
+**3. Batch order — verified safe as written; folding is neutral, not better.** service.py:1046-1054 statically rejects timelines whose clipTypes aren't in the manifest's `clip_types` **before** support runs, so yaml-last keeps batches 2-4 behaviorally inert (no bisectable broken commit, contra what I expected to find). Keep 1→2→3→4+5; folding 2-5 changes nothing for safety. No red-suite risk: the only text blockers are structural_reasons' kind check (support.py:313-316) and the one-visual-track gate (282-283), each retargeted with its test in-batch.
+
+Findings 1-2 are small, additive to task text; nothing deletable found.
+0

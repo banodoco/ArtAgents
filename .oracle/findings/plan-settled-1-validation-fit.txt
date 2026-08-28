@@ -1,0 +1,10 @@
+**Validation-fit findings (ranked):**
+
+1. **Under-tested fail-closed clauses (the material one — insufficiency, not redundancy).** Task 2's support changes reject text-on-an-audio-track, text with `asset`, and `x/y/width/height`, but task 6's "Add: support still rejects" list omits all of them. Highest risk is `x/y/width/height`: committed fixtures rarely set them, Remotion *silently drops* them, and today support rejects every clip carrying them — a missed carve-out would route such timelines to ffmpeg with text painted at the wrong place (the exact silent-fallback anti-pattern the North Star forbids). Add two tests: text+`x/y` rejected; text on an audio track rejected. Skip the rest if keeping the list lean.
+
+2. **Duplicate argv assertion.** Task 6 lists both "extra `-loop 1 -t <END> -i`" and separately "Assert `-t` is overlay END, not duration." Same token, same value — one assertion on input index + parsed value covers both. Cut one.
+
+3. **Smoke probe duplication.** Task 7 offers "luma/alpha **or** a small PNG overlay checksum" for the non-blank criterion — two mechanisms, one contract. Pin sampled-frame luma/alpha (it also proves the output decodes, which the checksum of the input PNG does not); drop the checksum alternative so the smoke has one deterministic implementation.
+
+**Proportionality confirmed (no action):** no `service.py` auto-route test — support-accepts evidence is sufficient and avoids a redundant integration test; the `d=0` both-fades assertion is one line pinning a decided invariant against future "cleanup"; the media `fade_in` rejection test is load-bearing given the `_EFFECT_KEYS` carve-out touches shared code; resolver-skip-if-`None` avoids CI font ceremony without weakening coverage. Validation commands match the agent goal's final-validation list exactly — nothing ceremonial there.
+0

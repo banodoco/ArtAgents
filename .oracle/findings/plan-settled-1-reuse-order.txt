@@ -1,0 +1,10 @@
+**Ranked findings (reuse-order lens):**
+
+1. **Third parallel clip-window parser — reuse the canonical one.** `astrid/core/timeline/validators/timeline.py:128` `_clip_duration_seconds(clip)` already implements hold-else-(to−from), returns `None` on unparseable, and is re-exported from `banodoco_schema.py:564`. Implement `_text_window` as a thin wrapper (`at + duration`, fail on `None`/≤0) and let support validate text timing through the same helper (task 2 already depends on task 1, so no cycle). This collapses support `_clip_range`, command `clip_duration_seconds`, and the planned third parser into one semantics source. Edge: canonical computes `to−from`; plan's "hold else `to`" assumes `from` absent — have support reject text `from` explicitly (consistent with existing media-bounds rejections).
+
+2. **`_parse_color`: partially deletable — verified.** Pillow 12.3 `ImageColor.getcolor('#ffffff','RGBA')` → `(255,255,255,255)`; but `rgba(0,0,0,0.75)` raises `unknown color specifier` (just ran it). So reuse `ImageColor` for the hex/named path and hand-parse only the `rgba(r,g,b,a)` form needed by `textShadow` — smaller than a bespoke parser, and the shadow-color path shares one branch instead of two parsers.
+
+3. **Test distribution contradicts the plan's own commit rule.** Batches commit "after each passing batch," yet all tests sit in task 6 behind 1–5. Batch 4+5 (yaml/support) breaks `test_ffmpeg_backend.py` (`clip_types`, `unknown_clip_kind`) and `test_cli.py` until task 6 lands — red suite between commits. Split task 6 per batch: rasterize unit tests→1, support tests→2, argv tests→3, yaml assertions/retargets→4+5; keep only live-smoke prep in 6. No scope change; earlier failure discovery.
+
+4. Minor: the resolver list is the repo's ~5th parallel font-candidate list (timeline_storyboard `run.py:388`, visual_understanding per E3, orchestrators). Backend-local is right per non-goal; add a one-line comment naming the precedent to slow drift.
+0

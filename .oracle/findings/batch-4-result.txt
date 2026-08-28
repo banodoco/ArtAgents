@@ -1,0 +1,22 @@
+**B4 complete.** Commit `4ea29d62` on `megado/oracle-run-ffmpeg-text` (4 files, +153/−14). Not pushed.
+
+## Files changed
+
+- `astrid/packs/rendering/backends/ffmpeg/run.py`
+  - New private `_text_overlay_specs(timeline_data, *, rasterize_dir)` (run.py:81): returns `()` for media-only timelines; otherwise rasterizes each text clip via `rasterize_text_clip` into `text-<order>.png` at canvas size from `timeline_canvas`, windows via `_text_window`, fades via `_parse_fades` (same parser support ran — no second extractor). Ordering: track array order → `at` → clip index, per `TextOverlaySpec`'s contract.
+  - `_render_ffmpeg_media_to_path` (run.py:174-192): builder + ffmpeg invocation now inside `TemporaryDirectory("astrid-ffmpeg-text-overlays-")`; specs passed via `text_overlays=`; `stream_copy_allowed=bool(report.features.get("stream_copy"))` relay byte-identical.
+  - `_protocol_render` else-branch (run.py:630-645): loads timeline JSON, rasterizes specs into tempdir, passes to `build_render_command(..., text_overlays=...)`, ffmpeg runs before the temp dir closes. Audio-reactive branch (run.py:610-621) and provenance (`engine: "ffmpeg"`) untouched.
+  - Interaction check: reactive+text is unreachable — `match_and_validate` requires exactly 2 clips (audio_reactive_colour.py:126), so support rejects it fail-closed; the else-branch wiring is total, no silent drop.
+- `renderer.yaml`: `clip_types: [media, text]`; features block `media_only: false / text_overlay: true / fade_envelope: true / stream_copy: true / sequential_audio: true`; description → "Render legacy media and text-overlay timelines with FFmpeg."
+- `tests/packs/rendering/test_ffmpeg_backend.py`: `clip_types == ["media", "text"]` retarget + features dict-equality assert, same commit.
+- `tests/packs/rendering/test_ffmpeg_text.py`: W3B-3 — one test on `_text_overlay_specs` with rasterize patched: asserts windows equal `_text_window`, fades equal `_parse_fades` (incl. literal `(0.25, 0.5)` pin), track-array-first ordering, PNG paths.
+
+## Validation
+
+- `pytest tests/packs/rendering/test_ffmpeg_text.py test_ffmpeg_support.py test_ffmpeg_backend.py -x -q` → **87 passed** (337.9s)
+- `pytest tests/core/rendering/test_cli.py -q` → **16 passed** (`clip_types: media` prefix holds)
+
+## Deviations
+
+None. No planner/`service.py`/`test_cli.py` edits; `.oracle/` harness state left uncommitted as scoped.
+0

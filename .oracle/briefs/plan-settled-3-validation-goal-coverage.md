@@ -1,3 +1,11 @@
+# Settled-plan critique — lens: validation-goal-coverage (wave 3, on revised plan v4)
+
+You are an independent plan-settled CRITIC in a megado run. READ-ONLY: do not modify any repository files. Your output: ranked concrete findings with plan-section or source evidence, <300 words. Do NOT widen scope, do NOT rewrite the plan, do NOT invent architecture.
+
+Prior dispositions (cite these IDs if you would repeat them without NEW evidence): wave 1 accepted color-via-ImageColor+rgba-branch, canonical duration reuse w/ text-from reject, two-place stream-copy veto, tests co-located per batch, x/y+audio-track reject tests, single -t assertion, luma/alpha smoke, resolver precedent comment. Wave 2 accepted _parse_fades normalizer shared by support+run, _parse_text_shadow as single shadow-parse surface, test_cli.py added to validation, report+yaml feature assertions, post-END smoke frame. Wave 2 verified batch order safe (service.py:1046-1054 static clipTypes gate) and folding checkpoints neutral.
+
+## Immutable plan snapshot (v4, sha256/16 91e2ca981c7539d2)
+
 # Plan — FFmpeg text rendering extension (v4)
 
 This revises v3 against settled-plan wave 2 (all 5 findings accepted). The seed plan’s intent is kept; v1 mechanics that were wrong stay wrong. Wave 2 does not add scope — it collapses two parse sites onto helpers that task 1 already owns, and it pins three contracts the done criteria already require (yaml/support features, CLI inspect, live overlay window).
@@ -169,3 +177,296 @@ Named anti-patterns, rejected:
 About one focused implementation day: one new ~150-line helper (now also the single fade/shadow parse surface), support carve-outs, overlay chain in the existing concat graph with a verified `-t` cap, yaml+tests+one live ffmpeg smoke with an extra frame extract. No planner/Remotion work. Wave 2 removed work (a second fade extractor, a CSS split in support) more than it added (shared-parser tests, three feature asserts, one CLI pytest line, one extra luma sample).
 
 HUGE-RUN: no
+
+
+## North Star (complete)
+
+# North Star — Astrid rendering
+
+## Desirable end state
+Astrid renders timelines with the simplest toolchain that produces correct output. FFmpeg — one binary, no Chrome, no webpack, no npm tree, no CDN — is the default engine; heavier engines (Remotion) are used only where they genuinely earn their complexity. Engine choice is invisible to the user except as speed and reliability.
+
+## Enduring principles
+- **Simplest sufficient toolchain.** Prefer the fewest moving parts that produce correct, good-looking output.
+- **Capability-driven routing.** A backend declares what it supports; the router prefers the cheapest capable backend. Support checks are fail-closed and evidence-based — they never claim more than the backend implements.
+- **Output parity.** Switching engines must not visibly regress what the user sees: text layout, fonts, position, timing, fades.
+- **Offline and fast by default.** Network/CDN dependencies at render time are liabilities, not features.
+
+## Anti-patterns to avoid
+- Declaring a capability the backend doesn't implement (routing lies), or implementing without declaring.
+- Widening `renderer.yaml` capabilities while `support.py` semantics lag (or vice versa) — the two must agree.
+- Speculative abstraction layers, parallel mechanisms where one exists, config surfaces nothing reads.
+- Silent fallbacks that hide which engine actually rendered a video.
+- Scope creep: this run is about text rendering in the FFmpeg backend — not transitions, not media effects, not a new font management subsystem.
+
+
+## Agent goal (complete, frozen)
+
+# Agent goal — FFmpeg text rendering extension (megado run, 2026-08-28)
+
+Advances [North Star](./northstar.md): moves text rendering from the Chrome/webpack/CDN Remotion path into the single-binary FFmpeg path, directly serving "simplest sufficient toolchain" and "offline and fast by default", bounded by "output parity" and the capability/support-check agreement principle.
+
+## Objective
+Implement `docs/ffmpeg-text-extension.md` (committed at base SHA `c6c505af`) in this worktree so that timelines containing **media + text clips** render end-to-end through the `rendering.ffmpeg` backend, with Remotion unchanged as the fallback for complex segments.
+
+## Authoritative inputs
+- `docs/ffmpeg-text-extension.md` @ `46f1aff0` — the seed plan
+- Base code state @ `c6c505af` (custody: `./custody.md`)
+- User run declaration (below)
+
+## In scope
+1. `astrid/packs/rendering/backends/ffmpeg/renderer.yaml` — declare `text` clip type, `media_only: false`, `text_overlay: true`, `fade_envelope: true`.
+2. `astrid/packs/rendering/backends/ffmpeg/run.py` — text clip handling: PIL rasterization to transparent PNG (font, size, color, weight, alignment, position/anchor, maxWidth wrap, textShadow), overlay chaining in ONE filtergraph per section, timing via `enable='between(t,start,end)'`.
+3. Fade envelope (`effects.fade_in`/`fade_out`) applied to text overlay alpha.
+4. `astrid/packs/rendering/backends/ffmpeg/support.py` — return `supported` for media+text timelines the backend can actually render; stay fail-closed otherwise.
+5. Tests covering the new behavior; docs update if behavior/claims change.
+
+## Non-goals
+- Transitions between media clips; media fade envelopes beyond what the seed plan's fade-envelope step requires.
+- Changes to `rendering.remotion`, the `legacy_hybrid` planner, or any other backend/pack.
+- A new cross-backend font-management subsystem (font sourcing stays an ffmpeg-backend-local concern).
+- Storyboard compile pipeline changes.
+
+## Settled decisions
+- Model declaration (user-pinned 2026-08-28, restated, not asked again): **Grok 4.6** = planner/revision/tasklist/oracle/`[XHARD]` (the judgment slots); **GLM 5.3 Flash** (`openrouter:z-ai/glm-5.3-flash` via hermes launcher) = sense-checkers/explorers/normal executors. No switches without user approval.
+- The seed plan doc is the starting plan; it is revised through the megado loop, not rewritten from scratch.
+- Worktree/branch per custody.md; never `main`.
+
+## Open boundaries (planner resolves within scope)
+- Font sourcing: system fonts vs bundled TTF; PIL cannot load `woff2` directly (fonttools conversion or bundled TTF needed).
+- Whether "fade envelope" extends to media clips or is text-overlay-only (seed plan wording covers text overlay alpha).
+- Exact wrap/shadow fidelity expectations vs Remotion output (parity bar: visibly equivalent for slide-style text, not pixel-identical browser text).
+
+## Authorization boundaries
+- Mutate this worktree only. Commit on `megado/oracle-run-ffmpeg-text` after each passing batch.
+- Push at finish: explicit refspec `HEAD:megado/oracle-run-ffmpeg-text` → origin. Never main, never deploy/promote.
+
+## Done criteria (all required)
+1. A media+text timeline renders through `rendering.ffmpeg`: text visible, positioned per anchor/offset, timed, faded per envelope; output plays.
+2. `support.py` accepts media+text timelines the backend renders, and remains fail-closed for unsupported features.
+3. `renderer.yaml` capabilities match implemented reality (North Star: no routing lies).
+4. `python -m pytest tests/packs/rendering/ -x -q` passes; no pre-existing test regressions in touched surfaces.
+5. A short live render smoke test (real ffmpeg invocation on a minimal media+text timeline) succeeds.
+6. Docs touched only where behavior changed (e.g. the seed plan's claims now match reality).
+
+## Final validation commands
+- `python -m pytest tests/packs/rendering/ -x -q` (authoritative suite run once by host)
+- Live smoke render of a minimal media+text timeline via the ffmpeg backend (command finalized in tasklist)
+- `git diff c6c505af..HEAD -- astrid/packs/rendering/backends/ffmpeg/` reviewed by oracle
+
+## Sync/promotion policy
+- Commit per batch checkpoint; push branch at completion; no merge to main, no deploy. Stop conditions: `blocked` / `failed` / `undetermined` / `retryable` / `escalate` per megado skill — stop and escalate rather than silently widen scope.
+
+
+## Exploration evidence + prior syntheses
+
+# Planner groundwork (v1) — schema, examples, Remotion parity, fades
+
+Extracted from grok-4.6 planning run (see receipts/planner-v1.md). Lines 114-193 of raw output.
+## How yaml / `support.py` are## 1. Exact text-clip JSON schema
+
+Canonical Python types: `TextClipData` + `TimelineEffect` in `/Users/peteromalley/Documents/reigh-workspace/Astrid-ffmpeg-oracle/astrid/core/timeline/banodoco_schema.py`. Zod lives in `@banodoco/timeline-schema` (not in-tree). Validator: `clipType=="text"` requires `text` object with string `content` (`validators/timeline.py:253-268`).
+
+**Clip (allowed keys)** `_CLIP_ALLOWED` (`banodoco_schema.py:354-361`): `id`, `at`, `track`, `clipType`, `asset`, `from`/`to`/`hold`/`speed`, `volume`, `x`/`y`/`width`/`height`, crops, `opacity`, **`params`**, **`text`**, `entrance`/`exit`/`continuous`/`transition`, **`effects`**, plus provenance fields.
+
+**`clip.text` (`TextClipData`, all optional except `content` when `clipType` is `text`)** — `banodoco_schema.py:213-220`:
+
+| field | type |
+|---|---|
+| `content` | `str` (required) |
+| `fontFamily` | `str` |
+| `fontSize` | `float` |
+| `color` | `str` |
+| `align` | `"left" \| "center" \| "right"` |
+| `bold` | `bool` |
+| `italic` | `bool` |
+
+Full-fixture text keys asserted as exactly those seven (`tests/test_schema_contract.py:103-107`). **No** `weight`/`anchor`/`offset*`/`maxWidth`/`textShadow` on `text`.
+
+**`clip.params` (layout; not in `TextClipData`)** — used by storyboard compiler + Three.js: `anchor`, `offsetX`, `offsetY`, `maxWidth`, `textShadow` (CSS string), `weight` (number). Three.js accepts **only** those params (`ThreeTimelineComposition.tsx:41-45`, `docs/reference/threejs-renderer.md:100-101`).
+
+**`clipType: "text-card"`** is a different shape: copy lives in **`params`**, not `clip.text` (`hype.timeline.full.json:160-176`). Registry aliases `text` → `text-card` (`scripts/gen_effect_registry.py:274-277`).
+
+**`clip.params` vs `clip.text`:** structured captions use **`text` for type, `params` for layout**. Effect clips put args in `params`. For Remotion `clipType:"text"`, `resolveParams` **passes `clip.text` as the effect params and drops `clip.params`** (`docs/reference/timeline-composition-v0.0.6/lib/effect-params.ts:3-7`).
+
+---
+
+## 2. Real examples (committed)
+
+From `/Users/peteromalley/Documents/reigh-workspace/Astrid-ffmpeg-oracle/examples/hype.timeline.json` (golden small fixture):
+
+**Text clip** (`49:102`):
+```json
+{"id":"brand_wordmark","at":0.0,"track":"brand","clipType":"text","hold":10.0,
+ "text":{"content":"ASTRID","fontSize":28,"color":"#ffffff","align":"right","bold":true},
+ "params":{"anchor":"top-right","offsetX":64,"offsetY":48,"textShadow":"0 2px 10px rgba(0,0,0,0.75)"}}
+```
+Caption sibling `cap_search` also has `effects: {fade_in:0.25, fade_out:0.25}` + `params.anchor/offsetY/maxWidth/textShadow`.
+
+**Media clip** (`40:47`):
+```json
+{"id":"src_open","at":0.0,"track":"v1","clipType":"media","asset":"main","to":6.0,"from":2.0}
+```
+
+Full fixture adds `fontFamily:"IBM Plex Sans"` + `italic` (`examples/hype.timeline.full.json:133-148`).
+
+---
+
+## 3. Intro storyboard (76 / 50 / 177.53s)
+
+- **Authored input:** `/Users/peteromalley/Documents/reigh-workspace/Astrid-ffmpeg-oracle/storyboards/astrid-intro.storyboard.json` (sections with `vo.text` + image/audio paths — **not** compiled timeline clips).
+- **Compiler:** `scripts/build_storyboard.py` (docstring L6-17). Compiled `timeline.json` is **not committed**; golden test rebuilds it (`tests/test_compiler_golden.py:8-11,172-199`).
+- Frozen styles (`build_storyboard.py:99-116,340-401`):
+  - captions: `text={content: vo.text, fontSize:30, color:"#ffffff", align:"center", bold:false}`, `params={anchor:"bottom-center", offsetY:56, weight:500, maxWidth:1500, textShadow:"0 1px 4px rgba(0,0,0,0.95)"}`, `effects={fade_in:0.2, fade_out:0.2}`
+  - brand: `ASTRID`, `align:"right"`, `bold:true`, `params={anchor:"top-right", offsetX:48, offsetY:40, textShadow:...}` — **no fontFamily**.
+
+---
+
+## 4. How Remotion actually paints text (parity)
+
+Two compositions (`remotion/src/Root.tsx:78-89`):
+
+**A. Default `TimelineComposition`** (`@banodoco/timeline-composition` v0.0.6, snapshot in `docs/reference/timeline-composition-v0.0.6/`):
+- `clipType:"text"` → `text-card` (`effects.generated.ts:23-26`).
+- Component: `astrid/packs/rendering/elements/effects/text-card/component.tsx`.
+- CSS: `fontFamily` = `text.fontFamily` else `theme.visual.type.families.body` else **`Chillax, Inter, Arial, sans-serif`**; `fontWeight` 700/400 (or 600 with bounds); `textAlign`; `whiteSpace: pre-wrap` (full-frame) or **`nowrap`** (if `clip.x/y/width/height`).
+- **Ignores** `params.anchor/offset/maxWidth/textShadow/weight`.
+- Fade is **`theme.motion.fadeMs` (default 450ms)**, not `clip.effects` (`component.tsx:86-93`). Media clips do use `clip.effects` via `useFadeOpacity` (`lib/fade.ts:27-50`).
+
+**B. `ThreeTimelineComposition`** (canvas 2D, `remotion/src/ThreeTimelineComposition.tsx:224-317`):
+- Font: **`"Helvetica Neue", Helvetica, Arial, sans-serif`** — **no Google Fonts**, no `text.fontFamily`.
+- Wrap on `params.maxWidth`; shadow via `params.textShadow`; weight from `params.weight` or `text.bold`; anchor+offsets as documented. **No fade.**
+
+**Fonts:** `remotion/src/fonts.ts` loads **Google Fonts** Inter / Sixtyfour / JetBrainsMono via `@remotion/google-fonts` (network). Theme `ados-paris-2026` ships **local** Chillax `.otf` + `Pilowlava.woff2` (`examples/themes/ados-paris-2026/fonts/`). Real committed clips almost never set `fontFamily` (only full hype fixture: IBM Plex Sans). Cut pipeline uses `"Inter, system-ui, sans-serif"` (`video_editing/executors/cut/timeline_build.py:37`).
+
+---
+
+## 5. Fade envelope
+
+
+
+## E1 findings — ffmpeg overlay/fade on this machine
+
+**1. Version:** `ffmpeg 7.1.1` (homebrew `7.1.1_3`, clang 17, arm64, `libx264` enabled).
+
+**2. Working filter — exit 0, output exactly 3.000000s** (PNG appended LAST; spine = overlay main):
+```
+-i base.mp4 -loop 1 -t 3 -i ov.png -filter_complex "[1:v]format=rgba,fade=t=in:st=0.500000:d=0.250000:alpha=1,fade=t=out:st=2.000000:d=0.250000:alpha=1[ov];[0:v][ov]overlay=0:0:enable='between(t,0.500000,2.250000)':format=auto[v]" -map "[v]"
+```
+
+**3. Frame checks** (outA vs base, overlay region 160×160, mean-abs RGB diff / changed px):
+- t=0.1 (outside): (0.9, 0.7, 1.0), 415/25600 px → absent ✓
+- t=0.7 (fade-in 80%): (118.2, 55.9, 112.7), 24848/25600 → visible ✓
+- t=1.5 (full): (185.9, 76.1, 178.5), 24860/25600 → visible ✓
+- t=2.6 (after out): (0.9, 0.6, 1.0) → absent ✓
+
+**4. Quoting:** `command.py:414` emits `";".join(filters)` as ONE argv element; execution is `subprocess.run(command_argv, check=True)` (run.py:124) — no shell. Single quotes in `enable='between(...)'` are ffmpeg's own filtergraph quoting; they must be literal in the Python string and survive untouched (verified via argv-list subprocess, exit 0). Don't shell-escape or double them.
+
+**5. Decimals:** literal `st=0.500000`, `between(t,0.500000,2.250000)` exit 0. `d=0.000000` is a legal no-op (exit 0) — no zero-guard needed.
+
+**Risks (ranked):**
+1. **CRITICAL — termination:** `-loop 1 -i png` without an input cap HANGS after spine EOF (killed at 120s/90s; truncated mp4, `moov atom not found`). `-shortest` does **not** fix it (60s timeout, correct wiring). Verified fixes: input `-t <END>` (exit 0, 3.1s — recommended) or branch `trim=duration=<END>,setpts=PTS-STARTPTS` (exit 0, 7.4s, slower).
+2. **Input order:** spine must be overlay main, PNG secondary; inverted wiring inherits the PNG's infinite 25fps clock (my mis-wired run: 90 frames → 3.6s duration).
+3. PNG defaults 25fps — timings are seconds-based so fades stay correct, but `-framerate <spine fps>` is cheap hygiene.
+4. Input `-t` must cover fade-out completion (`st+d ≤ -t`), else the fade never fires.
+
+Scratch files in `/tmp/e1` only; repo untouched.
+0
+
+
+## E2 findings — routing + direct-invocation reality
+
+**Q1 — no production config sets those keys.** Repo-wide grep (yaml/json/toml/py/docs, tests excluded): `simple_renderers`/`complex_renderers`/`renderers` exist only in the planner's allowlist + defaults (`planners/legacy_hybrid/run.py:63-73,418-434`) and tests (`test_legacy_hybrid.py:183,446`; `test_renderer_parity.py:419-422`). Runtime `backend_config` producers: facade `_legacy_backend_config` (`executors/render/run.py:64-95` — remotion namespace + `legacy_hybrid.theme_path` only), CLI `--backend-config` (`run.py:347-351,413`), attached passthrough (`core/rendering/attached.py:54,120-123`), cut/resume (`video_editing/executors/cut/resume.py:176-178` — remotion only). Defaults always win: simple=(ffmpeg,remotion), complex=(remotion,) (`legacy_hybrid/run.py:424-433`).
+
+**Q2 — default path never uses legacy_hybrid. [CONTRADICTS BRIEF]** `rendering.render` defaults selector `"remotion"` (`executors/render/run.py:252,408-412`). `_translate_legacy_selector` (`core/rendering/service.py:167-183`): "remotion" → **renderer** policy `("rendering.ffmpeg","rendering.remotion")` auto_route; "hybrid" → planner legacy_hybrid; "ffmpeg" → strict. For media+text, ffmpeg support fails (media-only manifest `renderer.yaml:14-20`; fail-closed `strict_support` `backends/ffmpeg/run.py:247-272`; text-card rejection `test_legacy_renderer_characterization.py:301-305`) → auto-route to remotion (warning `service.py:730-735`). `layer_stack` (`pack.yaml:55`) is qualified-id-selectable only, never default. legacy_hybrid's only "production" caller is the preserved-unimported `legacy_engine.py:326`; no production module imports it — asserted by `test_production_callers.py:202-207`. Text clips reach Remotion via renderer auto-route, not hybrid complex windows.
+
+**Q3 — protocol.** Manifest command `[python3, run.py]`, ops render/support (`renderer.yaml:6-11`). Transport argv `<cmd> <verb> --request <file> --result <file>`, stdin DEVNULL, env `ASTRID_RENDER_BACKEND` (`transport.py:149,166-189`). Request = JSON file: `{schema_version, timeline_path, output_name, assets_registry_path, window, audio, profile, backend_config, metadata}` — file paths, not contents (`contracts.py:774-786`). Pack-root launcher routes by env/namespace (`packs/rendering/run.py:63-136`). ffmpeg `main` (`run.py:680-721`): `_load_request` → `RenderRequest.from_dict(...).for_backend` (:652-656); workspace = request file's parent (:704); `_protocol_render` re-runs support, fail-closed (:523-535), writes `workspace/outputs/<output_name>` (:556-558); result JSON atomically (:710); failures `_write_failure` kinds protocol/binary_missing/internal, always exit 0 (:700-721).
+
+**Q4 — direct callers exist.** Default "remotion" auto-route invokes rendering.ffmpeg first for media-only timelines (`service.py:171-177,704-737`; provenance `auto_routed` `provenance.py:156-160`); "ffmpeg" strict (`service.py:169-170`). Finalize uses separate `rendering.ffmpeg-finalizer` (`packs/rendering/run.py:35-60`). Cut/resume: remotion only. Tests invoke directly (`test_ffmpeg_backend.py`, `test_ffmpeg_finalizer.py`). **Consequence:** adding text support to rendering.ffmpeg flips the *default* auto-route for media+text timelines to ffmpeg (`supports_full_timeline: true`), independent of hybrid.
+0
+
+
+## E3 findings — font availability + PIL reality
+
+**1. Arial filenames (macOS, this machine, Darwin 24.4.0):** `/System/Library/Fonts/Supplemental/` contains `Arial.ttf`, `Arial Bold.ttf` (space, exact), `Arial Italic.ttf`, `Arial Bold Italic.ttf`, `Arial Black.ttf`, `Arial Narrow*`, `Arial Rounded Bold.ttf`, `Arial Unicode.ttf`. Plan's Bold filename confirmed.
+
+**2. Load test:** `python3` = pyenv **3.11.11** (`~/.pyenv/versions/3.11.11`), Pillow **12.3.0** (pyproject allows `>=12.2,<13`). `ImageFont.truetype(..., 30)` → OK: `('Arial','Regular')` and `('Arial','Bold')`.
+
+**3. Suite env:** pytest pinned `9.0.2` + `pytest-timeout` (suite-wide `timeout=120`, `timeout_method="signal"`), `testpaths = ["tests", "scripts/migrations"]`. No `.python-version`, no repo `.venv`; CI (`ci.yml`) pins **3.11** (`m4-gate`/`m8-installed` matrices add 3.12; `m8` also runs `macos-latest`; `bridge-latency` 3.12; `timeline-vlm-gate` 3.14). **No font/DejaVu setup step anywhere in CI or Makefile** — Linux tests run with whatever the `ubuntu-latest` image ships ([INFERENCE: dejavu-core present, since existing path-based lookups pass there]).
+
+**4. woff2 — premise disproven empirically:** `ImageFont.truetype('examples/themes/ados-paris-2026/fonts/Pilowlava.woff2', 30)` **loaded successfully** → `('Pilowlava','Regular')`. WOFF2 support depends on the bundled FreeType having brotli — present in this Pillow 12 wheel, but not guaranteed on all builds; the resolver targets TTF paths only, so this is moot. **fonttools: not a declared dependency** (checked pyproject deps — absent) though importable in this env transitively; resolver needs none (path-based only). Verified bundled-TTF precedent loads: `PowerGrotesk-Regular.ttf` → `('Power Grotesk','Regular')`.
+
+**5. Existing references the resolver must stay consistent with:**
+- `astrid/packs/rendering/understanding/executors/visual_understanding/run.py:198-208` — exact precedent: candidate list `/System/Library/Fonts/Supplemental/Arial Bold.ttf`, `/Library/Fonts/Arial Bold.ttf`, `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`, then `load_default()`.
+- `astrid/packs/rendering/executors/timeline_storyboard/run.py:385-390` — bare-name `DejaVuSans-Bold.ttf` + `load_default()` fallback.
+- `astrid/packs/rendering/executors/timeline_visualize/render_png.py:72-89` — repo-bundled TTF, docstring says "no system-font lookup", raises `FileNotFoundError` (fail-hard, not fallback) — closest to the plan's fail-closed posture; `packs/**/*.ttf` ships in the wheel (`pyproject.toml:132`).
+- `astrid/packs/rendering/executors/video_editing/orchestrators/{animate_image,logo_ideas,vary_grid}/run.py` — hardcoded Supplemental Arial paths + `load_default()` fallback.
+- `tests/core/test_style_scope.py:44` — "Arial" as theme family name (CSS-level only, no path).
+- `remotion` components use CSS stacks (`'Chillax, Inter, Arial, sans-serif'`); no Python-side overlap.
+
+**Risks:** (a) DejaVu exists on this Mac only as user-installed fonts in `~/Library/Fonts/` — macOS has no system DejaVu, so the Linux path never resolves here (fine; Arial is primary); (b) pre-10.15 macOS kept Arial in `/Library/Fonts/` — keep that fallback candidate as `visual_understanding` already does; (c) existing repo convention is `load_default()` fallback, not raise — plan's fail-closed differs; align deliberately, don't silently diverge.
+0
+
+
+# Settled-plan wave 1 — synthesis (plan v2, snapshot 8323bcc7f350603a)
+
+Critics: GLM 5.3 Flash ×3 (kiss-scope, reuse-order, validation-fit), independent, same immutable snapshot. Verdicts below are the oracle's dispositions.
+
+## Accepted (feed to full-plan revision R2)
+
+1. **Color parsing (W1A-1 refined by W1B-2).** W1A proposed deleting `_parse_color` for `PIL.ImageColor`; W1B empirically contradicted the blanket claim (`ImageColor.getcolor('rgba(0,0,0,0.75)', 'RGBA')` raises). **Disposition: accept W1B-2** — use `ImageColor` for hex/named forms; hand-parse only the `rgba(r,g,b,a)` form needed by text/shadow colors; share one branch.
+2. **Canonical duration reuse (W1A-3 + W1B-1).** Implement `_text_window` as a thin wrapper over canonical `astrid/core/timeline/validators/timeline.py:128 _clip_duration_seconds` (re-exported `banodoco_schema.py:564`); support validates text timing through the same helper. Because canonical computes `to−from`, support must **reject text `from` explicitly** (consistent with media-bounds rejections). Accept both as one change.
+3. **Stream-copy veto in two places, not three (W1A-2).** Keep support feature forcing and the command-builder guard; drop the run.py re-check (`run.py:121` merely relays the support feature — dead weight). Accept.
+4. **Test distribution per batch (W1B-3).** Split task 6's tests into their batches (rasterize→1, support→2, argv→3, yaml retargets→4+5); task 6 keeps only live-smoke prep. Avoids red suite between batch commits. Accept.
+5. **Support reject tests for x/y/width/height and text-on-audio-track (W1C-1).** Highest-risk silent-fallback surface (Remotion silently drops x/y). Accept.
+6. **Dedupe argv `-t` assertion (W1C-2).** One assertion on input index + parsed value covers both listed forms. Accept.
+7. **Smoke probe pinned to luma/alpha (W1C-3).** Drop the checksum alternative; luma/alpha also proves the output decodes. Accept.
+8. **Precedent comment in font resolver (W1B-4).** One-line comment naming `visual_understanding`/`timeline_visualize` precedent to slow drift. Accept.
+
+## Rejected
+
+None.
+
+## Investigate
+
+None.
+
+## Wave disposition
+
+All 8 findings accepted → material revision required (R2 → plan v3). Per skill, a fresh settled-plan wave (wave 2) runs on the entire v3 before the plan is final.
+
+
+# Settled-plan wave 2 — synthesis (plan v3, snapshot 0a27e8b563a0dcf9)
+
+Critics: GLM 5.3 Flash ×2 (simplicity-reuse-order, validation-goal-coverage), independent, same immutable v3 snapshot. Wave-1 dispositions embedded; no repeats raised.
+
+## Accepted (feed to full-plan revision R3)
+
+1. **Single fades normalizer (W2A-1).** `clip.effects` accepts map or list-of-objects, but v3 specifies validate-in-support + extract-in-run — a drift risk (list accepted, map-only extracted → silent no-fade). Fix: `_parse_fades(effects) -> (fade_in, fade_out)` in `text.py` (task 1), consumed by both support (task 2) and run.py (task 4).
+2. **Single shadow-parse surface (W2A-2).** Support must call `_parse_text_shadow` (which returns the color) rather than hand-splitting the CSS string to reach a color for `_parse_color`.
+3. **Validation command gap (W2B-1).** `tests/core/rendering/test_cli.py:82` (clip_types prefix assertion) is outside `pytest tests/packs/rendering/`. Add `python -m pytest tests/core/rendering/test_cli.py -q` to the plan's validation list.
+4. **Assert declared observable contracts (W2B-2).** Add: one accept-test line asserting support report features (`media_only: False`, `text_overlay: True`, `stream_copy: False` when text present); one dict-equality assertion on the yaml `features` block in the yaml test.
+5. **Smoke timed-window assertion (W2B-3).** Live smoke adds: post-END sampled frame luma ≈ pre-AT frame (overlay window is observed live, not only argv-asserted). One extra frame extract, no new fixture.
+
+## Rejected
+
+None.
+
+## Investigate
+
+None.
+
+## Noted, no action
+
+- W2A-3: batch order verified safe as written (service.py:1046-1054 statically rejects clipTypes outside manifest clip_types before support runs, so yaml-last keeps batches 2-4 behaviorally inert); folding checkpoints 2-5 is neutral. Keep 1→2→3→4+5→6→7→8.
+
+## Wave disposition
+
+5 accepted → material revision R3 (v4), then a fresh settled wave (wave 3) on the entire v4. Plan settles only when v4 is STABLE and wave 3 yields no accepted material simplification.
+
+
+## Your lens
+
+Validation proportionality AND goal coverage on v4: is every agent-goal done-criterion (1-6) mapped to a concrete test/validation? any ceremonial test left? any uncovered observable contract (support report features, yaml features, auto-route consequences, docs claims)? does the smoke actually prove hang-termination, timed window, and non-blank output?
+
+If you find nothing material for your lens, say exactly `NO MATERIAL FINDINGS`.

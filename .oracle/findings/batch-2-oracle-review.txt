@@ -1,0 +1,28 @@
+PASS
+
+AC1: PASS — accept tests cover text on the media visual track (`test_ffmpeg_support.py:683`), fades (701), and an extra text-only visual track (720); `structural_reasons` allows extra visual tracks iff non-empty (support.py:405-411) and excludes text from gap/overlap logic (415-417).
+AC2: PASS — `test_support_accepts_text_overlay_with_fades_and_vetoes_stream_copy` asserts media_only False, text_overlay True, stream_copy False, whole_media False, fade_envelope True (test:713-717); features computed at support.py:848-875.
+AC3: PASS — no-fades accept asserts `fade_envelope is False` plus the other four features (test:694-698).
+AC4: PASS — parametrized table (test:743-824) covers text-only-no-media, extra visual MEDIA track, empty extra visual track, unknown fade key via `_parse_fades` ("unsupported effect keys"), unknown params, missing font (resolver→None), media fade-in retained generically, `from: 0`, x/y via `_POSITION_KEYS`, audio track. All named cases present and fail-closed.
+AC5: PASS — `test_support_rejects_non_media_timeline` lives in `test_ffmpeg_backend.py:214`, untouched; only one "text-card" occurrence in the whole diff (the retarget).
+AC6: PASS — retarget at test:236 (`clipType: "text-card"`); `text-card` fails via support.py:386-389.
+AC7: PASS — support.py imports only `_parse_*`/`_resolve_font_path`/`_text_window`/`_finite_number` (support.py:28-35); no PIL/rasterize/load_default (grep clean); shadow color goes through `_parse_text_shadow`→`_parse_color` (text.py:134), no CSS color re-extraction.
+AC8: PASS — renderer.yaml:13-24 still `clip_types: [media]`, `media_only: true`; delta touched only support.py + test file.
+
+HOLES: none. Text `from` by key presence (support.py:285, including `from: 0`); text on audio track (283-284); text asset (289); unknown params allowlist (240-246); non-fade text effects — top-level `entrance`/`exit`/`continuous`/`keyframes` still generic-rejected (202-208, only `effects` carved out); hold:0 → `_clip_duration_seconds` returns 0.0 → `_text_window` raises (text.py:253-256); to-without-hold → duration=`to` relative to `at`, not absolute (timeline.py:128-136); font missing → reason (755-761); media effects keep full `_EFFECT_KEYS` (202).
+POSITION_KEYS: intact — unconditional check at support.py:188, no text filter.
+MEDIA_EFFECTS: intact — carve-out is `if is_text` only (202).
+
+NORTH STAR:
+- Simplest sufficient toolchain: ALIGNED — reuses B1 helpers; one set-difference carve-out, no new layers.
+- Capability-driven routing: ALIGNED — fail-closed, evidence-based, font probed not assumed.
+- Output parity: ALIGNED — bold/color/shadow/window checks mirror rasterizer semantics exactly (support.py:266-273 vs text.py:292-293).
+- Offline and fast: N/A — no render-time additions.
+- Anti-pattern routing lies: ALIGNED — yaml still media-only, support ahead is allowed.
+- Anti-pattern yaml/support lag: ALIGNED — yaml does not lead.
+- Anti-pattern speculative layers: ALIGNED — no new config, no parallel parsers.
+- Anti-pattern silent fallbacks: ALIGNED — every carve-out still yields a reason; `fade_envelope` ValueError path (853-854) only runs on already-rejected reports.
+- Anti-pattern scope creep: ALIGNED — no overlay/run changes, no auto-route.
+
+ELEGANCE: ALIGNED — two nits, not contract holes: (1) `_text_wants_bold` duplicates the rasterizer's bold rule (support.py:266-273 vs text.py:292-293) — drift risk, docstring acknowledges; (2) present-but-non-string `text.color` (e.g. `color: 5`) is skipped at support (304 guard) and identically defaulted to white at render (text.py:283-288) — parity holds so output is deterministic, but "present means parsed" would be stricter. Consider sharing one bold-decision helper and rejecting non-string colors next time either file is touched.
+ISSUES: none

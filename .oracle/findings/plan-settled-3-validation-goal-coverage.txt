@@ -1,0 +1,14 @@
+Findings, ranked (evidence: plan tasks; `support.py#B2F1`; `renderer.yaml#9888`; `test_cli.py#6C67`):
+
+1. **Support-report `fade_envelope` is computed but never asserted.** Task 2 Changes add `fade_envelope: <any text clip whose _parse_fades pair has a value > 0>` to report features, but task 2's accept tests assert only `media_only`/`text_overlay`/`stream_copy`. It is a new observable contract (serializes in the support payload; the yaml half is pinned by task 5's dict-equality, the request-sensitive half by nothing). Fix: extend the existing accept assert with `fade_envelope is True`, plus one no-effects text accept asserting `False` — two lines on existing fixtures.
+
+2. **Done-criterion 1's "positioned per anchor/offset" has no pixel-level evidence anywhere.** Task 1's anchor tests hit `_anchor_origin` (helper-level); rasterize tests skip when the resolver returns `None` and the plan states no ink-placement assertion; the smoke proves non-blank + window, not position (a full-canvas PNG mis-anchored still passes). Fix: one rasterize test asserting ink bbox lands in the anchored region (e.g. top-right + offsetX/offsetY), same skip-if-no-font guard as its siblings.
+
+3. **Task 4 (run.py wiring) ships untested until batch 6.** A wiring bug (empty specs, `at`/`end` swap) is green through batches 4–5; command tests take specs as given. Fix: one unit test on the allowed private spec-builder (patched rasterize; assert `at/end` via `_text_window`, fades via `_parse_fades`).
+
+4. **Smoke in-window sample unpinned.** Plan's own example (window [1,2], fades 0.2) gives alpha≈0 at t=1.0 — sampling at window start is a false blank. Specify mid-window (t=1.5).
+
+5. **Ceremonial:** task 2's reject list re-covers `text-card`, already pinned by retained `test_support_rejects_non_media_timeline` (media + text-card fixture). Drop from the new list.
+
+No other gaps: `supports_full_timeline` is a static manifest capability already true (`renderer.yaml:23`), so auto-route flip needs only support-accept + yaml — plan's evidence chain holds; test_cli.py:82-83 is the only external manifest pin and is covered.
+0

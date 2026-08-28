@@ -1,0 +1,27 @@
+## E1 findings — ffmpeg overlay/fade on this machine
+
+**1. Version:** `ffmpeg 7.1.1` (homebrew `7.1.1_3`, clang 17, arm64, `libx264` enabled).
+
+**2. Working filter — exit 0, output exactly 3.000000s** (PNG appended LAST; spine = overlay main):
+```
+-i base.mp4 -loop 1 -t 3 -i ov.png -filter_complex "[1:v]format=rgba,fade=t=in:st=0.500000:d=0.250000:alpha=1,fade=t=out:st=2.000000:d=0.250000:alpha=1[ov];[0:v][ov]overlay=0:0:enable='between(t,0.500000,2.250000)':format=auto[v]" -map "[v]"
+```
+
+**3. Frame checks** (outA vs base, overlay region 160×160, mean-abs RGB diff / changed px):
+- t=0.1 (outside): (0.9, 0.7, 1.0), 415/25600 px → absent ✓
+- t=0.7 (fade-in 80%): (118.2, 55.9, 112.7), 24848/25600 → visible ✓
+- t=1.5 (full): (185.9, 76.1, 178.5), 24860/25600 → visible ✓
+- t=2.6 (after out): (0.9, 0.6, 1.0) → absent ✓
+
+**4. Quoting:** `command.py:414` emits `";".join(filters)` as ONE argv element; execution is `subprocess.run(command_argv, check=True)` (run.py:124) — no shell. Single quotes in `enable='between(...)'` are ffmpeg's own filtergraph quoting; they must be literal in the Python string and survive untouched (verified via argv-list subprocess, exit 0). Don't shell-escape or double them.
+
+**5. Decimals:** literal `st=0.500000`, `between(t,0.500000,2.250000)` exit 0. `d=0.000000` is a legal no-op (exit 0) — no zero-guard needed.
+
+**Risks (ranked):**
+1. **CRITICAL — termination:** `-loop 1 -i png` without an input cap HANGS after spine EOF (killed at 120s/90s; truncated mp4, `moov atom not found`). `-shortest` does **not** fix it (60s timeout, correct wiring). Verified fixes: input `-t <END>` (exit 0, 3.1s — recommended) or branch `trim=duration=<END>,setpts=PTS-STARTPTS` (exit 0, 7.4s, slower).
+2. **Input order:** spine must be overlay main, PNG secondary; inverted wiring inherits the PNG's infinite 25fps clock (my mis-wired run: 90 frames → 3.6s duration).
+3. PNG defaults 25fps — timings are seconds-based so fades stay correct, but `-framerate <spine fps>` is cheap hygiene.
+4. Input `-t` must cover fade-out completion (`st+d ≤ -t`), else the fade never fires.
+
+Scratch files in `/tmp/e1` only; repo untouched.
+0
