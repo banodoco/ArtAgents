@@ -70,6 +70,16 @@ def _load_timeline_from_fixture(timeline_id: str) -> tuple[dict, AssetRegistry]:
                 {"id": "sub_clip_3", "at": 0.5, "hold": 3.0, "track": "visual", "clipType": "media"},
             ],
         )
+    elif timeline_id  == "sub_with_nested_shot":
+        config, reg = _make_timeline_fixture(
+            "sub_with_nested_shot",
+            tracks=[{"id": "visual", "kind": "visual"}],
+            clips=[
+                {"id": "sub_media_clip", "at": 0, "hold": 2.0, "track": "visual", "clipType": "media"},
+                {"id": "nested_shot_in_sub", "at": 1.0, "hold": 1.0, "track": "visual", "clipType": "shot", "params": {"shot_id": "nested_shot_in_sub", "timeline_document_id": "sub2"}},
+            ],
+        )
+
     elif timeline_id == "deep_sub":
         config, reg = _make_timeline_fixture(
             "deep_sub",
@@ -203,17 +213,7 @@ def test_nested_shot_raises_error():
                 "clipType": "shot",
                 "params": {
                     "shot_id": "shot_1",
-                    "timeline_document_id": "sub1",
-                },
-            },
-            {
-                "id": "nested_shot",
-                "at": 1.0,
-                "hold": 1.0,
-                "clipType": "shot",
-                "params": {
-                    "shot_id": "nested_shot",
-                    "timeline_document_id": "sub2",
+                    "timeline_document_id": "sub_with_nested_shot",
                 },
             },
         ],
@@ -327,16 +327,16 @@ def test_memory_only_input_unmodified():
     assert expanded_config["clips"][1]["at"] == 1.5
 
     # Verify expanded_registry has assets from sub1.
-    assert len(expanded_registry) == 0  # sub1 has no assets in our fixture
+    assert len(expanded_registry["assets"]) == 0  # sub1 has no assets in our fixture
 
     # Verify original configs/registry are untouched (no side effects).
     assert original_config["clips"][0]["id"] == "shot_1"  # original clip is still there
     assert original_config["clips"][0]["at"] == 0.0  # original at is unchanged
-    assert original_registry.total_assets == 0  # original registry is empty
+    assert len(original_registry.get("assets", {})) == 0  # original registry is empty
 
 
 def test_deeply_nested_shot_raises_error():
-    """Shot clips nested inside a sub-doc shot also fail closed."""
+    """A sub-document containing its own shot clip fails closed (no recursion)."""
     config, registry = _make_timeline_fixture(
         "main",
         clips=[
@@ -347,7 +347,7 @@ def test_deeply_nested_shot_raises_error():
                 "clipType": "shot",
                 "params": {
                     "shot_id": "shot_1",
-                    "timeline_document_id": "deep_sub",
+                    "timeline_document_id": "sub_with_nested_shot",
                 },
             },
         ],
@@ -399,11 +399,9 @@ def test_empty_sub_doc_all_dropped():
         load_timeline=load_empty,
     )
 
-    # Shot should remain as placeholder (no sub-clips expanded).
-    # The shot clip ID should still be in the clips list.
+    # Shot with an empty sub-doc contributes NO clips (all dropped).
     shot_1_clips = [c for c in expanded_config["clips"] if c.get("clipType") == "shot"]
-    assert len(shot_1_clips) == 1
-    assert shot_1_clips[0]["id"] == "shot_1"
+    assert len(shot_1_clips) == 0
     # No expanded sub-clips should be present.
     assert all(c["clipType"] != "shot" for c in expanded_config["clips"])
 
@@ -459,17 +457,12 @@ def test_multiple_shots_expansion():
         load_timeline=load_timeline,
     )
 
-    # Verify both shots were expanded.
-    shot_1_clips = [c for c in expanded_config["clips"] if c["clipType"] == "shot"]
-    assert len(shot_1_clips) == 1
-    assert shot_1_clips[0]["id"] == "shot_1"
+    # Verify both shots were fully expanded (no shot clips remain).
+    shot_remaining = [c for c in expanded_config["clips"] if c["clipType"] == "shot"]
+    assert len(shot_remaining) == 0
 
-    shot_2_clips = [c for c in expanded_config["clips"] if c["clipType"] == "shot"]
-    assert len(shot_2_clips) == 1
-    assert shot_2_clips[0]["id"] == "shot_2"
-
-    # Verify total clip count.
-    assert len(expanded_config["clips"]) == 5  # 2 expanded shots (2+2 clips) + 1 parent media
+    # Verify total clip count: 2 (sub1) + 1 (sub2) + 1 parent media.
+    assert len(expanded_config["clips"]) == 4
 
     # Verify sub_clip_1 from sub1 and sub_clip_3 from sub2 are both present.
     assert any(c["id"] == "sub_clip_1" for c in expanded_config["clips"])

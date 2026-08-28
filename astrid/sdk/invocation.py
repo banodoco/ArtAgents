@@ -10,6 +10,7 @@ import json
 import warnings
 from collections.abc import Mapping
 from contextlib import nullcontext, redirect_stdout
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from .exceptions import (
     _sdk_error_from_exception,
 )
 from .results import DiscoveryResult, InvocationResult, _json_safe, _json_safe_mapping
+from astrid.core.timeline.expand_shots import expand_shot_clips
 
 
 def run_executor(request: Any, registry: Any) -> Any:
@@ -611,26 +613,33 @@ def _validate_managed_profile_theme_compatibility(
 
 def _load_timeline_from_connection(
     timeline_id: str,
+    *,
+    projects_root: str | Path | None = None,
+    project: str | None = None,
 ) -> tuple[Mapping[str, object], Mapping[str, object]]:
     """Load a timeline document and registry by ID from the kernel database.
-    
+
     This is a helper for expand_shot_clips during managed render prep. It reads
     from the same kernel database that resolved the snapshot, ensuring that the
     sub-documents of shot clips are current and consistent with the admission
     control's stream head.
-    
+
     The stored sqlite timeline document is NEVER written back: expansion is
     purely memory-only.
     """
-    from pathlib import Path
-    from astrid.core.timeline.expand_shots import _LoadTimelineFn
+    import sqlite3
     from typing import TYPE_CHECKING
-    
+
     if TYPE_CHECKING:
-        from astrid.core.timeline.asset_registry import AssetRegistry
-    
-    projects_root = Path.cwd()  # Will be overridden in the calling context
-    database = projects_root.resolve() / ".astrid" / "astrid.sqlite3"
+        from astrid.core.timeline.expand_shots import _LoadTimelineFn
+
+    if projects_root is None:
+        projects_root = Path.cwd()
+    # The snapshot resolver builds the DB path as:
+    #   resolve_managed_render_snapshot(projects_root) → projects_root/.astrid/astrid.sqlite3
+    # where the caller passes the PROJECT DIR as projects_root (project_root=<dir>).
+    # Reuse that exact derivation so parent snapshot and shot sub-docs read one DB.
+    database = Path(str(projects_root)).expanduser().resolve() / ".astrid" / "astrid.sqlite3"
     if not database.is_file():
         raise ValueError("Astrid kernel database is unavailable")
     conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
@@ -759,14 +768,22 @@ def _prepare_managed_render_inputs(
             timeline_ref=timeline_ref.strip(),
             expected_version=expected_version,
         )
-        validate_managed_render_snapshot(snapshot)
 
-        # Expand shot clips before admission validation.
-        snapshot.config, snapshot.registry = expand_shot_clips(
+        # Expand shot clips before admission validation (memory-only; the
+        # stored sqlite document is never written back).
+        expanded_config, expanded_registry = expand_shot_clips(
             snapshot.config,
             snapshot.registry,
-            load_timeline=_load_timeline_from_connection,
+            load_timeline=lambda timeline_id: _load_timeline_from_connection(
+                timeline_id, projects_root=projects_root, project=project
+            ),
         )
+        snapshot = replace(
+            snapshot,
+            config=expanded_config,
+            registry=expanded_registry,
+        )
+        validate_managed_render_snapshot(snapshot)
     except ManagedRenderValidationError as exc:
         raise CapabilityValidationError(str(exc), details=exc.details) from exc
     except ValueError as exc:

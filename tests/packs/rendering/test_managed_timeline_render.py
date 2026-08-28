@@ -619,14 +619,14 @@ def test_expand_shot_clips_before_admission():
         
         # Setup: create a simple project with a timeline containing a shot clip
         projects_root = tmp_path
-        demo_dir = projects_root / "demo"
-        demo_dir.mkdir()
-        astrid_db = demo_dir / ".astrid"
+        # Resolver/loader derive the DB as <projects_root>/.astrid/astrid.sqlite3
+        # (project_root is passed as the project dir; no slug is appended).
+        astrid_db = projects_root / ".astrid"
         astrid_db.mkdir()
         db_path = astrid_db / "astrid.sqlite3"
         
         # Initialize database
-        sqlite3.connect(f"file:{db_path}?mode=rw", uri=True).execute(
+        sqlite3.connect(f"file:{db_path}?mode=rwc", uri=True).execute(
             "CREATE TABLE IF NOT EXISTS projects (id TEXT, slug TEXT, PRIMARY KEY (id, slug))"
         ).execute(
             "CREATE TABLE IF NOT EXISTS timelines (id TEXT, project_id TEXT, event_stream_id TEXT, document_json TEXT, asset_registry_json TEXT, PRIMARY KEY (id))"
@@ -649,18 +649,17 @@ def test_expand_shot_clips_before_admission():
             "clips": [
                 {
                     "id": "parent_clip",
-                    "clipType": "clip",
+                    "clipType": "media",
                     "at": 0.0,
-                    "duration": 10.0,
-                    "params": {
-                        "track": "A",
-                    },
+                    "track": "A",
+                    "hold": 10.0,
+                    "asset": "parent-asset",
                 },
                 {
                     "id": "shot_clip",
                     "clipType": "shot",
                     "at": 0.0,
-                    "duration": 5.0,
+                    "track": "A",
                     "hold": 5.0,
                     "params": {
                         "shot_id": "my_shot",
@@ -669,7 +668,7 @@ def test_expand_shot_clips_before_admission():
                 },
             ],
             "tracks": [
-                {"id": "A", "clips": ["parent_clip"]},
+                {"id": "A", "kind": "visual", "label": "Visual"},
             ],
             "duration": 10.0,
         }
@@ -677,10 +676,10 @@ def test_expand_shot_clips_before_admission():
         # Insert a sub-timeline (the shot's content)
         sub_doc = {
             "clips": [
-                {"id": "sub_clip_1", "clipType": "clip", "at": 0.0, "duration": 2.0, "params": {"track": "A"}},
-                {"id": "sub_clip_2", "clipType": "clip", "at": 2.0, "duration": 2.0, "params": {"track": "A"}},
+                {"id": "sub_clip_1", "clipType": "media", "at": 0.0, "track": "A", "hold": 2.0, "asset": "sub1-asset"},
+                {"id": "sub_clip_2", "clipType": "media", "at": 2.0, "track": "A", "hold": 2.0, "asset": "sub2-asset"},
             ],
-            "tracks": [{"id": "A", "clips": ["sub_clip_1", "sub_clip_2"]}],
+            "tracks": [{"id": "A", "kind": "visual", "label": "Visual"}],
             "duration": 4.0,
         }
         
@@ -688,7 +687,7 @@ def test_expand_shot_clips_before_admission():
             conn.execute("INSERT INTO event_streams (id, head_seq) VALUES (?, 1)", ("es-demo-project-timeline",))
             conn.execute(
                 "INSERT INTO timelines (id, project_id, event_stream_id, document_json, asset_registry_json) VALUES (?, ?, ?, ?, ?)",
-                ("main-timeline", "demo-project", "es-demo-project-timeline", json.dumps(parent_doc), '{"assets": {}}'),
+                ("main-timeline", "demo-project", "es-demo-project-timeline", json.dumps(parent_doc), '{"assets": {"parent-asset": {"file": "/tmp/parent.png"}}}'),
             )
             # Insert timeline.created event
             conn.execute(
@@ -696,15 +695,10 @@ def test_expand_shot_clips_before_admission():
                 ("es-demo-project-timeline", json.dumps({"data": {"timeline_id": "main-timeline", "timeline_ulid": "main-ulid", "slug": "main"}}), "main-created-event"),
             )
             # Insert timeline.archived event
-            conn.execute(
-                "INSERT INTO events (stream_id, seq, payload_json, kind, event_id) VALUES (?, 2, ?, 'timeline.archived', ?)",
-                ("es-demo-project-timeline", json.dumps({"data": {"timeline_id": "main-timeline"}}), "main-archived-event"),
-            )
-            
             # Insert the sub-timeline
             conn.execute(
                 "INSERT INTO timelines (id, project_id, event_stream_id, document_json, asset_registry_json) VALUES (?, ?, ?, ?, ?)",
-                ("sub-timeline-id", "demo-project", "es-demo-project-sub", json.dumps(sub_doc), '{"assets": {"sub1": {"id": "sub1"}}}'),
+                ("sub-timeline-id", "demo-project", "es-demo-project-sub", json.dumps(sub_doc), '{"assets": {"sub1-asset": {"file": "/tmp/sub1.png"}, "sub2-asset": {"file": "/tmp/sub2.png"}}}'),
             )
             conn.execute(
                 "INSERT INTO events (stream_id, seq, payload_json, kind, event_id) VALUES (?, 1, ?, 'timeline.created', ?)",
@@ -728,15 +722,19 @@ def test_expand_shot_clips_before_admission():
             project_root=projects_root,
         )
         
-        # Verify the flattened config has the expanded clips
-        flattened_clips = prepared["config"]["clips"]
-        assert len(flattened_clips) == 2  # sub_clip_1 + sub_clip_2 (shot removed, expanded in)
-        assert flattened_clips[0]["id"] == "sub_clip_1"
-        assert flattened_clips[1]["id"] == "sub_clip_2"
+        # Verify the materialized timeline file has the expanded clips (the
+        # values dict carries materialized paths, not the config itself).
+        import json as _json
+        materialized = _json.loads(Path(prepared["timeline"]).read_text())
+        flattened_clips = materialized["clips"]
+        assert len(flattened_clips) == 3  # parent_clip + sub_clip_1 + sub_clip_2
+        assert flattened_clips[1]["id"] == "sub_clip_1"
+        assert flattened_clips[2]["id"] == "sub_clip_2"
         assert "shot_clip" not in [c["id"] for c in flattened_clips]  # shot clip removed
         
         # Verify the database content is unchanged (memory-only)
         with sqlite3.connect(f"file:{db_path}?mode=rw", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
             after_row = conn.execute(
                 "SELECT document_json FROM timelines WHERE id = 'main-timeline'",
             ).fetchone()
@@ -757,14 +755,14 @@ def test_expand_shot_clips_without_shot_still_valid():
     with tempfile.TemporaryDirectory() as tmp_path:
         tmp_path = Path(tmp_path)
         projects_root = tmp_path
-        demo_dir = projects_root / "demo"
-        demo_dir.mkdir()
-        astrid_db = demo_dir / ".astrid"
+        # Resolver/loader derive the DB as <projects_root>/.astrid/astrid.sqlite3
+        # (project_root is passed as the project dir; no slug is appended).
+        astrid_db = projects_root / ".astrid"
         astrid_db.mkdir()
         db_path = astrid_db / "astrid.sqlite3"
         
         # Initialize database
-        sqlite3.connect(f"file:{db_path}?mode=rw", uri=True).execute(
+        sqlite3.connect(f"file:{db_path}?mode=rwc", uri=True).execute(
             "CREATE TABLE IF NOT EXISTS projects (id TEXT, slug TEXT, PRIMARY KEY (id, slug))"
         ).execute(
             "CREATE TABLE IF NOT EXISTS timelines (id TEXT, project_id TEXT, event_stream_id TEXT, document_json TEXT, asset_registry_json TEXT, PRIMARY KEY (id))"
@@ -784,9 +782,9 @@ def test_expand_shot_clips_without_shot_still_valid():
         # Insert a simple timeline WITHOUT shot clips
         simple_doc = {
             "clips": [
-                {"id": "clip1", "clipType": "clip", "at": 0.0, "duration": 5.0, "params": {"track": "A"}},
+                {"id": "clip1", "clipType": "media", "at": 0.0, "hold": 5.0, "track": "A", "asset": "clip1-asset"},
             ],
-            "tracks": [{"id": "A", "clips": ["clip1"]}],
+            "tracks": [{"id": "A", "kind": "visual", "label": "Visual"}],
             "duration": 5.0,
         }
         
@@ -794,7 +792,7 @@ def test_expand_shot_clips_without_shot_still_valid():
             conn.execute("INSERT INTO event_streams (id, head_seq) VALUES (?, 1)", ("es-demo-project-simple",))
             conn.execute(
                 "INSERT INTO timelines (id, project_id, event_stream_id, document_json, asset_registry_json) VALUES (?, ?, ?, ?, ?)",
-                ("simple-timeline", "demo-project", "es-demo-project-simple", json.dumps(simple_doc), '{"assets": {}}'),
+                ("simple-timeline", "demo-project", "es-demo-project-simple", json.dumps(simple_doc), '{"assets": {"clip1-asset": {"file": "/tmp/clip1.png"}}}'),
             )
             conn.execute(
                 "INSERT INTO events (stream_id, seq, payload_json, kind, event_id) VALUES (?, 1, ?, 'timeline.created', ?)",
@@ -808,9 +806,11 @@ def test_expand_shot_clips_without_shot_still_valid():
             project_root=projects_root,
         )
         
-        # Verify the config is unchanged
-        assert len(prepared["config"]["clips"]) == 1
-        assert prepared["config"]["clips"][0]["id"] == "clip1"
+        # Verify the materialized timeline file is unchanged (no shot clips).
+        import json as _json
+        materialized = _json.loads(Path(prepared["timeline"]).read_text())
+        assert len(materialized["clips"]) == 1
+        assert materialized["clips"][0]["id"] == "clip1"
 
 
 def test_expand_hook_called_between_resolve_and_validate():
