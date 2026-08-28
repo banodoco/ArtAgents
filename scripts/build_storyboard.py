@@ -366,7 +366,7 @@ def compile_storyboard(
                 "hold": hold_r,
             }
             if img_origin:
-                broll["generation"] = {"prompt": img_origin} if img_origin else {}
+                broll["generation"] = img_origin
             section_clips.append(broll)
         else:
             # No VO: the broll plate stands alone for the authored default hold.
@@ -643,6 +643,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PLAN_JSON",
         help="Optional VO alignment plan.json ({segments: [{slug, start, duration}, …]}); "
         "snaps section starts to VO segment times.",
+    )
+    compile_cmd.add_argument(
+        "--shots",
+        action="store_true",
+        default=False,
+        help="Enable shot projection: compile with kernel writes (parent timeline + shots sub-timelines). Flat emitter stays default.",
     )
     compile_cmd.add_argument(
         "--out",
