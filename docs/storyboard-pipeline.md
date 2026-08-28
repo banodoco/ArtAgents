@@ -180,10 +180,20 @@ shot↔timeline-document association stays in `metadata_json` (open-shaped by de
    parity test becomes the expansion test.
 5. Render through the unchanged ffmpeg/Remotion backends.
 
-### Phase B — Reigh integration
+### Phase B — Reigh integration: one schema for shots
 
-Shot detail view (already exists in `reigh-live-main`) reads/edits the shot's own timeline
-document through the bridge; the parent timeline shows `shot` clips as atomic blocks.
+Verified in `reigh-live-main`: today the individual shot view
+(`travel-between-images/ShotEditor`) edits the **travel segments model** (`Shot` + segments +
+guidance), while the timeline edits `TimelineConfig` clips — two schemas that never meet.
+Document-shot mode groups clips derived from the flat document; `navigateToShot` opens the
+segment-model editor.
+
+With shots owning real `TimelineConfig` documents (Phase A), the shot view unifies onto the
+timeline schema: mount the existing `TimelineEditorCore` against the shot's own document
+(served through the bridge), replacing the segment-model view for composed shots. The parent
+timeline shows `shot` clips as atomic blocks; navigating into one opens the same timeline
+editor at shot scope. One content model end to end — authored storyboard, shot documents,
+parent timeline, renderers.
 
 ### Phase C — true nested render (only if expansion proves insufficient)
 
