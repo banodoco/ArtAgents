@@ -13,11 +13,14 @@ description: Render legacy media-only timelines with FFmpeg.
 capabilities:
   clip_types:
     - media
+    - text
   track_types:
     - visual
     - audio
   features:
-    media_only: true
+    media_only: false
+    text_overlay: true
+    fade_envelope: true
     stream_copy: true
     sequential_audio: true
   supports_full_timeline: true

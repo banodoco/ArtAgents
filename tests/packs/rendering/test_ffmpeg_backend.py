@@ -478,3 +478,203 @@ def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> Non
 
 def test_audio_reactive_compatibility_path_is_same_module() -> None:
     assert legacy_audio_reactive is audio_reactive_colour
+
+
+def test_live_encode_stills_text_wav(tmp_path: Path) -> None:
+    """Test live encode fixture with 2-section stills + text + wav.
+
+    This test creates:
+    1. Still 1: blue color PNG (hold 3s)
+    2. Still 2: blue color PNG (hold 3s)
+    3. Text overlay with "Hello World" (hold 4s)
+    4. WAV audio (44100Hz, 16-bit, mono)
+
+    Verifies:
+    - Duration approximates sum of holds (ffprobe)
+    - At least 1 extracted frame has caption pixels (diff vs render without caption)
+    """
+    import json
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    # Create fixture assets
+    assets = {
+        "assets": {
+            "still1": {
+                "type": "image",
+                "path": "test_fixture.png",
+                "duration": 3.0,
+                "resolution": "1280x720",
+                "fps": 30,
+            },
+            "still2": {
+                "type": "image",
+                "path": "test_fixture.png",
+                "duration": 3.0,
+                "resolution": "1280x720",
+                "fps": 30,
+            },
+            "audio": {
+                "type": "audio",
+                "path": "test_fixture.wav",
+                "duration": 1.0,
+            },
+        }
+    }
+
+    # Create timeline with 2 stills + text + audio
+    timeline = {
+        "tracks": [
+            {"id": "v", "kind": "visual", "label": "Video"},
+            {"id": "a", "kind": "audio", "label": "Audio"},
+        ],
+        "clips": [
+            {
+                "id": "s1",
+                "clipType": "media",
+                "track": "v",
+                "asset": "still1",
+                "at": 0,
+                "hold": 3.0,
+                "from": 0,
+                "to": 3.0,
+            },
+            {
+                "id": "s2",
+                "clipType": "media",
+                "track": "v",
+                "asset": "still2",
+                "at": 3.0,
+                "hold": 3.0,
+                "from": 0,
+                "to": 3.0,
+            },
+            {
+                "id": "t1",
+                "clipType": "text",
+                "track": "v",
+                "at": 3.0,
+                "hold": 4.0,
+                "text": {
+                    "content": "Hello World",
+                    "fontSize": 72,
+                    "color": "#FFFFFF",
+                    "align": "center",
+                    "textShadow": {"color": "#000000", "blur": 2, "offsetX": 2, "offsetY": 2},
+                },
+            },
+            {
+                "id": "audio1",
+                "clipType": "media",
+                "track": "a",
+                "asset": "audio",
+                "at": 0,
+                "from": 0,
+                "to": 1.0,
+            },
+        ],
+    }
+
+    # Write inputs
+    timeline_path = tmp_path / "timeline.json"
+    assets_path = tmp_path / "assets.json"
+
+    with open(timeline_path, "w") as f:
+        json.dump(timeline, f)
+    with open(assets_path, "w") as f:
+        json.dump(assets, f)
+
+    # Copy fixtures
+    Path(tmp_path / "test_fixture.png").parent.mkdir(exist_ok=True)
+    Path(tmp_path / "test_fixture.wav").parent.mkdir(exist_ok=True)
+    import shutil
+    shutil.copy("tests/packs/rendering/test_fixture.png", tmp_path / "test_fixture.png")
+    shutil.copy("tests/packs/rendering/test_fixture.wav", tmp_path / "test_fixture.wav")
+
+    # Run render
+    from astrid.packs.rendering.executors.render import run as facade
+
+    request = RenderRequest(
+        input_path=str(timeline_path),
+        assets_registry_path=str(assets_path),
+        output_name="output.mp4",
+        backend_config={},
+    )
+
+    result = facade(
+        request,
+        output_dir=str(tmp_path),
+        selector="ffmpeg",
+        system_check=True,
+    )
+
+    assert result.success, f"Render failed: {result.error}"
+
+    output_path = tmp_path / "output.mp4"
+
+    # Verify duration
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(output_path)]
+    probe_result = subprocess.run(cmd, capture_output=True, text=True)
+    assert probe_result.returncode == 0, f"ffprobe failed: {probe_result.stderr}"
+    duration = float(probe_result.stdout.strip())
+    assert abs(duration - 7.0) < 0.5, f"Duration should be ~7s (sum of holds), got {duration}"
+
+    # Verify caption is rendered by checking for non-black pixels
+    # Render WITHOUT text
+    timeline_no_text = dict(timeline)
+    timeline_no_text["clips"] = [
+        clip for clip in timeline["clips"] if clip["clipType"] != "text"
+    ]
+    with open(timeline_path / "no_text.json", "w") as f:
+        json.dump(timeline_no_text, f)
+
+    request_no_text = RenderRequest(
+        input_path=str(timeline_path / "no_text.json"),
+        assets_registry_path=str(assets_path),
+        output_name="no_text.mp4",
+        backend_config={},
+    )
+
+    result_no_text = facade(
+        request_no_text,
+        output_dir=str(tmp_path),
+        selector="ffmpeg",
+        system_check=True,
+    )
+
+    assert result_no_text.success, f"Render without text failed: {result_no_text.error}"
+
+    no_text_path = tmp_path / "no_text.mp4"
+
+    # Extract frames and compare
+    cmd_extract = [
+        "ffmpeg",
+        "-y",
+        "-i", str(output_path),
+        "-vf", "select=\'eq(n,150)\'",
+        "-vsync", "0",
+        str(tmp_path / "caption_frame.png"),
+    ]
+    subprocess.run(cmd_extract, check=True, capture_output=True)
+
+    cmd_extract_no_text = [
+        "ffmpeg",
+        "-y",
+        "-i", str(no_text_path),
+        "-vf", "select=\'eq(n,150)\'",
+        "-vsync", "0",
+        str(tmp_path / "no_caption_frame.png"),
+    ]
+    subprocess.run(cmd_extract_no_text, check=True, capture_output=True)
+
+    # Check that caption frame has non-black pixels (text)
+    from PIL import Image
+    caption_frame = Image.open(tmp_path / "caption_frame.png")
+    no_caption_frame = Image.open(tmp_path / "no_caption_frame.png")
+
+    caption_pixels = [p for p in caption_frame.getdata() if p[2] > 100]  # Blue text
+    no_caption_pixels = [p for p in no_caption_frame.getdata() if p[2] > 100]
+
+    # Caption frame should have significantly more non-black blue pixels
+    assert len(caption_pixels) > len(no_caption_pixels), "Caption should render blue pixels"

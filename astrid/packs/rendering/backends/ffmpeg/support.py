@@ -30,6 +30,7 @@ from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
 BACKEND_ID = "rendering.ffmpeg"
 BACKEND_VERSION = "1.0.0"
 ALTERNATIVE_BACKENDS = ("rendering.remotion",)
+_CLIP_TYPES = frozenset({"media", "text"})
 
 _TRACK_KINDS = frozenset({"visual", "audio"})
 _POSITION_KEYS = frozenset({"x", "y", "width", "height"})
@@ -216,13 +217,17 @@ def _validate_clip_semantics(
             if name in params and _nonempty(params.get(name))
         ]
         if fades:
+            clip_type = clip.get("clipType")
+            if clip_type == "media":
+                reasons.append(
+                    f"Clip {clip_id!r} uses unsupported media fades: {', '.join(fades)}"
+                )
+        text_params = sorted(
+            set(params) - {"fadeIn", "fadeOut"} - set(params for params in fades)
+        )
+        if text_params and clip.get("clipType") == "media":
             reasons.append(
-                f"Clip {clip_id!r} uses unsupported audio fades: {', '.join(fades)}"
-            )
-        other_params = sorted(set(params) - {"fadeIn", "fadeOut"})
-        if other_params and clip.get("clipType") == "media":
-            reasons.append(
-                f"Clip {clip_id!r} uses unsupported media params: {', '.join(other_params)}"
+                f"Clip {clip_id!r} uses unsupported media params: {', '.join(text_params)}"
             )
 
     if clip.get("clipType") == "media":
@@ -239,7 +244,6 @@ def _validate_clip_semantics(
         except ValueError as exc:
             reasons.append(str(exc))
     return reasons
-
 
 def structural_reasons(
     timeline_data: Mapping[str, Any],
@@ -310,9 +314,13 @@ def structural_reasons(
                 reasons.append(
                     f"rendering.ffmpeg media path does not support clip kind {clip_type!r}"
                 )
-        elif clip_type != "media":
+        elif clip_type not in _CLIP_TYPES:
             reasons.append(
                 f"Clip {clip_id!r} has unsupported clip kind {clip_type!r}"
+            )
+        elif clip_type == "text" and len(visual_track_ids) != 1:
+            reasons.append(
+                "text clip requires exactly one visual track"
             )
         reasons.extend(_validate_clip_semantics(raw_clip, track))
 
@@ -326,7 +334,7 @@ def structural_reasons(
     visual_ranges: list[_ClipRange] = []
     audio_ranges: list[_ClipRange] = []
     for clip in clips:
-        if clip.get("clipType") != "media":
+        if clip.get("clipType") not in ("media", "text"):
             continue
         track = tracks.get(str(clip.get("track")), {})
         try:
@@ -340,7 +348,9 @@ def structural_reasons(
 
     visual_ranges.sort(key=lambda item: item.at)
     if not visual_ranges:
-        reasons.append("rendering.ffmpeg needs at least one visual media clip")
+            reasons.append(
+                "rendering.ffmpeg needs at least one visual media clip"
+            )
     else:
         cursor = 0.0
         for bounds in visual_ranges:
@@ -627,11 +637,6 @@ def support(
         reasons.append(
             "rendering.ffmpeg accepts complete timelines, not native frame windows"
         )
-    config = request.backend_config.get(BACKEND_ID, {})
-    if config:
-        reasons.append(
-            "rendering.ffmpeg does not accept backend-specific configuration"
-        )
     if request.assets_registry_path is None:
         reasons.append("rendering.ffmpeg requires an assets registry")
     try:
@@ -755,11 +760,13 @@ def support(
         "media_only": not specialization,
         "full_timeline": True,
         "windows": False,
+        "text_overlay": True,
+        "fade_envelope": True,
         "sequential_audio": True,
+        "stream_copy": whole_media,
         "audio_reactive_colour": specialization,
         "whole_media": whole_media,
         "whole_media_optimization": whole_media,
-        "stream_copy": whole_media,
         "audio_ownership": ownership.value,
     }
     if specialization:

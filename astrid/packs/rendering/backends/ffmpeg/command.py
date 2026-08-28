@@ -163,6 +163,8 @@ def build_filter_graph(
 ) -> tuple[list[str], int | None]:
     """Return the legacy filter graph and optional stream-copy input index."""
 
+    from astrid.packs.rendering.backends.ffmpeg import text
+
     timeline_data = inputs.timeline_data
     registry = inputs.registry
     width, height, fps = timeline_canvas(timeline_data)
@@ -179,27 +181,37 @@ def build_filter_graph(
         for track in tracks.values()
         if track.get("kind") == "audio"
     }
-    video_clips = sorted(
+    all_clips = sorted(
         [
             clip
             for clip in timeline_data.get("clips", [])
-            if clip.get("track") in visual_track_ids
+            if clip.get("track") in visual_track_ids or clip.get("track") in audio_track_ids
         ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
+    media_clips = [
+        clip
+        for clip in all_clips
+        if clip.get("clipType") == "media"
+    ]
+    text_clips = [
+        clip
+        for clip in all_clips
+        if clip.get("clipType") == "text"
+    ]
     audio_clips = sorted(
         [
             clip
-            for clip in timeline_data.get("clips", [])
+            for clip in all_clips
             if clip.get("track") in audio_track_ids
         ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
-    if not video_clips:
-        raise ValueError("ffmpeg engine needs at least one visual media clip")
+    if not media_clips and not text_clips:
+        raise ValueError("ffmpeg engine needs at least one visual media or text clip")
 
     asset_keys: list[str] = []
-    for clip in [*video_clips, *audio_clips]:
+    for clip in media_clips:
         asset_key = str(clip.get("asset") or "")
         if not asset_key:
             raise ValueError(f"Clip {clip.get('id')!r} has no asset")
@@ -211,13 +223,37 @@ def build_filter_graph(
         if asset_key not in asset_keys:
             asset_keys.append(asset_key)
 
+    # Generate text overlay PNGs for text clips
+    text_assets: dict[str, bytes] = {}
+    for clip in text_clips:
+        clip_id = clip.get("id")
+        text_data = clip.get("text", {})
+        try:
+            text_png = text.text_to_rgba_png(
+                content=text_data.get("content", ""),
+                fontSize=text_data.get("fontSize", 48),
+                color=text_data.get("color", "#FFFFFF"),
+                align=text_data.get("align", "center"),
+                bold=text_data.get("bold", False),
+                anchor=text_data.get("anchor", "top-left"),
+                offsetX=text_data.get("offsetX", 0),
+                offsetY=text_data.get("offsetY", 0),
+                maxWidth=text_data.get("maxWidth"),
+                textShadow=text_data.get("textShadow"),
+                weight=text_data.get("weight", 400),
+            )
+            text_assets[clip_id] = text_png
+        except Exception as exc:
+            raise ValueError(f"Failed to rasterize text for clip {clip_id!r}: {exc}") from exc
+
     asset_index = {
         asset_key: index for index, asset_key in enumerate(asset_keys)
     }
     filters: list[str] = []
     video_labels: list[str] = []
+    text_labels: list[str] = []
     copy_video_input: int | None = None
-    if len(video_clips) == 1:
+    if len(media_clips) == 1:
         clip = video_clips[0]
         asset_key = str(clip["asset"])
         entry = registry["assets"][asset_key]
@@ -264,7 +300,8 @@ def build_filter_graph(
         ):
             copy_video_input = asset_index[asset_key]
     if copy_video_input is None:
-        for index, clip in enumerate(video_clips):
+        # Process media clips
+        for index, clip in enumerate(media_clips):
             inp = asset_index[str(clip["asset"])]
             start = float(clip.get("from", 0) or 0)
             end = float(clip.get("to", start) or start)
@@ -277,9 +314,43 @@ def build_filter_graph(
                 f"fps={fps},format=yuv420p[{label}]"
             )
             video_labels.append(f"[{label}]")
+        # Process text overlays
+        for index, clip in enumerate(text_clips):
+            clip_id = clip.get("id")
+            at = float(clip.get("at", 0))
+            hold = float(clip.get("hold", 4))
+            end = at + hold
+            text_png = text_assets.get(clip_id)
+            if not text_png:
+                raise ValueError(f"No rendered text found for clip {clip_id!r}")
+            # Write text PNG to temp file for FFmpeg input
+            import tempfile
+            import os
+            fd, png_path = tempfile.mkstemp(suffix=".png")
+            try:
+                os.write(fd, text_png)
+                os.close(fd)
+                inp = f"[0:v]movie={png_path}[overlay]"
+                fade_in = clip.get("params", {}).get("fadeIn")
+                fade_out = clip.get("params", {}).get("fadeOut")
+                label = f"ov{index}"
+                alpha_filter = ""
+                if fade_in is not None:
+                    alpha_filter += f"format=rgba,colorchannelmixer=aa=overlay='(t-{at})/{fade_in}'"
+                if fade_out is not None:
+                    alpha_end = at + hold - fade_out
+                    alpha_filter += f",colorchannelmixer=aa=overlay='(t-{end})/{fade_out}'"
+                filters.append(
+                    f"[vout]{alpha_filter if alpha_filter else ''}[{label}]"
+                )
+                text_labels.append(f"[{label}]")
+            finally:
+                os.unlink(png_path)
+        # Concatenate media and text labels
+        video_text_labels = video_labels + text_labels
         filters.append(
-            "".join(video_labels)
-            + f"concat=n={len(video_labels)}:v=1:a=0[vout]"
+            "".join(video_text_labels)
+            + f"concat=n={len(video_text_labels)}:v=1:a=0[vout]"
         )
 
     audio_labels: list[str] = []
@@ -317,7 +388,7 @@ def build_filter_graph(
     if audio_clips:
         visual_duration = max(
             float(clip.get("at", 0)) + clip_duration_seconds(clip)
-            for clip in video_clips
+            for clip in media_clips + text_clips
         )
         if visual_duration > cursor + 1e-9:
             duration = visual_duration - cursor
