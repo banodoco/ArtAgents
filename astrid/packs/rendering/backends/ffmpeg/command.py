@@ -1,4 +1,4 @@
-"""Pure FFmpeg command builders for the media-only renderer.
+"""Pure FFmpeg command builders for the media-spine and text-overlay renderer.
 
 The builders read the immutable request inputs and return argv.  They do not
 create directories, write files, or launch subprocesses, which keeps command
@@ -19,6 +19,23 @@ from astrid.core.rendering.contracts import RenderRequest
 
 
 @dataclass(frozen=True)
+class TextOverlaySpec:
+    """One caller-rasterized text PNG composited over the video spine.
+
+    ``path`` is the PNG file; ``at``/``end`` are absolute timeline seconds
+    bounding the overlay window; ``fade_in``/``fade_out`` are seconds.
+    Callers pass overlays already ordered (track array order, then ``at``,
+    then clip index); later entries composite on top.
+    """
+
+    path: str
+    at: float
+    end: float
+    fade_in: float
+    fade_out: float
+
+
+@dataclass(frozen=True)
 class RenderCommandInputs:
     """Resolved, validated inputs used to construct one FFmpeg argv."""
 
@@ -32,10 +49,15 @@ class RenderCommandInputs:
     # permitted when the actual media probe confirmed whole-source
     # compatibility (never trust registry metadata alone).
     stream_copy_allowed: bool = False
+    text_overlays: tuple[TextOverlaySpec, ...] = ()
 
 
 def timeline_canvas(timeline_data: Mapping[str, Any]) -> tuple[int, int, int]:
-    canvas = timeline_data.get("theme_overrides", {}).get("visual", {}).get("canvas", {})
+    canvas = (
+        timeline_data.get("theme_overrides", {})
+        .get("visual", {})
+        .get("canvas", {})
+    )
     return (
         int(canvas.get("width", 1920)),
         int(canvas.get("height", 1080)),
@@ -62,7 +84,9 @@ def clip_duration_seconds(clip: Mapping[str, Any]) -> float:
     if speed <= 0:
         raise ValueError(f"Clip {clip_id!r} has non-positive speed {speed}")
     if start < 0 or end <= start:
-        raise ValueError(f"Clip {clip_id!r} must have positive source bounds with to > from")
+        raise ValueError(
+            f"Clip {clip_id!r} must have positive source bounds with to > from"
+        )
     return (end - start) / speed
 
 
@@ -83,7 +107,9 @@ def validate_ffmpeg_media_timeline(timeline_data: Mapping[str, Any]) -> None:
 
 def _input_path(raw_path: str, workspace: Path) -> Path:
     candidate = Path(raw_path).expanduser()
-    return (candidate if candidate.is_absolute() else workspace / candidate).resolve()
+    return (
+        candidate if candidate.is_absolute() else workspace / candidate
+    ).resolve()
 
 
 def _coerce_request(request: RenderRequest | Mapping[str, Any]) -> RenderRequest:
@@ -158,15 +184,39 @@ def build_filter_graph(
     timeline_data = inputs.timeline_data
     registry = inputs.registry
     width, height, fps = timeline_canvas(timeline_data)
-    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-    visual_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "visual"}
-    audio_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "audio"}
+    tracks = {
+        track.get("id"): track for track in timeline_data.get("tracks", [])
+    }
+    visual_track_ids = {
+        track["id"]
+        for track in tracks.values()
+        if track.get("kind") == "visual"
+    }
+    audio_track_ids = {
+        track["id"]
+        for track in tracks.values()
+        if track.get("kind") == "audio"
+    }
     video_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in visual_track_ids],
+        [
+            clip
+            for clip in timeline_data.get("clips", [])
+            if (
+                clip.get("track") in visual_track_ids
+                and clip.get("clipType") == "media"
+            )
+        ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     audio_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
+        [
+            clip
+            for clip in timeline_data.get("clips", [])
+            if (
+                clip.get("track") in audio_track_ids
+                and clip.get("clipType") == "media"
+            )
+        ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     if not video_clips:
@@ -178,11 +228,16 @@ def build_filter_graph(
         if not asset_key:
             raise ValueError(f"Clip {clip.get('id')!r} has no asset")
         if asset_key not in registry["assets"]:
-            raise ValueError(f"Clip {clip.get('id')!r} references unknown asset {asset_key!r}")
+            raise ValueError(
+                f"Clip {clip.get('id')!r} references unknown asset "
+                f"{asset_key!r}"
+            )
         if asset_key not in asset_keys:
             asset_keys.append(asset_key)
 
-    asset_index = {asset_key: index for index, asset_key in enumerate(asset_keys)}
+    asset_index = {
+        asset_key: index for index, asset_key in enumerate(asset_keys)
+    }
     filters: list[str] = []
     video_labels: list[str] = []
     copy_video_input: int | None = None
@@ -224,6 +279,7 @@ def build_filter_graph(
         )
         if (
             inputs.stream_copy_allowed
+            and not inputs.text_overlays
             and at == 0
             and start == 0
             and full_duration
@@ -246,7 +302,35 @@ def build_filter_graph(
                 f"fps={fps},format=yuv420p[{label}]"
             )
             video_labels.append(f"[{label}]")
-        filters.append("".join(video_labels) + f"concat=n={len(video_labels)}:v=1:a=0[vout]")
+        filters.append(
+            "".join(video_labels)
+            + f"concat=n={len(video_labels)}:v=1:a=0[vout]"
+        )
+        spine = "vout"
+        for k, overlay in enumerate(inputs.text_overlays):
+            # ffmpeg's fade filter treats duration=0 as nb_frames (default
+            # 25), so each side is emitted only when its duration is
+            # positive; a no-envelope overlay composites instantly.
+            steps = [f"[{len(asset_keys) + k}:v]format=rgba"]
+            if overlay.fade_in > 0:
+                steps.append(
+                    f"fade=t=in:st={overlay.at:.6f}:d={overlay.fade_in:.6f}:alpha=1"
+                )
+            if overlay.fade_out > 0:
+                steps.append(
+                    f"fade=t=out:st={overlay.end - overlay.fade_out:.6f}:"
+                    f"d={overlay.fade_out:.6f}:alpha=1"
+                )
+            filters.append(",".join(steps) + f"[ov{k}]")
+            spine_out = (
+                "vout" if k == len(inputs.text_overlays) - 1 else f"vout{k + 1}"
+            )
+            filters.append(
+                f"[{spine}][ov{k}]overlay=0:0:"
+                f"enable='between(t,{overlay.at:.6f},{overlay.end:.6f})':"
+                f"format=auto[{spine_out}]"
+            )
+            spine = spine_out
 
     audio_labels: list[str] = []
     cursor = 0.0
@@ -282,7 +366,8 @@ def build_filter_graph(
 
     if audio_clips:
         visual_duration = max(
-            float(clip.get("at", 0)) + clip_duration_seconds(clip) for clip in video_clips
+            float(clip.get("at", 0)) + clip_duration_seconds(clip)
+            for clip in video_clips
         )
         if visual_duration > cursor + 1e-9:
             duration = visual_duration - cursor
@@ -292,7 +377,10 @@ def build_filter_graph(
                 f"atrim=duration={duration:.6f}[{label}]"
             )
             audio_labels.append(f"[{label}]")
-        filters.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[aout]")
+        filters.append(
+            "".join(audio_labels)
+            + f"concat=n={len(audio_labels)}:v=0:a=1[aout]"
+        )
     return filters, copy_video_input
 
 
@@ -313,15 +401,39 @@ def _has_audio_clips(timeline_data: Mapping[str, Any]) -> bool:
 def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
     timeline_data = inputs.timeline_data
     registry = inputs.registry
-    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-    visual_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "visual"}
-    audio_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "audio"}
+    tracks = {
+        track.get("id"): track for track in timeline_data.get("tracks", [])
+    }
+    visual_track_ids = {
+        track["id"]
+        for track in tracks.values()
+        if track.get("kind") == "visual"
+    }
+    audio_track_ids = {
+        track["id"]
+        for track in tracks.values()
+        if track.get("kind") == "audio"
+    }
     video_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in visual_track_ids],
+        [
+            clip
+            for clip in timeline_data.get("clips", [])
+            if (
+                clip.get("track") in visual_track_ids
+                and clip.get("clipType") == "media"
+            )
+        ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     audio_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
+        [
+            clip
+            for clip in timeline_data.get("clips", [])
+            if (
+                clip.get("track") in audio_track_ids
+                and clip.get("clipType") == "media"
+            )
+        ],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     asset_keys: list[str] = []
@@ -335,11 +447,18 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
         entry = registry["assets"][asset_key]
         file_value = entry.get("file")
         if not isinstance(file_value, str) or not file_value:
-            raise ValueError(f"ffmpeg engine requires local file assets; {asset_key!r} has no file")
+            raise ValueError(
+                "ffmpeg engine requires local file assets; "
+                f"{asset_key!r} has no file"
+            )
         asset_path = Path(file_value)
         if not asset_path.is_absolute():
             asset_path = (inputs.assets_path.parent / asset_path).resolve()
         argv.extend(["-i", str(asset_path)])
+    for overlay in inputs.text_overlays:
+        argv.extend(
+            ["-loop", "1", "-t", f"{overlay.end:.6f}", "-i", str(overlay.path)]
+        )
     return argv
 
 
@@ -354,12 +473,24 @@ def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
         *_asset_input_argv(inputs),
         *(["-filter_complex", ";".join(filters)] if filters else []),
         "-map",
-        (f"{copy_video_input}:v:0" if copy_video_input is not None else "[vout]"),
+        (
+            f"{copy_video_input}:v:0"
+            if copy_video_input is not None
+            else "[vout]"
+        ),
         *(["-map", "[aout]"] if has_audio else []),
         "-c:v",
         "copy" if copy_video_input is not None else "libx264",
-        *(["-preset", "veryfast", "-crf", "20"] if copy_video_input is None else []),
-        *(["-c:a", "aac", "-b:a", "192k"] if has_audio else ["-an"]),
+        *(
+            ["-preset", "veryfast", "-crf", "20"]
+            if copy_video_input is None
+            else []
+        ),
+        *(
+            ["-c:a", "aac", "-b:a", "192k"]
+            if has_audio
+            else ["-an"]
+        ),
         "-movflags",
         "+faststart",
         str(inputs.output_path),
@@ -369,11 +500,15 @@ def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
 def build_render_command(
     request: RenderRequest | Mapping[str, Any],
     workspace: Path,
+    *,
+    text_overlays: tuple[TextOverlaySpec, ...] = (),
 ) -> list[str]:
     """Build FFmpeg argv for ``workspace/outputs/<request.output_name>``.
 
     Stream-copy is permitted only when strict support's probe evidence says
     the whole source is compatible (never trust registry metadata alone).
+    Text overlays are caller-provided rasterized PNG specs; nothing is
+    rasterized or fade-parsed here.
     """
     inputs = resolve_render_command_inputs(request, workspace)
     try:
@@ -381,17 +516,25 @@ def build_render_command(
         from astrid.packs.rendering.backends.ffmpeg.support import support
 
         normalized_request = (
-            request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
+            request
+            if isinstance(request, RenderRequest)
+            else RenderRequest.from_dict(request)
         )
         report = support(
             normalized_request,
             inputs.timeline_data,
             inputs.registry,
         )
-        stream_copy_allowed = report.supported and bool(report.features.get("stream_copy"))
-    except Exception:  # noqa: BLE001 - support probing is fail-closed
+        stream_copy_allowed = (
+            report.supported and bool(report.features.get("stream_copy"))
+        )
+    except Exception:
         stream_copy_allowed = False
-    inputs = replace(inputs, stream_copy_allowed=stream_copy_allowed)
+    inputs = replace(
+        inputs,
+        stream_copy_allowed=stream_copy_allowed,
+        text_overlays=text_overlays,
+    )
     return build_render_command_from_inputs(inputs)
 
 
@@ -404,6 +547,7 @@ def build_render_command_from_data(
     *,
     audio_sample_rate: int = 48000,
     stream_copy_allowed: bool = False,
+    text_overlays: tuple[TextOverlaySpec, ...] = (),
 ) -> list[str]:
     """Build FFmpeg argv from ALREADY-LOADED, strictly supported data.
 
@@ -419,6 +563,7 @@ def build_render_command_from_data(
             registry=dict(registry),
             audio_sample_rate=audio_sample_rate,
             stream_copy_allowed=stream_copy_allowed,
+            text_overlays=text_overlays,
         )
     )
 
@@ -427,16 +572,22 @@ def build_render_command_for_paths(
     timeline_path: Path,
     assets_path: Path,
     output_path: Path,
+    *,
+    text_overlays: tuple[TextOverlaySpec, ...] = (),
 ) -> list[str]:
     """Compatibility builder for the legacy facade's explicit output path."""
 
     return build_render_command_from_inputs(
-        _command_inputs_for_paths(timeline_path, assets_path, output_path)
+        replace(
+            _command_inputs_for_paths(timeline_path, assets_path, output_path),
+            text_overlays=text_overlays,
+        )
     )
 
 
 __all__ = [
     "RenderCommandInputs",
+    "TextOverlaySpec",
     "build_filter_graph",
     "build_render_command",
     "build_render_command_for_paths",

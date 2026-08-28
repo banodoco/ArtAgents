@@ -45,8 +45,10 @@ from astrid.core.rendering.errors import (
 from astrid.core.rendering.publication import publish_render_result
 from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
 from astrid.packs.rendering.backends.ffmpeg.command import (
+    TextOverlaySpec,
     build_render_command,
     build_render_command_from_data,
+    timeline_canvas,
     validate_ffmpeg_media_timeline,
 )
 from astrid.packs.rendering.backends.ffmpeg.support import (
@@ -58,6 +60,11 @@ from astrid.packs.rendering.backends.ffmpeg.support import (
     support as strict_support,
 )
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
+from astrid.packs.rendering.backends.ffmpeg.text import (
+    _parse_fades,
+    _text_window,
+    rasterize_text_clip,
+)
 
 # Compatibility spellings retained while callers migrate off the facade's
 # historical private helper names.
@@ -67,6 +74,59 @@ _validate_ffmpeg_media_timeline = validate_ffmpeg_media_timeline
 def _input_path(raw_path: str, workspace: Path) -> Path:
     candidate = Path(raw_path).expanduser()
     return (candidate if candidate.is_absolute() else workspace / candidate).resolve()
+
+
+def _text_overlay_specs(
+    timeline_data: Mapping[str, Any],
+    *,
+    rasterize_dir: Path,
+) -> tuple[TextOverlaySpec, ...]:
+    """Rasterize every text clip and return the caller-ordered overlay specs.
+
+    Ordering follows TextOverlaySpec's contract: track array order, then
+    ``at``, then clip index; later entries composite on top. Fades come from
+    ``_parse_fades`` — the same reader strict support already ran — and
+    windows from ``_text_window``. No text clips -> ``()``.
+    """
+    if not any(
+        isinstance(clip, Mapping) and clip.get("clipType") == "text"
+        for clip in timeline_data.get("clips", [])
+    ):
+        return ()
+    width, height, _fps = timeline_canvas(timeline_data)
+    track_order = {
+        str(track.get("id")): index
+        for index, track in enumerate(timeline_data.get("tracks", []))
+        if isinstance(track, Mapping)
+    }
+    text_clips = sorted(
+        (
+            (index, clip)
+            for index, clip in enumerate(timeline_data.get("clips", []))
+            if isinstance(clip, Mapping) and clip.get("clipType") == "text"
+        ),
+        key=lambda item: (
+            track_order.get(str(item[1].get("track")), len(track_order)),
+            float(item[1].get("at", 0) or 0),
+            item[0],
+        ),
+    )
+    specs: list[TextOverlaySpec] = []
+    for order, (_index, clip) in enumerate(text_clips):
+        dest = rasterize_dir / f"text-{order}.png"
+        rasterize_text_clip(clip, width, height, dest)
+        at, end = _text_window(clip)
+        fade_in, fade_out = _parse_fades(clip.get("effects"))
+        specs.append(
+            TextOverlaySpec(
+                path=str(dest),
+                at=at,
+                end=end,
+                fade_in=fade_in,
+                fade_out=fade_out,
+            )
+        )
+    return tuple(specs)
 
 
 def _render_ffmpeg_media_to_path(
@@ -105,16 +165,23 @@ def _render_ffmpeg_media_to_path(
         )
 
     output = Path(out_path)
-    command_argv = build_render_command_from_data(
-        Path(timeline_path),
-        Path(assets_path),
-        output,
-        timeline_data,
-        assets_data,
-        stream_copy_allowed=bool(report.features.get("stream_copy")),
-    )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    (subprocess.run if runner is None else runner)(command_argv, check=True)
+    with TemporaryDirectory(
+        prefix="astrid-ffmpeg-text-overlays-"
+    ) as overlay_tmp:
+        text_overlays = _text_overlay_specs(
+            timeline_data, rasterize_dir=Path(overlay_tmp)
+        )
+        command_argv = build_render_command_from_data(
+            Path(timeline_path),
+            Path(assets_path),
+            output,
+            timeline_data,
+            assets_data,
+            stream_copy_allowed=bool(report.features.get("stream_copy")),
+            text_overlays=text_overlays,
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        (subprocess.run if runner is None else runner)(command_argv, check=True)
     return output
 
 
@@ -269,6 +336,8 @@ def _support_load_failure(reason: str) -> SupportReport:
             "windows": False,
             "sequential_audio": True,
             "audio_reactive_colour": False,
+            "text_overlay": False,
+            "fade_envelope": False,
             "whole_media": False,
             "whole_media_optimization": False,
             "stream_copy": False,
@@ -533,7 +602,21 @@ def _protocol_render(
         if specialization_spec is not None:
             audio_reactive_colour.render(specialization_spec, output_path)
         else:
-            subprocess.run(build_render_command(request, workspace), check=True)
+            with TemporaryDirectory(
+                prefix="astrid-ffmpeg-text-overlays-"
+            ) as overlay_tmp:
+                timeline_data = json.loads(
+                    timeline_path.read_text(encoding="utf-8")
+                )
+                text_overlays = _text_overlay_specs(
+                    timeline_data, rasterize_dir=Path(overlay_tmp)
+                )
+                subprocess.run(
+                    build_render_command(
+                        request, workspace, text_overlays=text_overlays
+                    ),
+                    check=True,
+                )
         try:
             probe = ffprobe_metadata_strict(output_path)
             probed_profile = _profile_from_probe(probe, ownership)
