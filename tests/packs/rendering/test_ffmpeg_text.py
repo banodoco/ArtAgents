@@ -1,5 +1,6 @@
 """Unit tests for FFmpeg backend text support: the raster helper and the
-pure overlay argv builder (no ffmpeg needed).
+pure overlay argv builder, plus one live media+text smoke rendered by a real
+ffmpeg binary.
 
 Color/shadow/fade/empty-content/window/anchor tests call helpers directly and
 never skip. Wrap and rasterize tests need a real system TTF; they resolve one
@@ -10,10 +11,17 @@ font, no CI font package).
 from __future__ import annotations
 
 import dataclasses
+import json
+import math
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 from PIL import Image, ImageFont
 
+from astrid.core.media import ffprobe_metadata_strict
+from astrid.core.rendering.contracts import SCHEMA_VERSION, RenderRequest
 from astrid.packs.rendering.backends.ffmpeg import command
 from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_run
 from astrid.packs.rendering.backends.ffmpeg import text as ffmpeg_text
@@ -479,3 +487,208 @@ def test_text_overlay_specs_windows_fades_and_caller_order(  # W3B-3
         str(tmp_path / "text-0.png"),
         str(tmp_path / "text-1.png"),
     ]
+
+# ---------------------------------------------------------------------------
+# Live smoke (T6): one real constant-color media clip plus one text overlay,
+# rendered by a real ffmpeg binary. Hang guard: ffprobe must report a finite
+# duration (the overlay PNG input is terminated by absolute END, not an
+# unterminated -loop 1). Window guard (W3B-4): ink is sampled MID-WINDOW,
+# not at the window start. Parity guard: after END the luma returns to the
+# pre-AT plate (encoder noise allowed; not pixel-identity, no checksums).
+# ---------------------------------------------------------------------------
+
+
+def _extract_frame(video: Path, at: float, dest: Path) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            str(at),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            str(dest),
+        ],
+        check=True,
+    )
+
+
+def _luma_stats(path: Path) -> tuple[int, int, float]:
+    """Return (min, max, mean) luma of one extracted frame."""
+    with Image.open(path) as image:
+        histogram = image.convert("L").histogram()
+    total = sum(histogram)
+    low = next(level for level, count in enumerate(histogram) if count)
+    high = next(
+        255 - level for level, count in enumerate(reversed(histogram)) if count
+    )
+    mean = sum(level * count for level, count in enumerate(histogram)) / total
+    return low, high, mean
+
+
+def test_live_media_plus_text_smoke(tmp_path: Path) -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("live media+text smoke requires ffmpeg and ffprobe")
+    _skip_if_no_font()
+
+    # Constant-color 4s plate via the suite's lavfi -> libx264 smoke pattern.
+    source_path = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x2255aa:s=320x180:r=30:d=4",
+            "-frames:v",
+            "120",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            str(source_path),
+        ],
+        check=True,
+    )
+    audio_path = tmp_path / "audio.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=4",
+            str(audio_path),
+        ],
+        check=True,
+    )
+
+    # Media window [0, 4]; text overlay window strictly inside: [1, 2] with
+    # fades 0.2/0.2, so full ink covers the mid-window sample at t=1.5.
+    timeline = {
+        "theme": "banodoco-default",
+        "theme_overrides": {
+            "visual": {"canvas": {"width": 320, "height": 180, "fps": 30}}
+        },
+        "tracks": [
+            {"id": "v", "kind": "visual", "label": "V"},
+            {"id": "a", "kind": "audio", "label": "A", "volume": 0.5},
+        ],
+        "clips": [
+            {
+                "id": "video",
+                "at": 0,
+                "track": "v",
+                "clipType": "media",
+                "asset": "main",
+                "from": 0,
+                "to": 4,
+                "speed": 1,
+                "volume": 0,
+            },
+            {
+                "id": "music",
+                "at": 0,
+                "track": "a",
+                "clipType": "media",
+                "asset": "sound",
+                "from": 0,
+                "to": 4,
+                "speed": 1,
+                "volume": 0.4,
+            },
+            {
+                "id": "title",
+                "at": 1.0,
+                "track": "v",
+                "clipType": "text",
+                "hold": 1.0,
+                "text": {
+                    "content": "SMOKE",
+                    "fontSize": 24,
+                    "color": "#ffffff",
+                },
+                "params": {"anchor": "center"},
+                "effects": {"fade_in": 0.2, "fade_out": 0.2},
+            },
+        ],
+    }
+    assets = {
+        "assets": {
+            "main": {
+                "file": source_path.name,
+                "type": "video/mp4",
+                "duration": 4,
+                "resolution": "320x180",
+                "fps": 30,
+            },
+            "sound": {
+                "file": audio_path.name,
+                "type": "audio/wav",
+                "duration": 4,
+            },
+        }
+    }
+    timeline_path = tmp_path / "timeline.json"
+    assets_path = tmp_path / "assets.json"
+    timeline_path.write_text(json.dumps(timeline), encoding="utf-8")
+    assets_path.write_text(json.dumps(assets), encoding="utf-8")
+
+    request = RenderRequest(
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(timeline_path),
+        assets_registry_path=str(assets_path),
+        output_name="smoke.mp4",
+        backend_config={ffmpeg_run.BACKEND_ID: {}},
+    )
+    report = ffmpeg_run.support(request, workspace=tmp_path)
+    assert report.supported is True
+
+    output = ffmpeg_run.render(
+        timeline_path, assets_path, tmp_path / "smoke.mp4"
+    )
+
+    assert output.exists()
+    # Hang regression guard: a render wedged by an unterminated overlay input
+    # is killed by the suite timeout and leaves a truncated file (probe raise,
+    # missing video stream, or non-finite / unbounded duration).
+    probe = ffprobe_metadata_strict(output)
+    assert probe.video_stream_present is True
+    assert probe.duration_seconds is not None
+    assert math.isfinite(probe.duration_seconds)
+    assert 0 < probe.duration_seconds <= 4.5
+
+    plate_path = tmp_path / "frame-plate.png"
+    mid_path = tmp_path / "frame-mid.png"
+    post_path = tmp_path / "frame-post.png"
+    _extract_frame(output, 0.5, plate_path)  # pre-AT reference plate
+    _extract_frame(output, 1.5, mid_path)  # W3B-4: mid-window, not at start
+    _extract_frame(output, 2.6, post_path)  # after END: overlay gone
+
+    _plate_low, plate_high, plate_mean = _luma_stats(plate_path)
+    _mid_low, mid_high, _mid_mean = _luma_stats(mid_path)
+    _post_low, post_high, post_mean = _luma_stats(post_path)
+
+    # Mid-window frame is not a blank plate: white ink lifts the luma maximum
+    # far above the constant plate (a flat plate stays tight under libx264).
+    assert mid_high >= plate_high + 40
+
+    # Post-END frame: luma back at the pre-AT plate (encoder noise allowed —
+    # not pixel-identity, no checksum): mean near the plate and no bright ink
+    # pixels left.
+    assert abs(post_mean - plate_mean) <= 8
+    assert post_high <= plate_high + 20
