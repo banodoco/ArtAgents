@@ -224,50 +224,6 @@ _DEFAULT_RATE_LIMIT_CAPACITY = 128
 _DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 64.0
 
 
-def _is_immutable_byte_route(method: str, request_target: str) -> bool:
-    """Return whether *request_target* is one of the byte-serving routes.
-
-    Only the exact GET/HEAD route shapes are exempt from token-bucket charge.
-    Keep this matcher stricter than the compatibility dispatcher: empty,
-    traversal, and encoded path-separator segments must not turn malformed
-    requests into unmetered work.
-    """
-
-    if method not in {"GET", "HEAD"}:
-        return False
-    try:
-        path = urlparse(request_target).path
-    except ValueError:
-        return False
-    raw_parts = path.split("/")
-    if not path.startswith("/") or any(not part for part in raw_parts[1:]):
-        return False
-    parts = [unquote(part) for part in raw_parts[1:]]
-    if any(
-        part in {".", ".."}
-        or "/" in part
-        or "\\" in part
-        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in part)
-        for part in parts
-    ):
-        return False
-    route_parts = parts[1:] if parts[:1] == ["v1"] else parts
-    return (
-        (
-            len(route_parts) == 5
-            and route_parts[0] == "projects"
-            and route_parts[2] == "media"
-            and route_parts[4] == "content"
-        )
-        or (
-            len(route_parts) == 6
-            and route_parts[0] == "projects"
-            and route_parts[2] == "timelines"
-            and route_parts[4] == "assets"
-        )
-    )
-
-
 class _RequestAdmissionController:
     """Thread-safe fixed-capacity concurrency and token-bucket admission."""
 
@@ -1388,7 +1344,9 @@ def make_local_bridge_handler(*, projects_root: Path):
                 admitted, retry_after = cast(
                     LocalBridgeHTTPServer, self.server
                 ).bridge_admission.try_acquire(
-                    rate_limited=not _is_immutable_byte_route(self.command, self.path)
+                    # Reads are bounded by the handler semaphore; writes and
+                    # preflights also consume the process-local rate budget.
+                    rate_limited=self.command not in {"GET", "HEAD"}
                 )
                 if not admitted:
                     error = BridgeRateLimitError("the local bridge request budget is exhausted")

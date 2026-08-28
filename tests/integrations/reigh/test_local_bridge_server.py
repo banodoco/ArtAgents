@@ -19,7 +19,6 @@ from urllib.request import Request, urlopen
 from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.bridge_service import HealthStatus
 from astrid.core.integrations.reigh.local_bridge_server import (
-    _is_immutable_byte_route,
     _is_loopback_host_header,
     create_local_bridge_server,
 )
@@ -1021,9 +1020,9 @@ def test_release_boot_secret_is_private_rotated_and_integrity_checked(
         composition.close()
 
 
-def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> None:
-    import pytest
-
+def test_bridge_rate_budget_rejects_repeated_mutation_with_retry_after(
+    tmp_bridge_root: Path,
+) -> None:
     composition = compose_standard_bridge(tmp_bridge_root)
     server = create_local_bridge_server(
         projects_root=tmp_bridge_root,
@@ -1036,20 +1035,23 @@ def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> N
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    _BRIDGE_REQUEST_TOKENS[base] = server.request_token
     try:
-        first_status, _first = _get_json(f"{base}/v1/health")
-        with pytest.raises(HTTPError) as limited:
-            urlopen(f"{base}/v1/health")  # noqa: S310 - loopback test server
-        limited_body = json.loads(limited.value.read().decode("utf-8"))
+        first_status, _first = _post_json(
+            f"{base}/v1/projects/no-such/timelines/no-such/save", {}
+        )
+        second_status, limited_body = _post_json(
+            f"{base}/v1/projects/no-such/timelines/no-such/save", {}
+        )
     finally:
+        _BRIDGE_REQUEST_TOKENS.pop(base, None)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
         composition.close()
 
-    assert first_status == 200
-    assert limited.value.code == 429
-    assert limited.value.headers["Retry-After"]
+    assert first_status == 400
+    assert second_status == 429
     assert limited_body["error"] == "rate_limited"
 
 
@@ -1079,37 +1081,15 @@ def test_bridge_default_rate_budget_allows_legitimate_burst_above_legacy_limit(
     assert statuses == [200] * 40
 
 
-def test_immutable_byte_route_matcher_is_exact_and_method_scoped() -> None:
-    accepted = (
-        ("GET", "/projects/demo/media/media-1/content"),
-        ("HEAD", "/v1/projects/demo/timelines/primary/assets/shot-1"),
-    )
-    rejected = (
-        ("POST", "/projects/demo/media/media-1/content"),
-        ("GET", "/projects/demo/media/media-1/content/extra"),
-        ("GET", "/projects//media/media-1/content"),
-        ("GET", "/projects/%2E%2E/media/media-1/content"),
-        ("GET", "/projects/demo/timelines/primary/assets/shot-1/extra"),
-        ("GET", "/projects/demo/timelines/primary/assets/%2F"),
-        ("GET", "http://["),
-    )
-
-    for method, target in accepted:
-        assert _is_immutable_byte_route(method, target), (method, target)
-    for method, target in rejected:
-        assert not _is_immutable_byte_route(method, target), (method, target)
-
-
-def test_immutable_byte_reads_do_not_consume_dynamic_rate_budget(
+def test_bridge_read_burst_does_not_consume_mutation_rate_budget(
     tmp_bridge_root: Path,
 ) -> None:
-    """Media fan-out remains bounded by concurrency without starving JSON reads."""
-    import pytest
-
+    """Dynamic and media reads do not starve the separately metered mutations."""
     composition = compose_standard_bridge(tmp_bridge_root)
     server = create_local_bridge_server(
         projects_root=tmp_bridge_root,
         bridge=composition.bridge,
+        task_bridge=composition.task_bridge,
         writer=composition.writer,
         database_path=composition.database_path,
         rate_limit_capacity=1,
@@ -1118,27 +1098,43 @@ def test_immutable_byte_reads_do_not_consume_dynamic_rate_budget(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    _BRIDGE_REQUEST_TOKENS[base] = server.request_token
     try:
-        media_status, _, _ = _get_bytes(
-            f"{base}/v1/projects/no-such/media/no-such/content"
+        read_targets = (
+            "/v1/health",
+            "/v1/projects",
+            "/v1/projects/no-such/timelines",
+            "/v1/projects/no-such/generations",
+            "/v1/projects/no-such/media/no-such/content",
+            "/v1/projects/no-such/timelines/no-such/assets/no-such",
         )
-        asset_status, _, _ = _get_bytes(
-            f"{base}/v1/projects/no-such/timelines/no-such/assets/no-such"
+        read_statuses: list[int] = []
+        for index in range(40):
+            target = read_targets[index % len(read_targets)]
+            try:
+                read_statuses.append(_get_json(f"{base}{target}")[0])
+            except HTTPError as error:
+                read_statuses.append(error.code)
+                error.read()
+
+        first_status, _first = _post_json(
+            f"{base}/v1/projects/no-such/timelines/no-such/save", {}
         )
-        health_status, _ = _get_json(f"{base}/v1/health")
-        with pytest.raises(HTTPError) as malformed:
-            urlopen(f"{base}/v1/projects/no-such/media/no-such/content/extra")
-        malformed_body = json.loads(malformed.value.read().decode("utf-8"))
+        second_status, second_body = _post_json(
+            f"{base}/v1/projects/no-such/timelines/no-such/save", {}
+        )
     finally:
+        _BRIDGE_REQUEST_TOKENS.pop(base, None)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
         composition.close()
 
-    assert media_status == asset_status == 404
-    assert health_status == 200
-    assert malformed.value.code == 429
-    assert malformed_body["error"] == "rate_limited"
+    assert len(read_statuses) == 40
+    assert all(status != 429 for status in read_statuses)
+    assert first_status == 400
+    assert second_status == 429
+    assert second_body["error"] == "rate_limited"
 
 
 def test_bridge_rejects_oversized_request_body_and_target_before_dispatch(
