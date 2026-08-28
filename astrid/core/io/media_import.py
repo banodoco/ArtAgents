@@ -55,6 +55,8 @@ from typing import Callable, Mapping, Sequence
 
 from astrid.core.media import MediaProbeError, ffprobe_metadata_strict
 
+from astrid.core.media import MediaProbeError, ffprobe_metadata_strict
+
 # ---------------------------------------------------------------------------
 # Frozen vocabulary and layout (decision artifact sections 5 and 7)
 # ---------------------------------------------------------------------------
