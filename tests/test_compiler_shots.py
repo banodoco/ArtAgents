@@ -27,11 +27,11 @@ def _compile_shots(projects_root: Path, story: dict, *, project: str = "test") -
         return 0.5
 
     with AstridClient.open(str(projects_root)) as client:
-        r = client.projects.create(slug=project, name="test")
-        if not r.ok and r.error.code == "conflict":
-            # Recompile reuses the existing project (idempotency test).
-            pass
-        elif not r.ok:
+        # Recompile reuses the existing project; create only when absent.
+        existing = client.projects.list()
+        have = existing.ok and any(p.get("slug") == project for p in (existing.data or []))
+        if not have:
+            r = client.projects.create(slug=project, name="test")
             assert r.ok, r.error
         importer = bs.make_client_importer(client, project=project)
         out = bs._compile_with_shots(

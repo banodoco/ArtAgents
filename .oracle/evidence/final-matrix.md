@@ -27,7 +27,7 @@ sandbox ASTRID_PROJECTS_ROOT=$PWD/TEMP/SANDBOX (ephemeral; not the real store).
 ## AG4 — Render-prep expansion: flat-equivalent
 
 - `expand_shot_clips(main_config, main_registry, load_timeline=…)` → **76 expanded clips** (50 media = 25 broll + 25 vo; 26 text = 25 caps + 1 brand), 50 assets merged, no `shot` clips remain, all file assets resolved. Sequential `at`; max end **177.533s** = flat golden.
-- Expanded doc persisted at `.oracle/evidence/expanded-timeline.json` (51 clips) + `expanded-assets.json` (50 assets).
+- Expanded doc persisted at `.oracle/evidence/expanded-timeline.json` (76 clips) + `expanded-assets.json` (50 assets).
 - Frozen acceptance: byte-equivalent to flat compile modulo clip ids — golden test suite (B3 T12) keeps flat 76/50/177.53±0.5 asserts and adds the expansion equality test (`tests/test_compiler_golden.py`); suite green (25 passed).
 - Hook: `_prepare_managed_render_inputs` expands before `validate_managed_render_snapshot` (invocation.py) — proven end-to-end by the SDK render reaching ffmpeg admission (no `shot` clip error) and by the direct render.
 - Evidence: `.oracle/evidence/expanded-timeline.json`, tests `tests/core/timeline/test_expand_shots.py` (12 pass), `tests/packs/rendering/test_managed_timeline_render.py` (20 pass).
@@ -53,11 +53,11 @@ Every criterion → command/path/result. Reviewer dispositions: B1/B2/B3 grok or
 |---|---|
 | `build_storyboard.py validate --story storyboards/astrid-intro.storyboard.json` | PASS (schema suite green) |
 | compile `--shots` (project astrid-intro) | PASS: 25 shots / 50 assets / 26-clip parent |
-| `pytest tests/ -k storyboard` | PASS: 92 passed (incl. real shots + expansion-equality tests, no skips) |
+| `pytest tests/ -k storyboard` | PASS: 92 passed / 0 failed / 0 skipped (incl. real shots + expansion-equality tests; FF f2/f60/f140 frames + 177.529s aac render) |
 | `timelines show main` counts | 26 stored clips; expanded summary derived |
 | `timelines render main --backend rendering.ffmpeg` | PASS (run succeeded); direct render exit 0 |
 | ffprobe duration + frame spot-checks | 177.43s; captions visible in 3 frames |
 
 ## Git state
 
-Commits on `megado/oracle-run-storyboard`: B1 ffmpeg (e3c13deb + rework 5be1da19), B2 expansion (d2e61e9f + rework 18251a70), B3 compiler (4128b598 + reworks 93c40057/d2614bba/63d02ee0), B4 e2e evidence (this run's fixes: scripts/build_storyboard.py, astrid/packs/timeline/cli.py, astrid/packs/rendering/backends/ffmpeg/{support,command,text}.py, conftest.py). No merge to main; remotion/ untouched (protected in-flight fonts fix intact).
+Commits on `megado/oracle-run-storyboard`: B1 ffmpeg (e3c13deb + rework 5be1da19), B2 expansion (d2e61e9f + rework 18276a70), B3 compiler (4128b598 + reworks 93c40057/d2614bba/63d02ee0), B4 e2e evidence (this run's fixes: scripts/build_storyboard.py, astrid/packs/timeline/cli.py, astrid/packs/rendering/backends/ffmpeg/{support,command,text}.py, conftest.py). No merge to main; remotion/ untouched (protected in-flight fonts fix intact).
