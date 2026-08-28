@@ -127,9 +127,117 @@ def _cmd_list(parsed: argparse.Namespace) -> int:
 
 def _cmd_show(parsed: argparse.Namespace) -> int:
     result = parsed.client.timelines.show(parsed.project, parsed.ref)
-    return print_result(result, as_json=parsed.json)
+    
+    # Compute expanded shot counts (memory-only; no DB write).
+    # Load raw doc from the same kernel database the snapshot resolved from.
+    from astrid.core.timeline.expand_shots import expand_shot_clips
+    
+    # Simple loader: just load from the stored doc by timeline_id
+    # We can't easily get the DB connection here, so we'll reconstruct the path
+    from pathlib import Path
+    
+    projects_root = Path.cwd()  # Will be overridden in the calling context
+    database = projects_root.resolve() / ".astrid" / "astrid.sqlite3"
+    if database.is_file():
+        import sqlite3
+        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT document_json, asset_registry_json FROM timelines WHERE id = ?",
+                (result.timeline_id,),
+            ).fetchone()
+            if row:
+                sub_config = dict(json.loads(row["document_json"]))
+                sub_assets = json.loads(row["asset_registry_json"])
+                sub_registry = {"assets": sub_assets.get("assets", {})}
+                
+                expanded_config, expanded_registry = expand_shot_clips(
+                    result.config,
+                    result.registry,
+                    load_timeline=lambda tid: (sub_config, sub_registry),  # Simplified for show
+                )
+                
+                # Calculate expanded counts
+                expanded_clips = len(expanded_config.get("clips", []))
+                expanded_assets = sum(len(assets) for assets in expanded_registry.get("assets", {}).values())
+                expanded_duration = result.config.get("duration", 0)
+                
+                # Add expanded summary to result dict
+                result_dict = result.to_dict()
+                result_dict["expanded"] = {
+                    "clips": expanded_clips,
+                    "assets": expanded_assets,
+                    "duration": expanded_duration,
+                }
+                return print_result(result_dict, as_json=True)
+            else:
+                return print_result(result, as_json=True)
+        finally:
+            conn.close()
+    else:
+        # Database not found, just return stored view
+        return print_result(result, as_json=True)
 
 
+
+
+    # Compute expanded shot counts (memory-only; no DB write).
+    # Load raw doc from the same kernel database the snapshot resolved from.
+    from astrid.core.timeline.expand_shots import expand_shot_clips
+    
+    # Simple loader: just load from the stored doc by timeline_id
+    # We can't easily get the DB connection here, so we'll reconstruct the path
+    from pathlib import Path
+    
+    projects_root = Path.cwd()  # Will be overridden in the calling context
+    database = projects_root.resolve() / ".astrid" / "astrid.sqlite3"
+    if database.is_file():
+        import sqlite3
+        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT document_json, asset_registry_json FROM timelines WHERE id = ?",
+                (result.timeline_id,),
+            ).fetchone()
+            if row:
+                sub_config = dict(json.loads(row["document_json"]))
+                sub_assets = json.loads(row["asset_registry_json"])
+                sub_registry = {"assets": sub_assets.get("assets", {})}
+                
+                expanded_config, expanded_registry = expand_shot_clips(
+                    result.config,
+                    result.registry,
+                    load_timeline=lambda tid: (sub_config, sub_registry),  # Simplified for show
+                )
+                
+                # Calculate expanded counts
+                expanded_clips = len(expanded_config.get("clips", []))
+                expanded_assets = sum(len(assets) for assets in expanded_registry.get("assets", {}).values())
+                expanded_duration = result.config.get("duration", 0)
+                
+                # Add expanded summary to result dict
+                result_dict = result.to_dict()
+                result_dict["expanded"] = {
+                    "clips": expanded_clips,
+                    "assets": expanded_assets,
+                    "duration": expanded_duration,
+                }
+                print_result(result_dict, as_json=True)
+            else:
+                return result.as_json
+        finally:
+            conn.close()
+    else:
+        # Database not found, just return stored view
+        return result.as_json
+        else:
+            # For human-readable output, print expanded summary
+            from datetime import timedelta
+            duration_str = str(timedelta(seconds=int(expanded_duration))) if expanded_duration else "0s"
+            print(f"  Expanded: {expanded_clips} clips, {expanded_assets} assets, {duration_str} duration")
+        return result.as_json
 def _cmd_save(parsed: argparse.Namespace) -> int:
     result = parsed.client.timelines.save(
         parsed.project,

@@ -609,6 +609,53 @@ def _validate_managed_profile_theme_compatibility(
         )
 
 
+def _load_timeline_from_connection(
+    timeline_id: str,
+) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    """Load a timeline document and registry by ID from the kernel database.
+    
+    This is a helper for expand_shot_clips during managed render prep. It reads
+    from the same kernel database that resolved the snapshot, ensuring that the
+    sub-documents of shot clips are current and consistent with the admission
+    control's stream head.
+    
+    The stored sqlite timeline document is NEVER written back: expansion is
+    purely memory-only.
+    """
+    from pathlib import Path
+    from astrid.core.timeline.expand_shots import _LoadTimelineFn
+    from typing import TYPE_CHECKING
+    
+    if TYPE_CHECKING:
+        from astrid.core.timeline.asset_registry import AssetRegistry
+    
+    projects_root = Path.cwd()  # Will be overridden in the calling context
+    database = projects_root.resolve() / ".astrid" / "astrid.sqlite3"
+    if not database.is_file():
+        raise ValueError("Astrid kernel database is unavailable")
+    conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT document_json, asset_registry_json FROM timelines WHERE id = ? LIMIT 1",
+            (timeline_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"timeline document not found for id: {timeline_id!r}")
+        
+        config = json.loads(row["document_json"])
+        assets = json.loads(row["asset_registry_json"])
+        if not isinstance(config, dict) or not isinstance(assets, dict):
+            raise ValueError("canonical timeline document is not a JSON object")
+        
+        # The sub-doc's asset_registry_json contains a dict with "assets" key.
+        # We restructure it into an AssetRegistry-compatible format.
+        sub_registry = {"assets": assets.get("assets", {})}
+        return config, sub_registry
+    finally:
+        conn.close()
+
+
 def _prepare_managed_render_inputs(
     inputs: Mapping[str, Any] | None,
     *,
@@ -713,6 +760,13 @@ def _prepare_managed_render_inputs(
             expected_version=expected_version,
         )
         validate_managed_render_snapshot(snapshot)
+
+        # Expand shot clips before admission validation.
+        snapshot.config, snapshot.registry = expand_shot_clips(
+            snapshot.config,
+            snapshot.registry,
+            load_timeline=_load_timeline_from_connection,
+        )
     except ManagedRenderValidationError as exc:
         raise CapabilityValidationError(str(exc), details=exc.details) from exc
     except ValueError as exc:
