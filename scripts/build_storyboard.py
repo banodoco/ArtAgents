@@ -269,9 +269,16 @@ def compile_storyboard(
         slug = section["id"]
         segment = segments.get(slug) if segments is not None else None
 
-        image = section["image"]
-        img_path = image["path"]  # direct path — no variants model
-        img_origin = section.get("provenance", {}).get("prompt")
+        # Image path XOR active variant
+        image_cfg = section["image"]
+        active_index = image_cfg.get("active_index", 0)
+        variants = image_cfg.get("variants", [])
+        if not isinstance(active_index, int) or not (0 <= active_index < len(variants)):
+            raise StoryboardError(
+                [f"sections[{slug}].image: active_index {active_index} out of bounds for {len(variants)} variants"]
+            )
+        active_variant = variants[active_index]
+        img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
         img_key = f"img_{slug}"
         if import_asset is not None:
             img_import = import_asset(img_path)
@@ -380,7 +387,7 @@ def compile_storyboard(
         total = max(total, start_r + hold_r)
         report_sections[slug] = {
             "image": {
-                "path": img_path,
+                "path": str(img_path),
                 "asset_key": img_key,
                 "file": img_import.file,
                 "content_sha256": img_import.content_sha256,
@@ -425,6 +432,98 @@ def compile_storyboard(
         "sections": report_sections,
     }
     return config, registry, report
+
+
+
+def _build_shot_subtimeline(
+    story: dict[str, Any],
+    section: dict[str, Any],
+    image_key: str,
+    vo_key: str | None,
+    duration: float,
+) -> dict[str, Any]:
+    """Create a SHOT sub-timeline document for one section (vo a1 / cap captions / broll broll).
+    
+    The sub-timeline is a self-contained temporal document with LOCAL ``at=0`` for all clips
+    and ``hold``/``to`` matching the flat per-section durations. It serves as the timeline
+    document reference for the parent shot graph.
+    """
+    # Use the section's authored timing as the sub-timeline duration
+    hold_r = round(duration + GAP, 3)
+    
+    width, height, fps = _parse_canvas(story["meta"]["canvas"])
+    
+    clips = []
+    # VO on audio track a1
+    if vo_key is not None:
+        vo_start = 0.0
+        vo_end = round(duration, 3)
+        clips.append(
+            {
+                "id": f"vo_{section['id']}",
+                "at": vo_start,
+                "track": "a1",
+                "clipType": "media",
+                "asset": vo_key,
+                "from": 0.0,
+                "to": vo_end,
+            }
+        )
+        
+        # Captions over VO
+        vo_text = section.get("vo", {}).get("text", "")
+        if vo_text:
+            clips.append(
+                {
+                    "id": f"cap_{section['id']}",
+                    "at": vo_start,
+                    "track": "captions",
+                    "clipType": "text",
+                    "hold": hold_r,
+                    "text": {"content": vo_text, **_CAPTION_TEXT_STYLE},
+                    "params": dict(_CAPTION_PARAMS),
+                    "effects": dict(_CAPTION_FADES),
+                }
+            )
+    
+    # B-roll on visual track broll
+    broll_start = 0.0
+    broll_end = hold_r
+    broll_clip = {
+        "id": f"broll_{section['id']}",
+        "at": broll_start,
+        "track": "broll",
+        "clipType": "media",
+        "asset": image_key,
+        "hold": broll_end,
+    }
+    
+    # B-roll may have generative provenance (variant.source == 'gen')
+    img_origin = None
+    variants = section.get("image", {}).get("variants", [])
+    active_index = section.get("image", {}).get("active_index", 0)
+    if 0 <= active_index < len(variants):
+        active_variant = variants[active_index]
+        if active_variant.get("source") == "gen":
+            img_origin = active_variant.get("prompt", "")
+    if img_origin:
+        broll_clip["generation"] = {"prompt": img_origin}
+    
+    clips.append(broll_clip)
+    
+    config: dict[str, Any] = {
+        "theme": _THEME,
+        "theme_overrides": {
+            "visual": {
+                "canvas": {"width": width, "height": height, "fps": fps},
+                "backgroundColor": _BACKGROUND_COLOR,
+            }
+        },
+        "tracks": [dict(track) for track in _TRACKS],
+        "clips": clips,
+        "output": {"resolution": f"{width}x{height}", "fps": fps, "file": f"shot-{section['id']}.mp4"},
+    }
+    return config
 
 
 def _plan_segments(plan: Any) -> dict[str, _Segment] | None:
@@ -601,6 +700,201 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+
+
+
+def _compile_with_shots(
+    story: dict[str, Any],
+    *,
+    base_dir: str | Path,
+    plan: Mapping[str, Any] | None = None,
+    import_asset: Callable[[Path], AssetImport] | None = None,
+    probe_duration: Callable[[Path], float] | None = None,
+    project: str = DEFAULT_PROJECT,
+    output_name: str = DEFAULT_OUTPUT_NAME,
+) -> dict[str, Any]:
+    """Compile a storyboard with shot projection (task T11).
+    
+    Creates per-section sub-timelines via TimelinesService, shots via ShotsService,
+    and a parent shot graph. All kernel writes go through the SDK services.
+    """
+    from astrid.sdk.client import AstridClient
+    from astrid.sdk.shots import ShotsService
+    from astrid.sdk.timelines import TimelinesService
+    
+    base = Path(base_dir)
+    if probe_duration is None:
+        probe_duration = probe_wav_duration
+    
+    segments = _plan_segments(plan)
+    width, height, fps = _parse_canvas(story["meta"]["canvas"])
+    
+    # Import all media first
+    assets: dict[str, Any] = {}
+    vo_durations: dict[str, float] = {}
+    
+    with AstridClient.open(None) as client:
+        for section in story["sections"]:
+            slug = section["id"]
+            image_cfg = section["image"]
+            active_index = image_cfg.get("active_index", 0)
+            variants = image_cfg.get("variants", [])
+            active_variant = variants[active_index]
+            img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
+            
+            if import_asset is not None:
+                img_import = import_asset(img_path)
+            else:
+                img_import = sdk_import_asset(img_path, project=project)
+            
+            img_key = f"img_{slug}"
+            assets[img_key] = {
+                "file": img_import.file,
+                "type": "image",
+                "content_sha256": img_import.content_sha256,
+            }
+            
+            # VO
+            vo = section.get("vo")
+            if vo is not None:
+                audio = vo.get("audio") or {}
+                wav_path = _resolve_path(audio["asset"], base)
+                where = f"sections[{slug}].vo"
+                duration = probe_duration(wav_path)
+                vo_durations[slug] = duration
+                
+                vo_key = f"vo_{slug}"
+                vo_import = sdk_import_asset(wav_path, project=project)
+                assets[vo_key] = {
+                    "file": vo_import.file,
+                    "type": "audio",
+                    "duration": round(duration, 3),
+                    "content_sha256": vo_import.content_sha256,
+                }
+    
+    # Create shots and sub-timelines
+    with AstridClient.open(None) as client:
+        shots_service = ShotsService(client)
+        timelines_service = TimelinesService(client)
+        
+        shot_data: dict[str, dict[str, Any]] = {}  # slug -> {shot_id, timeline_document_id, nav, prompt}
+        
+        for section in story["sections"]:
+            slug = section["id"]
+            segment = segments.get(slug) if segments is not None else None
+            
+            # Calculate duration for this section
+            duration = None
+            if segment is not None:
+                duration = segment.duration
+            elif slug in vo_durations:
+                duration = vo_durations[slug]
+            
+            if duration is None:
+                raise StoryboardError([f"section {slug} has no duration"])
+            
+            # Create sub-timeline
+            sub_timeline_config = _build_shot_subtimeline(story, section, f"img_{slug}", f"vo_{slug}" if "vo_{slug}" in assets else None, duration)
+            timeline_result = timelines_service.create(
+                project=project,
+                idempotency_key=f"{project}:shot-timeline:{slug}",
+            )
+            assert timeline_result.ok
+            timeline_document_id = timeline_result.data["id"]
+            
+            # Create shot
+            nav = section.get("nav", {})
+            prompt = section.get("provenance", {}).get("prompt", "")
+            shot_result = shots_service.create(
+                project=project,
+                name=f"shot-{slug}",
+                idempotency_key=f"{project}:shot:{slug}",
+                metadata={"slug": slug, "nav": nav, "prompt": prompt, "timeline_document_id": timeline_document_id},
+            )
+            assert shot_result.ok
+            shot_id = shot_result.data["id"]
+            
+            shot_data[slug] = {
+                "shot_id": shot_id,
+                "timeline_document_id": timeline_document_id,
+                "nav": nav,
+                "prompt": prompt,
+            }
+            
+            # Add image item
+            img_key = f"img_{slug}"
+            item_result = shots_service.add_item(
+                project=project,
+                shot_id=shot_id,
+                media_id=assets[img_key]["content_sha256"][:16],  # Use first 16 chars of hash
+                position=0,
+                idempotency_key=f"{project}:shot-item:{slug}:image",
+            )
+            assert item_result.ok
+            
+            # Add VO item if exists
+            vo_key = f"vo_{slug}"
+            if vo_key in assets:
+                item_result = shots_service.add_item(
+                    project=project,
+                    shot_id=shot_id,
+                    media_id=assets[vo_key]["content_sha256"][:16],
+                    position=1,
+                    idempotency_key=f"{project}:shot-item:{slug}:vo",
+                )
+                assert item_result.ok
+    
+    # Create parent shot graph
+    total = 0.0
+    for section in story["sections"]:
+        if "vo" in section:
+            duration = vo_durations.get(section["id"], 0.0)
+            total = max(total, duration + GAP)
+    
+    total_r = round(total, 3)
+    
+    brand_clip = {
+        "id": "brand_wordmark",
+        "at": 0.0,
+        "track": "brand",
+        "clipType": "text",
+        "hold": total_r,
+        "text": dict(_BRAND_TEXT),
+        "params": dict(_BRAND_PARAMS),
+    }
+    
+    shot_clips = []
+    for slug, data in shot_data.items():
+        shot_clip = {
+            "id": f"shot_{slug}",
+            "at": 0.0,
+            "track": "broll",
+            "clipType": "shot",
+            "hold": total_r,
+            "params": {"shot_id": data["shot_id"], "timeline_document_id": data["timeline_document_id"]},
+        }
+        shot_clips.append(shot_clip)
+    
+    parent_config = {
+        "theme": _THEME,
+        "theme_overrides": {
+            "visual": {
+                "canvas": {"width": width, "height": height, "fps": fps},
+                "backgroundColor": _BACKGROUND_COLOR,
+            }
+        },
+        "tracks": [dict(track) for track in _TRACKS],
+        "clips": [brand_clip] + shot_clips,
+        "output": {"resolution": f"{width}x{height}", "fps": fps, "file": f"parent-shot-graph.mp4"},
+    }
+    
+    return {
+        "timeline": parent_config,
+        "assets": assets,
+        "shots": shot_data,
+    }
+
+
 def _cmd_compile(args: argparse.Namespace) -> int:
     story_path = Path(args.story).expanduser()
     story = load_storyboard(story_path)
@@ -640,6 +934,25 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 output_name=render_name,
             )
 
+    # Shot projection path (--shots)
+    if args.shots:
+        import_asset = make_client_importer(
+            AstridClient.open(args.projects_root), project=args.project
+        )
+        shots_result = _compile_with_shots(
+            story,
+            base_dir=story_path.resolve().parent,
+            plan=plan,
+            import_asset=import_asset,
+            project=args.project,
+            output_name=args.output_name,
+        )
+        # Write parent timeline and assets
+        _write_outputs(timeline_path, assets_path, shots_result["timeline"], shots_result["assets"])
+        # Print report summary
+        print_report_shots(shots_result)
+        return 0
+
     config, registry, report = compile_storyboard(
         story,
         base_dir=story_path.resolve().parent,
@@ -650,6 +963,18 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     _write_outputs(timeline_path, assets_path, config, registry)
     _print_report(report)
     return 0
+
+def print_report_shots(result: dict[str, Any]) -> None:
+    """Print a brief report for shot projection compile."""
+    assets = result["assets"]
+    shots = result["shots"]
+    print(json.dumps({
+        "mode": "shots",
+        "clips": len(result["timeline"]["clips"]),
+        "assets": len(assets),
+        "shots_created": len(shots),
+        "timeline_file": result["timeline"]["output"]["file"],
+    }, indent=2, sort_keys=True))
 
 
 def _write_outputs(
