@@ -1,4 +1,5 @@
-"""Unit tests for the FFmpeg backend text raster helper (no ffmpeg needed).
+"""Unit tests for FFmpeg backend text support: the raster helper and the
+pure overlay argv builder (no ffmpeg needed).
 
 Color/shadow/fade/empty-content/window/anchor tests call helpers directly and
 never skip. Wrap and rasterize tests need a real system TTF; they resolve one
@@ -8,9 +9,12 @@ font, no CI font package).
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from PIL import Image, ImageFont
 
+from astrid.packs.rendering.backends.ffmpeg import command
 from astrid.packs.rendering.backends.ffmpeg import text as ffmpeg_text
 
 
@@ -209,3 +213,221 @@ def test_text_window_uses_canonical_duration() -> None:
         ffmpeg_text._text_window({"id": "t", "at": 1.0, "hold": -1})
     with pytest.raises(ValueError):
         ffmpeg_text._text_window({"id": "t", "at": 1.0})
+
+
+# ---------------------------------------------------------------------------
+# Overlay argv tests (T3): the command builder consumes caller-provided
+# TextOverlaySpec tuples — no rasterization, no asset demands from text
+# clips, PNG inputs capped at absolute END.
+# ---------------------------------------------------------------------------
+
+
+def _overlay_timeline() -> dict:
+    return {
+        "theme_overrides": {
+            "visual": {"canvas": {"width": 320, "height": 180, "fps": 30}}
+        },
+        "tracks": [
+            {"id": "v", "kind": "visual", "label": "V"},
+            {"id": "a", "kind": "audio", "label": "A"},
+        ],
+        "clips": [
+            {
+                "id": "video",
+                "at": 0,
+                "track": "v",
+                "clipType": "media",
+                "asset": "main",
+                "from": 0,
+                "to": 4,
+                "speed": 1,
+                "volume": 0,
+            },
+            {
+                "id": "music",
+                "at": 0,
+                "track": "a",
+                "clipType": "media",
+                "asset": "main",
+                "from": 0,
+                "to": 4,
+                "speed": 1,
+                "volume": 0.75,
+            },
+            # Text clip: no asset key — must not demand one.
+            {
+                "id": "title",
+                "at": 1.0,
+                "track": "v",
+                "clipType": "text",
+                "hold": 2.0,
+                "text": {"content": "Hello"},
+            },
+        ],
+    }
+
+
+def _overlay_inputs(tmp_path, **overrides) -> command.RenderCommandInputs:
+    registry = {
+        "assets": {
+            "main": {
+                "file": str(tmp_path / "source.mp4"),
+                "type": "video/mp4",
+                "duration": 4,
+                "resolution": "320x180",
+                "fps": 30,
+            }
+        }
+    }
+    inputs = command.RenderCommandInputs(
+        timeline_path=tmp_path / "timeline.json",
+        assets_path=tmp_path / "assets.json",
+        output_path=tmp_path / "out.mp4",
+        timeline_data=_overlay_timeline(),
+        registry=registry,
+        text_overlays=(
+            command.TextOverlaySpec(
+                path=str(tmp_path / "title.png"),
+                at=1.0,
+                end=3.0,
+                fade_in=0.25,
+                fade_out=0.5,
+            ),
+        ),
+    )
+    return dataclasses.replace(inputs, **overrides) if overrides else inputs
+
+
+def _filter_complex(argv: list[str]) -> str:
+    return argv[argv.index("-filter_complex") + 1]
+
+
+def test_overlay_png_inputs_come_after_asset_inputs(tmp_path) -> None:
+    argv = command.build_render_command_from_inputs(_overlay_inputs(tmp_path))
+    i_asset = argv.index(str(tmp_path / "source.mp4"))
+    i_png = argv.index(str(tmp_path / "title.png"))
+    # PNG inputs are appended after the asset inputs, looped and capped.
+    assert argv[i_asset + 1 : i_png] == ["-loop", "1", "-t", "3.000000", "-i"]
+    assert argv.count("-i") == 2  # the text clip demanded no extra asset
+
+
+def test_overlay_input_t_is_absolute_end_not_duration(tmp_path) -> None:
+    argv = command.build_render_command_from_inputs(_overlay_inputs(tmp_path))
+    i_png = argv.index(str(tmp_path / "title.png"))
+    overlay_input_index = argv[:i_png].count("-i") - 1
+    assert overlay_input_index == 1  # the PNG sits after the one asset input
+    # ONE assertion: -t caps the looped PNG input at absolute END (3.0),
+    # not the window length (2.0).
+    assert argv[i_png - 5 : i_png] == ["-loop", "1", "-t", "3.000000", "-i"]
+
+
+def test_no_shortest_with_overlays(tmp_path) -> None:
+    argv = command.build_render_command_from_inputs(_overlay_inputs(tmp_path))
+    assert "-shortest" not in argv
+
+
+def test_overlay_chain_spine_first_png_secondary(tmp_path) -> None:
+    steps = _filter_complex(
+        command.build_render_command_from_inputs(_overlay_inputs(tmp_path))
+    ).split(";")
+    assert any(f.endswith("concat=n=1:v=1:a=0[vout]") for f in steps)
+    source = next(f for f in steps if f.startswith("[1:v]format=rgba"))
+    assert source == (
+        "[1:v]format=rgba,"
+        "fade=t=in:st=1.000000:d=0.250000:alpha=1,"
+        "fade=t=out:st=2.500000:d=0.500000:alpha=1[ov0]"
+    )
+    overlay = next(f for f in steps if "overlay=0:0" in f)
+    # spine [vout] is the overlay main; the PNG [ov0] is secondary; the
+    # final spine label stays [vout].
+    assert overlay == (
+        "[vout][ov0]overlay=0:0:"
+        "enable='between(t,1.000000,3.000000)':format=auto[vout]"
+    )
+
+
+def test_filtergraph_is_one_argv_element_with_literal_quotes(tmp_path) -> None:
+    argv = command.build_render_command_from_inputs(_overlay_inputs(tmp_path))
+    assert argv.count("-filter_complex") == 1
+    graph = _filter_complex(argv)
+    assert "enable='between(t,1.000000,3.000000)'" in graph
+    assert "[0:v]trim=start=0.000000:end=4.000000" in graph
+    assert graph.count("'") == 2  # exactly the enable quoting, untouched
+
+
+def test_both_fades_emitted_even_at_zero_duration(tmp_path) -> None:
+    inputs = _overlay_inputs(
+        tmp_path,
+        text_overlays=(
+            command.TextOverlaySpec(
+                path=str(tmp_path / "title.png"),
+                at=1.0,
+                end=3.0,
+                fade_in=0.0,
+                fade_out=0.0,
+            ),
+        ),
+    )
+    graph = _filter_complex(command.build_render_command_from_inputs(inputs))
+    assert "fade=t=in:st=1.000000:d=0.000000:alpha=1" in graph
+    assert "fade=t=out:st=3.000000:d=0.000000:alpha=1" in graph
+
+
+def test_stream_copy_vetoed_when_overlays_present(tmp_path) -> None:
+    inputs = _overlay_inputs(tmp_path)
+    overlay_argv = command.build_render_command_from_inputs(
+        dataclasses.replace(inputs, stream_copy_allowed=True)
+    )
+    assert overlay_argv[overlay_argv.index("-c:v") + 1] == "libx264"
+    assert overlay_argv[overlay_argv.index("-map") + 1] == "[vout]"
+    # The same inputs without overlays still qualify for stream copy.
+    plain_argv = command.build_render_command_from_inputs(
+        dataclasses.replace(inputs, text_overlays=(), stream_copy_allowed=True)
+    )
+    assert plain_argv[plain_argv.index("-c:v") + 1] == "copy"
+
+
+def test_text_clip_does_not_demand_asset(tmp_path) -> None:
+    inputs = _overlay_inputs(tmp_path)
+    filters, copy_video_input = command.build_filter_graph(inputs)
+    assert copy_video_input is None
+    assert any(f.endswith("concat=n=1:v=1:a=0[vout]") for f in filters)
+    argv = command.build_render_command_from_inputs(
+        dataclasses.replace(inputs, text_overlays=())
+    )
+    assert argv.count("-i") == 1  # only the media asset became an input
+
+
+def test_multiple_overlays_chain_in_caller_order_last_on_top(tmp_path) -> None:
+    overlays = (
+        command.TextOverlaySpec(
+            path=str(tmp_path / "a.png"),
+            at=1.0,
+            end=2.0,
+            fade_in=0.0,
+            fade_out=0.0,
+        ),
+        command.TextOverlaySpec(
+            path=str(tmp_path / "b.png"),
+            at=2.5,
+            end=3.5,
+            fade_in=0.0,
+            fade_out=0.0,
+        ),
+    )
+    argv = command.build_render_command_from_inputs(
+        _overlay_inputs(tmp_path, text_overlays=overlays)
+    )
+    graph = _filter_complex(argv)
+    assert (
+        "[vout][ov0]overlay=0:0:"
+        "enable='between(t,1.000000,2.000000)':format=auto[vout1]" in graph
+    )
+    assert (
+        "[vout1][ov1]overlay=0:0:"
+        "enable='between(t,2.500000,3.500000)':format=auto[vout]" in graph
+    )
+    i_a = argv.index(str(tmp_path / "a.png"))
+    i_b = argv.index(str(tmp_path / "b.png"))
+    assert (argv[i_a - 2], argv[i_b - 2]) == ("2.000000", "3.500000")
+    assert i_a < i_b  # caller order kept; later overlays composite on top
