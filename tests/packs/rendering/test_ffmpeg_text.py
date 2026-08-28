@@ -15,6 +15,7 @@ import pytest
 from PIL import Image, ImageFont
 
 from astrid.packs.rendering.backends.ffmpeg import command
+from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_run
 from astrid.packs.rendering.backends.ffmpeg import text as ffmpeg_text
 
 
@@ -431,3 +432,50 @@ def test_multiple_overlays_chain_in_caller_order_last_on_top(tmp_path) -> None:
     i_b = argv.index(str(tmp_path / "b.png"))
     assert (argv[i_a - 2], argv[i_b - 2]) == ("2.000000", "3.500000")
     assert i_a < i_b  # caller order kept; later overlays composite on top
+
+
+def test_text_overlay_specs_windows_fades_and_caller_order(  # W3B-3
+    tmp_path, monkeypatch
+) -> None:
+    rasterized: list[str] = []
+
+    def fake_rasterize(clip, width, height, dest):
+        assert (width, height) == (320, 180)  # canvas via timeline_canvas
+        rasterized.append(dest.name)
+        dest.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    monkeypatch.setattr(ffmpeg_run, "rasterize_text_clip", fake_rasterize)
+
+    timeline = _overlay_timeline()
+    title = timeline["clips"][2]
+    title["effects"] = [{"fade_in": 0.25}, {"fade_out": 0.5}]
+    timeline["tracks"].append({"id": "v2", "kind": "visual", "label": "V2"})
+    lower = {
+        "id": "lower",
+        "at": 0.5,
+        "track": "v2",
+        "clipType": "text",
+        "hold": 1.5,
+        "text": {"content": "Lower"},
+    }
+    timeline["clips"].append(lower)
+
+    specs = ffmpeg_run._text_overlay_specs(timeline, rasterize_dir=tmp_path)
+
+    assert rasterized == ["text-0.png", "text-1.png"]
+    # Track array order first: v (index 0) before v2 even though "lower"
+    # starts earlier; windows and fades come from the canonical parsers.
+    assert [(spec.at, spec.end) for spec in specs] == [
+        ffmpeg_text._text_window(title),
+        ffmpeg_text._text_window(lower),
+    ]
+    assert (specs[0].fade_in, specs[0].fade_out) == ffmpeg_text._parse_fades(
+        title.get("effects")
+    ) == (0.25, 0.5)
+    assert (specs[1].fade_in, specs[1].fade_out) == ffmpeg_text._parse_fades(
+        lower.get("effects")
+    ) == (0.0, 0.0)
+    assert [spec.path for spec in specs] == [
+        str(tmp_path / "text-0.png"),
+        str(tmp_path / "text-1.png"),
+    ]

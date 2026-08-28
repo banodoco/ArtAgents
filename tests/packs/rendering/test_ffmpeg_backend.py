@@ -165,7 +165,14 @@ def test_manifest_registers_static_raw_command_backend() -> None:
     assert manifest.operations == ("render", "support")
     assert manifest.required_permissions == ("project_files", "subprocess")
     assert manifest.required_binaries == ("ffmpeg", "ffprobe")
-    assert manifest.capabilities["clip_types"] == ["media"]
+    assert manifest.capabilities["clip_types"] == ["media", "text"]
+    assert manifest.capabilities["features"] == {
+        "media_only": False,
+        "text_overlay": True,
+        "fade_envelope": True,
+        "stream_copy": True,
+        "sequential_audio": True,
+    }
     assert (manifest_path.parents[2] / manifest.command[1]).is_file()
 
     pack = yaml.safe_load(
