@@ -111,3 +111,79 @@ The storyboard JSON is an **authored input artifact** (like scripts/prompts — 
 and lineage). It does NOT receive kernel-derived values (media_id, content_hash, resolved
 paths). Those live in the kernel timeline and the compiled registry. The kernel is the sole
 authority for durable execution state.
+
+## Shots projection & sub-timeline plan
+
+This database (`$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3`) is the **local Reigh database** —
+the SQLite authority that replaces Supabase in the local stack. Reigh UI, the worker, and
+Astrid all read/write it through the bridge.
+
+### Current state (verified 2026-08-28)
+
+- `shots` and `shot_items` tables exist (shots pack, `astrid/packs/shots/`) but hold **0 rows**.
+  The intro's 25 sections live only in the storyboard JSON and the timeline document — never
+  projected as shot rows.
+- The schema has **no shot↔timeline anchoring**: `shots` is `id, project_id, name, sort_key,
+  metadata_json`. No `timeline_id`, no `start_seconds`, no `duration_seconds`.
+- Reigh's editor does **not** render nested sub-timelines. `TimelineConfig` is flat
+  `clips[]` + optional `pinnedShotGroups[]`; a shot is a *soft grouping* over flat clips
+  (`PinnedShotGroup = {shotId, trackId, clipIds, mode, videoAssetKey, imageClipSnapshot}`).
+  Shot-scoped generation uses `imageClipSnapshot`; rendering is always flat.
+
+### Hard constraint: the plugin law
+
+Schema packs may FK only to kernel tables (`projects`, `media`); the only cross-pack currency
+is `media_id`. The shots pack "never FK's to or imports the timeline pack"
+(`astrid/packs/shots/schema-pack.yaml`). Therefore a `timeline_shots` junction table with an
+FK to `timelines` would violate the pack architecture. **Do not add it.**
+
+### The association lives at the document layer
+
+The timeline↔shot association is *data, not DDL*:
+
+1. **Parent timeline document** carries `pinnedShotGroups[]` whose `shotId`s match real
+   kernel shot rows. The Reigh editor groups clips by these ids with no shots query.
+2. **A shot's sub-timeline** (when it has one) is a separate `timelines` row, referenced from
+   `shots.metadata_json` as `{"timeline_document_id": "<timelines.id>"}`. `metadata_json` is
+   open-shaped by design — this is a documented convention, not a foreign key.
+3. **Placement/timing** is inherent in the parent document's clips (`at`, `hold`) — the shot
+   row does not duplicate them.
+
+### Phase A — shot rows + pinned groups (no migration needed)
+
+1. Extend the compiler's report with per-section shot facts: name (slug), `at`/`hold`,
+   owned clip ids (broll/caption/vo), media ids (image + VO), nav, prompt.
+2. Emit `pinnedShotGroups[]` in the compiled timeline config: one group per section on the
+   `broll` track, `mode: "images"`, with a deterministic placeholder `shotId` (`shot_<slug>`).
+3. Add `--register-shots` to `scripts/build_storyboard.py compile`: for each section call
+   `ShotsService.create(project, name=slug, metadata={slug, nav, prompt, at, hold},
+   idempotency_key="<project>:shot:<slug>")`, then `add_item` for the image media and VO
+   audio media (deterministic keys `<project>:shot-item:<slug>:image` / `:vo`). Receipt
+   idempotency makes retries replay-safe.
+4. Rewrite the pinned groups' `shotId`s from the real kernel shot ids returned by the
+   receipts, then write outputs / save / render.
+
+Result: 25 real shot rows in the Reigh database with their media pinned via `shot_items`,
+queryable through the bridge, editor-visible in Reigh via matching `shotId`s.
+
+### Phase B — shot sub-timelines (nested authoring, flat render)
+
+1. Per shot, create a `timelines` row holding the section's sub-composition (the same 3
+   clips the parent flattens today). Reference it from `shots.metadata_json`.
+2. Render-prep expansion in the kernel: before handing a document to any renderer, resolve
+   each pinned shot's sub-document and splice its clips into the parent timeline at the
+   shot's time window. Renderers stay flat — ffmpeg and Remotion see exactly what they see
+   today.
+3. Reigh's shot detail view edits the shot's own timeline document (the view already exists
+   in `reigh-live-main`); the parent timeline only carries the pinned group.
+
+This matches Reigh's semantics exactly ("like in Reigh"): shots organize and scope editing;
+the render path stays flat and boring. Shot edits never require touching the parent timeline.
+
+### Phase C — true nested render (only if Phase B proves insufficient)
+
+Renderer-native compositing: a shot clip becomes a render pass with its own canvas/time
+window (ffmpeg: render sub-timeline to an intermediate file, then overlay; Remotion:
+`<Sequence>` nesting). More powerful (per-shot effects, independent resolution/speed) but a
+real renderer-contract change. Do not start until Phase B is green and a concrete limitation
+is hit.
