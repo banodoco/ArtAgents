@@ -1,0 +1,21 @@
+{
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/briefs/ffmpeg-shots/area1-shots-mount.md",
+  "elapsed_s": 220.962,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-28T11:39:43Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/ffmpeg-shots/area1-shots-mount.meta.json",
+  "model": "zhipu:glm-5.3",
+  "pid": 82619,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2654,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/ffmpeg-shots/area1-shots-mount.txt",
+  "started_at": "2026-08-28T11:36:02Z",
+  "status": "ok",
+  "stem": "area1-shots-mount",
+  "task_timeout_s": 900,
+  "tool_calls": 0
+}

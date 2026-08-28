@@ -1,0 +1,12 @@
+20260828T154340Z
+cmd: grok --prompt-file /tmp/plan-rev1-brief.txt -m grok-4.6 --reasoning-effort high
+base: c6c505af9429ca20d0adae9534f4a303343307b9
+northstar sha256: a928ba4b112417c58a6aa59ac0a35977b90f5694a0603253acba5252ffa1025e
+plan sha256: d35a66f5a9f42fd11182d7fc3eef13fc28e1f101261c9034d5587736fc42fc6b
+synth sha256: 1b21f743b2c0fa7c8ccdfc22a4625fcaa9e115f2ad12f4ce199ba46009b00f2c
+rev-brief sha256: 9aadfd73373ee2c0a04b2a640ad40aa8a6754c4a5f15447ba985d7f097525fcc
+20260828T154925Z
+grok revision exit=0 wall=302s
+rev1 sha256: 8ff8aece39913907ceffb447d3c686b220affef41fae56827024519679061515
+plan.md now = rev1 (sha 8ff8aece...)
+wave-1 synthesis: 6 accepted, 2 rejected, no material reopen

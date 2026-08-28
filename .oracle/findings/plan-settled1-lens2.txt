@@ -1,0 +1,72 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Still starting after 10s — phase: capability:extension-modules:native
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.63360.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Working...
+# Lens 2: Scope/Verification/Sequencing Sense-Check
+
+## FINDINGS (RANKED)
+
+### 1. Scope drift: `timeline_document_id` from shots to timelines
+**Where:** A2 task descriptions assert storing a `timelines.id` in shots metadata → A3 expand uses it → A6 e2e relies on resolution.  
+**Evidence:** Kernel-evolution rule says timeline pack is promotion candidate requiring a second composition to prove a common primitive. The plan's evidence is one composition (intro).  
+**Proposed fix:** Either:
+- Add `timeline_document_id` references (as written) AND strengthen the golden test to assert idempotency: run compile twice → same 25 shots, same 25 timeline rows, no new rows on second run.
+- Or document explicitly why this single composition validates the shared primitive (e.g., timeline-pack cas is earned by design pattern of one-shot sub-documents, not threshold).
+
+**Recommendation:** Choose the former; runidempotency proves shared primitive early and is cheap.
+
+---
+
+### 2. Parallelism statement contradicts task dependencies
+**Where:** "Parallel: B1 ∥ B2. B3 after B2. B4 after B1+B3."  
+**Evidence:** T5 (expand pure function) does not depend on B1; T6 depends only on T5. B1 and B2 are in fact fully independent.  
+**Proposed fix:** Replace with "Parallel batches: B1, B2, B3 (inter-batch dependencies only); B4 last."
+
+---
+
+### 3. Golden test opacity: not explicitly stated what is asserted
+**Where:** A6 done criterion #4 and test step T12 ("Golden becomes expansion test") vs current golden test purpose.  
+**Evidence:** Without explicit statement that the new golden test asserts the *byte-equivalence modulo clip ids* contract (not item-by-item), T12 acceptance is ambiguous.  
+**Proposed fix:** In A6 / T12 description, add: "assert expanded document reconstructed from shot-clip params equals flat compile output modulo clip ids (per A4)."
+
+---
+
+### 4. Renderer output location splitting risk
+**Where:** A6 T14/T15/T16 split render output between evidence path (`.oracle/evidence/`) and also commit/reference fixture.  
+**Evidence:** No guard against accidentally splitting output location between test/commit/docs; next executor could get mismatched expectation vs expected path.  
+**Proposed fix:** Specify one canonical output location (e.g., `.oracle/evidence/shot-pipeline.mp4`) and update T16 to document that location as authoritative.
+
+---
+
+### 5. Loop still-image input implementation undefined
+**Where:** "Additional areas to explore" item 1: how `-loop 1 -t` splices when PNGs are distinct (25 stills).  
+**Evidence:** Not addressed in settled design; could affect correctness of the still+text+overlay chain.  
+**Proposed fix:** Decide now: either (a) reuse each PNG once per stills segment (avoid re-encoding by filename), or (b) document that ffmpeg concatenates 25 `-i` args and accepts `-loop 1` per arg (NVIDIA docs confirm; accept as settled). Recommendation: (a) reuse path; cheaper and matches shell `cat a.jpg b.jpg | ffmpeg`.
+
+---
+
+### 6. Test order dependency between expansion and compiler
+**Where:** B2 (A4) and B3 (A1-A3) depend via "B3 after B2."  
+**Evidence:** B2 (expand tests) and B3 (compiler tests) are independent: expand tests only exercise the pure function; compiler tests only write shots/timelines via SDK. They need not be sequential.  
+**Proposed fix:** Mark B2 and B3 as parallel batches, with only B4 after them.
+
+---
+
+## TOP 3 RECOMMENDATIONS
+
+1. **Resolve scope drift (finding 1):** Keep `timeline_document_id` but add idempotency asserts (run compile twice, same rows, no new rows). This meets kernel-evolution rule and reduces risk.
+
+2. **Correct parallelism story (findings 2, 6):** Explicitly state B1/B2/B3 are parallel; B4 last. Remove false dependency between expansion and compiler batches.
+
+3. **Make golden test contract explicit (finding 3):** Add a line in A6/T12 that the new golden test asserts byte-equivalence modulo clip ids. This unambiguously grounds T12's acceptance criteria.
+[launch_hermes_agent] done in 117.0s (exit=0)
+ERROR: Could not consume arg: --task-timeout=1800
+Usage: launch_hermes_agent.py --model=deepseek:deepseek-v4-flash --toolsets=file,web --query_file=.oracle/briefs/settled1/lens2-scope-kiss.md --project-dir=/Users/peteromalley/Documents/reigh-workspace/astrid-megado - <command|value>
+  available commands:    as_integer_ratio | bit_count | bit_length |
+                         conjugate | from_bytes | to_bytes
+  available values:      denominator | imag | numerator | real
+
+For detailed information on this command, run:
+  launch_hermes_agent.py --model=deepseek:deepseek-v4-flash --toolsets=file,web --query_file=.oracle/briefs/settled1/lens2-scope-kiss.md --project-dir=/Users/peteromalley/Documents/reigh-workspace/astrid-megado - --help

@@ -1,0 +1,12 @@
+## Render routing architecture — verified findings
+
+**1. Backend selection.** `timelines render --backend X` (`astrid/packs/timeline/cli.py:515-519`) feeds `inputs["backend"]` into the `rendering.render` executor (`cli.py:298-308`), which delegates to `RenderService`. All selection lives in `_translate_legacy_selector` (`astrid/core/rendering/service.py:152-209`). Yes, there's a registry: `load_default_registries` builds Renderer/Planner/Finalizer registries (`astrid/core/rendering/registry.py:497-503`) from manifests declared in `astrid/packs/rendering/pack.yaml:46-58`.
+
+**2. ffmpeg backend exists.** `rendering.ffmpeg` — `astrid/packs/rendering/backends/ffmpeg/renderer.yaml:2` (media-only: `clip_types: [media]`, `features: media_only: true`, lines 14-22). The legacy `remotion` selector is an **FFmpeg-first ordered pair** `("rendering.ffmpeg", "rendering.remotion")` with `auto_route=True` (`service.py:171-177`); `None` defaults to `remotion` (`service.py:167-168`).
+
+**3. Remotion vs ffmpeg decision.** Per-candidate request-sensitive `support()` checks (`service.py:711`). Auto-route falls through only on `unsupported`/`binary_missing` (`service.py:718-721`) and warns (`LegacyRenderRoutingWarning`, `service.py:730-735`). Media-only timelines → ffmpeg; text/effect/transition timelines → Remotion. Qualified ids are strict — no fallback.
+
+**4. Other backends.** Renderer `rendering.threejs` (`backends/threejs/renderer.yaml:2`); planners `rendering.legacy_hybrid`, `rendering.threejs-hybrid`, `rendering.layer_stack`; finalizers `rendering.ffmpeg-finalizer`, `rendering.ffmpeg-compositor` (`pack.yaml:48-58`). No blender. html-canvas is only a deprecated executor alias (`pack.yaml:66-67`).
+
+**5. Backend interface.** Language-neutral protocol v1 (`contracts.py:23`): a `renderer.yaml` manifest (`RendererManifest`, `contracts.py:2163` — id, `protocol_version: 1`, `command`, `operations: [render, support]`, capabilities, permissions, binaries) plus a subprocess `run.py` reading `RenderRequest` and writing `RenderResult`/`RendererError` (`parse_wire_result`, `contracts.py:2267`). An ffmpeg backend is already registered — extend `rendering.ffmpeg`'s capabilities rather than adding a new one.
+0

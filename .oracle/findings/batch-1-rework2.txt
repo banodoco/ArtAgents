@@ -1,0 +1,8 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web', 'terminal'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Working...
+402 Insufficient Balance
+Insufficient Balance (type=unknown_error param=invalid_request_error)
+[launch_hermes_agent] done in 3446.8s (exit=1)
+1

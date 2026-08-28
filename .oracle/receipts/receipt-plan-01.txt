@@ -1,0 +1,12 @@
+20260828T152016Z
+cmd: grok --prompt-file /tmp/plan-brief.md -m grok-4.6 --reasoning-effort high
+cwd: /Users/peteromalley/Documents/reigh-workspace/astrid-megado/.oracle/receipts
+base: c6c505af9429ca20d0adae9534f4a303343307b9
+northstar sha256: a928ba4b112417c58a6aa59ac0a35977b90f5694a0603253acba5252ffa1025e
+0f7f73407fc37c55255b861f16b4303c4a6f8e7f188ddef63af4069f9e53f6f0
+20260828T153742Z
+exit=0; wall=991s
+brief sha256: 0f7f73407fc37c55255b861f16b4303c4a6f8e7f188ddef63af4069f9e53f6f0
+output /tmp/plan-v1.txt sha256: b96d0bc03457da39afe8fc8db08d9d531df705d8a9535cd171dabb4682b5e7dc
+plan.md sha256: d35a66f5a9f42fd11182d7fc3eef13fc28e1f101261c9034d5587736fc42fc6b
+model: grok-4.6 (grok CLI 1.0.5), --reasoning-effort high

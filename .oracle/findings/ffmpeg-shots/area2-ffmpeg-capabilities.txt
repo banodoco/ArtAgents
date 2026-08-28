@@ -1,0 +1,34 @@
+All questions answered. Verification evidence: frames extracted at t=10.0 and t=10.4 from `astrid-intro-final.mp4` are **md5-identical** (`90dc5f49…`) — output is 1920×1080@30 h264+aac, 177.6s, static slide PNGs + text overlay + VO, hard cuts. `grep` for `fade|interpolate|spring` across `remotion/src/` → **zero matches** — the `fade_in/fade_out` effects declared in timeline JSON are unimplemented.
+
+## Findings
+
+**1. Current render**: static image + text overlay only. `ThreeTimelineComposition.tsx` draws text to an offscreen canvas → three.js plane; positioned (anchor/offset), word-wrapped, text-shadow. No animation of any kind.
+
+**2–3. Remotion features ffmpeg can't do: none.** Text positioning/wrapping/shadow = `drawtext`. Layering already exits to ffmpeg: `astrid/packs/rendering/finalizers/compositor/run.py` composites z-layers with an ffmpeg `overlay` filtergraph; the planner has an `ffmpeg-finalizer` concat fast-path.
+
+**5. Existing ffmpeg renderers**: `scripts/render_2rp_launch_ffmpeg.py` (PIL frames + ffmpeg encode); the production compositor above; `blender/render_core.py:ffmpeg_encode_command()` (PNG seq → mp4); analysis users (`editorial.scenes/shots/quality_zones`, `media.clip_extract`, `foley.tile_video`).
+
+## Commands
+
+**Q4 — one image N sec + bottom text + audio, single command:**
+```bash
+ffmpeg -y -loop 1 -t 5 -i slide.png -i vo.wav -filter_complex \
+"[0:v]scale=1920:1080,drawtext=fontfile=/System/Library/Fonts/Helvetica.ttc:\
+fontsize=30:fontcolor=white:shadowcolor=black@0.95:shadowy=2:\
+x=(w-text_w)/2:y=h-text_h-56:text='Caption',format=yuv420p[v]" \
+-map "[v]" -map 1:a -c:v libx264 -r 30 -c:a aac -shortest out.mp4
+```
+Fade (currently missing anyway): add `alpha='if(lt(t,0.2),t/0.2,1)'` to drawtext. No auto-wrap — insert `\n` or split drawtext filters.
+
+**Q2 — full timeline (per-segment timing via adelay+amix, matching `at`):**
+```bash
+ffmpeg -y -loop 1 -t 10 -i s1.png -loop 1 -t 8 -i s2.png -i vo1.wav -i vo2.wav \
+-filter_complex "[0:v]scale=1920:1080,setsar=1,drawtext=...[v0];\
+[1:v]scale=1920:1080,setsar=1,drawtext=...[v1];[v0][v1]concat=n=2[v];\
+[2:a]adelay=0|0[a1];[3:a]adelay=10350|10350[a2];\
+[a1][a2]amix=inputs=2:normalize=0[a]" \
+-map "[v]" -map "[a]" -c:v libx264 -r 30 -c:a aac out.mp4
+```
+
+**Verdict**: the entire current output is ffmpeg-replicable; Remotion adds nothing used today except browser text layout.
+0

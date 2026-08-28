@@ -1,0 +1,27 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Still starting after 16s — phase: registerDaemonProjectPresence
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.67926.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 26s — phase: createAgentSession > discoverCustomToolPaths > capability:tools:claude-plugins
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.67926.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Working...
+I'll now execute the pre-execution contract review.
+
+1. **Plan ↔ goal**: The plan (rev1) is exactly A1–A6 with no drift. The plan's North Star aligns with the agent goal's end state: shots as sub‑timelines + ffmpeg text rendering, delivering A1–A6 via B1–B4 batches. No feature creep beyond Phase A/B/C boundaries is in scope.
+
+2. **Goal ↔ tasklist**: Each goal criterion maps to concrete tasks (T8–T12 for AG1–AG3; T5–T7 for AG4; T1–T4 for AG5; T13–T16 for AG6). Acceptance in tasks maps directly to done criteria (e.g., T12 golden/expansion test for AG4; T10 double‑compile idempotency for AG1). No goal item lacks a task; no task exceeds goal scope (e.g., Phase B/C remain out of scope).
+
+3. **Tasklist ↔ validation**: All tasks have validation commands that are available and trackable (e.g., `pytest` suites, `astrid timelines show`, `ffprobe`, `--backend rendering.ffmpeg`). The validation set from the goal is respected (compile+show+render+ffprobe). No missing checkpoints.
+
+4. **Sync/authorization**: The goal authorizes commits to branch `megado/oracle-run-storyboard` and pushing to origin on finish; never merge to main. The plan's Phase 6 (B4 T16) respects this. Local video opening is authorized; no deploy/Supabase/etc. All tasks are unambiguous.
+
+5. **Classifications**: All 16 tasks are marked `normal`. Each task is mechanically bounded (text rasterization, support relaxation, filtergraph, pure expansion function, hook insertion, compiler extraction/builders, SDK calls, CLI flags, end‑to‑end evidence). Evidence for [XHARD] threshold not found.
+
+6. **Protection**: The plan never references `remotion/*` or `remotion/public/`; the only Remotion work is the in‑flight font fix in those files, which the goal explicitly preserves.
+
+**Verdict**: PASS
+
+Pre-execution contract review passes. All invariants hold; no blocking findings. The frozen plan, goal, and tasklist are consistent, authorized, and fully traced, and all tasks are classified as normal. Execution may proceed.
+[launch_hermes_agent] done in 125.2s (exit=0)
+0

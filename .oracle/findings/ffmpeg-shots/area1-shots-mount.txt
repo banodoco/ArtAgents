@@ -1,0 +1,14 @@
+## Astrid `timelines shots` mount — verified facts
+
+**1. Data model.** `shots` table: `id` (PK), `project_id` (FK→projects, CASCADE), `name`, `sort_key` (UNIQUE per project), `metadata_json`, `created_at`, `updated_at` (`astrid/packs/shots/migrations/0001_initial.sql:17-26`). `shot_items`: `id` (PK), `shot_id` (FK→shots, CASCADE), `media_id` (FK→media, ON DELETE RESTRICT), `sort_key` (UNIQUE per shot), `source_frame`, `metadata_json`, `created_at` (`0001_initial.sql:28-37`). Read models: `ShotReadModel` (id, project_id, name, sort_key, metadata, created_at, updated_at, event_head_seq, items tuple) and `ShotItemReadModel` (id, shot_id, media_id, source_frame, metadata, sort_key, position, created_at, event_head_seq) at `astrid/packs/shots/repository.py:260-326`. Shots relate to **projects**, not timelines — no timeline FK anywhere.
+
+**2. ShotsService API** (`astrid/sdk/shots.py`): `create(*, project, name, metadata=None, idempotency_key=None)` (:86); `add_item(project, shot_id, *, media_id, position=None, source_frame=None, metadata=None, idempotency_key=None)` (:141); `remove_item(project, shot_id, item_id, *, idempotency_key=None)` (:201); `reorder(project, shot_id, item_ids, *, idempotency_key=None)` — exact permutation required (:246); `list(project)` (:291); `show(project, shot_id)` (:314). All return `DomainResult`.
+
+**3. No shots→clips bridge.** The pack "never FK's to or imports the timeline pack" (`repository.py:8-10`). The timeline's `pinnedShotGroups[].shotId/clipIds` concept (`timeline_visualize/model.py:432-489`, `timeline_storyboard/run.py:291-351`) is a **different, timeline-JSON-embedded shot concept** — unrelated to the shots pack tables.
+
+**4. Multiple items per shot: yes.** `position` domain is `0..count` (`repository.py:30-31`); no media-kind constraint — any kernel media (image, audio, video) qualifies; each item pins exactly one `media_id`.
+
+**5. Renderer ignores shots.** Render executor reads timeline config + asset registry only (`render/managed_timeline.py:235-232`); its only "shot" references are `editorial.shots` capability keywords (`executor.yaml:85`). No code outside the pack/application/SDK reads `shots` tables (grep: only `application.py:74,345`, `sdk/shots.py`).
+
+**6. SQLite: yes.** Tables live in each project's `.astrid/astrid.sqlite3` (`managed_timeline.py:244`); shots is one of three standard schema packs (`core/schema_packs/standard.py:27`); event stream type `shot.shot` registered in kernel (`core/events/registry.py:298-301`). CLI mount: `astrid timelines shots <verb>` with six verbs, no top-level family (`packs/timeline/cli.py:14-19`, `core/cli/domain_product.py:82`).
+0

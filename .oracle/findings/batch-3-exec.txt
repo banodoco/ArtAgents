@@ -1,0 +1,12 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web', 'terminal'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Still starting after 21s — phase: preloadPluginRoots
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.69945.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 31s — phase: createAgentSession > discoverSkills > capability:skills:codex
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.69945.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 41s — phase: createAgentSession > discoverCustomToolPaths > capability:tools:codex
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.69945.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Working...
+error: omp process exceeded --timeout=1800.0s
+124

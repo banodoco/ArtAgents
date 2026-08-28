@@ -1,0 +1,30 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Still starting after 11s — phase: capability:extension-modules:native
+  logs: /Users/peteromalley/.omp/logs/omp.2026-08-28.63361.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Working...
+RANKED CONCRETE FINDINGS (each: what to simplify → where in the plan → why safe → what breaks if ignored)
+
+1. **Expand hook writes twice** → expand_shot_clips + snapshot resolution both write to the same sqlite row (via `load_timeline_document` in `resolve_managed_render_snapshot`). Current plan splits the operation into a post-resolve hook; loader opens a sibling statement on the existing connection. Breaking: 2 places manage the same row (load + write) and are not version-checked together; merge would lose failure handling if snapshot resolution fails. Safe simplification: extract a reusable `expand_and_materialize_timeline` callable reused by both invocations; that keeps the exact row-sequence but reduces duplicate query. If you keep the hook as-is, be explicit about `save AFTER expand` and add a second row-level lock (`BEGIN IMMEDIATE; SELECT; SELECT; UPDATE; COMMIT`) to avoid concurrent writers.
+
+2. **Text rendering over-generalized** → the plan relaxes support to accept any text clip with params/shadows, then restricts to stills+text+fade for the intro, but also keeps text-only tracks, `anchor/offsetX/offsetY/maxWidth/textShadow/weight`. Breaking: over-generalization makes support tests fragile (misaligned expectations between `test_support_rejects_non_media_timeline` and new stills+text fixture) and will require manual guardian rules for any future text shape. Safe simplification: define a single intro-shaped `text_clip` schema (captions only, bottom-center anchor, 48px offsetY, black stroke, Helvetica fallback) and delete `renderer.yaml`'s `text_overlay: true` + `params` schema; let the test suite enforce it. If you need multiple text shapes later, add a dedicated `text-overlay` table, not generic text params. That still satisfies A5 while keeping the backend minimal.
+
+3. **`--shots` flag not always needed** → the plan keeps `compile` defaulting to flat (no `--shots`) so existing workflows keep working. Breaking: implies a forked compile path and manual client-side flag awareness; if the only use case is the Astrid intro, you could make `--shots` default and delete the branch. Safe simplification: only for the intro storyboard compile. If a future multi-project storyboarding path emerges, add the flag then. If you default to `--shots`, remove `compile`'s flat conditional and simplify the emit path.
+
+Top 3 recommended cuts:
+
+1. Merge expand hook into snapshot resolution itself (reusable callable or single pass) to avoid double-write coordination and reduce hook-coupling.
+2. Narrow text-clip support to the intro-specific shape (bottom-center captions, fades only) and delete general `text_overlay`/`params` machinery.
+3. Make `--shots` default for `compile_storyboard` if you commit to the Astrid intro as the canonical storyboard use case; otherwise leave opt-in and trim the conditional path.
+
+Evidence against these: no shots pack is tested with multiple text shapes or nested timelines; the only currently known text use is intro captions. The plugin law and spike analysis do not require generic text; Phase B/C are excluded, which would have required more genericity. Hence the cuts are safe.
+[launch_hermes_agent] done in 142.7s (exit=0)
+ERROR: Could not consume arg: --task-timeout=1800
+Usage: launch_hermes_agent.py --model=deepseek:deepseek-v4-flash --toolsets=file,web --query_file=.oracle/briefs/settled1/lens1-simplicity.md --project-dir=/Users/peteromalley/Documents/reigh-workspace/astrid-megado - <command|value>
+  available commands:    as_integer_ratio | bit_count | bit_length |
+                         conjugate | from_bytes | to_bytes
+  available values:      denominator | imag | numerator | real
+
+For detailed information on this command, run:
+  launch_hermes_agent.py --model=deepseek:deepseek-v4-flash --toolsets=file,web --query_file=.oracle/briefs/settled1/lens1-simplicity.md --project-dir=/Users/peteromalley/Documents/reigh-workspace/astrid-megado - --help

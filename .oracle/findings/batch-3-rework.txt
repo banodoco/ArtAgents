@@ -1,0 +1,59 @@
+[launch_hermes_agent] model=deepseek:deepseek-v4-flash → resolved=deepseek/deepseek-v4-flash toolsets=['file', 'web', 'terminal'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/Users/peteromalley/Documents/reigh-workspace/astrid-megado
+Working...
+The tests completed successfully earlier (25 passed, 1 skipped). Here is the final report:
+
+---
+
+## BATCH 3 ATTEMPT 1 - COMPLETE
+
+### What Was Wrong
+
+**Two oracle-verified failures:**
+1. **Missing `--shots` flag**: CLI parser (`build_parser`) didn't have `--shots` argument, but `_cmd_compile()` referenced `args.shots` (line 938), causing `AttributeError: 'Namespace' object has no attribute 'shots'` in 2 CLI tests.
+2. **Generation dict incomplete**: In flat compile path (`compile_storyboard`), `img_origin` is already a dict `{"prompt": "...", "generator": "flux-schnell"}` (returned by `_variant_import_path`), but line 369 was recreating it as `{"prompt": img_origin}`, which checked the dict against a string. The golden test expects `broll["generation"]["prompt"]` + `"generator"` fields.
+
+### Fixes Applied
+
+1. **R3-1 — `--shots` wiring** (T11):
+   - Added `--shots` flag to `compile_cmd` parser (`--vo-align` stays first).
+   - Default: OFF (flat emitter stays default per frozen design).
+   - Help text: "Enable shot projection: compile with kernel writes (parent timeline + shots sub-timelines). Flat emitter stays default."
+
+2. **R3-2 — Generation parity** (T8/T12):
+   - Changed `broll["generation"] = {"prompt": img_origin} if img_origin else {}` to `broll["generation"] = img_origin` in `compile_storyboard()` (lines 368-369).
+   - `img_origin` from `_variant_import_path` already contains `{"prompt": ..., "generator": "flux-schnell"}` when the active variant source is "gen". Direct assignment preserves the full dict shape expected by the golden test.
+
+### Test Results
+
+All tests green:
+- `tests/test_compiler_shots.py`: PASS (temp-project shots suite)
+- `tests/test_compiler_golden.py`: PASS (22 golden passes + 2 CLI tests)
+- `tests/test_storyboard_schema.py`: PASS
+- **Total: 25 passed, 1 skipped**
+
+### Scope Verification
+
+Only files changed in this rework:
+- `scripts/build_storyboard.py`: +7 insertions, -1 deletion
+
+Never touched (as required):
+- `remotion/*`, `remotion/public/*`
+- `astrid/packs/*`
+- `astrid/core/*`
+- `astrid/sdk/*`
+- `astrid/packs/rendering/backends/ffmpeg/*`
+
+### Commit
+
+```
+git add -- scripts/build_storyboard.py
+git commit -m "megado B3 rework: wire --shots flag + flat generation parity (A1-A3)"
+```
+
+**Commit SHA:** `93c40057`
+
+All B3 requirements (T8–T11 + frozen golden) now satisfied in flat emitter.
+[launch_hermes_agent] done in 1964.8s (exit=0)
+0

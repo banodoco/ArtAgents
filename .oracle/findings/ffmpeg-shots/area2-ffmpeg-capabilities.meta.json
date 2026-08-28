@@ -1,0 +1,21 @@
+{
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/briefs/ffmpeg-shots/area2-ffmpeg-capabilities.md",
+  "elapsed_s": 283.861,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-28T11:40:46Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/ffmpeg-shots/area2-ffmpeg-capabilities.meta.json",
+  "model": "zhipu:glm-5.3",
+  "pid": 82620,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2378,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/ffmpeg-shots/area2-ffmpeg-capabilities.txt",
+  "started_at": "2026-08-28T11:36:02Z",
+  "status": "ok",
+  "stem": "area2-ffmpeg-capabilities",
+  "task_timeout_s": 900,
+  "tool_calls": 0
+}
