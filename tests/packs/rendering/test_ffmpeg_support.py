@@ -233,7 +233,7 @@ def test_support_fails_closed_for_every_unsupported_semantic(
     if case == "unknown_track_kind":
         timeline_data["tracks"][1]["kind"] = "captions"
     elif case == "unknown_clip_kind":
-        timeline_data["clips"][0]["clipType"] = "text"
+        timeline_data["clips"][0]["clipType"] = "text-card"
     elif case == "unknown_track":
         timeline_data["clips"][0]["track"] = "missing"
     elif case == "invalid_bounds":
@@ -656,3 +656,169 @@ def test_pinned_video_profile_and_level_are_rejected_as_unguaranteed(
     report = _evaluate(tmp_path, _timeline(), _assets(tmp_path), request=request)
     assert report.supported is False
     assert any("video_profile" in reason or "video_level" in reason for reason in report.reasons)
+
+
+def _text_clip(**overrides: object) -> dict:
+    clip = {
+        "id": "title",
+        "at": 0.5,
+        "track": "v",
+        "clipType": "text",
+        "hold": 1,
+        "text": {"content": "Hello"},
+    }
+    clip.update(overrides)
+    return clip
+
+
+def _with_font(monkeypatch: pytest.MonkeyPatch, path: str | None) -> None:
+    """Pin the support-time font resolver: a fake path accepts, None rejects."""
+    monkeypatch.setattr(
+        support_module,
+        "_resolve_font_path",
+        (lambda bold: Path(path)) if path else (lambda bold: None),
+    )
+
+
+def test_support_accepts_text_overlay_without_fades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_font(monkeypatch, "font.ttf")
+    timeline_data = _timeline()
+    timeline_data["clips"].append(_text_clip())
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is True
+    assert report.reasons == []
+    assert report.features["media_only"] is False
+    assert report.features["text_overlay"] is True
+    assert report.features["fade_envelope"] is False
+    assert report.features["whole_media"] is False
+    assert report.features["stream_copy"] is False
+
+
+def test_support_accepts_text_overlay_with_fades_and_vetoes_stream_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_font(monkeypatch, "font.ttf")
+    timeline_data = _timeline()
+    timeline_data["clips"].append(
+        _text_clip(effects={"fade_in": 0.25, "fade_out": 0.5})
+    )
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is True
+    assert report.features["media_only"] is False
+    assert report.features["text_overlay"] is True
+    assert report.features["fade_envelope"] is True
+    assert report.features["whole_media"] is False
+    assert report.features["stream_copy"] is False
+
+
+def test_support_accepts_text_on_media_track_and_extra_text_only_track(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_font(monkeypatch, "font.ttf")
+    timeline_data = _timeline()
+    timeline_data["tracks"].append(
+        {"id": "brand", "kind": "visual", "label": "Brand"}
+    )
+    timeline_data["clips"].append(_text_clip(id="title_v"))
+    timeline_data["clips"].append(
+        _text_clip(id="title_brand", track="brand", at=0.25)
+    )
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is True
+    assert report.reasons == []
+    assert report.features["text_overlay"] is True
+    assert report.features["media_only"] is False
+    assert report.features["whole_media"] is False
+    assert report.features["stream_copy"] is False
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("text_only_no_media", "needs at least one visual media clip"),
+        ("extra_visual_media_track", "exactly one visual track carrying media clips"),
+        ("empty_extra_visual_track", "has no clips"),
+        ("text_from", "must not declare from"),
+        ("text_position", "unsupported transforms"),
+        ("text_audio_track", "must sit on a visual track"),
+        ("text_asset", "must not reference an asset"),
+        ("text_hold_zero", "positive duration"),
+        ("text_missing_content", "non-empty text.content"),
+        ("text_unknown_param", "unsupported text params"),
+        ("text_unknown_fade_key", "unsupported effect keys"),
+        ("text_entrance_effect", "unsupported effects"),
+        ("text_bad_color", "color"),
+        ("text_bad_shadow", "textShadow"),
+        ("missing_font", "no TTF font"),
+    ],
+)
+def test_support_fails_closed_for_text_semantics(
+    tmp_path: Path,
+    case: str,
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _with_font(monkeypatch, "font.ttf")
+    timeline_data = _timeline()
+
+    if case == "text_only_no_media":
+        timeline_data = _timeline(include_audio=False)
+        timeline_data["clips"] = [_text_clip()]
+    elif case == "extra_visual_media_track":
+        timeline_data["tracks"].append({"id": "v2", "kind": "visual", "label": "B"})
+        timeline_data["clips"].append(
+            {
+                "id": "video_2",
+                "at": 0,
+                "track": "v2",
+                "clipType": "media",
+                "asset": "video",
+                "from": 0,
+                "to": 4,
+                "speed": 1,
+                "volume": 0,
+            }
+        )
+    elif case == "empty_extra_visual_track":
+        timeline_data["tracks"].append({"id": "v2", "kind": "visual", "label": "B"})
+    elif case == "text_from":
+        timeline_data["clips"].append(_text_clip(**{"from": 0}))
+    elif case == "text_position":
+        timeline_data["clips"].append(_text_clip(x=10, y=20))
+    elif case == "text_audio_track":
+        timeline_data["clips"].append(_text_clip(track="a"))
+    elif case == "text_asset":
+        timeline_data["clips"].append(_text_clip(asset="video"))
+    elif case == "text_hold_zero":
+        timeline_data["clips"].append(_text_clip(hold=0))
+    elif case == "text_missing_content":
+        timeline_data["clips"].append(_text_clip(text={}))
+    elif case == "text_unknown_param":
+        timeline_data["clips"].append(_text_clip(params={"banana": 1}))
+    elif case == "text_unknown_fade_key":
+        timeline_data["clips"].append(_text_clip(effects={"slide_in": 0.3}))
+    elif case == "text_entrance_effect":
+        timeline_data["clips"].append(_text_clip(entrance={"type": "slide"}))
+    elif case == "text_bad_color":
+        timeline_data["clips"].append(
+            _text_clip(text={"content": "Hello", "color": "not-a-color"})
+        )
+    elif case == "text_bad_shadow":
+        timeline_data["clips"].append(_text_clip(params={"textShadow": "1 2"}))
+    elif case == "missing_font":
+        _with_font(monkeypatch, None)
+        timeline_data["clips"].append(_text_clip())
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is False
+    assert any(reason in item for item in report.reasons)
+    assert report.alternatives == ["rendering.remotion"]

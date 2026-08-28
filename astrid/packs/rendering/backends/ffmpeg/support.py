@@ -25,6 +25,14 @@ from astrid.core.rendering.contracts import (
     SupportReport,
 )
 from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
+from astrid.packs.rendering.backends.ffmpeg.text import (
+    _finite_number,
+    _parse_color,
+    _parse_fades,
+    _parse_text_shadow,
+    _resolve_font_path,
+    _text_window,
+)
 
 
 BACKEND_ID = "rendering.ffmpeg"
@@ -35,6 +43,9 @@ _TRACK_KINDS = frozenset({"visual", "audio"})
 _POSITION_KEYS = frozenset({"x", "y", "width", "height"})
 _CROP_KEYS = frozenset({"cropTop", "cropBottom", "cropLeft", "cropRight"})
 _EFFECT_KEYS = frozenset({"effects", "entrance", "exit", "continuous", "keyframes"})
+_TEXT_PARAM_KEYS = frozenset(
+    {"anchor", "offsetX", "offsetY", "maxWidth", "textShadow", "weight"}
+)
 _TIMELINE_EPSILON_SECONDS = 1e-9
 _SOURCE_BOUND_TOLERANCE_SECONDS = 0.001
 
@@ -160,6 +171,7 @@ def _validate_clip_semantics(
 ) -> list[str]:
     reasons: list[str] = []
     clip_id = clip.get("id")
+    is_text = clip.get("clipType") == "text"
     if "muted" in clip:
         reasons.append(
             f"Clip {clip_id!r} uses unsupported clip-level muted; use volume: 0"
@@ -187,8 +199,9 @@ def _validate_clip_semantics(
         reasons.append(
             f"Clip {clip_id!r} uses unsupported crop: {', '.join(cropped)}"
         )
+    effect_keys = _EFFECT_KEYS - {"effects"} if is_text else _EFFECT_KEYS
     effects = sorted(
-        key for key in _EFFECT_KEYS if key in clip and _nonempty(clip.get(key))
+        key for key in effect_keys if key in clip and _nonempty(clip.get(key))
     )
     if effects:
         reasons.append(
@@ -224,6 +237,13 @@ def _validate_clip_semantics(
             reasons.append(
                 f"Clip {clip_id!r} uses unsupported media params: {', '.join(other_params)}"
             )
+        if is_text:
+            unknown_params = sorted(set(params) - _TEXT_PARAM_KEYS)
+            if unknown_params:
+                reasons.append(
+                    f"Clip {clip_id!r} uses unsupported text params: "
+                    f"{', '.join(unknown_params)}"
+                )
 
     if clip.get("clipType") == "media":
         if _nonempty(clip.get("hold")):
@@ -238,6 +258,61 @@ def _validate_clip_semantics(
             effective_gain(track, clip)
         except ValueError as exc:
             reasons.append(str(exc))
+    if is_text:
+        reasons.extend(_validate_text_semantics(clip, track))
+    return reasons
+
+
+def _text_wants_bold(clip: Mapping[str, Any]) -> bool:
+    """Mirror of the rasterizer's bold decision (text.bold or weight >= 600)."""
+    text_field = clip.get("text")
+    params = clip.get("params")
+    text_field = text_field if isinstance(text_field, Mapping) else {}
+    params = params if isinstance(params, Mapping) else {}
+    weight = _finite_number(params.get("weight"))
+    return text_field.get("bold") is True or (weight is not None and weight >= 600)
+
+
+def _validate_text_semantics(
+    clip: Mapping[str, Any],
+    track: Mapping[str, Any],
+) -> list[str]:
+    """Text-only semantics: content, window, no source, color/shadow parity."""
+    reasons: list[str] = []
+    clip_id = clip.get("id")
+    if track.get("kind") != "visual":
+        reasons.append(f"Text clip {clip_id!r} must sit on a visual track")
+    if "from" in clip:
+        reasons.append(
+            f"Text clip {clip_id!r} must not declare from; use at with hold or to"
+        )
+    if clip.get("asset") is not None:
+        reasons.append(f"Text clip {clip_id!r} must not reference an asset")
+    text_field = clip.get("text")
+    text_field = text_field if isinstance(text_field, Mapping) else {}
+    content = text_field.get("content")
+    if not isinstance(content, str) or not content:
+        reasons.append(f"Text clip {clip_id!r} requires non-empty text.content")
+    try:
+        _parse_fades(clip.get("effects"))
+    except ValueError as exc:
+        reasons.append(str(exc))
+    try:
+        _text_window(clip)
+    except ValueError as exc:
+        reasons.append(str(exc))
+    color_text = text_field.get("color")
+    if isinstance(color_text, str) and color_text.strip():
+        try:
+            _parse_color(color_text)
+        except ValueError as exc:
+            reasons.append(str(exc))
+    params = clip.get("params")
+    params = params if isinstance(params, Mapping) else {}
+    try:
+        _parse_text_shadow(params.get("textShadow"))
+    except ValueError as exc:
+        reasons.append(str(exc))
     return reasons
 
 
@@ -279,8 +354,6 @@ def structural_reasons(
             visual_track_ids.add(track_id)
         reasons.extend(_validate_track_semantics(raw_track))
 
-    if len(visual_track_ids) != 1:
-        reasons.append("rendering.ffmpeg requires exactly one visual track")
 
     clips: list[Mapping[str, Any]] = []
     seen_clip_ids: set[str] = set()
@@ -310,7 +383,7 @@ def structural_reasons(
                 reasons.append(
                     f"rendering.ffmpeg media path does not support clip kind {clip_type!r}"
                 )
-        elif clip_type != "media":
+        elif clip_type not in ("media", "text"):
             reasons.append(
                 f"Clip {clip_id!r} has unsupported clip kind {clip_type!r}"
             )
@@ -322,6 +395,20 @@ def structural_reasons(
                 "audio-reactive-colour specialization requires exactly one effect clip"
             )
         return _dedupe(reasons)
+
+    media_visual_track_ids = {
+        str(clip.get("track"))
+        for clip in clips
+        if clip.get("clipType") == "media"
+        and tracks.get(str(clip.get("track")), {}).get("kind") == "visual"
+    }
+    if len(media_visual_track_ids) != 1:
+        reasons.append(
+            "rendering.ffmpeg requires exactly one visual track carrying media clips"
+        )
+    for track_id in sorted(visual_track_ids - media_visual_track_ids):
+        if not any(str(clip.get("track")) == track_id for clip in clips):
+            reasons.append(f"Visual track {track_id!r} has no clips")
 
     visual_ranges: list[_ClipRange] = []
     audio_ranges: list[_ClipRange] = []
@@ -660,6 +747,18 @@ def support(
         for clip in media_clips
         if tracks.get(clip.get("track"), {}).get("kind") == "audio"
     ]
+    text_clips = [
+        clip
+        for clip in timeline_data.get("clips", [])
+        if isinstance(clip, Mapping) and clip.get("clipType") == "text"
+    ]
+    if text_clips:
+        for bold in sorted({_text_wants_bold(clip) for clip in text_clips}):
+            if _resolve_font_path(bold=bold) is None:
+                reasons.append(
+                    "no TTF font found for text rendering (searched "
+                    "Supplemental Arial, /Library/Fonts Arial, DejaVu)"
+                )
     ownership, ownership_reasons = _requested_ownership(
         request,
         has_audio_clips=bool(audio_clips),
@@ -746,17 +845,29 @@ def support(
         else:
             specialization = spec is not None
 
-    whole_media = not reactive and _whole_media_optimization(
-        timeline_data,
-        assets,
-        probes,
+    has_text_overlay = bool(text_clips)
+    fade_envelope = False
+    for clip in text_clips:
+        try:
+            fade_in, fade_out = _parse_fades(clip.get("effects"))
+        except ValueError:
+            continue
+        if fade_in > 0 or fade_out > 0:
+            fade_envelope = True
+            break
+    whole_media = (
+        not reactive
+        and not has_text_overlay
+        and _whole_media_optimization(timeline_data, assets, probes)
     )
     features: dict[str, bool | str] = {
-        "media_only": not specialization,
+        "media_only": not specialization and not has_text_overlay,
         "full_timeline": True,
         "windows": False,
         "sequential_audio": True,
         "audio_reactive_colour": specialization,
+        "text_overlay": has_text_overlay,
+        "fade_envelope": fade_envelope,
         "whole_media": whole_media,
         "whole_media_optimization": whole_media,
         "stream_copy": whole_media,
