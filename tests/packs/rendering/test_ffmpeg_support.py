@@ -740,6 +740,29 @@ def test_support_accepts_text_on_media_track_and_extra_text_only_track(
     assert report.features["stream_copy"] is False
 
 
+def test_support_accepts_text_window_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A text window ending exactly at media coverage and a fade envelope
+    exactly filling its window are both legal."""
+    _with_font(monkeypatch, "font.ttf")
+    timeline_data = _timeline()
+    timeline_data["clips"].append(_text_clip(at=3.0, hold=1.0))
+    timeline_data["clips"].append(
+        _text_clip(
+            id="full_fade",
+            at=1.0,
+            hold=1.0,
+            effects={"fade_in": 0.5, "fade_out": 0.5},
+        )
+    )
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is True
+    assert report.reasons == []
+
+
 @pytest.mark.parametrize(
     ("case", "reason"),
     [
@@ -758,6 +781,8 @@ def test_support_accepts_text_on_media_track_and_extra_text_only_track(
         ("text_bad_color", "color"),
         ("text_bad_shadow", "textShadow"),
         ("missing_font", "no TTF font"),
+        ("text_past_media", "beyond the visual media coverage"),
+        ("text_fade_envelope_too_long", "fade envelope"),
     ],
 )
 def test_support_fails_closed_for_text_semantics(
@@ -813,6 +838,12 @@ def test_support_fails_closed_for_text_semantics(
         )
     elif case == "text_bad_shadow":
         timeline_data["clips"].append(_text_clip(params={"textShadow": "1 2"}))
+    elif case == "text_past_media":
+        timeline_data["clips"].append(_text_clip(at=3.5, hold=2))
+    elif case == "text_fade_envelope_too_long":
+        timeline_data["clips"].append(
+            _text_clip(effects={"fade_in": 0.75, "fade_out": 0.5})
+        )
     elif case == "missing_font":
         _with_font(monkeypatch, None)
         timeline_data["clips"].append(_text_clip())

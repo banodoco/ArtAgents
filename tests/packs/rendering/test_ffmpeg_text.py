@@ -364,22 +364,34 @@ def test_filtergraph_is_one_argv_element_with_literal_quotes(tmp_path) -> None:
     assert graph.count("'") == 2  # exactly the enable quoting, untouched
 
 
-def test_both_fades_emitted_even_at_zero_duration(tmp_path) -> None:
-    inputs = _overlay_inputs(
-        tmp_path,
-        text_overlays=(
-            command.TextOverlaySpec(
-                path=str(tmp_path / "title.png"),
-                at=1.0,
-                end=3.0,
-                fade_in=0.0,
-                fade_out=0.0,
+def test_fade_filters_omitted_per_side_at_zero_duration(tmp_path) -> None:
+    def graph_for(fade_in: float, fade_out: float) -> str:
+        inputs = _overlay_inputs(
+            tmp_path,
+            text_overlays=(
+                command.TextOverlaySpec(
+                    path=str(tmp_path / "title.png"),
+                    at=1.0,
+                    end=3.0,
+                    fade_in=fade_in,
+                    fade_out=fade_out,
+                ),
             ),
-        ),
-    )
-    graph = _filter_complex(command.build_render_command_from_inputs(inputs))
-    assert "fade=t=in:st=1.000000:d=0.000000:alpha=1" in graph
-    assert "fade=t=out:st=3.000000:d=0.000000:alpha=1" in graph
+        )
+        return _filter_complex(command.build_render_command_from_inputs(inputs))
+
+    # ffmpeg's fade filter treats duration=0 as nb_frames (default 25), so a
+    # zero-duration side must be OMITTED, not emitted with d=0.
+    neither = graph_for(0.0, 0.0)
+    assert "fade=t=" not in neither
+    assert "[1:v]format=rgba[ov0]" in neither
+    # Each side is emitted independently when its duration is positive.
+    in_only = graph_for(0.25, 0.0)
+    assert "fade=t=in:st=1.000000:d=0.250000:alpha=1" in in_only
+    assert "fade=t=out" not in in_only
+    out_only = graph_for(0.0, 0.5)
+    assert "fade=t=out:st=2.500000:d=0.500000:alpha=1" in out_only
+    assert "fade=t=in" not in out_only
 
 
 def test_stream_copy_vetoed_when_overlays_present(tmp_path) -> None:

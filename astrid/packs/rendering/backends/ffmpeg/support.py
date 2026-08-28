@@ -32,6 +32,7 @@ from astrid.packs.rendering.backends.ffmpeg.text import (
     _parse_text_shadow,
     _resolve_font_path,
     _text_window,
+    text_wants_bold,
 )
 
 
@@ -263,16 +264,6 @@ def _validate_clip_semantics(
     return reasons
 
 
-def _text_wants_bold(clip: Mapping[str, Any]) -> bool:
-    """Mirror of the rasterizer's bold decision (text.bold or weight >= 600)."""
-    text_field = clip.get("text")
-    params = clip.get("params")
-    text_field = text_field if isinstance(text_field, Mapping) else {}
-    params = params if isinstance(params, Mapping) else {}
-    weight = _finite_number(params.get("weight"))
-    return text_field.get("bold") is True or (weight is not None and weight >= 600)
-
-
 def _validate_text_semantics(
     clip: Mapping[str, Any],
     track: Mapping[str, Any],
@@ -293,14 +284,24 @@ def _validate_text_semantics(
     content = text_field.get("content")
     if not isinstance(content, str) or not content:
         reasons.append(f"Text clip {clip_id!r} requires non-empty text.content")
+    fades: tuple[float, float] = (0.0, 0.0)
     try:
-        _parse_fades(clip.get("effects"))
+        fades = _parse_fades(clip.get("effects"))
     except ValueError as exc:
         reasons.append(str(exc))
+    window: tuple[float, float] | None = None
     try:
-        _text_window(clip)
+        window = _text_window(clip)
     except ValueError as exc:
         reasons.append(str(exc))
+    if window is not None:
+        fade_total = fades[0] + fades[1]
+        duration = window[1] - window[0]
+        if fade_total > duration + _TIMELINE_EPSILON_SECONDS:
+            reasons.append(
+                f"Text clip {clip_id!r} fade envelope {fade_total:.6f}s exceeds "
+                f"its window {duration:.6f}s"
+            )
     color_text = text_field.get("color")
     if isinstance(color_text, str) and color_text.strip():
         try:
@@ -455,6 +456,19 @@ def structural_reasons(
                     f"Audio clip {clip_id!r} ends outside the visual frame bounds"
                 )
             audio_cursor = max(audio_cursor, bounds.end)
+        media_coverage_end = max(bounds.end for bounds in visual_ranges)
+        for clip in clips:
+            if clip.get("clipType") != "text":
+                continue
+            try:
+                _, text_end = _text_window(clip)
+            except ValueError:
+                continue
+            if text_end > media_coverage_end + _TIMELINE_EPSILON_SECONDS:
+                reasons.append(
+                    f"Text clip {clip.get('id')!r} ends at {text_end:.6f}, beyond "
+                    f"the visual media coverage end {media_coverage_end:.6f}"
+                )
     return _dedupe(reasons)
 
 
@@ -753,7 +767,7 @@ def support(
         if isinstance(clip, Mapping) and clip.get("clipType") == "text"
     ]
     if text_clips:
-        for bold in sorted({_text_wants_bold(clip) for clip in text_clips}):
+        for bold in sorted({text_wants_bold(clip) for clip in text_clips}):
             if _resolve_font_path(bold=bold) is None:
                 reasons.append(
                     "no TTF font found for text rendering (searched "

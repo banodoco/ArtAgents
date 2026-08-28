@@ -1,4 +1,4 @@
-"""Pure FFmpeg command builders for the media-only renderer.
+"""Pure FFmpeg command builders for the media-spine and text-overlay renderer.
 
 The builders read the immutable request inputs and return argv.  They do not
 create directories, write files, or launch subprocesses, which keeps command
@@ -308,12 +308,20 @@ def build_filter_graph(
         )
         spine = "vout"
         for k, overlay in enumerate(inputs.text_overlays):
-            filters.append(
-                f"[{len(asset_keys) + k}:v]format=rgba,"
-                f"fade=t=in:st={overlay.at:.6f}:d={overlay.fade_in:.6f}:alpha=1,"
-                f"fade=t=out:st={overlay.end - overlay.fade_out:.6f}:"
-                f"d={overlay.fade_out:.6f}:alpha=1[ov{k}]"
-            )
+            # ffmpeg's fade filter treats duration=0 as nb_frames (default
+            # 25), so each side is emitted only when its duration is
+            # positive; a no-envelope overlay composites instantly.
+            steps = [f"[{len(asset_keys) + k}:v]format=rgba"]
+            if overlay.fade_in > 0:
+                steps.append(
+                    f"fade=t=in:st={overlay.at:.6f}:d={overlay.fade_in:.6f}:alpha=1"
+                )
+            if overlay.fade_out > 0:
+                steps.append(
+                    f"fade=t=out:st={overlay.end - overlay.fade_out:.6f}:"
+                    f"d={overlay.fade_out:.6f}:alpha=1"
+                )
+            filters.append(",".join(steps) + f"[ov{k}]")
             spine_out = (
                 "vout" if k == len(inputs.text_overlays) - 1 else f"vout{k + 1}"
             )

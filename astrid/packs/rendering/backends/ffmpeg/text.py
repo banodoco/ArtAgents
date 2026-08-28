@@ -257,6 +257,20 @@ def _text_window(clip: dict[str, Any]) -> tuple[float, float]:
     return (start, start + duration)
 
 
+def text_wants_bold(clip: Mapping[str, Any]) -> bool:
+    """Single bold decision shared by support and the rasterizer.
+
+    ``text.bold`` is True or ``params.weight`` >= 600.
+    """
+
+    text_field = clip.get("text")
+    params = clip.get("params")
+    text_field = text_field if isinstance(text_field, Mapping) else {}
+    params = params if isinstance(params, Mapping) else {}
+    weight = _finite_number(params.get("weight"))
+    return text_field.get("bold") is True or (weight is not None and weight >= 600)
+
+
 def rasterize_text_clip(
     clip: dict[str, Any],
     width: int,
@@ -289,8 +303,7 @@ def rasterize_text_clip(
     align = text_field.get("align")
     align = align if align in ("left", "center", "right") else DEFAULT_ALIGN
 
-    weight = _finite_number(params.get("weight"))
-    wants_bold = text_field.get("bold") is True or (weight is not None and weight >= 600)
+    wants_bold = text_wants_bold(clip)
     anchor = params.get("anchor")
     anchor_name = anchor if isinstance(anchor, str) else ""
     offset_x = _finite_number(params.get("offsetX")) or 0.0

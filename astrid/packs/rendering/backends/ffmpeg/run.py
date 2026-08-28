@@ -350,6 +350,8 @@ def _support_load_failure(reason: str) -> SupportReport:
             "windows": False,
             "sequential_audio": True,
             "audio_reactive_colour": False,
+            "text_overlay": False,
+            "fade_envelope": False,
             "whole_media": False,
             "whole_media_optimization": False,
             "stream_copy": False,
