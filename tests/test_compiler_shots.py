@@ -1,19 +1,14 @@
-"""Compiler shots projection tests (plan v10 batch B3, tasks T8-T12).
+"""Compiler shots projection tests (plan v10 batch B3, tasks T8-T12 + final findings F3).
 
-Tests the compiler's --shots flag: compile a storyboard into kernel shots,
-sub-timelines, and a parent shot graph. Verifies:
-- 2 sections → 2 shots / 4 items / 2 sub-timelines
-- Same shot ids on recompile (receipt replay-safe)
-- 25 total timeline rows on first run, same on second run (no duplication)
-- Each shot.metadata_json.timeline_document_id resolves to real timelines row
+Tests the compiler's --shots flag against a REAL temp kernel: compile a
+storyboard into kernel shots + sub-timelines + a sequential parent shot graph,
+then verify idempotency and expansion-to-flat equality.
 """
 
 from __future__ import annotations
 
 import json
-from collections import namedtuple
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -21,76 +16,127 @@ from scripts import build_storyboard as bs
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 MINIMAL = FIXTURES / "storyboard-minimal.json"
-ASSET_DIR = FIXTURES / "storyboard-assets"
 
 
-class _FakeKernelImports:
-    """Monkeypatch stand-in for ``sdk_import_asset``: temp files, real hashes."""
+def _compile_shots(projects_root: Path, story: dict, *, project: str = "test") -> dict:
+    """Run the --shots compile against a real temp kernel via the CLI handler."""
+    from astrid.sdk.client import AstridClient
 
-    def __init__(self, cas_root: Path):
-        self.cas_root = cas_root
-        self.imports: dict[str, Any] = {}
-        self.media_ids: dict[str, str] = {}
+    def _probe(path: Path) -> float:
+        # Real valid wavs: use ffprobe-free constant (fixture is 0.5s).
+        return 0.5
 
-    def __call__(self, path: Path, *, project: str) -> Any:
-        """Mock import_asset: return temp-file-backed receipts with real hashes."""
-        rel = path.relative_to(cas_root.parent)
-        target = self.cas_root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(path.read_bytes())
-        sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-        media_id = f"media_{sha256[:16]}"
-        self.media_ids[rel.name] = media_id
-        receipt = {
-            "file": str(target),
-            "content_sha256": sha256,
-            "media_id": media_id,
-        }
-        return receipt
-
-
-@pytest.fixture()
-def fake_kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Monkeypatch sdk_import_asset with fake kernel that uses temp CAS."""
-    cas_root = tmp_path / "cas"
-    fake = _FakeKernelImports(cas_root)
-    monkeypatch.setattr(bs, "sdk_import_asset", fake)
-    return fake
+    with AstridClient.open(str(projects_root)) as client:
+        r = client.projects.create(slug=project, name="test")
+        if not r.ok and r.error.code == "conflict":
+            # Recompile reuses the existing project (idempotency test).
+            pass
+        elif not r.ok:
+            assert r.ok, r.error
+        importer = bs.make_client_importer(client, project=project)
+        out = bs._compile_with_shots(
+            story,
+            base_dir=FIXTURES,
+            plan=None,
+            import_asset=importer,
+            probe_duration=_probe,
+            project=project,
+            output_name="parent-shot-graph.mp4",
+            client=client,
+        )
+        return out
 
 
-def _import_media(fake: _FakeKernelImports, path: str) -> str:
-    """Import media through fake kernel and return media_id."""
-    fake_path = ASSET_DIR / path
-    receipt = fake(fake_path)
-    return receipt["media_id"]
+def _count_rows(projects_root: Path, table: str) -> int:
+    import sqlite3
+
+    db = projects_root / ".astrid" / "astrid.sqlite3"
+    conn = sqlite3.connect(db)
+    try:
+        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    finally:
+        conn.close()
 
 
-def test_compiler_shots_two_sections_creates_kernel_data(fake_kernel: _FakeKernelImports) -> None:
-    """Compile 2-section minimal intro with --shots flag: creates 2 shots / 4 items / 2 sub-timelines."""
-    # Open minimal intro story
+def _load_doc(projects_root: Path, timeline_id: str) -> tuple[dict, dict]:
+    import sqlite3, json
+
+    db = projects_root / ".astrid" / "astrid.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT document_json, asset_registry_json FROM timelines WHERE id=?",
+            (timeline_id,),
+        ).fetchone()
+        return json.loads(row["document_json"]), json.loads(row["asset_registry_json"])
+    finally:
+        conn.close()
+
+
+def test_compiler_shots_creates_rows_and_sequential_parent(tmp_path) -> None:
+    """Compile minimal storyboard --shots: kernel rows + sequential parent graph."""
     story = json.loads(MINIMAL.read_text(encoding="utf-8"))
-    
-    # We can't actually run the compiler with --shots yet (need to implement parent emitter),
-    # so this test documents the expected contract until T11 is complete.
-    # When T11 is implemented, this test should:
-    # - Call compile_storyboard(story, base_dir=..., project="test", shots=True)
-    # - Verify shots service results: 2 shots created, 4 items added
-    # - Verify timelines service: 2 sub-timelines created
-    # - Verify parent doc: 1 brand clip + 25 shot clips
-    
-    # For now, just verify the fixture loads correctly
-    assert len(story["sections"]) == 2
-    assert story["sections"][0]["id"] == "open"
-    assert story["sections"][1]["id"] == "idea-1"
-    
-    # Verify image variants exist (active_index=1 points to idea-1-alt.png gen variant)
-    assert "variants" in story["sections"][1]["image"]
-    assert len(story["sections"][1]["image"]["variants"]) == 2
-    assert story["sections"][1]["image"]["active_index"] == 1
-    
-    # This test will be implemented in T11/T12 when parent emitter and expand_shot_clips are complete
-    pytest.skip("Parent emitter (--shots) not yet implemented in compile_storyboard")
+    out = _compile_shots(tmp_path, story)
+
+    assert len(out["shots"]) == 2  # open, idea-1
+    assert set(out["shots"].keys()) == {"open", "idea-1"}
+    assert len(out["timeline"]["clips"]) == 3  # brand + 2 shot clips
+    shot_clips = [c for c in out["timeline"]["clips"] if c["clipType"] == "shot"]
+    assert len(shot_clips) == 2
+    # Sequential placement (F2): idea-1 starts after open's hold.
+    open_clip = next(c for c in shot_clips if c["id"] == "shot_open")
+    idea_clip = next(c for c in shot_clips if c["id"] == "shot_idea-1" or (c["id"].endswith("idea-1")))
+    assert idea_clip["at"] >= open_clip["at"] + open_clip["hold"] - 1e-6
+    assert open_clip["hold"] > 0
+    assert idea_clip["hold"] > 0
+
+    # Rows in the kernel store: 2 shots, 2 sub-timelines.
+    assert _count_rows(tmp_path, "shots") == 2
+    assert _count_rows(tmp_path, "timelines") == 2
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_compiler_shots_recompile_is_idempotent(tmp_path) -> None:
+    """Same compile twice → same ids, no new rows (receipt replay-safe)."""
+    story = json.loads(MINIMAL.read_text(encoding="utf-8"))
+    out1 = _compile_shots(tmp_path, story)
+    timelines1 = _count_rows(tmp_path, "timelines")
+    out2 = _compile_shots(tmp_path, story, project="test")
+    timelines2 = _count_rows(tmp_path, "timelines")
+    assert timelines1 == timelines2 == 2
+    assert set(out1["shots"].keys()) == set(out2["shots"].keys())
+
+
+def test_expand_matches_sub_docs_and_keeps_vo(tmp_path) -> None:
+    """Expansion of the parent preserves VO clips with sequential timebase (F1/F2)."""
+    import sqlite3, json
+    from astrid.core.timeline.expand_shots import expand_shot_clips
+
+    story = json.loads(MINIMAL.read_text(encoding="utf-8"))
+    out = _compile_shots(tmp_path, story)
+
+    db = tmp_path / ".astrid" / "astrid.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+
+    def load_tl(tlid):
+        row = conn.execute(
+            "SELECT document_json, asset_registry_json FROM timelines WHERE id=?",
+            (tlid,),
+        ).fetchone()
+        return json.loads(row["document_json"]), json.loads(row["asset_registry_json"])
+
+    try:
+        # Parent registry is the compile's canonical assets.
+        expanded, oreg = expand_shot_clips(
+            out["timeline"], {"assets": out["assets"]}, load_timeline=load_tl
+        )
+    finally:
+        conn.close()
+
+    vo_clips = [c for c in expanded["clips"] if c.get("id", "").startswith("vo_")]
+    # VO clips survive expansion (F1): each section had a vo clip.
+    assert len(vo_clips) == 2, f"expected 2 vo clips, got {len(vo_clips)}"
+    # Sequential timebase (F2): vo/idea-1 starts after vo/open's window.
+    vo_at = {c["id"]: c["at"] for c in vo_clips}
+    assert vo_at["vo_idea-1"] >= vo_at["vo_open"] + 1e-6

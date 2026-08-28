@@ -109,7 +109,14 @@ def expand_shot_clips(
                 )
 
             sub_at = float(sub_clip.get("at", 0.0))
+            # Sub-clip duration: `hold` for stills/text; `to-from` for bounded
+            # media (VO audio clips carry from/to with no hold).
             sub_hold = float(sub_clip.get("hold", 0.0))
+            if sub_hold <= 0.0:
+                from_v = float(sub_clip.get("from", 0.0))
+                to_v = float(sub_clip.get("to", 0.0))
+                if to_v > from_v:
+                    sub_hold = to_v - from_v
             new_at = parent_at + sub_at
             new_end = new_at + sub_hold
             if new_end <= parent_at:

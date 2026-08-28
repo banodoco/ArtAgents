@@ -873,12 +873,23 @@ def _compile_with_shots(
             )
             assert item_result.ok
 
-    # Create parent shot graph
+    # Create parent shot graph: each shot clip starts at its section's
+    # accumulated offset and holds its own section duration (+ GAP), so the
+    # expanded document time base matches the flat compile.
+    _section_holds: dict[str, float] = {}
     total = 0.0
+    section_offsets: dict[str, float] = {}
+    cursor = 0.0
     for section in story["sections"]:
+        slug = section["id"]
+        section_offsets[slug] = cursor
+        duration = 0.0
         if "vo" in section:
-            duration = vo_durations.get(section["id"], 0.0)
-            total = max(total, duration + GAP)
+            duration = vo_durations.get(slug, 0.0)
+        hold = round(duration + GAP, 3)
+        cursor += hold
+        total = cursor
+        _section_holds[slug] = hold
     
     total_r = round(total, 3)
     
@@ -896,10 +907,10 @@ def _compile_with_shots(
     for slug, data in shot_data.items():
         shot_clip = {
             "id": f"shot_{slug}",
-            "at": 0.0,
+            "at": section_offsets.get(slug, 0.0),
             "track": "broll",
             "clipType": "shot",
-            "hold": total_r,
+            "hold": _section_holds.get(slug, total_r),
             "params": {"shot_id": data["shot_id"], "timeline_document_id": data["timeline_document_id"]},
         }
         shot_clips.append(shot_clip)
