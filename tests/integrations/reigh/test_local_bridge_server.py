@@ -20,6 +20,7 @@ from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.bridge_service import HealthStatus
 from astrid.core.integrations.reigh.local_bridge_server import (
     _is_loopback_host_header,
+    _RequestAdmissionController,
     create_local_bridge_server,
 )
 from astrid.core.receipts.service import ReceiptService
@@ -1081,6 +1082,76 @@ def test_bridge_default_rate_budget_allows_legitimate_burst_above_legacy_limit(
     assert statuses == [200] * 40
 
 
+def test_read_admission_waits_for_a_handler_slot_to_release() -> None:
+    controller = _RequestAdmissionController(
+        max_concurrent=1,
+        rate_capacity=1,
+        refill_per_second=1.0,
+    )
+    acquired, _retry_after = controller.try_acquire(rate_limited=False)
+    assert acquired
+
+    started = threading.Event()
+    result: dict[str, tuple[bool, int]] = {}
+
+    def queued_read() -> None:
+        started.set()
+        result["admission"] = controller.try_acquire(
+            rate_limited=False,
+            concurrency_timeout=0.5,
+        )
+
+    client = threading.Thread(target=queued_read, daemon=True)
+    client.start()
+    assert started.wait(timeout=1)
+    time.sleep(0.05)
+    controller.release()
+    client.join(timeout=1)
+
+    assert not client.is_alive()
+    assert result["admission"] == (True, 0)
+    controller.release()
+
+
+def test_read_admission_times_out_without_hanging() -> None:
+    controller = _RequestAdmissionController(
+        max_concurrent=1,
+        rate_capacity=1,
+        refill_per_second=1.0,
+    )
+    acquired, _retry_after = controller.try_acquire(rate_limited=False)
+    assert acquired
+    started_at = time.monotonic()
+    admitted, retry_after = controller.try_acquire(
+        rate_limited=False,
+        concurrency_timeout=0.05,
+    )
+    elapsed = time.monotonic() - started_at
+    controller.release()
+
+    assert not admitted
+    assert retry_after == 1
+    assert elapsed < 1
+
+
+def test_write_admission_remains_fail_fast_when_handlers_are_full() -> None:
+    controller = _RequestAdmissionController(
+        max_concurrent=1,
+        rate_capacity=2,
+        refill_per_second=1.0,
+    )
+    acquired, _retry_after = controller.try_acquire(rate_limited=False)
+    assert acquired
+    started_at = time.monotonic()
+    admitted, retry_after = controller.try_acquire(rate_limited=True)
+    elapsed = time.monotonic() - started_at
+    controller.release()
+
+    assert not admitted
+    assert retry_after == 1
+    assert elapsed < 0.5
+
+
 def test_bridge_read_burst_does_not_consume_mutation_rate_budget(
     tmp_bridge_root: Path,
 ) -> None:
@@ -1323,9 +1394,13 @@ def test_asset_stream_stops_after_client_disconnect(
     assert read_calls == 1
 
 
-def test_bridge_concurrency_budget_rejects_then_releases(
+def test_bridge_concurrency_budget_read_times_out_then_releases(
     tmp_bridge_root: Path,
+    monkeypatch,
 ) -> None:
+    import astrid.core.integrations.reigh.local_bridge_server as bridge_server
+
+    monkeypatch.setattr(bridge_server, "_READ_ADMISSION_WAIT_SECONDS", 0.05)
     entered = threading.Event()
     release = threading.Event()
     first_result: dict[str, int] = {}

@@ -114,8 +114,10 @@ local clients:
   bridge unbounded. Authenticated `GET`/`HEAD` reads, including dynamic JSON
   and immutable media bytes, do not deplete that token bucket, but remain
   subject to the eight-handler cap and all host, origin, auth, version, and
-  path gates. `POST` mutations and `OPTIONS` preflights remain token-bucket
-  limited. Exhaustion is
+  path gates. Reads wait up to two seconds for one of the eight handler slots
+  before returning `429`; they never wait indefinitely. `POST` mutations and
+  `OPTIONS` preflights remain token-bucket limited and fail fast when all
+  handler slots are occupied. Exhaustion is
   `429 rate_limited` with `Retry-After`; disconnect and shutdown cancellation
   stops chunked asset streaming and always releases the admission permit.
 - JSON and asset data responses carry `X-Astrid-Bridge-Version: v1`,

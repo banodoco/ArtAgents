@@ -222,6 +222,7 @@ _DEFAULT_MAX_CONCURRENT_REQUESTS = 8
 # concurrency cap remains the primary protection for work and open streams.
 _DEFAULT_RATE_LIMIT_CAPACITY = 128
 _DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 64.0
+_READ_ADMISSION_WAIT_SECONDS = 2.0
 
 
 class _RequestAdmissionController:
@@ -243,7 +244,14 @@ class _RequestAdmissionController:
         self._updated_at = time.monotonic()
         self._rate_lock = threading.Lock()
 
-    def try_acquire(self, *, rate_limited: bool = True) -> tuple[bool, int]:
+    def try_acquire(
+        self,
+        *,
+        rate_limited: bool = True,
+        concurrency_timeout: float = 0.0,
+    ) -> tuple[bool, int]:
+        if concurrency_timeout < 0:
+            raise ValueError("concurrency_timeout must be non-negative")
         if rate_limited:
             now = time.monotonic()
             with self._rate_lock:
@@ -259,7 +267,11 @@ class _RequestAdmissionController:
                     )
                     return False, retry_after
                 self._tokens -= 1.0
-        if not self._semaphore.acquire(blocking=False):
+        if concurrency_timeout:
+            acquired = self._semaphore.acquire(timeout=concurrency_timeout)
+        else:
+            acquired = self._semaphore.acquire(blocking=False)
+        if not acquired:
             return False, 1
         return True, 0
 
@@ -1346,7 +1358,12 @@ def make_local_bridge_handler(*, projects_root: Path):
                 ).bridge_admission.try_acquire(
                     # Reads are bounded by the handler semaphore; writes and
                     # preflights also consume the process-local rate budget.
-                    rate_limited=self.command not in {"GET", "HEAD"}
+                    rate_limited=self.command not in {"GET", "HEAD"},
+                    concurrency_timeout=(
+                        _READ_ADMISSION_WAIT_SECONDS
+                        if self.command in {"GET", "HEAD"}
+                        else 0.0
+                    ),
                 )
                 if not admitted:
                     error = BridgeRateLimitError("the local bridge request budget is exhausted")
