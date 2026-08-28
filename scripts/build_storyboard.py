@@ -270,16 +270,21 @@ def compile_storyboard(
         segment = segments.get(slug) if segments is not None else None
 
         # Image path XOR active variant
-        image_cfg = section["image"]
-        active_index = image_cfg.get("active_index", 0)
-        variants = image_cfg.get("variants", [])
-        if not isinstance(active_index, int) or not (0 <= active_index < len(variants)):
-            raise StoryboardError(
-                [f"sections[{slug}].image: active_index {active_index} out of bounds for {len(variants)} variants"]
-            )
-        active_variant = variants[active_index]
-        img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
         img_key = f"img_{slug}"
+        image_cfg = section["image"]
+        direct_path = image_cfg.get("path")
+        variants = image_cfg.get("variants") or []
+        if direct_path is not None and not variants:
+            img_path = _resolve_path(direct_path, base)
+            img_origin = image_cfg.get("provenance") or {}
+        else:
+            active_index = image_cfg.get("active_index", 0)
+            if not isinstance(active_index, int) or not (0 <= active_index < len(variants)):
+                raise StoryboardError(
+                    [f"sections[{slug}].image: active_index {active_index} out of bounds for {len(variants)} variants"]
+                )
+            active_variant = variants[active_index]
+            img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
         if import_asset is not None:
             img_import = import_asset(img_path)
         else:
@@ -743,10 +748,15 @@ def _compile_with_shots(
         for section in story["sections"]:
             slug = section["id"]
             image_cfg = section["image"]
-            active_index = image_cfg.get("active_index", 0)
-            variants = image_cfg.get("variants", [])
-            active_variant = variants[active_index]
-            img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
+            direct_path = image_cfg.get("path")
+            variants = image_cfg.get("variants") or []
+            if direct_path is not None and not variants:
+                img_path = _resolve_path(direct_path, base)
+                img_origin = image_cfg.get("provenance") or {}
+            else:
+                active_index = image_cfg.get("active_index", 0)
+                active_variant = variants[active_index]
+                img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
             
             if import_asset is not None:
                 img_import = import_asset(img_path)
