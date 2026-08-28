@@ -227,6 +227,7 @@ def compile_storyboard(
     probe_duration: Callable[[Path], float] | None = None,
     project: str = DEFAULT_PROJECT,
     output_name: str = DEFAULT_OUTPUT_NAME,
+    projects_root: str | Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Compile *story* into ``(timeline_config, assets_registry, resolution_report)``.
 
@@ -723,6 +724,7 @@ def _compile_with_shots(
     probe_duration: Callable[[Path], float] | None = None,
     project: str = DEFAULT_PROJECT,
     output_name: str = DEFAULT_OUTPUT_NAME,
+    client: Any | None = None,
 ) -> dict[str, Any]:
     """Compile a storyboard with shot projection (task T11).
     
@@ -730,9 +732,7 @@ def _compile_with_shots(
     and a parent shot graph. All kernel writes go through the SDK services.
     """
     from astrid.sdk.client import AstridClient
-    from astrid.sdk.shots import ShotsService
-    from astrid.sdk.timelines import TimelinesService
-    
+
     base = Path(base_dir)
     if probe_duration is None:
         probe_duration = probe_wav_duration
@@ -744,122 +744,135 @@ def _compile_with_shots(
     assets: dict[str, Any] = {}
     vo_durations: dict[str, float] = {}
     
-    with AstridClient.open(None) as client:
-        for section in story["sections"]:
-            slug = section["id"]
-            image_cfg = section["image"]
-            direct_path = image_cfg.get("path")
-            variants = image_cfg.get("variants") or []
-            if direct_path is not None and not variants:
-                img_path = _resolve_path(direct_path, base)
-                img_origin = image_cfg.get("provenance") or {}
-            else:
-                active_index = image_cfg.get("active_index", 0)
-                active_variant = variants[active_index]
-                img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
+    for section in story["sections"]:
+        slug = section["id"]
+        image_cfg = section["image"]
+        direct_path = image_cfg.get("path")
+        variants = image_cfg.get("variants") or []
+        if direct_path is not None and not variants:
+            img_path = _resolve_path(direct_path, base)
+            img_origin = image_cfg.get("provenance") or {}
+        else:
+            active_index = image_cfg.get("active_index", 0)
+            active_variant = variants[active_index]
+            img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
+        
+        if import_asset is not None:
+            img_import = import_asset(img_path)
+        else:
+            img_import = sdk_import_asset(img_path, project=project)
+        
+        img_key = f"img_{slug}"
+        assets[img_key] = {
+            "file": img_import.file,
+            "type": "image",
+            "content_sha256": img_import.content_sha256,
+            "media_id": img_import.media_id,
+        }
+        
+        # VO
+        vo = section.get("vo")
+        if vo is not None:
+            audio = vo.get("audio") or {}
+            wav_path = _resolve_path(audio["asset"], base)
+            where = f"sections[{slug}].vo"
+            duration = probe_duration(wav_path)
+            vo_durations[slug] = duration
             
+            vo_key = f"vo_{slug}"
             if import_asset is not None:
-                img_import = import_asset(img_path)
+                vo_import = import_asset(wav_path)
             else:
-                img_import = sdk_import_asset(img_path, project=project)
-            
-            img_key = f"img_{slug}"
-            assets[img_key] = {
-                "file": img_import.file,
-                "type": "image",
-                "content_sha256": img_import.content_sha256,
-            }
-            
-            # VO
-            vo = section.get("vo")
-            if vo is not None:
-                audio = vo.get("audio") or {}
-                wav_path = _resolve_path(audio["asset"], base)
-                where = f"sections[{slug}].vo"
-                duration = probe_duration(wav_path)
-                vo_durations[slug] = duration
-                
-                vo_key = f"vo_{slug}"
                 vo_import = sdk_import_asset(wav_path, project=project)
-                assets[vo_key] = {
-                    "file": vo_import.file,
-                    "type": "audio",
-                    "duration": round(duration, 3),
-                    "content_sha256": vo_import.content_sha256,
-                }
-    
-    # Create shots and sub-timelines
-    with AstridClient.open(None) as client:
-        shots_service = ShotsService(client)
-        timelines_service = TimelinesService(client)
-        
-        shot_data: dict[str, dict[str, Any]] = {}  # slug -> {shot_id, timeline_document_id, nav, prompt}
-        
-        for section in story["sections"]:
-            slug = section["id"]
-            segment = segments.get(slug) if segments is not None else None
-            
-            # Calculate duration for this section
-            duration = None
-            if segment is not None:
-                duration = segment.duration
-            elif slug in vo_durations:
-                duration = vo_durations[slug]
-            
-            if duration is None:
-                raise StoryboardError([f"section {slug} has no duration"])
-            
-            # Create sub-timeline
-            sub_timeline_config = _build_shot_subtimeline(story, section, f"img_{slug}", f"vo_{slug}" if "vo_{slug}" in assets else None, duration)
-            timeline_result = timelines_service.create(
-                project=project,
-                idempotency_key=f"{project}:shot-timeline:{slug}",
-            )
-            assert timeline_result.ok
-            timeline_document_id = timeline_result.data["id"]
-            
-            # Create shot
-            nav = section.get("nav", {})
-            prompt = section.get("provenance", {}).get("prompt", "")
-            shot_result = shots_service.create(
-                project=project,
-                name=f"shot-{slug}",
-                idempotency_key=f"{project}:shot:{slug}",
-                metadata={"slug": slug, "nav": nav, "prompt": prompt, "timeline_document_id": timeline_document_id},
-            )
-            assert shot_result.ok
-            shot_id = shot_result.data["id"]
-            
-            shot_data[slug] = {
-                "shot_id": shot_id,
-                "timeline_document_id": timeline_document_id,
-                "nav": nav,
-                "prompt": prompt,
+            assets[vo_key] = {
+                "file": vo_import.file,
+                "type": "audio",
+                "duration": round(duration, 3),
+                "content_sha256": vo_import.content_sha256,
+                "media_id": vo_import.media_id,
             }
-            
-            # Add image item
-            img_key = f"img_{slug}"
+    
+    # Create shots and sub-timelines against the caller's projects root.
+    if client is None:
+        raise StoryboardError(
+            ["_compile_with_shots requires the caller's open AstridClient"]
+        )
+    shots_service = client.shots
+    timelines_service = client.timelines
+        
+    shot_data: dict[str, dict[str, Any]] = {}  # slug -> {shot_id, timeline_document_id, nav, prompt}
+    
+    for section in story["sections"]:
+        slug = section["id"]
+        segment = segments.get(slug) if segments is not None else None
+        
+        # Calculate duration for this section
+        duration = None
+        if segment is not None:
+            duration = segment.duration
+        elif slug in vo_durations:
+            duration = vo_durations[slug]
+        
+        if duration is None:
+            raise StoryboardError([f"section {slug} has no duration"])
+        
+        # Create sub-timeline
+        vo_key = f"vo_{slug}"
+        sub_timeline_config = _build_shot_subtimeline(story, section, f"img_{slug}", vo_key if vo_key in assets else None, duration)
+        slug_tl = slug.replace("_", "-")
+        timeline_result = timelines_service.create(
+            project=project,
+            slug=f"shot-{slug_tl}",
+            name=f"shot-{slug_tl}",
+            config=sub_timeline_config,
+            registry={"assets": _canonical_assets({k: v for k, v in assets.items() if k in (f"img_{slug}", f"vo_{slug}")})},
+            idempotency_key=f"{project}:shot-timeline:{slug}",
+        )
+        assert timeline_result.ok, getattr(timeline_result, "error", None)
+        timeline_document_id = timeline_result.data["timeline_id"]
+        
+        # Create shot
+        nav = section.get("nav", {})
+        prompt = section.get("provenance", {}).get("prompt", "")
+        shot_result = shots_service.create(
+            project=project,
+            name=f"shot-{slug}",
+            idempotency_key=f"{project}:shot:{slug}",
+            metadata={"slug": slug, "nav": nav, "prompt": prompt, "timeline_document_id": timeline_document_id},
+        )
+        assert shot_result.ok
+        shot_id = shot_result.data["id"]
+        
+        shot_data[slug] = {
+            "shot_id": shot_id,
+            "timeline_document_id": timeline_document_id,
+            "nav": nav,
+            "prompt": prompt,
+        }
+        
+        # Add image item
+        img_key = f"img_{slug}"
+        item_result = shots_service.add_item(
+            project=project,
+            shot_id=shot_id,
+            media_id=assets[img_key]["media_id"],
+            position=0,
+            idempotency_key=f"{project}:shot-item:{slug}:image",
+        )
+        assert item_result.ok
+        
+        # Add VO item if exists
+        vo_key = f"vo_{slug}"
+        if vo_key in assets:
             item_result = shots_service.add_item(
                 project=project,
                 shot_id=shot_id,
-                media_id=assets[img_key]["content_sha256"][:16],  # Use first 16 chars of hash
-                position=0,
-                idempotency_key=f"{project}:shot-item:{slug}:image",
+                media_id=assets[vo_key]["media_id"],
+                position=1,
+                idempotency_key=f"{project}:shot-item:{slug}:vo",
             )
             assert item_result.ok
-            
-            # Add VO item if exists
-            vo_key = f"vo_{slug}"
-            if vo_key in assets:
-                item_result = shots_service.add_item(
-                    project=project,
-                    shot_id=shot_id,
-                    media_id=assets[vo_key]["content_sha256"][:16],
-                    position=1,
-                    idempotency_key=f"{project}:shot-item:{slug}:vo",
-                )
-                assert item_result.ok
-    
+
     # Create parent shot graph
     total = 0.0
     for section in story["sections"]:
@@ -903,10 +916,10 @@ def _compile_with_shots(
         "clips": [brand_clip] + shot_clips,
         "output": {"resolution": f"{width}x{height}", "fps": fps, "file": f"parent-shot-graph.mp4"},
     }
-    
+
     return {
         "timeline": parent_config,
-        "assets": assets,
+        "assets": _canonical_assets(assets),
         "shots": shot_data,
     }
 
@@ -963,9 +976,10 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 import_asset=import_asset,
                 project=args.project,
                 output_name=args.output_name,
+                client=client,
             )
         # Write parent timeline and assets
-        _write_outputs(timeline_path, assets_path, shots_result["timeline"], shots_result["assets"])
+        _write_outputs(timeline_path, assets_path, shots_result["timeline"], {"assets": shots_result["assets"]})
         # Print report summary
         print_report_shots(shots_result)
         return 0
@@ -992,6 +1006,15 @@ def print_report_shots(result: dict[str, Any]) -> None:
         "shots_created": len(shots),
         "timeline_file": result["timeline"]["output"]["file"],
     }, indent=2, sort_keys=True))
+
+
+
+def _canonical_assets(assets: dict[str, Any]) -> dict[str, Any]:
+    """Registry entries for kernel storage (no private media_id key)."""
+    out: dict[str, Any] = {}
+    for key, entry in assets.items():
+        out[key] = {k: v for k, v in entry.items() if k != "media_id"}
+    return out
 
 
 def _write_outputs(

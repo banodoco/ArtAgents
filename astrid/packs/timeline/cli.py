@@ -232,12 +232,6 @@ def _cmd_show(parsed: argparse.Namespace) -> int:
     else:
         # Database not found, just return stored view
         return result.as_json
-        else:
-            # For human-readable output, print expanded summary
-            from datetime import timedelta
-            duration_str = str(timedelta(seconds=int(expanded_duration))) if expanded_duration else "0s"
-            print(f"  Expanded: {expanded_clips} clips, {expanded_assets} assets, {duration_str} duration")
-        return result.as_json
 def _cmd_save(parsed: argparse.Namespace) -> int:
     result = parsed.client.timelines.save(
         parsed.project,

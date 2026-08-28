@@ -192,9 +192,20 @@ def _validate_clip_semantics(
         key for key in _EFFECT_KEYS if key in clip and _nonempty(clip.get(key))
     )
     if effects:
-        reasons.append(
-            f"Clip {clip_id!r} uses unsupported effects: {', '.join(effects)}"
-        )
+        if clip.get("clipType") == "text" and set(effects) == {"effects"}:
+            # Text fade envelope (effects.fade_in/fade_out) is supported by
+            # the overlay alpha ramp (T2). Any other effect key set is not.
+            effect_map = clip.get("effects")
+            if isinstance(effect_map, dict) and set(effect_map) <= {"fade_in", "fade_out"}:
+                pass
+            else:
+                reasons.append(
+                    f"Clip {clip_id!r} uses unsupported text effects: {', '.join(sorted(effect_map)) if isinstance(effect_map, dict) else effects}"
+                )
+        else:
+            reasons.append(
+                f"Clip {clip_id!r} uses unsupported effects: {', '.join(effects)}"
+            )
     if _nonempty(clip.get("transition")):
         reasons.append(f"Clip {clip_id!r} uses an unsupported transition")
     opacity = clip.get("opacity")
