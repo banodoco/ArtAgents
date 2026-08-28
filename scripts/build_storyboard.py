@@ -942,17 +942,18 @@ def _cmd_compile(args: argparse.Namespace) -> int:
 
     # Shot projection path (--shots)
     if args.shots:
-        import_asset = make_client_importer(
-            AstridClient.open(args.projects_root), project=args.project
-        )
-        shots_result = _compile_with_shots(
-            story,
-            base_dir=story_path.resolve().parent,
-            plan=plan,
-            import_asset=import_asset,
-            project=args.project,
-            output_name=args.output_name,
-        )
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open(args.projects_root) as client:
+            import_asset = make_client_importer(client, project=args.project)
+            shots_result = _compile_with_shots(
+                story,
+                base_dir=story_path.resolve().parent,
+                plan=plan,
+                import_asset=import_asset,
+                project=args.project,
+                output_name=args.output_name,
+            )
         # Write parent timeline and assets
         _write_outputs(timeline_path, assets_path, shots_result["timeline"], shots_result["assets"])
         # Print report summary
