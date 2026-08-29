@@ -248,7 +248,11 @@ def test_golden_parity_counts_and_timing(
         assert cap["at"] == pytest.approx(start)
         assert broll["id"] == f"broll_{sid}"
         assert broll["asset"] == f"img_{sid}"
-        assert broll["hold"] == pytest.approx(duration + bs.GAP)
+        # FFmpeg media clips use bounded source windows; ``hold`` is not a
+        # valid still-image duration semantic at the renderer boundary.
+        assert broll["from"] == 0.0
+        assert broll["to"] == pytest.approx(duration + bs.GAP)
+        assert "hold" not in broll
         assert broll["at"] == pytest.approx(start)
         # Gen-variant sections carry generative provenance; baked ones do not.
         if index % 2 == 1:
@@ -318,7 +322,9 @@ def test_cumulative_timing_without_plan(
         assert grouped["a1"][index]["at"] == pytest.approx(start)
         assert grouped["a1"][index]["to"] == pytest.approx(duration)
         assert grouped["broll"][index]["at"] == pytest.approx(start)
-        assert grouped["broll"][index]["hold"] == pytest.approx(duration + bs.GAP)
+        assert grouped["broll"][index]["from"] == 0.0
+        assert grouped["broll"][index]["to"] == pytest.approx(duration + bs.GAP)
+        assert "hold" not in grouped["broll"][index]
     expected_total = round(starts[-1] + durations[-1] + bs.GAP, 3)
     assert grouped["brand"][0]["hold"] == pytest.approx(expected_total)
     assert report["total_duration"] == pytest.approx(expected_total)
@@ -341,7 +347,9 @@ def test_section_without_vo_compiles_broll_plate_only(
     assert len(config["clips"]) == 2  # brand + lone broll plate
     broll = [clip for clip in config["clips"] if clip["track"] == "broll"]
     assert len(broll) == 1
-    assert broll[0]["hold"] == pytest.approx(story["meta"]["timing"]["default_hold"])
+    assert broll[0]["from"] == 0.0
+    assert broll[0]["to"] == pytest.approx(story["meta"]["timing"]["default_hold"])
+    assert "hold" not in broll[0]
     assert "captions" not in _by_track(config)
     assert "a1" not in _by_track(config)
     assert len(registry["assets"]) == 1  # image only

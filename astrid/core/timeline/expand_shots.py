@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from pathlib import Path
 
 import logging
 
@@ -63,6 +64,51 @@ def expand_shot_clips(
     )
     merged_assets.update(reg_assets)
 
+    def _is_still_asset(asset_id: object) -> bool:
+        """Recognize image assets before they can reach FFmpeg validation.
+
+        The FFmpeg backend deliberately rejects media ``hold`` semantics. A
+        typed image entry (or a conventional image filename in an older
+        registry) is enough to fail the invalid authored shape at expansion,
+        where it can be repaired, rather than after renderer admission.
+        """
+        if not isinstance(asset_id, str):
+            return False
+        entry = merged_assets.get(asset_id)
+        if not isinstance(entry, Mapping):
+            return False
+        kind = str(entry.get("type", "")).lower()
+        if kind in {"image", "still", "image/png", "image/jpeg", "image/webp"}:
+            return True
+        file_value = entry.get("file")
+        return isinstance(file_value, str) and Path(file_value).suffix.lower() in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".gif",
+            ".bmp",
+            ".tif",
+            ".tiff",
+        }
+
+    def _reject_unbounded_stills(doc_clips: list[object]) -> None:
+        for raw_clip in doc_clips:
+            if not isinstance(raw_clip, Mapping):
+                continue
+            if (
+                raw_clip.get("clipType") == "media"
+                and "hold" in raw_clip
+                and ("from" not in raw_clip or "to" not in raw_clip)
+                and _is_still_asset(raw_clip.get("asset"))
+            ):
+                raise TimelineEditError(
+                    f"Image media clip {raw_clip.get('id', '?')} uses hold without "
+                    "explicit from/to source bounds"
+                )
+
+    _reject_unbounded_stills(clips)
+
     for clip in clips:
         if not isinstance(clip, Mapping):
             raise TimelineEditError("timeline clips must be objects")
@@ -107,6 +153,7 @@ def expand_shot_clips(
         # cannot replace the parent's identity for a colliding key.
         for asset_id, entry in sub_assets.items():
             merged_assets.setdefault(asset_id, entry)
+        _reject_unbounded_stills(sub_clips)
         if not sub_clips:
             # Empty sub-doc contributes nothing; the shot clip expands to
             # nothing (renderers must never receive a `shot` clip).

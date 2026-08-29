@@ -61,6 +61,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from astrid.core.foundation.atomic_io import write_json_atomic  # noqa: E402
+from astrid.core.foundation.project_paths import resolve_projects_root  # noqa: E402
 from astrid.core.media import ffprobe_duration_seconds  # noqa: E402
 from astrid.core.storyboard import (  # noqa: E402
     StoryboardError,
@@ -135,10 +136,16 @@ class AssetImport:
 # ---------------------------------------------------------------------------
 
 _SHARED_CLIENT: Any = None
+_SHARED_CLIENT_ROOT: Path | None = None
 """Lazily opened client behind :func:`sdk_import_asset` (see close_shared_client)."""
 
 
-def sdk_import_asset(path: Path, *, project: str = DEFAULT_PROJECT) -> AssetImport:
+def sdk_import_asset(
+    path: Path,
+    *,
+    project: str = DEFAULT_PROJECT,
+    projects_root: str | Path | None = None,
+) -> AssetImport:
     """Import *path* through the kernel SDK against ``ASTRID_PROJECTS_ROOT``.
 
     One shared client is opened lazily and reused across a whole compile; the
@@ -146,23 +153,28 @@ def sdk_import_asset(path: Path, *, project: str = DEFAULT_PROJECT) -> AssetImpo
     with the kernel's typed ``unavailable`` error rather than silently
     degrading. Close it with :func:`close_shared_client` (``main`` does).
     """
-    global _SHARED_CLIENT
+    global _SHARED_CLIENT, _SHARED_CLIENT_ROOT
+    root = resolve_projects_root(projects_root)
+    if _SHARED_CLIENT is not None and _SHARED_CLIENT_ROOT != root:
+        close_shared_client()
     if _SHARED_CLIENT is None:
         from astrid.sdk.client import AstridClient
 
-        # The legacy convenience path has no explicit root.  The CLI and all
-        # managed callers use ``make_client_importer`` so imports share the
-        # caller-owned client and its project root.
-        _SHARED_CLIENT = AstridClient.open()
+        # Always bind the importer to a resolved root.  In particular, never
+        # let AstridClient.open(None) silently consult a developer checkout
+        # when an isolated compile root was supplied.
+        _SHARED_CLIENT = AstridClient.open(root)
+        _SHARED_CLIENT_ROOT = root
     return _client_import(_SHARED_CLIENT, project, path)
 
 
 def close_shared_client() -> None:
     """Close the lazily opened shared client (idempotent)."""
-    global _SHARED_CLIENT
+    global _SHARED_CLIENT, _SHARED_CLIENT_ROOT
     if _SHARED_CLIENT is not None:
         _SHARED_CLIENT.close()
         _SHARED_CLIENT = None
+        _SHARED_CLIENT_ROOT = None
 
 
 def make_client_importer(client: Any, *, project: str) -> Callable[[Path], AssetImport]:
@@ -293,7 +305,9 @@ def compile_storyboard(
         if import_asset is not None:
             img_import = import_asset(img_path)
         else:
-            img_import = sdk_import_asset(img_path, project=project)
+            img_import = _sdk_import_asset(
+                img_path, project=project, projects_root=projects_root
+            )
         assets[img_key] = {
             "file": img_import.file,
             "type": "image",
@@ -319,7 +333,9 @@ def compile_storyboard(
             if import_asset is not None:
                 vo_import = import_asset(wav_path)
             else:
-                vo_import = sdk_import_asset(wav_path, project=project)
+                vo_import = _sdk_import_asset(
+                    wav_path, project=project, projects_root=projects_root
+                )
             generator = audio.get("generator")
             if not isinstance(generator, str) or not generator:
                 generator = _DEFAULT_TTS_GENERATOR
@@ -373,7 +389,8 @@ def compile_storyboard(
                 "track": "broll",
                 "clipType": "media",
                 "asset": img_key,
-                "hold": hold_r,
+                "from": 0.0,
+                "to": hold_r,
             }
             if img_origin:
                 broll["generation"] = img_origin
@@ -387,7 +404,8 @@ def compile_storyboard(
                 "track": "broll",
                 "clipType": "media",
                 "asset": img_key,
-                "hold": hold_r,
+                "from": 0.0,
+                "to": hold_r,
             }
             if img_origin:
                 broll["generation"] = {"prompt": img_origin} if img_origin else {}
@@ -505,7 +523,11 @@ def _build_shot_subtimeline(
         "track": "broll",
         "clipType": "media",
         "asset": image_key,
-        "hold": broll_end,
+        # FFmpeg's media contract has no hold-for-media semantics.  A still
+        # is represented as a bounded file window; its source origin is 0 and
+        # its source end carries the authored timeline duration.
+        "from": 0.0,
+        "to": broll_end,
     }
 
     # B-roll may have generative provenance (variant.source == 'gen')
@@ -602,6 +624,23 @@ def _resolve_path(raw: str, base: Path) -> Path:
     return path if path.is_absolute() else base / path
 
 
+def _sdk_import_asset(
+    path: Path,
+    *,
+    project: str,
+    projects_root: str | Path | None,
+) -> AssetImport:
+    """Import through the SDK, preserving an explicit isolated root.
+
+    Keeping the omitted-root call shape for legacy monkeypatch seams matters:
+    callers that do not request a root still resolve the normal default inside
+    :func:`sdk_import_asset`, while isolated callers pass the root explicitly.
+    """
+    if projects_root is None:
+        return sdk_import_asset(path, project=project)
+    return sdk_import_asset(path, project=project, projects_root=projects_root)
+
+
 def _is_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -639,6 +678,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_cmd.add_argument(
         "--story", required=True, help="Storyboard JSON path (may be relative)."
+    )
+    validate_cmd.add_argument(
+        "--projects-root",
+        default=None,
+        help="Projects root context for callers that validate before compiling.",
     )
     validate_cmd.set_defaults(handler=_cmd_validate)
     compile_cmd = subparsers.add_parser(
@@ -706,7 +750,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         for problem in getattr(exc, "problems", []) or []:
             print(f"  - {problem}", file=sys.stderr)
         return 1
-    problems = validate_storyboard(story)
+    # ``load_storyboard`` validated against the story's parent already. Keep
+    # that same base on this explicit second pass; cwd is not an asset root.
+    problems = validate_storyboard(story, base_dir=story_path.parent)
     if problems:
         print("error: storyboard validation failed:", file=sys.stderr)
         for problem in problems:
@@ -728,6 +774,7 @@ def _compile_with_shots(
     probe_duration: Callable[[Path], float] | None = None,
     project: str = DEFAULT_PROJECT,
     output_name: str = DEFAULT_OUTPUT_NAME,
+    projects_root: str | Path | None = None,
     client: Any | None = None,
 ) -> dict[str, Any]:
     """Compile a storyboard with shot projection (task T11).
@@ -773,7 +820,9 @@ def _compile_with_shots(
         if import_asset is not None:
             img_import = import_asset(img_path)
         else:
-            img_import = sdk_import_asset(img_path, project=project)
+            img_import = _sdk_import_asset(
+                img_path, project=project, projects_root=projects_root
+            )
 
         img_key = f"img_{slug}"
         assets[img_key] = {
@@ -795,7 +844,9 @@ def _compile_with_shots(
             if import_asset is not None:
                 vo_import = import_asset(wav_path)
             else:
-                vo_import = sdk_import_asset(wav_path, project=project)
+                vo_import = _sdk_import_asset(
+                    wav_path, project=project, projects_root=projects_root
+                )
             assets[vo_key] = {
                 "file": vo_import.file,
                 "type": "audio",
@@ -1031,6 +1082,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 plan=plan,
                 import_asset=importer,
                 output_name=args.output_name,
+                projects_root=args.projects_root,
             )
             _write_outputs(timeline_path, assets_path, config, registry)
             _print_report(report)
@@ -1055,6 +1107,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 import_asset=import_asset,
                 project=args.project,
                 output_name=args.output_name,
+                projects_root=args.projects_root,
                 client=client,
             )
         # Write parent timeline and assets
@@ -1069,6 +1122,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
         plan=plan,
         project=args.project,
         output_name=args.output_name,
+        projects_root=args.projects_root,
     )
     _write_outputs(timeline_path, assets_path, config, registry)
     _print_report(report)
