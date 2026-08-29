@@ -500,26 +500,17 @@ def test_expand_of_shot_parent_matches_flat_compile_modulo_clip_ids(tmp_path):
         )
     assert len(out["timeline"]["clips"]) == 3  # brand + 2 shots
 
-    import sqlite3
+    with AstridClient.open(str(tmp_path)) as client:
+        def load_tl(tlid):
+            result = client.timelines.show("test", tlid)
+            assert result.ok and result.data, result.error
+            return result.data["config"], result.data["registry"]
 
-    conn = sqlite3.connect(tmp_path / ".astrid" / "astrid.sqlite3")
-    conn.row_factory = sqlite3.Row
-
-    def load_tl(tlid):
-        row = conn.execute(
-            "SELECT document_json, asset_registry_json FROM timelines WHERE id=?",
-            (tlid,),
-        ).fetchone()
-        return _json.loads(row["document_json"]), _json.loads(row["asset_registry_json"])
-
-    try:
         from astrid.core.timeline.expand_shots import expand_shot_clips
 
         expanded, _reg = expand_shot_clips(
             out["timeline"], {"assets": out["assets"]}, load_timeline=load_tl
         )
-    finally:
-        conn.close()
 
     clips = expanded["clips"]
     ids = [c.get("id") for c in clips]

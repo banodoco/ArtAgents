@@ -215,6 +215,7 @@ class AstridClient:
         # standard in-tree packs; rebuilding a standard registry at invoke
         # time would make the canonical DB unreadable to its own client.
         kwargs.setdefault("registry", self._app.registry)
+        kwargs.setdefault("_client", self)
         return invoke(capability_id, **kwargs)
 
     def invoke_result(self, capability_id: str, **kwargs: Any) -> Any:
@@ -229,6 +230,7 @@ class AstridClient:
 
         kwargs.setdefault("project_root", self._bound_root())
         kwargs.setdefault("registry", self._app.registry)
+        kwargs.setdefault("_client", self)
         return invoke_result(capability_id, **kwargs)
 
     @property

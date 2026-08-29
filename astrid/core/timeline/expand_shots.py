@@ -44,9 +44,10 @@ def expand_shot_clips(
     - Each ``shot`` clip must carry ``params.shot_id`` and
       ``params.timeline_document_id``; anything else fails closed.
     - Sub-clips are offset ``new_at = parent.at + sub.at``; sub-clips with no
-      positive remainder inside the parent window are dropped. Sub-clip ids are
-      preserved, so the expanded document is byte-equivalent to a flat compile
-      modulo clip ids.
+      positive remainder inside the parent window are dropped. Overlong child
+      windows are clamped to the parent's remaining window (including bounded
+      media ``to`` values). Sub-clip ids are preserved, so the expanded
+      document is byte-equivalent to a flat compile modulo clip ids.
     - A ``shot`` clip nested inside a sub-document fails closed (no recursion).
     - Unknown/missing timeline_document_id fails closed via the loader error.
     """
@@ -63,6 +64,8 @@ def expand_shot_clips(
     merged_assets.update(reg_assets)
 
     for clip in clips:
+        if not isinstance(clip, Mapping):
+            raise TimelineEditError("timeline clips must be objects")
         if clip.get("clipType") != "shot":
             expanded_clips.append(dict(clip))
             continue
@@ -91,12 +94,29 @@ def expand_shot_clips(
             ) from exc
 
         sub_clips = list(sub_config.get("clips", []))
+        sub_assets = (
+            sub_registry.get("assets", {})
+            if isinstance(sub_registry, dict)
+            else getattr(sub_registry, "assets", {})
+        )
+        if not isinstance(sub_assets, Mapping):
+            raise TimelineEditError(
+                f"sub-timeline {timeline_document_id} has an invalid asset registry"
+            )
+        # Parent entries are authoritative.  A child may add an asset, but it
+        # cannot replace the parent's identity for a colliding key.
+        for asset_id, entry in sub_assets.items():
+            merged_assets.setdefault(asset_id, entry)
         if not sub_clips:
             # Empty sub-doc contributes nothing; the shot clip expands to
             # nothing (renderers must never receive a `shot` clip).
             continue
 
         for sub_clip in sub_clips:
+            if not isinstance(sub_clip, Mapping):
+                raise TimelineEditError(
+                    f"sub-clip inside sub-timeline {timeline_document_id} must be an object"
+                )
             if sub_clip.get("clipType") == "shot":
                 raise TimelineEditError(
                     f"nested shot clip detected inside sub-timeline {timeline_document_id}"
@@ -107,16 +127,31 @@ def expand_shot_clips(
                 raise TimelineEditError(
                     f"Sub-clip missing id inside sub-timeline {timeline_document_id}"
                 )
+            asset_id = sub_clip.get("asset")
+            if (
+                isinstance(asset_id, str)
+                and asset_id not in sub_assets
+                and asset_id not in merged_assets
+            ):
+                raise TimelineEditError(
+                    f"Sub-clip {sub_id} references missing asset {asset_id!r} "
+                    f"inside sub-timeline {timeline_document_id}"
+                )
 
             sub_at = float(sub_clip.get("at", 0.0))
             # Sub-clip duration: `hold` for stills/text; `to-from` for bounded
             # media (VO audio clips carry from/to with no hold).
             sub_hold = float(sub_clip.get("hold", 0.0))
+            speed = float(sub_clip.get("speed", 1.0))
+            if speed <= 0.0:
+                raise TimelineEditError(
+                    f"Sub-clip {sub_id} inside sub-timeline {timeline_document_id} has invalid speed"
+                )
+            source_from = float(sub_clip.get("from", 0.0))
+            source_to = float(sub_clip.get("to", 0.0))
             if sub_hold <= 0.0:
-                from_v = float(sub_clip.get("from", 0.0))
-                to_v = float(sub_clip.get("to", 0.0))
-                if to_v > from_v:
-                    sub_hold = to_v - from_v
+                if source_to > source_from:
+                    sub_hold = (source_to - source_from) / speed
             new_at = parent_at + sub_at
             new_end = new_at + sub_hold
             if new_end <= parent_at:
@@ -128,6 +163,7 @@ def expand_shot_clips(
                     parent_at,
                 )
                 continue
+            remaining = parent_end - new_at
             if new_end > parent_end:
                 # Clamp into the parent window: drop if the clip's own start is
                 # at/past the parent end (nothing remains to render).
@@ -142,15 +178,17 @@ def expand_shot_clips(
 
             expanded_sub = dict(sub_clip)
             expanded_sub["at"] = new_at
+            if new_end > parent_end:
+                # Preserve source semantics while making the timeline window
+                # finite.  ``hold`` is timeline time; bounded media ``to`` is
+                # source time and therefore scales by playback speed.
+                if "hold" in expanded_sub:
+                    expanded_sub["hold"] = remaining
+                if source_to > source_from:
+                    expanded_sub["to"] = source_from + remaining * speed
             if sub_clip.get("track") is None:
                 expanded_sub["track"] = clip.get("track")
             expanded_clips.append(expanded_sub)
-            sub_assets = (
-                sub_registry.get("assets", {})
-                if isinstance(sub_registry, dict)
-                else getattr(sub_registry, "assets", {})
-            )
-            merged_assets.update(sub_assets)
 
     expanded_config = deepcopy(dict(config))
     expanded_config["clips"] = expanded_clips

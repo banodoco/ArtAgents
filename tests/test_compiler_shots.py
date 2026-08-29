@@ -48,30 +48,26 @@ def _compile_shots(projects_root: Path, story: dict, *, project: str = "test") -
 
 
 def _count_rows(projects_root: Path, table: str) -> int:
-    import sqlite3
+    from astrid.sdk.client import AstridClient
 
-    db = projects_root / ".astrid" / "astrid.sqlite3"
-    conn = sqlite3.connect(db)
-    try:
-        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-    finally:
-        conn.close()
+    with AstridClient.open(str(projects_root)) as client:
+        if table == "timelines":
+            result = client.timelines.list("test")
+        elif table == "shots":
+            result = client.shots.list("test")
+        else:
+            raise AssertionError(f"unsupported SDK row count: {table}")
+        assert result.ok, result.error
+        return len(result.data or [])
 
 
 def _load_doc(projects_root: Path, timeline_id: str) -> tuple[dict, dict]:
-    import sqlite3, json
+    from astrid.sdk.client import AstridClient
 
-    db = projects_root / ".astrid" / "astrid.sqlite3"
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute(
-            "SELECT document_json, asset_registry_json FROM timelines WHERE id=?",
-            (timeline_id,),
-        ).fetchone()
-        return json.loads(row["document_json"]), json.loads(row["asset_registry_json"])
-    finally:
-        conn.close()
+    with AstridClient.open(str(projects_root)) as client:
+        result = client.timelines.show("test", timeline_id)
+        assert result.ok and result.data, result.error
+        return result.data["config"], result.data["registry"]
 
 
 def test_compiler_shots_creates_rows_and_sequential_parent(tmp_path) -> None:
@@ -91,9 +87,10 @@ def test_compiler_shots_creates_rows_and_sequential_parent(tmp_path) -> None:
     assert open_clip["hold"] > 0
     assert idea_clip["hold"] > 0
 
-    # Rows in the kernel store: 2 shots, 2 sub-timelines.
+    # Rows in the kernel store: 2 shots, 2 sub-timelines, and the registered
+    # parent timeline (the sidecar is provenance only).
     assert _count_rows(tmp_path, "shots") == 2
-    assert _count_rows(tmp_path, "timelines") == 2
+    assert _count_rows(tmp_path, "timelines") == 3
 
 
 def test_compiler_shots_recompile_is_idempotent(tmp_path) -> None:
@@ -103,36 +100,30 @@ def test_compiler_shots_recompile_is_idempotent(tmp_path) -> None:
     timelines1 = _count_rows(tmp_path, "timelines")
     out2 = _compile_shots(tmp_path, story, project="test")
     timelines2 = _count_rows(tmp_path, "timelines")
-    assert timelines1 == timelines2 == 2
+    assert timelines1 == timelines2 == 3
     assert set(out1["shots"].keys()) == set(out2["shots"].keys())
 
 
 def test_expand_matches_sub_docs_and_keeps_vo(tmp_path) -> None:
     """Expansion of the parent preserves VO clips with sequential timebase (F1/F2)."""
-    import sqlite3, json
+    import json
     from astrid.core.timeline.expand_shots import expand_shot_clips
 
     story = json.loads(MINIMAL.read_text(encoding="utf-8"))
     out = _compile_shots(tmp_path, story)
 
-    db = tmp_path / ".astrid" / "astrid.sqlite3"
-    conn = sqlite3.connect(db)
-    conn.row_factory = sqlite3.Row
+    from astrid.sdk.client import AstridClient
 
-    def load_tl(tlid):
-        row = conn.execute(
-            "SELECT document_json, asset_registry_json FROM timelines WHERE id=?",
-            (tlid,),
-        ).fetchone()
-        return json.loads(row["document_json"]), json.loads(row["asset_registry_json"])
+    with AstridClient.open(str(tmp_path)) as client:
+        def load_tl(tlid):
+            result = client.timelines.show("test", tlid)
+            assert result.ok and result.data, result.error
+            return result.data["config"], result.data["registry"]
 
-    try:
         # Parent registry is the compile's canonical assets.
         expanded, oreg = expand_shot_clips(
             out["timeline"], {"assets": out["assets"]}, load_timeline=load_tl
         )
-    finally:
-        conn.close()
 
     vo_clips = [c for c in expanded["clips"] if c.get("id", "").startswith("vo_")]
     # VO clips survive expansion (F1): each section had a vo clip.

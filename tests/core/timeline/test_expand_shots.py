@@ -161,6 +161,45 @@ def test_shot_offset_clamp_drop():
     assert _total_assets(expanded_registry) == 0
 
 
+def test_bounded_media_window_clamps_to_parent_remaining_with_speed():
+    config, registry = _make_timeline_fixture(
+        "main",
+        clips=[
+            {
+                "id": "shot-1",
+                "at": 1.0,
+                "hold": 2.0,
+                "clipType": "shot",
+                "params": {"shot_id": "shot-1", "timeline_document_id": "bounded"},
+            }
+        ],
+    )
+
+    def load_timeline(timeline_id: str):
+        assert timeline_id == "bounded"
+        child_config, _ = _make_timeline_fixture(
+            "bounded",
+            clips=[
+                {
+                    "id": "video",
+                    "at": 0.5,
+                    "track": "visual",
+                    "clipType": "video",
+                    "asset": "clip",
+                    "from": 2.0,
+                    "to": 12.0,
+                    "speed": 2.0,
+                }
+            ],
+        )
+        return child_config, {"assets": {"clip": {"file": "clip.mp4"}}}
+
+    expanded, _ = expand_shot_clips(config, registry, load_timeline=load_timeline)
+    clip = expanded["clips"][0]
+    assert clip["at"] == 1.5
+    assert clip["to"] == 5.0  # 2s remaining * speed 2 + source from 2
+
+
 def test_registry_union_parent_wins():
     """Assets from sub-registries are merged; parent wins on conflict."""
     config, registry = _make_timeline_fixture(
@@ -199,6 +238,42 @@ def test_registry_union_parent_wins():
 
     # Verify sub-clip_1's asset registry is not in parent (it's not in our sub1 fixture).
     assert _total_assets(expanded_registry) == 1
+
+
+def test_registry_conflict_keeps_parent_entry():
+    config, registry = _make_timeline_fixture(
+        "main",
+        clips=[
+            {
+                "id": "shot-1",
+                "at": 0.0,
+                "hold": 2.0,
+                "clipType": "shot",
+                "params": {"shot_id": "shot-1", "timeline_document_id": "child"},
+            }
+        ],
+    )
+    registry["assets"]["shared"] = {"file": "parent.mp4"}
+
+    def load_timeline(_timeline_id: str):
+        child_config, _ = _make_timeline_fixture(
+            "child",
+            clips=[
+                {
+                    "id": "child-clip",
+                    "at": 0.0,
+                    "hold": 1.0,
+                    "clipType": "media",
+                    "asset": "shared",
+                }
+            ],
+        )
+        return child_config, {"assets": {"shared": {"file": "child.mp4"}}}
+
+    _, expanded_registry = expand_shot_clips(
+        config, registry, load_timeline=load_timeline
+    )
+    assert expanded_registry["assets"]["shared"]["file"] == "parent.mp4"
 
 
 def test_nested_shot_raises_error():

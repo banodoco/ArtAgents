@@ -345,6 +345,94 @@ def test_complete_flat_render_profile_reaches_managed_snapshot(tmp_path: Path) -
     assert authority["timeline_slug"] == "main"
 
 
+def test_managed_render_expands_registered_shot_from_sdk_snapshot(tmp_path: Path) -> None:
+    """Composite parents are flattened from client reads before admission."""
+    with AstridClient.open(projects_root=tmp_path) as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        child = client.timelines.create(
+            project="demo",
+            slug="child",
+            name="Child",
+            config={"tracks": [], "clips": []},
+            registry={"assets": {}},
+            idempotency_key="child-create",
+        )
+        assert child.ok and child.data
+        shot = client.shots.create(
+            project="demo",
+            name="Shot",
+            idempotency_key="shot-create",
+        )
+        assert shot.ok and shot.data
+        parent = client.timelines.create(
+            project="demo",
+            slug="composite",
+            name="Composite",
+            config={
+                "tracks": [],
+                "clips": [
+                    {
+                        "id": "shot-1",
+                        "at": 0,
+                        "hold": 2,
+                        "clipType": "shot",
+                        "params": {
+                            "shot_id": shot.data["id"],
+                            "timeline_document_id": child.data["timeline_id"],
+                        },
+                    }
+                ],
+            },
+            registry={"assets": {}},
+            idempotency_key="parent-create",
+        )
+        assert parent.ok
+        prepared, authority = _prepare_managed_render_inputs(
+            {"timeline_ref": "composite", "expected_version": 1},
+            project="demo",
+            project_root=tmp_path,
+            _client=client,
+        )
+
+    rendered = json.loads(Path(prepared["timeline"]).read_text())
+    assert all(clip.get("clipType") != "shot" for clip in rendered["clips"])
+    assert authority is not None
+    assert authority["expansion"]["children"][0]["timeline_id"] == child.data["timeline_id"]
+    assert len(authority["expansion"]["expanded_config_hash"]) == 64
+
+
+def test_managed_render_rejects_unregistered_shot_before_expansion(tmp_path: Path) -> None:
+    with AstridClient.open(projects_root=tmp_path) as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        parent = client.timelines.create(
+            project="demo",
+            slug="bad-composite",
+            name="Bad composite",
+            config={
+                "tracks": [],
+                "clips": [
+                    {
+                        "id": "shot-1",
+                        "at": 0,
+                        "hold": 1,
+                        "clipType": "shot",
+                        "params": {"shot_id": "missing", "timeline_document_id": "missing"},
+                    }
+                ],
+            },
+            registry={"assets": {}},
+            idempotency_key="bad-parent-create",
+        )
+        assert parent.ok
+        with pytest.raises(CapabilityValidationError, match="unregistered shot"):
+            _prepare_managed_render_inputs(
+                {"timeline_ref": "bad-composite", "expected_version": 1},
+                project="demo",
+                project_root=tmp_path,
+                _client=client,
+            )
+
+
 def test_alpha_mov_reaches_managed_snapshot_before_admission(tmp_path: Path) -> None:
     _alpha_timeline(tmp_path)
 

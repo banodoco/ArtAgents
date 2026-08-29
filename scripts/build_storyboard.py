@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -149,7 +150,10 @@ def sdk_import_asset(path: Path, *, project: str = DEFAULT_PROJECT) -> AssetImpo
     if _SHARED_CLIENT is None:
         from astrid.sdk.client import AstridClient
 
-        _SHARED_CLIENT = AstridClient.open(None)
+        # The legacy convenience path has no explicit root.  The CLI and all
+        # managed callers use ``make_client_importer`` so imports share the
+        # caller-owned client and its project root.
+        _SHARED_CLIENT = AstridClient.open()
     return _client_import(_SHARED_CLIENT, project, path)
 
 
@@ -731,18 +735,27 @@ def _compile_with_shots(
     Creates per-section sub-timelines via TimelinesService, shots via ShotsService,
     and a parent shot graph. All kernel writes go through the SDK services.
     """
-    from astrid.sdk.client import AstridClient
-
     base = Path(base_dir)
+    problems = validate_storyboard(story, base_dir=base)
+    if problems:
+        raise StoryboardError(problems)
     if probe_duration is None:
         probe_duration = probe_wav_duration
 
     segments = _plan_segments(plan)
+    if segments is not None:
+        missing = [section["id"] for section in story["sections"] if section["id"] not in segments]
+        if missing:
+            raise StoryboardError(
+                [f"--vo-align plan has no segment for section {slug!r}" for slug in missing]
+            )
     width, height, fps = _parse_canvas(story["meta"]["canvas"])
 
     # Import all media first
     assets: dict[str, Any] = {}
     vo_durations: dict[str, float] = {}
+    section_durations: dict[str, float] = {}
+    section_starts: dict[str, float] = {}
 
     for section in story["sections"]:
         slug = section["id"]
@@ -775,8 +788,7 @@ def _compile_with_shots(
         if vo is not None:
             audio = vo.get("audio") or {}
             wav_path = _resolve_path(audio["asset"], base)
-            where = f"sections[{slug}].vo"
-            duration = probe_duration(wav_path)
+            duration = _positive_duration(probe_duration(wav_path), f"sections[{slug}].vo.audio.asset")
             vo_durations[slug] = duration
 
             vo_key = f"vo_{slug}"
@@ -800,6 +812,30 @@ def _compile_with_shots(
     shots_service = client.shots
     timelines_service = client.timelines
 
+    # Register the parent before its children.  The initial empty document is
+    # immediately replaced with the final shot graph after child references
+    # exist; this ordering makes the parent admissible even if a later child
+    # command is retried or inspected independently.
+    parent_slug = _parent_timeline_slug(story, output_name)
+    parent_key = f"{project}:storyboard-parent:{parent_slug}"
+    placeholder_config = {
+        "tracks": [],
+        "clips": [],
+        "output": {"resolution": f"{width}x{height}", "fps": fps, "file": output_name},
+    }
+    parent_result = timelines_service.create(
+        project=project,
+        slug=parent_slug,
+        name=parent_slug,
+        config=placeholder_config,
+        registry={"assets": {}},
+        idempotency_key=parent_key,
+    )
+    if not parent_result.ok or not parent_result.data:
+        error = parent_result.error
+        raise StoryboardError([f"parent timeline registration failed: {error}"])
+    parent_data = parent_result.data
+
     shot_data: dict[str, dict[str, Any]] = {}  # slug -> {shot_id, timeline_document_id, nav, prompt}
 
     for section in story["sections"]:
@@ -807,14 +843,21 @@ def _compile_with_shots(
         segment = segments.get(slug) if segments is not None else None
 
         # Calculate duration for this section
-        duration = None
+        duration: float | None = None
         if segment is not None:
             duration = segment.duration
         elif slug in vo_durations:
             duration = vo_durations[slug]
+        else:
+            # A shot without VO has no probe to supply a duration.  Its
+            # authored timing contract is the storyboard default hold.
+            duration = float(story["meta"]["timing"]["default_hold"])
 
         if duration is None:
-            raise StoryboardError([f"section {slug} has no duration"])
+            duration = float(story["meta"]["timing"]["default_hold"])
+        section_durations[slug] = duration
+        if segment is not None:
+            section_starts[slug] = segment.start
 
         # Create sub-timeline
         vo_key = f"vo_{slug}"
@@ -882,13 +925,13 @@ def _compile_with_shots(
     cursor = 0.0
     for section in story["sections"]:
         slug = section["id"]
-        section_offsets[slug] = cursor
-        duration = 0.0
-        if "vo" in section:
-            duration = vo_durations.get(slug, 0.0)
-        hold = round(duration + GAP, 3)
-        cursor += hold
-        total = cursor
+        duration = section_durations[slug]
+        start = section_starts.get(slug, cursor)
+        section_offsets[slug] = round(start, 3)
+        has_vo = section.get("vo") is not None
+        hold = round(duration + GAP, 3) if has_vo else round(duration, 3)
+        cursor = max(cursor, start + hold)
+        total = max(total, start + hold)
         _section_holds[slug] = hold
 
     total_r = round(total, 3)
@@ -925,13 +968,38 @@ def _compile_with_shots(
         },
         "tracks": [dict(track) for track in _TRACKS],
         "clips": [brand_clip] + shot_clips,
-        "output": {"resolution": f"{width}x{height}", "fps": fps, "file": f"parent-shot-graph.mp4"},
+        "output": {"resolution": f"{width}x{height}", "fps": fps, "file": output_name},
     }
+
+    final_registry = {"assets": _canonical_assets(assets)}
+    current_version = int(parent_data.get("config_version", 1))
+    parent_matches = (
+        parent_data.get("config") == parent_config
+        and parent_data.get("registry") == final_registry
+    )
+    if not parent_matches:
+        saved = timelines_service.save(
+            project,
+            str(parent_data["timeline_id"]),
+            config=parent_config,
+            registry=final_registry,
+            expected_version=current_version,
+            idempotency_key=f"{parent_key}:save",
+        )
+        if not saved.ok or not saved.data:
+            raise StoryboardError([f"parent timeline save failed: {saved.error}"])
+        parent_data = saved.data
 
     return {
         "timeline": parent_config,
-        "assets": _canonical_assets(assets),
+        "assets": final_registry["assets"],
         "shots": shot_data,
+        "parent": {
+            "timeline_id": parent_data["timeline_id"],
+            "timeline_ulid": parent_data["timeline_ulid"],
+            "slug": parent_data["slug"],
+            "config_version": parent_data["config_version"],
+        },
     }
 
 
@@ -1021,11 +1089,20 @@ def print_report_shots(result: dict[str, Any]) -> None:
 
 
 def _canonical_assets(assets: dict[str, Any]) -> dict[str, Any]:
-    """Registry entries for kernel storage (no private media_id key)."""
+    """Registry entries for kernel storage, retaining managed media identity."""
     out: dict[str, Any] = {}
     for key, entry in assets.items():
-        out[key] = {k: v for k, v in entry.items() if k != "media_id"}
+        out[key] = dict(entry)
     return out
+
+
+def _parent_timeline_slug(story: Mapping[str, Any], output_name: str) -> str:
+    """Derive a stable managed parent slug from authored output/story identity."""
+    stem = Path(output_name).stem if isinstance(output_name, str) else ""
+    raw = stem or str(story.get("id") or "storyboard")
+    # Timeline slugs are portable identifiers, not filesystem paths.
+    slug = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+    return slug or "storyboard"
 
 
 def _write_outputs(

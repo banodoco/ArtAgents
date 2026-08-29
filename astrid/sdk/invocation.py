@@ -34,6 +34,14 @@ from .exceptions import (
 from .results import DiscoveryResult, InvocationResult, _json_safe, _json_safe_mapping
 
 
+def _expanded_config_hash(config: Mapping[str, Any]) -> str:
+    """Hash the exact in-memory expansion sent to the renderer."""
+    payload = json.dumps(
+        config, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def run_executor(request: Any, registry: Any) -> Any:
     from astrid.core.execution.executor.runner import run_executor as _run_executor
 
@@ -782,6 +790,7 @@ def _prepare_managed_render_inputs(
     *,
     project: str | None,
     project_root: str | Path | None,
+    _client: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Resolve and materialize the explicit ``rendering.render`` ref mode."""
 
@@ -871,6 +880,20 @@ def _prepare_managed_render_inputs(
         validate_managed_render_snapshot,
     )
 
+    if _client is None:
+        # Global SDK callers do not own an application object. Use a bounded
+        # client lifetime for the read/materialization transaction; callers
+        # using AstridClient.invoke inject their already-open client.
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open(project_root) as owned_client:
+            return _prepare_managed_render_inputs(
+                values,
+                project=project,
+                project_root=project_root,
+                _client=owned_client,
+            )
+
     projects_root = _resolve_projects_root(project_root, project)
     try:
         snapshot = resolve_managed_render_snapshot(
@@ -878,6 +901,81 @@ def _prepare_managed_render_inputs(
             project_ref=str(project),
             timeline_ref=timeline_ref.strip(),
             expected_version=expected_version,
+            client=_client,
+        )
+        from astrid.core.timeline._edit_helpers import TimelineEditError
+        from astrid.core.timeline.expand_shots import expand_shot_clips
+
+        # Admission is intentionally split: the authoring parent may contain
+        # composite ``shot`` clips, but every reference must resolve through
+        # the SDK before expansion. The expander never invents or fetches a
+        # missing shot and never talks to storage itself.
+        child_records: list[dict[str, Any]] = []
+        raw_clips = snapshot.config.get("clips", [])
+        for index, clip in enumerate(raw_clips):
+            if not isinstance(clip, Mapping) or clip.get("clipType") != "shot":
+                continue
+            params = clip.get("params")
+            shot_id = params.get("shot_id") if isinstance(params, Mapping) else None
+            timeline_document_id = (
+                params.get("timeline_document_id") if isinstance(params, Mapping) else None
+            )
+            if not isinstance(shot_id, str) or not shot_id:
+                raise CapabilityValidationError(
+                    f"canonical timeline {snapshot.timeline_slug!r} shot clip at index {index} "
+                    "is missing a registered shot_id"
+                )
+            shot_result = _client.shots.show(str(project), shot_id)
+            if not shot_result.ok or not shot_result.data:
+                raise CapabilityValidationError(
+                    f"canonical timeline {snapshot.timeline_slug!r} references unregistered shot "
+                    f"{shot_id!r}"
+                )
+            if not isinstance(timeline_document_id, str) or not timeline_document_id:
+                raise CapabilityValidationError(
+                    f"canonical timeline {snapshot.timeline_slug!r} shot {shot_id!r} "
+                    "is missing timeline_document_id"
+                )
+
+        def load_child(ref: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+            child_result = _client.timelines.show(str(project), ref)
+            if not child_result.ok or not child_result.data:
+                raise TimelineEditError(f"timeline {ref!r} was not found")
+            child = child_result.data
+            child_config = child.get("config")
+            child_registry = child.get("registry")
+            if not isinstance(child_config, Mapping) or not isinstance(child_registry, Mapping):
+                raise TimelineEditError(f"timeline {ref!r} has an invalid snapshot")
+            child_records.append(
+                {
+                    "timeline_id": str(child["timeline_id"]),
+                    "timeline_ulid": str(child["timeline_ulid"]),
+                    "slug": str(child["slug"]),
+                    "config_version": int(child["config_version"]),
+                    "config_hash": _expanded_config_hash(child_config),
+                }
+            )
+            return child_config, child_registry
+
+        try:
+            expanded_config, expanded_registry = expand_shot_clips(
+                snapshot.config,
+                snapshot.registry,
+                load_timeline=load_child,
+            )
+        except TimelineEditError as exc:
+            raise CapabilityValidationError(str(exc)) from exc
+        from dataclasses import replace
+
+        snapshot = replace(
+            snapshot,
+            config=expanded_config,
+            registry=expanded_registry,
+            materialized_registry_hash=_expanded_config_hash(expanded_registry),
+            expansion={
+                "children": child_records,
+                "expanded_config_hash": _expanded_config_hash(expanded_config),
+            },
         )
         validate_managed_render_snapshot(snapshot)
     except ManagedRenderValidationError as exc:
@@ -1606,6 +1704,7 @@ def invoke(
     argv: tuple[str, ...] = (),
     orchestrator_args: tuple[str, ...] = (),
     registry: FrozenSchemaPackRegistry | None = None,
+    _client: Any | None = None,
 ) -> InvocationResult:
     sdk_module = _sdk_module()
     include_elements = kind == "element"
@@ -1649,6 +1748,7 @@ def invoke(
             inputs,
             project=project,
             project_root=project_root,
+            _client=_client,
         )
 
     # Generation requests have a single read-only preflight for both dry-run
