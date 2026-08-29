@@ -6,6 +6,7 @@ import pytest
 
 from astrid.core.integrations.reigh.capabilities import (
     BINDING_ASTRID_REMOTION,
+    BINDING_ASTRID_VISUALIZE,
     BINDING_VIBECOMFY,
     BINDING_WGP,
     DEAD_TYPES,
@@ -74,10 +75,19 @@ def test_every_entry_has_exactly_one_binding_and_policy() -> None:
     for entry in REGISTRY.values():
         assert isinstance(entry, CapabilityEntry)
         assert entry.binding in {BINDING_WGP, BINDING_VIBECOMFY,
-                                 BINDING_ASTRID_REMOTION}
+                                 BINDING_ASTRID_REMOTION,
+                                 BINDING_ASTRID_VISUALIZE}
         assert isinstance(entry.output_policy, dict)
         assert "create_generation" in entry.output_policy
-        check_available(entry)  # default probes pass
+        try:
+            check_available(entry)
+        except CapabilityUnavailable as exc:
+            # Remotion is an optional capability closure.  A checkout without
+            # its ignored adapter packages must advertise that fact instead
+            # of making this structural registry test depend on local setup.
+            assert entry.probe == "remotion_ready"
+            assert "missing_prerequisites:" in str(exc)
+            assert "astrid doctor setup" in str(exc)
 
 
 def test_render_capability_uses_remotion_and_no_generation() -> None:
@@ -85,6 +95,12 @@ def test_render_capability_uses_remotion_and_no_generation() -> None:
     assert entry.binding == BINDING_ASTRID_REMOTION
     assert entry.output_policy["create_generation"] is False
     assert entry.output_policy["managed_media_role"] == "render"
+
+
+def test_timeline_visualize_does_not_claim_remotion() -> None:
+    entry = REGISTRY["rendering.timeline_visualize"]
+    assert entry.binding == BINDING_ASTRID_VISUALIZE
+    assert entry.probe == "always_available"
 
 
 def test_image_generation_model_switch() -> None:

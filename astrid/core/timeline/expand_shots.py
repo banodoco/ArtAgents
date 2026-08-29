@@ -9,11 +9,10 @@ memory-only. CLI `timelines show` uses this to print derived expanded counts.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
-
-import logging
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +25,8 @@ __all__ = ["expand_shot_clips", "_total_assets"]
 
 def _total_assets(registry: Mapping[str, object]) -> int:
     """Count total assets in an AssetRegistry dict."""
-    return len(registry.get("assets", {}))
+    assets = registry.get("assets", {})
+    return len(assets) if isinstance(assets, Mapping) else 0
 
 
 def expand_shot_clips(
@@ -54,7 +54,10 @@ def expand_shot_clips(
     """
     from astrid.core.timeline._edit_helpers import TimelineEditError
 
-    clips = list(config.get("clips", []))
+    raw_clips = config.get("clips", [])
+    if not isinstance(raw_clips, list):
+        raise TimelineEditError("timeline clips must be a list")
+    clips: list[object] = list(raw_clips)
     expanded_clips: list[dict[str, object]] = []
     merged_assets: dict[str, object] = {}
     # registry may be a dict {"assets": {...}} or an AssetRegistry-like object
@@ -139,7 +142,12 @@ def expand_shot_clips(
                 f"Failed to load sub-timeline {timeline_document_id}: {exc}"
             ) from exc
 
-        sub_clips = list(sub_config.get("clips", []))
+        raw_sub_clips = sub_config.get("clips", [])
+        if not isinstance(raw_sub_clips, list):
+            raise TimelineEditError(
+                f"sub-timeline {timeline_document_id} clips must be a list"
+            )
+        sub_clips: list[object] = list(raw_sub_clips)
         sub_assets = (
             sub_registry.get("assets", {})
             if isinstance(sub_registry, dict)

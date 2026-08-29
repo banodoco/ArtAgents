@@ -15,6 +15,7 @@ import pytest
 import astrid.core.integrations.reigh.capabilities as caps
 from astrid.core.integrations.reigh.capabilities import (
     AVAILABILITY_PROBES,
+    REMOTION_ADAPTER_PACKAGES,
     CapabilityEntry,
     CapabilityUnavailable,
     _setup_stamp_probe,
@@ -82,17 +83,42 @@ def test_unknown_probe_names_resolve_to_none() -> None:
     assert resolve_probe("weights:missing-prefix") is None
 
 
-def test_remotion_probe_covers_binaries_and_bundle(monkeypatch) -> None:
+def test_remotion_probe_covers_binaries_and_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import shutil
 
-    real_which = shutil.which
+    bundle = tmp_path / "remotion"
+    package_root = bundle / "node_modules" / "@banodoco"
+    package_root.mkdir(parents=True)
+    (bundle / "package.json").write_text("{}\n", encoding="utf-8")
+    for package in REMOTION_ADAPTER_PACKAGES:
+        (package_root / package).mkdir()
+    monkeypatch.setattr(caps, "_REPO_ROOT", tmp_path)
     monkeypatch.setattr(
         shutil, "which", lambda name: "/usr/bin/" + name
     )
     ok, missing = AVAILABILITY_PROBES["remotion_ready"]()
-    # This checkout has the Remotion bundle installed; binaries stubbed in.
+    # The complete bundle closure is staged above; binaries are stubbed in.
     assert ok is True, missing
-    del real_which
+
+
+def test_remotion_probe_rejects_incomplete_adapter_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Node/ffmpeg alone must not advertise the Remotion capability ready."""
+    bundle = tmp_path / "remotion"
+    (bundle / "node_modules" / "@banodoco").mkdir(parents=True)
+    (bundle / "package.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(caps, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+
+    ok, missing = AVAILABILITY_PROBES["remotion_ready"]()
+
+    assert ok is False
+    assert any("@banodoco/timeline-composition" in item for item in missing)
+    assert any("@banodoco/timeline-schema" in item for item in missing)
+    assert any("@banodoco/timeline-theme-2rp" in item for item in missing)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +152,7 @@ def test_completing_setup_flips_probe_without_code_changes(
     root: Path, runtime_ok
 ) -> None:
     probe = resolve_probe(WEIGHT_ID)
+    assert probe is not None
     assert probe() == (
         False,
         [
@@ -142,6 +169,7 @@ def test_completing_setup_flips_probe_without_code_changes(
 
     assert result.sha256 == sha256_hex(content)
     # Same process, same code, same registry — only data moved.
+    assert probe is not None
     assert probe()[0] is True
 
 

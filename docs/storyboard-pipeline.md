@@ -114,9 +114,11 @@ authority for durable execution state.
 
 ## Shots projection & sub-timeline plan
 
-This database (`$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3`) is the **local Reigh database** —
-the SQLite authority that replaces Supabase in the local stack. Reigh UI, the worker, and
-Astrid all read/write it through the bridge.
+The generated neutral client/runtime is the **timeline authority**. It owns the
+SQLite/CAS store beneath `$ASTRID_PROJECTS_ROOT/.astrid/`; Reigh UI, workers,
+and Astrid read and write it through the client/service seam. The storyboard
+compiler and render preparation do not open SQLite or treat authored sidecars
+as runtime state.
 
 ### Current state (verified 2026-08-28)
 

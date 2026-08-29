@@ -18,6 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # as an unknown root entry.
 ROOT_FILE_ALLOWLIST = {
     "AGENTS.md",
+    # Test bootstrap for the sibling timeline-schema package.  This is kept
+    # deliberately narrow: only the root fixture module is approved, not
+    # arbitrary root Python files.
+    "conftest.py",
     "SECURITY.md",
     ".env.example",
     ".gitattributes",
@@ -45,6 +49,8 @@ ROOT_DIR_ALLOWLIST = {
     "remotion",
     "requirements",
     "scripts",
+    # Authored storyboard provenance (not generated render output).
+    "storyboards",
     "tests",
     "tools",
 }

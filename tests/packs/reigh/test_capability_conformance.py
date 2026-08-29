@@ -31,8 +31,10 @@ from typing import Any
 
 import pytest
 
+import astrid.core.integrations.reigh.capabilities as capabilities
 from astrid.core.integrations.reigh.capabilities import (
     REGISTRY,
+    REMOTION_ADAPTER_PACKAGES,
     WGP_CHECKOUT_ENV,
     CapabilityInputError,
     CapabilityUnavailable,
@@ -136,6 +138,19 @@ def _install_prerequisite(
             binary.write_text("#!/bin/sh\n", encoding="utf-8")
             binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
         monkeypatch.setenv("PATH", str(bin_dir))
+        # ``remotion_ready`` is a bundle closure, not merely a pair of
+        # executable checks.  Stage the same package names the production
+        # probe verifies so this data-only setup exercises the available leg
+        # without depending on an ignored node_modules checkout.
+        bundle = tmp_path / "remotion"
+        (bundle / "node_modules" / "@banodoco").mkdir(parents=True)
+        (bundle / "package.json").write_text("{}\n", encoding="utf-8")
+        for package in REMOTION_ADAPTER_PACKAGES:
+            (bundle / "node_modules" / "@banodoco" / package).mkdir()
+        monkeypatch.setattr(capabilities, "_REPO_ROOT", tmp_path)
+    elif entry.probe == "always_available":
+        # Pure local executors have no optional installable closure.
+        return
     else:
         pytest.fail(f"unexpected probe {entry.probe!r} on {spec.capability_id}")
 
@@ -233,6 +248,8 @@ def test_capability_conformance_fixture(
     #    registered (advertised-gated, never removed).
     _install_prerequisite(spec, tmp_path, monkeypatch)
     check_available(entry_row)  # must not raise
+    if entry_row.probe == "always_available":
+        return
     _remove_prerequisite(spec, tmp_path, monkeypatch)
     with pytest.raises(CapabilityUnavailable) as excinfo:
         check_available(entry_row)

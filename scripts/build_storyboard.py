@@ -658,10 +658,6 @@ def _positive_duration(value: float, where: str) -> float:
     return float(value)
 
 
-def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -837,8 +833,10 @@ def _compile_with_shots(
         if vo is not None:
             audio = vo.get("audio") or {}
             wav_path = _resolve_path(audio["asset"], base)
-            duration = _positive_duration(probe_duration(wav_path), f"sections[{slug}].vo.audio.asset")
-            vo_durations[slug] = duration
+            vo_duration = _positive_duration(
+                probe_duration(wav_path), f"sections[{slug}].vo.audio.asset"
+            )
+            vo_durations[slug] = vo_duration
 
             vo_key = f"vo_{slug}"
             if import_asset is not None:
@@ -850,7 +848,7 @@ def _compile_with_shots(
             assets[vo_key] = {
                 "file": vo_import.file,
                 "type": "audio",
-                "duration": round(duration, 3),
+                "duration": round(vo_duration, 3),
                 "content_sha256": vo_import.content_sha256,
                 "media_id": vo_import.media_id,
             }

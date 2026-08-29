@@ -41,10 +41,24 @@ BINDING_VIBECOMFY = "vibecomfy"
 """Local VibeComfy/ComfyUI scratchpad binding."""
 BINDING_ASTRID_REMOTION = "astrid_remotion"
 """Astrid/Remotion render binding."""
+BINDING_ASTRID_VISUALIZE = "astrid_visualize"
+"""Pure-Python timeline evidence-pack binding (no Remotion bundle)."""
+
+REMOTION_ADAPTER_PACKAGES: tuple[str, ...] = (
+    "timeline-composition",
+    "timeline-schema",
+    "timeline-theme-2rp",
+)
+"""Required installed ``@banodoco`` packages for the Remotion closure."""
 
 
 _KNOWN_BINDINGS = frozenset(
-    {BINDING_WGP, BINDING_VIBECOMFY, BINDING_ASTRID_REMOTION}
+    {
+        BINDING_WGP,
+        BINDING_VIBECOMFY,
+        BINDING_ASTRID_REMOTION,
+        BINDING_ASTRID_VISUALIZE,
+    }
 )
 
 # ---------------------------------------------------------------------------
@@ -556,13 +570,16 @@ REGISTRY: dict[str, CapabilityEntry] = {
         CapabilityEntry(
             "rendering.timeline_visualize",
             FAMILY_RENDER_EXPORT,
-            BINDING_ASTRID_REMOTION,
+            BINDING_ASTRID_VISUALIZE,
             _policy(
                 create_generation=False,
                 managed_media_role="render",
             ),
             required_inputs={"timeline_ref": str},
-            probe="remotion_ready",
+            # Visualization emits a Python-owned evidence pack.  Remotion is
+            # not in its runtime closure; optional video thumbnails already
+            # fail closed at the thumbnail boundary when ffmpeg is absent.
+            probe="always_available",
         ),
         # Canonical server-owned render executor. Keep the historical
         # timeline_visualize row above as a compatibility capability while
@@ -694,7 +711,7 @@ def _probe_remotion_ready() -> tuple[bool, list[str]]:
     else:
         absent = [
             f"@banodoco/{name}"
-            for name in ("timeline-composition", "timeline-schema", "timeline-theme-2rp")
+            for name in REMOTION_ADAPTER_PACKAGES
             if not (banodoco / name).is_dir()
         ]
         if absent:
@@ -1063,6 +1080,8 @@ def reject_dead_or_unknown(identifier: str) -> None:
 __all__ = [
     "AVAILABILITY_PROBES",
     "BINDING_ASTRID_REMOTION",
+    "BINDING_ASTRID_VISUALIZE",
+    "REMOTION_ADAPTER_PACKAGES",
     "WGP_CHECKOUT_ENV",
     "BINDING_VIBECOMFY",
     "BINDING_WGP",

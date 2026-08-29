@@ -1066,15 +1066,15 @@ def _capability_fixtures() -> tuple[CapabilityConformance, ...]:
             _BINDING_PROVENANCE,
             invalid_input={},
         ),
-        # Historical visualization remains a supported direct executor
-        # capability for the evidence-pack surface.  New render-export
-        # family admission resolves to rendering.render, but the legacy row
-        # still participates in the boot census and probe contract.
+        # Historical visualization is a direct evidence-pack executor, not a
+        # video-producing Remotion workflow.  It remains registered for the
+        # compatibility surface, but its conformance manifest must not claim
+        # a rendered video or a workflow-file output.
         CapabilityConformance(
             "rendering.timeline_visualize",
             "render_export",
             {"timeline_ref": "tl-1", "expected_version": 0},
-            {"files": 1, "media": "video"},
+            {"files": 0, "media": "none"},
             _BINDING_PROVENANCE,
             invalid_input={},
         ),
