@@ -449,16 +449,16 @@ def _build_shot_subtimeline(
     duration: float,
 ) -> dict[str, Any]:
     """Create a SHOT sub-timeline document for one section (vo a1 / cap captions / broll broll).
-    
+
     The sub-timeline is a self-contained temporal document with LOCAL ``at=0`` for all clips
     and ``hold``/``to`` matching the flat per-section durations. It serves as the timeline
     document reference for the parent shot graph.
     """
     # Use the section's authored timing as the sub-timeline duration
     hold_r = round(duration + GAP, 3)
-    
+
     width, height, fps = _parse_canvas(story["meta"]["canvas"])
-    
+
     clips = []
     # VO on audio track a1
     if vo_key is not None:
@@ -475,7 +475,7 @@ def _build_shot_subtimeline(
                 "to": vo_end,
             }
         )
-        
+
         # Captions over VO
         vo_text = section.get("vo", {}).get("text", "")
         if vo_text:
@@ -491,7 +491,7 @@ def _build_shot_subtimeline(
                     "effects": dict(_CAPTION_FADES),
                 }
             )
-    
+
     # B-roll on visual track broll
     broll_start = 0.0
     broll_end = hold_r
@@ -503,7 +503,7 @@ def _build_shot_subtimeline(
         "asset": image_key,
         "hold": broll_end,
     }
-    
+
     # B-roll may have generative provenance (variant.source == 'gen')
     img_origin = None
     variants = section.get("image", {}).get("variants", [])
@@ -514,9 +514,9 @@ def _build_shot_subtimeline(
             img_origin = active_variant.get("prompt", "")
     if img_origin:
         broll_clip["generation"] = {"prompt": img_origin}
-    
+
     clips.append(broll_clip)
-    
+
     config: dict[str, Any] = {
         "theme": _THEME,
         "theme_overrides": {
@@ -727,7 +727,7 @@ def _compile_with_shots(
     client: Any | None = None,
 ) -> dict[str, Any]:
     """Compile a storyboard with shot projection (task T11).
-    
+
     Creates per-section sub-timelines via TimelinesService, shots via ShotsService,
     and a parent shot graph. All kernel writes go through the SDK services.
     """
@@ -736,14 +736,14 @@ def _compile_with_shots(
     base = Path(base_dir)
     if probe_duration is None:
         probe_duration = probe_wav_duration
-    
+
     segments = _plan_segments(plan)
     width, height, fps = _parse_canvas(story["meta"]["canvas"])
-    
+
     # Import all media first
     assets: dict[str, Any] = {}
     vo_durations: dict[str, float] = {}
-    
+
     for section in story["sections"]:
         slug = section["id"]
         image_cfg = section["image"]
@@ -756,12 +756,12 @@ def _compile_with_shots(
             active_index = image_cfg.get("active_index", 0)
             active_variant = variants[active_index]
             img_path, img_origin = _variant_import_path(active_variant, base, f"sections[{slug}].image")
-        
+
         if import_asset is not None:
             img_import = import_asset(img_path)
         else:
             img_import = sdk_import_asset(img_path, project=project)
-        
+
         img_key = f"img_{slug}"
         assets[img_key] = {
             "file": img_import.file,
@@ -769,7 +769,7 @@ def _compile_with_shots(
             "content_sha256": img_import.content_sha256,
             "media_id": img_import.media_id,
         }
-        
+
         # VO
         vo = section.get("vo")
         if vo is not None:
@@ -778,7 +778,7 @@ def _compile_with_shots(
             where = f"sections[{slug}].vo"
             duration = probe_duration(wav_path)
             vo_durations[slug] = duration
-            
+
             vo_key = f"vo_{slug}"
             if import_asset is not None:
                 vo_import = import_asset(wav_path)
@@ -791,7 +791,7 @@ def _compile_with_shots(
                 "content_sha256": vo_import.content_sha256,
                 "media_id": vo_import.media_id,
             }
-    
+
     # Create shots and sub-timelines against the caller's projects root.
     if client is None:
         raise StoryboardError(
@@ -799,23 +799,23 @@ def _compile_with_shots(
         )
     shots_service = client.shots
     timelines_service = client.timelines
-        
+
     shot_data: dict[str, dict[str, Any]] = {}  # slug -> {shot_id, timeline_document_id, nav, prompt}
-    
+
     for section in story["sections"]:
         slug = section["id"]
         segment = segments.get(slug) if segments is not None else None
-        
+
         # Calculate duration for this section
         duration = None
         if segment is not None:
             duration = segment.duration
         elif slug in vo_durations:
             duration = vo_durations[slug]
-        
+
         if duration is None:
             raise StoryboardError([f"section {slug} has no duration"])
-        
+
         # Create sub-timeline
         vo_key = f"vo_{slug}"
         sub_timeline_config = _build_shot_subtimeline(story, section, f"img_{slug}", vo_key if vo_key in assets else None, duration)
@@ -830,7 +830,7 @@ def _compile_with_shots(
         )
         assert timeline_result.ok, getattr(timeline_result, "error", None)
         timeline_document_id = timeline_result.data["timeline_id"]
-        
+
         # Create shot
         nav = section.get("nav", {})
         prompt = section.get("provenance", {}).get("prompt", "")
@@ -842,14 +842,14 @@ def _compile_with_shots(
         )
         assert shot_result.ok
         shot_id = shot_result.data["id"]
-        
+
         shot_data[slug] = {
             "shot_id": shot_id,
             "timeline_document_id": timeline_document_id,
             "nav": nav,
             "prompt": prompt,
         }
-        
+
         # Add image item
         img_key = f"img_{slug}"
         item_result = shots_service.add_item(
@@ -860,7 +860,7 @@ def _compile_with_shots(
             idempotency_key=f"{project}:shot-item:{slug}:image",
         )
         assert item_result.ok
-        
+
         # Add VO item if exists
         vo_key = f"vo_{slug}"
         if vo_key in assets:
@@ -890,9 +890,9 @@ def _compile_with_shots(
         cursor += hold
         total = cursor
         _section_holds[slug] = hold
-    
+
     total_r = round(total, 3)
-    
+
     brand_clip = {
         "id": "brand_wordmark",
         "at": 0.0,
@@ -902,7 +902,7 @@ def _compile_with_shots(
         "text": dict(_BRAND_TEXT),
         "params": dict(_BRAND_PARAMS),
     }
-    
+
     shot_clips = []
     for slug, data in shot_data.items():
         shot_clip = {
@@ -914,7 +914,7 @@ def _compile_with_shots(
             "params": {"shot_id": data["shot_id"], "timeline_document_id": data["timeline_document_id"]},
         }
         shot_clips.append(shot_clip)
-    
+
     parent_config = {
         "theme": _THEME,
         "theme_overrides": {
