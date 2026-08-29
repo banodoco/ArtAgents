@@ -29,4 +29,4 @@ fence.
   variants and complex hybrid transition window); no new failures
 - `git diff --check`: **passed**
 
-Fix commit: recorded below after commit.
+Fix commit: `2262a36a` (`fix: reconcile reviewed timeline schema fence`).
