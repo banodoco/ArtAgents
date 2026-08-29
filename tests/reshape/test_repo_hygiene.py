@@ -56,12 +56,11 @@ def test_intentional_tracked_root_directories_are_allowed(
     assert check_repo_hygiene.find_unknown_root_entries(tracked_paths) == []
 
 
-def test_storyboard_and_test_bootstrap_roots_are_narrowly_allowlisted(
+def test_storyboard_root_is_narrowly_allowlisted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Keep authored storyboard/test source while rejecting other root drift."""
     tracked_paths = [
-        "conftest.py",
         "storyboards/intro.storyboard.json",
         "scratch.py",
     ]
