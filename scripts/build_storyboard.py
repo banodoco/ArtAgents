@@ -411,6 +411,13 @@ def compile_storyboard(
                 broll["generation"] = {"prompt": img_origin} if img_origin else {}
             section_clips.append(broll)
 
+        # A still image has no intrinsic ffprobe duration.  Persist the
+        # finite window that this compile asks the renderer to loop as the
+        # asset's truthful source duration.  The clip remains explicitly
+        # bounded by ``from``/``to``; this metadata is only the image-specific
+        # evidence needed for strict source-bound admission.
+        assets[img_key]["duration"] = hold_r
+
         cursor = max(cursor, start_r + hold_r)
         total = max(total, start_r + hold_r)
         report_sections[slug] = {
@@ -907,6 +914,14 @@ def _compile_with_shots(
         section_durations[slug] = duration
         if segment is not None:
             section_starts[slug] = segment.start
+
+        # PNG/JPEG sources are single still frames, so ffprobe cannot provide
+        # a duration.  Record the finite authored window on the image asset;
+        # the child clip still carries explicit source bounds.
+        assets[f"img_{slug}"]["duration"] = round(
+            duration + GAP if section.get("vo") is not None else duration,
+            3,
+        )
 
         # Create sub-timeline
         vo_key = f"vo_{slug}"

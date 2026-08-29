@@ -43,7 +43,7 @@ def _story() -> dict:
 def test_image_media_is_emitted_as_a_bounded_window() -> None:
     importer = _Import()
     story = _story()
-    config, _, _ = bs.compile_storyboard(
+    config, registry, _ = bs.compile_storyboard(
         story,
         base_dir=FIXTURES,
         import_asset=importer,
@@ -56,6 +56,7 @@ def test_image_media_is_emitted_as_a_bounded_window() -> None:
         assert clip["from"] == 0.0
         assert clip["to"] == duration
         assert "hold" not in clip
+        assert registry["assets"][clip["asset"]]["duration"] == duration
     assert canonical_timeline_config(config) is not None
 
     no_vo = _story()

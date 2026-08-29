@@ -519,6 +519,45 @@ def _probe_duration(probe: MediaProbe) -> float | None:
     return None
 
 
+def _is_still_asset(entry: Mapping[str, Any]) -> bool:
+    """Return whether an asset is a source image with looped render semantics."""
+
+    kind = str(entry.get("type", "")).lower()
+    if kind in {"image", "still", "image/png", "image/jpeg", "image/webp"}:
+        return True
+    file_value = entry.get("file")
+    return isinstance(file_value, str) and Path(file_value).suffix.lower() in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".gif",
+        ".bmp",
+        ".tif",
+        ".tiff",
+    }
+
+
+def _source_duration(entry: Mapping[str, Any], probe: MediaProbe) -> float | None:
+    """Resolve a finite source bound, including compiled still-image windows.
+
+    Still images intentionally have no intrinsic duration in ffprobe.  A
+    compiler-provided positive ``duration`` is valid only for a typed image;
+    all ordinary media continues to require probe-derived duration evidence.
+    """
+
+    probed = _probe_duration(probe)
+    if probed is not None:
+        return probed
+    if not _is_still_asset(entry):
+        return None
+    declared = entry.get("duration")
+    if isinstance(declared, bool) or not isinstance(declared, (int, float)):
+        return None
+    declared_float = float(declared)
+    return declared_float if math.isfinite(declared_float) and declared_float > 0 else None
+
+
 def _requested_ownership(
     request: RenderRequest,
     *,
@@ -830,7 +869,7 @@ def support(
             bounds = _clip_range(clip)
         except ValueError:
             continue
-        source_duration = _probe_duration(media_probe)
+        source_duration = _source_duration(entry, media_probe)
         if source_duration is None:
             reasons.append(
                 f"Asset {asset_id!r} has no probed duration for source-bound validation"

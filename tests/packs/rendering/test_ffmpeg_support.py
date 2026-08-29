@@ -188,6 +188,49 @@ def test_supported_report_exposes_request_specific_evidence(tmp_path: Path) -> N
     assert report.features["audio_ownership"] == "rendered"
 
 
+def test_compiled_still_image_uses_declared_window_when_probe_has_no_duration(
+    tmp_path: Path,
+) -> None:
+    """A compiled still has finite render evidence despite no intrinsic duration."""
+    timeline_data = _timeline(include_audio=False, duration=2.0)
+    timeline_data["clips"][0]["asset"] = "plate"
+    assets = {
+        "assets": {
+            "plate": {
+                "file": "plate.png",
+                "type": "image",
+                "duration": 2.0,
+            }
+        }
+    }
+    still_probe = MediaProbe(
+        duration_seconds=None,
+        width=640,
+        height=360,
+        video_codec="png",
+        video_stream_present=True,
+        audio_stream_present=False,
+    )
+
+    report = _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes={"plate.png": still_probe},
+    )
+    assert report.supported is True
+
+    argv = command.build_render_command(_request(tmp_path), tmp_path)
+    image_index = argv.index(str((tmp_path / "plate.png").resolve()))
+    assert argv[image_index - 5 : image_index] == [
+        "-loop",
+        "1",
+        "-t",
+        "2.000000",
+        "-i",
+    ]
+
+
 @pytest.mark.parametrize(
     ("case", "reason"),
     [

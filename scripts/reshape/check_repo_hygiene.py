@@ -37,6 +37,9 @@ ROOT_FILE_ALLOWLIST = {
 # Approved top-level directories.
 ROOT_DIR_ALLOWLIST = {
     ".github",
+    # Durable convergence evidence is authored release material, not runtime
+    # state. Individual generated outputs remain subject to path rules.
+    ".astrid-convergence",
     ".megaplan",
     ".oracle",
     ".vscode",
@@ -44,7 +47,6 @@ ROOT_DIR_ALLOWLIST = {
     "artifacts",
     "docs",
     "examples",
-    "fal-voice-upscale",
     "planning",
     "remotion",
     "requirements",
@@ -161,6 +163,7 @@ TRACKED_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "*.mp4",
             "*.mov",
             "*.wav",
+            "*.mp3",
             "*.jpg",
             "*.jpeg",
             "*.png",

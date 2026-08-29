@@ -55,6 +55,7 @@ out/
 *.mp4
 *.mov
 *.wav
+*.mp3
 *.jpg
 *.jpeg
 *.png

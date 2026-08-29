@@ -454,7 +454,30 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
         asset_path = Path(file_value)
         if not asset_path.is_absolute():
             asset_path = (inputs.assets_path.parent / asset_path).resolve()
-        argv.extend(["-i", str(asset_path)])
+        kind = str(entry.get("type", "")).lower()
+        is_still = kind in {"image", "still", "image/png", "image/jpeg", "image/webp"}
+        if not is_still:
+            is_still = asset_path.suffix.lower() in {
+                ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"
+            }
+        if is_still:
+            # Image files are one-frame sources.  Loop only typed stills and
+            # bound the input to the latest authored clip end; media clips
+            # retain ordinary finite source semantics.
+            image_clips = [
+                clip
+                for clip in timeline_data.get("clips", [])
+                if isinstance(clip, Mapping)
+                and clip.get("clipType") == "media"
+                and clip.get("asset") == asset_key
+            ]
+            end = max(
+                clip_duration_seconds(clip)
+                for clip in image_clips
+            )
+            argv.extend(["-loop", "1", "-t", f"{end:.6f}", "-i", str(asset_path)])
+        else:
+            argv.extend(["-i", str(asset_path)])
     for overlay in inputs.text_overlays:
         argv.extend(
             ["-loop", "1", "-t", f"{overlay.end:.6f}", "-i", str(overlay.path)]
@@ -486,6 +509,7 @@ def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
             if copy_video_input is None
             else []
         ),
+        *(["-pix_fmt", "yuv420p"] if copy_video_input is None else []),
         *(
             ["-c:a", "aac", "-b:a", "192k"]
             if has_audio

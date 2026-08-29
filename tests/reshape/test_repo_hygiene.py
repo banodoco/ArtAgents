@@ -86,6 +86,7 @@ def test_find_tracked_ignored_artifacts_classifies_synthetic_filenames(
         "cache/render-state.json",
         "astrid/packs/demo/build/compiled.json",
         "exports/preview.mp4",
+        "exports/voice.mp3",
         ".desloppify/state.json",
         "notes/debug.bak",
     ]
@@ -102,6 +103,7 @@ def test_find_tracked_ignored_artifacts_classifies_synthetic_filenames(
         ("generated runtime directory", "cache/render-state.json"),
         ("credential-like filename", "config/dev.key"),
         ("tracked runtime media output", "exports/preview.mp4"),
+        ("tracked runtime media output", "exports/voice.mp3"),
         ("local tool state", "notes/debug.bak"),
         ("generated runtime directory", "out/session-report.md"),
         ("generated runtime directory", "runs/demo/output.json"),
