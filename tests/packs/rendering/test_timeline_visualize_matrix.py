@@ -107,10 +107,12 @@ _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/core/timeline/_shared.py": "b768588e",
     # The schema received several reviewed, additive/narrowing updates during
     # the epic (the explicit schema import path, media identity, and the
-    # pinned clip allowlist).  ``git log`` is newest-first, so anchor at the
-    # newest reviewed revision; all older pre-update history is ignored while
-    # every later revision must remain byte-identical to the current bytes.
-    "astrid/core/timeline/banodoco_schema.py": "0d8ac242",
+    # pinned clip allowlist).  The final convergence checkout also carries
+    # the shared-schema-generated ``derived_output`` key; anchor at that
+    # reviewed revision so the pre-update merge blob is treated as history,
+    # while every later revision must remain byte-identical to current bytes.
+    # ``git log`` is newest-first, so older pre-update history is ignored.
+    "astrid/core/timeline/banodoco_schema.py": "0eb3a146",
 }
 
 REPO_ROOT = TESTS_ROOT.parent
