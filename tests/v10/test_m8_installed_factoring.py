@@ -9,6 +9,9 @@ boundaries before the lane runs.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Iterator
 
@@ -21,6 +24,7 @@ from scripts.reshape.check_pack_factoring import (
     KERNEL_LANE,
     PACK_TABLES,
     PACK_VOCABULARY,
+    _artifact_environment,
     check_artifact_factoring,
     extract_sketch_kernel_inventory,
     unpack_wheel,
@@ -113,6 +117,72 @@ def test_packaged_factoring_inputs_are_explicit_and_disjoint() -> None:
     }
 
 
+def test_packaged_factoring_uses_only_locked_dependencies_and_explicit_roots(
+    packaged_harness: InstalledArtifactHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A contaminated host/user path cannot satisfy the packaged lane.
+
+    The factoring helper must leave dependency resolution to the selected
+    interpreter's lock-provisioned venv.  In particular, a host
+    ``PYTHONPATH`` containing fake ``yaml``/``jsonschema`` modules must not
+    appear in the child environment or win imports over the locked packages.
+    """
+    host_site = tmp_path / "host-site"
+    host_site.mkdir()
+    (host_site / "yaml.py").write_text("raise AssertionError('host yaml used')\n", encoding="utf-8")
+    (host_site / "jsonschema.py").write_text(
+        "raise AssertionError('host jsonschema used')\n", encoding="utf-8"
+    )
+    user_base = tmp_path / "user-base"
+    user_site = (
+        user_base
+        / "lib"
+        / f"python{os.sys.version_info.major}.{os.sys.version_info.minor}"
+        / "site-packages"
+    )
+    user_site.mkdir(parents=True)
+    (user_site / "yaml.py").write_text("raise AssertionError('user yaml used')\n", encoding="utf-8")
+    (user_site / "jsonschema.py").write_text(
+        "raise AssertionError('user jsonschema used')\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(host_site))
+    monkeypatch.setenv("PYTHONUSERBASE", str(user_base))
+
+    artifact_root = tmp_path / "artifact"
+    artifact_root.mkdir()
+    env = _artifact_environment(artifact_root)
+    assert env["PYTHONPATH"] == str(artifact_root.resolve())
+    assert str(host_site) not in env["PYTHONPATH"]
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["PYTHONSAFEPATH"] == "1"
+
+    probe = subprocess.run(
+        [
+            str(packaged_harness.python_executable),
+            "-c",
+            (
+                "import json, jsonschema, yaml; "
+                "print(json.dumps({'yaml': yaml.__file__, 'jsonschema': jsonschema.__file__}))"
+            ),
+        ],
+        cwd=artifact_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    origins = json.loads(probe.stdout)
+    venv_root = packaged_harness.venv_dir.resolve()
+    for origin in origins.values():
+        resolved = Path(origin).resolve()
+        assert resolved.is_relative_to(venv_root), resolved
+        assert not resolved.is_relative_to(host_site)
+        assert not resolved.is_relative_to(user_site)
+
+
 def test_wheel_unpacking_is_confined_to_the_artifact_root(
     packaged_wheel: Path,
     tmp_path: Path,
@@ -126,11 +196,14 @@ def test_wheel_unpacking_is_confined_to_the_artifact_root(
 
 def test_sketch_inventory_is_the_unchanged_kernel() -> None:
     """The normative sketch remains exactly the 14-table core composition."""
-    assert extract_sketch_kernel_inventory(
-        (REPO_ROOT / "docs/architecture/software-engineering-pack-sketch.md").read_text(
-            encoding="utf-8"
+    assert (
+        extract_sketch_kernel_inventory(
+            (REPO_ROOT / "docs/architecture/software-engineering-pack-sketch.md").read_text(
+                encoding="utf-8"
+            )
         )
-    ) == CORE_KERNEL_TABLES
+        == CORE_KERNEL_TABLES
+    )
     summary = verify_sketch_kernel_inventory()
     assert summary.startswith("sketch-ok kernel_tables=14")
     assert "workspace" in summary

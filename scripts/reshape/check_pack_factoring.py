@@ -75,7 +75,6 @@ import json
 import os
 import re
 import shutil
-import site
 import subprocess
 import sys
 import tempfile
@@ -442,22 +441,33 @@ def _artifact_test_workspace(
 def _artifact_environment(*roots: Path) -> dict[str, str]:
     """Return a child environment whose only Astrid import roots are explicit."""
     environment = os.environ.copy()
-    # The artifact root must win for Astrid itself, while the lane runner
-    # still needs the test runner and declared third-party packages.  Make
-    # those dependency roots explicit because ``PYTHONNOUSERSITE`` below
-    # intentionally disables implicit user-site discovery (common on macOS,
-    # where pip installs PyYAML/pytest there).  No checkout path is added.
-    dependency_roots = [
-        Path(path).resolve()
-        for path in (*site.getsitepackages(), site.getusersitepackages())
-        if Path(path).is_dir()
-    ]
+    # The selected interpreter owns the dependency environment (for packaged
+    # factoring this is the lock-provisioned venv).  ``PYTHONPATH`` is only
+    # for the explicit artifact/test roots supplied by this check: injecting
+    # the host or user site-packages here would let a broken artifact pass and
+    # would defeat ``PYTHONNOUSERSITE``.
     environment["PYTHONPATH"] = os.pathsep.join(
-        str(root) for root in (*roots, *dependency_roots)
+        str(Path(root).resolve()) for root in roots
     )
     environment["PYTHONNOUSERSITE"] = "1"
+    environment["PYTHONSAFEPATH"] = "1"
     environment["ASTRID_INTERNAL_INVOCATION"] = "1"
     environment["ASTRID_NO_NUDGE"] = "1"
+    # A schema checkout is deliberately external to the wheel, but it is an
+    # explicit, validated contract input rather than ambient PYTHONPATH.  The
+    # Astrid timeline module consumes this root directly and verifies its
+    # package contents before importing it.
+    schema_name = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
+    schema_raw = environment.get(schema_name, "").strip()
+    if schema_raw:
+        schema_root = Path(schema_raw).expanduser()
+        schema_package = schema_root / "banodoco_timeline_schema"
+        if not (
+            schema_root.is_absolute()
+            and schema_package.is_dir()
+            and (schema_package / "timeline.schema.json").is_file()
+        ):
+            environment.pop(schema_name, None)
     for name in (
         "ASTRID_SESSION_ID",
         "ASTRID_REPO_ROOT",
@@ -857,8 +867,7 @@ def verify_remaining_catalog(
     remaining manifest-derived catalog (registry + fresh database)."""
     removed_tables = ",".join(PACK_TABLES[removed_pack])
     remaining_tables = ",".join(sorted(ALL_PACK_TABLES - set(PACK_TABLES[removed_pack])))
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(work)
+    env = _artifact_environment(work)
     proc = subprocess.run(
         [python, "-c", _CATALOG_SNIPPET, removed_pack, removed_tables, remaining_tables],
         cwd=work,
@@ -954,9 +963,10 @@ def run_kernel_lane(
     work: Path, python: str, *, timeout: int = 180
 ) -> subprocess.CompletedProcess[str]:
     """Run the complete enumerated kernel lane against the temp copy."""
-    env = os.environ.copy()
-    # Shadow any installed/editable astrid with the temp copy's source.
-    env["PYTHONPATH"] = str(work)
+    # Shadow any installed/editable astrid with the temp copy's source while
+    # retaining the same locked-dependency and schema-root boundary as the
+    # packaged lane.
+    env = _artifact_environment(work)
     cmd = [
         python,
         "-m",
