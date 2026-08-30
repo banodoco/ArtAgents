@@ -468,8 +468,16 @@ class GenericPackHost:
         if hasattr(self.client, "register_capability"):
             for record in self.capabilities.values():
                 disposition = str(record.matrix.get("disposition", ""))
-                status = "ready" if record.ready else (disposition if disposition in {"unsupported", "retired"} else "unavailable")
-                unavailable_reason = None if record.ready else _preflight_unavailable_reason(record)
+                if disposition in {"unsupported", "retired"}:
+                    # A declared disposition is authoritative even when the
+                    # optional source happens to fail another preflight check;
+                    # preserve its human-readable reason rather than exposing
+                    # an incidental local environment failure.
+                    status = disposition
+                    unavailable_reason = str(record.matrix.get("evidence_reason") or disposition)
+                else:
+                    status = "ready" if record.ready else "unavailable"
+                    unavailable_reason = None if record.ready else _preflight_unavailable_reason(record)
                 if isinstance(self.client, RuntimeProtocolClient):
                     self.client.register_capability(
                         record.id,

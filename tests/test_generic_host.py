@@ -5,8 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.execution.generic_host import GenericPackHost, HostError
-from astrid.core.execution.generic_host import AdapterRegistry
+from astrid.core.execution.generic_host import (
+    AdapterRegistry,
+    GenericPackHost,
+    HostError,
+    RuntimeProtocolClient,
+)
 
 
 class FakeRuntime:
@@ -143,3 +147,69 @@ def test_adapter_registry_classifies_provider_local_generation_and_render():
     report = render.capabilities["rendering.render"].preflight
     assert report["binaries"]["ok"]
     assert "remotion" in report
+
+
+def test_register_preserves_declared_dispositions_and_block_reasons(tmp_path, monkeypatch):
+    monkeypatch.delenv("ASTRID_TEST_PROVIDER_KEY", raising=False)
+    records = [
+        ("required.provider", "required", "Provider credential is required"),
+        ("optional.provider", "optional", "Optional provider credential"),
+        ("unsupported.provider", "unsupported", "Provider is not shipped"),
+        ("retired.provider", "retired", "Provider was retired"),
+    ]
+    capabilities = []
+    for capability_id, disposition, evidence_reason in records:
+        root = tmp_path / capability_id.replace(".", "-")
+        root.mkdir()
+        (root / "executor.yaml").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "id": capability_id,
+                    "name": capability_id,
+                    "kind": "external",
+                    "version": "1.0",
+                    "command": {"argv": ["{python_exec}", "-c", "pass"]},
+                    "outputs": [],
+                    "isolation": {"mode": "subprocess", "network": True},
+                    "metadata": {"adapter_family": "provider"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        capabilities.append(
+            {
+                "id": capability_id,
+                "disposition": disposition,
+                "evidence_reason": evidence_reason,
+                "adapter_family": "provider",
+                "required_env": (["ASTRID_TEST_PROVIDER_KEY"] if disposition in {"required", "optional"} else []),
+                "required_binaries": [],
+                "required_packages": [],
+            }
+        )
+    matrix = tmp_path / "matrix.json"
+    matrix.write_text(json.dumps({"schema_version": 1, "capabilities": capabilities}), encoding="utf-8")
+
+    class CaptureRuntime(RuntimeProtocolClient):
+        def __init__(self):
+            self.capability_registrations = []
+
+        def register_capability(self, capability_id, **payload):
+            self.capability_registrations.append((capability_id, payload))
+
+        def register_executor(self, executor_id, **payload):
+            return {"executor_id": executor_id, **payload}
+
+    runtime = CaptureRuntime()
+    host = GenericPackHost(pack_roots=[tmp_path], capability_matrix=matrix, client=runtime)
+    host.discover()
+    host.register()
+    registered = {capability_id: payload for capability_id, payload in runtime.capability_registrations}
+    assert registered["required.provider"]["status"] == "unavailable"
+    assert registered["required.provider"]["unavailable_reason"] == "credentials:missing=ASTRID_TEST_PROVIDER_KEY"
+    assert registered["optional.provider"]["status"] == "unavailable"
+    assert registered["unsupported.provider"]["status"] == "unsupported"
+    assert registered["unsupported.provider"]["unavailable_reason"] == "Provider is not shipped"
+    assert registered["retired.provider"]["status"] == "retired"
+    assert registered["retired.provider"]["unavailable_reason"] == "Provider was retired"
