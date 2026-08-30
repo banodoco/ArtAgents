@@ -30,6 +30,7 @@ from astrid.core.execution.executor.runner import (
 from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.schema import ExecutorDefinition, ExecutorValidationError
 from astrid.core.execution.executor.folder import discover_folder_executor_roots, load_folder_executor
+from astrid.core.execution.capability_ledger import load_capability_ledger
 
 
 class HostError(RuntimeError):
@@ -352,6 +353,7 @@ class GenericPackHost:
         self.capabilities: dict[str, CapabilityRecord] = {}
         self._registered_digests: dict[str, str] = {}
         self.capability_matrix_path = Path(capability_matrix).expanduser().resolve() if capability_matrix else self._default_matrix_path()
+        self.ledger = load_capability_ledger(self.capability_matrix_path) if self.capability_matrix_path else {"capabilities": [], "sources": {}}
         self.matrix: dict[str, dict[str, Any]] = self._load_matrix(self.capability_matrix_path)
 
     def _default_matrix_path(self) -> Path | None:
@@ -367,9 +369,9 @@ class GenericPackHost:
         if path is None:
             return {}
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise HostError(f"cannot read capability matrix {path}: {exc}") from exc
+            payload = load_capability_ledger(path)
+        except ValueError as exc:
+            raise HostError(str(exc)) from exc
         if payload.get("schema_version") != 1 or not isinstance(payload.get("capabilities"), list):
             raise HostError("capability matrix requires schema_version 1 and a capabilities list")
         allowed = {"required", "optional", "unsupported", "retired"}
