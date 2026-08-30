@@ -248,7 +248,11 @@ def resolve_managed_render_snapshot(
     if client is None:
         from astrid.sdk.client import AstridClient
 
-        with AstridClient.open(projects_root) as owned_client:
+        # The workspace runtime is the sole authority.  ``projects_root`` is
+        # only the attempt-local materialization destination and must never be
+        # passed to the client composition root (which deliberately accepts no
+        # local-storage arguments after the runtime cutover).
+        with AstridClient.open() as owned_client:
             return resolve_managed_render_snapshot(
                 projects_root,
                 project_ref=project_ref,

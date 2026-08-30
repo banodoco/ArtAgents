@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,59 @@ from astrid.sdk import invoke_result
 from astrid.sdk.client import AstridClient
 from astrid.sdk.exceptions import CapabilityValidationError
 from astrid.sdk.invocation import _prepare_managed_render_inputs, _render_profile_guidance
+
+
+def test_managed_snapshot_uses_runtime_client_without_local_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The resolver may materialize under a local root, but reads use runtime.
+
+    ``AstridClient.open`` intentionally has no ``projects_root`` argument after
+    the local-application cutover.  Keep this seam explicit so a renderer
+    cannot accidentally recreate local kernel authority.
+    """
+
+    timeline_id = "11111111-1111-4111-8111-111111111111"
+    timeline = {
+        "timeline_id": timeline_id,
+        "timeline_ulid": "01J00000000000000000000000",
+        "slug": "main",
+        "config_version": 1,
+        "config": {"tracks": [], "clips": []},
+        "registry": {"assets": {}},
+    }
+    response = lambda data: SimpleNamespace(ok=True, data=data)
+
+    class _RuntimeClient:
+        projects = SimpleNamespace(show=lambda _ref: response({"id": "p1", "slug": "demo"}))
+        timelines = SimpleNamespace(
+            show=lambda _project, _ref: response(timeline),
+            list=lambda _project, **_kwargs: response([timeline]),
+        )
+
+        def close(self) -> None:
+            pass
+
+        def __enter__(self) -> "_RuntimeClient":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self.close()
+
+    calls: list[tuple[object, ...]] = []
+
+    def _open(cls, *args: object, **kwargs: object) -> _RuntimeClient:
+        calls.append(args)
+        assert not kwargs
+        return _RuntimeClient()
+
+    monkeypatch.setattr(AstridClient, "open", classmethod(_open))
+    snapshot = resolve_managed_render_snapshot(
+        tmp_path, project_ref="demo", timeline_ref="main", expected_version=1
+    )
+
+    assert snapshot.timeline_id == timeline_id
+    assert calls == [()]
 
 
 def _managed_timeline(projects: Path) -> dict:
