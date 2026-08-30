@@ -11,9 +11,11 @@ git history manipulation is needed.
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,23 +27,29 @@ _CI_SCRIPT = _REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh"
 _CHANGED_MODULE = "astrid/core/contracts/capability_schema.py"
 _EXPECTED_TEST = "tests/test_capability_schema.py"
 _UNRELATED_TEST = "tests/timeline/test_model.py"
+_LOCAL_FONT_FIXTURE = "tests/fixtures/remotion-local-font-probe.json"
+_LOCAL_FONT_TEST = "tests/test_remotion_local_fonts.py"
 
 
-def _create_mock_git(tmp_path: Path) -> Path:
+def _create_mock_git(
+    tmp_path: Path, changed_paths: tuple[str, ...] = (_CHANGED_MODULE,)
+) -> Path:
     """Create a mock ``git`` wrapper that intercepts ``diff --name-only``
     and forwards everything else to the real git.
 
-    The mock returns a single changed file (*_CHANGED_MODULE*) so the
-    --changed heuristic selects *_EXPECTED_TEST via the direct name-mapping
-    rule.
+    The mock returns *changed_paths* so the --changed heuristic can be tested
+    without mutating the repository's real history.
     """
     mock_git = tmp_path / "git"
+    changed_output = "\n".join(
+        f'        printf \'%s\\n\' "{path}"' for path in changed_paths
+    )
     mock_git.write_text(
         f"""#!/bin/bash
 # Mock git: intercept diff --name-only, forward everything else.
-for arg in "$@"; do
+    for arg in "$@"; do
     if [ "$arg" = "--name-only" ]; then
-        echo "{_CHANGED_MODULE}"
+{changed_output}
         exit 0
     fi
 done
@@ -179,3 +187,66 @@ def test_ci_changed_selection_excludes_unrelated_when_only_structure_changes(
             f"--changed unexpectedly selected timeline tests: {timeline_selected}\n"
             f"Full selection: {selected_line}"
         )
+
+
+def test_ci_changed_json_fixture_maps_to_owner_without_pytest_json_target(
+    tmp_path: Path,
+) -> None:
+    """A changed fixture selects its owning Python test, never the JSON file."""
+    _create_mock_git(tmp_path, (_LOCAL_FONT_FIXTURE, _LOCAL_FONT_TEST))
+    env = os.environ.copy()
+    env["PATH"] = str(tmp_path) + ":" + env["PATH"]
+
+    result = subprocess.run(
+        ["bash", str(_CI_SCRIPT), "--changed", "--json"],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO_ROOT),
+        env=env,
+        timeout=180,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["lanes"]["changed"]["passed"] == 4
+    assert _LOCAL_FONT_TEST in result.stderr
+    assert _LOCAL_FONT_FIXTURE not in result.stderr
+
+
+def test_ci_changed_without_tests_falls_back_without_passing_data_to_pytest(
+    tmp_path: Path,
+) -> None:
+    """Non-test-only changes keep the blocking fallback and select no data files."""
+    _create_mock_git(tmp_path, ("docs/local-runtime-note.md",))
+    fake_python = tmp_path / "python"
+    real_python = sys.executable
+    fake_python.write_text(
+        f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pytest" ]; then
+  printf 'FAKE_PYTEST %s\\n' "$*"
+  exit 0
+fi
+exec "{real_python}" "$@"
+"""
+    )
+    fake_python.chmod(fake_python.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    env = os.environ.copy()
+    env["PATH"] = str(tmp_path) + ":" + env["PATH"]
+    env["PYTHON_BIN"] = str(fake_python)
+
+    result = subprocess.run(
+        ["bash", str(_CI_SCRIPT), "--changed"],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO_ROOT),
+        env=env,
+        timeout=180,
+    )
+    combined = result.stdout + "\n" + result.stderr
+
+    assert result.returncode == 0, combined
+    assert "falling back to TARGETED_BLOCKING_TESTS" in combined
+    assert "FAKE_PYTEST" in combined
+    assert _LOCAL_FONT_FIXTURE not in combined
+    assert "docs/local-runtime-note.md" not in combined

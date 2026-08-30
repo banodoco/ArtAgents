@@ -160,8 +160,21 @@ if $CHANGED_MODE; then
     [ -f "$path" ] || continue
 
     if [[ "$path" == tests/* ]]; then
-      # Rule 1: under tests/ → select directly.
-      SELECTED_TESTS+=("$path")
+      # Rule 1: select Python tests directly. Non-Python files under tests/
+      # are fixtures or data and must never be handed to pytest as targets.
+      # Keep explicit ownership mappings for fixtures whose owning test is
+      # part of the changed-file fast lane.
+      if [[ "$path" == *.py ]]; then
+        SELECTED_TESTS+=("$path")
+      else
+        case "$path" in
+          tests/fixtures/remotion-local-font-probe.json)
+            if [ -f tests/test_remotion_local_fonts.py ]; then
+              SELECTED_TESTS+=(tests/test_remotion_local_fonts.py)
+            fi
+            ;;
+        esac
+      fi
 
     elif [[ "$path" == astrid/*.py && "$path" != astrid/*/*.py ]]; then
       # Rule 2: astrid/<mod>.py top-level → tests/test_<mod>.py if it
@@ -235,6 +248,7 @@ if $CHANGED_MODE; then
     _xml="$_JSON_TMPDIR/junit_changed.xml"
     _rc=0
     echo "--- changed (fast lane) ---" >&2
+    echo "Selected tests: ${SELECTED_TESTS[*]}" >&2
     "$PYTHON_BIN" -m pytest "${SELECTED_TESTS[@]}" -q --junit-xml="$_xml" >&2 2>&1 || _rc=$?
 
     # Parse junit XML (SD1: passed = tests - failures - errors - skipped).

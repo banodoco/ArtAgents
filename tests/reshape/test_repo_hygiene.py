@@ -56,6 +56,24 @@ def test_intentional_tracked_root_directories_are_allowed(
     assert check_repo_hygiene.find_unknown_root_entries(tracked_paths) == []
 
 
+def test_convergence_evidence_root_is_allowed_but_unknown_root_is_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The committed convergence packet is durable evidence, not root drift."""
+    tracked_paths = [
+        ".astrid-convergence/astrid-loose-thread-classification.md",
+        "unapproved-evidence/report.md",
+    ]
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+
+    assert check_repo_hygiene.find_unknown_root_entries(tracked_paths) == [
+        "unapproved-evidence/"
+    ]
+
+
 def test_storyboard_root_is_narrowly_allowlisted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

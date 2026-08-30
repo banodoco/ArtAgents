@@ -32,6 +32,8 @@ ROOT_FILE_ALLOWLIST = {
 
 # Approved top-level directories.
 ROOT_DIR_ALLOWLIST = {
+    # Durable convergence evidence; runtime state remains classified below.
+    ".astrid-convergence",
     ".github",
     ".megaplan",
     ".oracle",
