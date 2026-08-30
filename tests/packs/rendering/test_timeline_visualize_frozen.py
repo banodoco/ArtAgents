@@ -27,6 +27,7 @@ from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     resolve_focus,
     snapshot_from_frozen,
 )
+from tests.packs.rendering._helpers import invoke_local_visualization
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 SLICE_DIR = TESTS_ROOT / "fixtures" / "timeline_visualize" / "desert_slice"
@@ -43,20 +44,14 @@ def _prepare_project(projects_root: Path, slug: str) -> tuple[Path, Path]:
 
 
 def _invoke(slug: str, **extra_inputs: Any):
-    return astrid.invoke(
-        "rendering.timeline_visualize",
-        kind="executor",
-        include_installed=False,
-        project=slug,
-        inputs={
-            "project_slug": slug,
-            "layout": "time-scaled",
-            "formats": ["md"],
-            "filmstrip": "off",
-            **extra_inputs,
-        },
-        execution_mode="in_process",
-    )
+    inputs = {
+        "project_slug": slug,
+        "layout": "time-scaled",
+        "formats": ["md"],
+        "filmstrip": "off",
+        **extra_inputs,
+    }
+    return invoke_local_visualization(slug, run_module=run_module, **inputs)
 
 
 def _pack_bytes(root: Path) -> dict[str, bytes]:
@@ -146,12 +141,25 @@ def test_frozen_snapshot_preserves_registry_media_types(tmp_projects_root: Path)
 
 
 def _editable_manifest(result: Any, project_root: Path) -> Path:
-    """Restore a durable CAS pack to its kernel-owned run path for forgery tests."""
+    """Copy a durable pack to a distinct project-owned run for forgery tests."""
 
     durable = Path(result.manifest_path or "").resolve()
     frozen = load_frozen_view(durable, project_root=project_root)
-    target = project_root / "runs" / str(result.run_id) / "agent-view"
+    run_id = f"{result.run_id}-editable"
+    run_root = project_root / "runs" / run_id
+    target = run_root / "agent-view"
     shutil.copytree(frozen.pack_root, target, dirs_exist_ok=True)
+    record = json.loads((project_root / "runs" / str(result.run_id) / "run.json").read_text())
+    record.update(
+        {
+            "run_id": run_id,
+            "out": f"runs/{run_id}",
+            "manifest_path": f"runs/{run_id}/agent-view/manifest.json",
+        }
+    )
+    (run_root / "run.json").write_text(
+        json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+    )
     return target / "manifest.json"
 
 

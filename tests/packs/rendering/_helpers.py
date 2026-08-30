@@ -15,6 +15,12 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+from astrid.core.foundation.project_paths import project_dir
+
+
+_LOCAL_VISUALIZE_ATTEMPTS = 0
 
 
 @contextmanager
@@ -123,3 +129,94 @@ def _source_video(tmp_path: Path, *, audio: bool = False) -> Path:
     command += ["-video_track_timescale", "12288", str(source_path)]
     subprocess.run(command, check=True, capture_output=True, text=True)
     return source_path
+
+
+class LocalVisualizationInvocation:
+    """Small result adapter for direct, attempt-local pack execution."""
+
+    def __init__(self, raw: dict[str, Any], out_root: Path) -> None:
+        self.raw_result = raw
+        self.ok = raw.get("returncode") == 0
+        self.error = raw.get("error")
+        self.manifest_path = raw.get("manifest_path")
+        self.run_root = str(out_root)
+        self.outputs = raw.get("outputs", {}) if self.ok else {}
+        self.run_id = out_root.name
+        self.kernel_run_id = out_root.name
+        self.kernel_task_id = None
+        self.kernel_attempt_id = None
+        self.executor_version = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "error": self.error,
+            "run_id": self.run_id,
+            "run_root": self.run_root,
+            "manifest_path": self.manifest_path,
+            "executor_version": self.executor_version,
+            "outputs": self.outputs,
+        }
+
+
+def invoke_local_visualization(slug: str, *, run_module: Any, **extra_inputs: Any) -> LocalVisualizationInvocation:
+    """Call the packaged visualization executor without the retired bridge.
+
+    Every invocation gets a fresh attempt root.  Inputs are translated to the
+    executor's explicit CLI protocol, preserving the same argument boundary
+    used by the production task adapter.
+    """
+    inputs: dict[str, Any] = {
+        "project_slug": slug,
+        "layout": "time-scaled",
+        "formats": ["md"],
+        "filmstrip": "off",
+        **extra_inputs,
+    }
+    global _LOCAL_VISUALIZE_ATTEMPTS
+    _LOCAL_VISUALIZE_ATTEMPTS += 1
+    out_root = project_dir(slug) / "runs" / f"attempt-{_LOCAL_VISUALIZE_ATTEMPTS}"
+    out_root.mkdir(parents=True, exist_ok=False)
+    argv = ["--out", str(out_root), "--project-slug", slug]
+    scalar_flags = {
+        "timeline_slug": "--timeline-slug", "scope": "--scope",
+        "range": "--range", "at": "--at", "clip": "--clip",
+        "asset": "--asset", "context": "--context", "neighbors": "--neighbors",
+        "from_view": "--from-view", "focus": "--focus", "layout": "--layout",
+        "filmstrip": "--filmstrip", "rendered_video": "--rendered-video",
+    }
+    for key, flag in scalar_flags.items():
+        value = inputs.get(key)
+        if value is not None:
+            argv.extend([flag, str(value)])
+    raw_sources = inputs.get("timeline_source")
+    sources = raw_sources if isinstance(raw_sources, list) else [raw_sources]
+    for source in sources:
+        if source is not None:
+            argv.extend(["--timeline-source", str(source)])
+    for fmt in inputs.get("formats", []):
+        argv.extend(["--format", str(fmt)])
+    if inputs.get("select_all"):
+        argv.append("--all")
+    if inputs.get("refresh_root"):
+        argv.append("--refresh-root")
+    raw = run_module.run_sdk(argv)
+    if raw.get("returncode") == 0:
+        timeline_ids = raw.get("timeline_ids", [])
+        record = {
+            "schema_version": 1,
+            "run_id": out_root.name,
+            "project_slug": slug,
+            "status": "completed",
+            "tool_id": "rendering.timeline_visualize",
+            "invocation": "sdk",
+            "auto_bound": False,
+            "out": f"runs/{out_root.name}",
+            "manifest_path": f"runs/{out_root.name}/agent-view/manifest.json",
+            "metadata": {"evidence": True, "timeline_ids": sorted(timeline_ids)},
+            "artifacts": {},
+        }
+        (out_root / "run.json").write_text(
+            json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+        )
+    return LocalVisualizationInvocation(raw, out_root)

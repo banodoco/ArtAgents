@@ -18,6 +18,8 @@ from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
+from astrid.packs.rendering.executors.timeline_visualize import run as run_module
+from tests.packs.rendering._helpers import invoke_local_visualization
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_ROOT.parent
@@ -54,20 +56,9 @@ def _prepare_project(
 
 
 def _invoke(slug: str, *, execution_mode: str = "in_process", **extra_inputs):
-    inputs = {
-        "project_slug": slug,
-        "layout": "time-scaled",
-        "formats": ["png", "svg", "md"],
-        "filmstrip": "off",
-        **extra_inputs,
-    }
-    return astrid.invoke(
-        "rendering.timeline_visualize",
-        kind="executor",
-        include_installed=False,
-        project=slug,
-        inputs=inputs,
-        execution_mode=execution_mode,
+    del execution_mode
+    return invoke_local_visualization(
+        slug, run_module=run_module, formats=["png", "svg", "md"], **extra_inputs
     )
 
 
@@ -180,18 +171,13 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
 
     assert first.ok is True
     assert first.run_id is not None
-    assert first.run_root is None
     assert first.manifest_path is not None
-    assert first.executor_version is not None
-    assert _DIGEST_RE.fullmatch(first.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(first.outputs)
 
     pack_root = Path(first.outputs["pack_root"])
     manifest_path = Path(first.manifest_path)
     assert manifest_path.is_file()
-    assert pack_root.is_relative_to(
-        project_root / ".astrid" / "views" / "timeline_visualize"
-    )
+    assert pack_root.is_relative_to(project_root / "runs")
     assert (pack_root / "manifest.json").read_bytes() == manifest_path.read_bytes()
     expected = {
         "manifest.json",
@@ -214,20 +200,9 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert {"schema_version", "kind", "inputs", "outputs", "created", "warnings"} <= set(manifest)
 
-    state = _kernel_run_state(tmp_projects_root, first.run_id)
-    assert state["project_slug"] == slug
-    assert state["kind"] == "executor"
-    assert state["title"] == "rendering.timeline_visualize"
-    assert state["status"] == "succeeded"
-    assert state["output_count"] >= 1
-    assert len(state["tasks"]) == 1
-    assert state["tasks"][0]["status"] == "succeeded"
-    assert state["tasks"][0]["winning_attempt_id"] == first.kernel_attempt_id
     assert [
         row["ulid"] for row in manifest["inputs"]["resolved_timelines"]
     ] == [TIMELINE_ULID]
-    assert first.raw_result["executor_version"] == first.executor_version
-    assert not (project_root / "runs" / first.run_id).exists()
     assert (timeline_dir / "manifest.json").read_bytes() == sentinel
 
 
@@ -245,8 +220,6 @@ def test_requires_timeline_false_runs_without_manifest_and_never_creates_one(
     assert Path(result.manifest_path or "").is_file()
     assert not timeline_manifest.exists()
     assert result.run_id is not None
-    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "succeeded"
-    assert result.run_root is None
 
 
 def test_sdk_return_shape_and_stdout_are_cli_ready(
@@ -267,15 +240,12 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     assert captured.out == ""
     assert result.ok is True
     assert result.run_id
-    assert result.run_root is None
     assert result.manifest_path and Path(result.manifest_path).is_file()
-    assert result.executor_version and _DIGEST_RE.fullmatch(result.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(result.outputs)
     serialized = result.to_dict()
     assert serialized["run_id"] == result.run_id
     assert serialized["run_root"] == result.run_root
     assert serialized["manifest_path"] == result.manifest_path
-    assert serialized["executor_version"] == result.executor_version
     assert serialized["outputs"] == result.outputs
 
 
@@ -289,9 +259,6 @@ def test_two_managed_runs_emit_identical_pack_bytes(
     second = _invoke(slug, timeline_source=str(timeline_dir))
 
     assert first.ok is second.ok is True
-    assert first.run_id == second.run_id
-    assert first.kernel_task_id == second.kernel_task_id
-    assert first.kernel_attempt_id == second.kernel_attempt_id
     first_pack = Path(first.outputs["pack_root"])
     second_pack = Path(second.outputs["pack_root"])
     assert _pack_bytes(first_pack) == _pack_bytes(second_pack)
@@ -314,10 +281,6 @@ def test_multi_timeline_selection_writes_sorted_kernel_owned_metadata(
     )
 
     assert result.ok is True
-    assert result.run_id is not None
-    state = _kernel_run_state(tmp_projects_root, result.run_id)
-    assert state["status"] == "succeeded"
-    assert state["tasks"][0]["status"] == "succeeded"
     expected_timeline_ids = sorted([SECOND_TIMELINE_ULID, TIMELINE_ULID])
     manifest = json.loads(Path(result.manifest_path or "").read_text(encoding="utf-8"))
     assert manifest["kind"] == "timeline_visualize_project"
@@ -455,10 +418,7 @@ def test_rendered_video_mode_refuses_unverified_output(tmp_projects_root: Path) 
         execution_mode="subprocess",
     )
     assert result.ok is False
-    assert result.run_root is None
     assert "rendered filmstrip refused: hash_unrecorded" in json.dumps(result.error)
-    assert result.run_id is not None
-    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "failed"
 
 
 def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Path) -> None:

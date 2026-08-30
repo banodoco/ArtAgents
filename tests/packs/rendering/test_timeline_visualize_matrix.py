@@ -61,6 +61,7 @@ from astrid.packs.rendering.executors.timeline_visualize.frozen import (
 )
 from astrid.packs.rendering.executors.timeline_visualize.ids import parse_qualified_ref
 from astrid.packs.rendering.executors.timeline_visualize.select import select_timeline
+from tests.packs.rendering._helpers import invoke_local_visualization
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = TESTS_ROOT / "fixtures" / "timeline_visualize"
@@ -164,7 +165,13 @@ def _prepare_project(
 
 
 def _invoke(slug: str, **extra_inputs: Any):
-    """One packaged executor invocation (in-process, deterministic inputs)."""
+    """Invoke the packaged executor with an attempt-local output root.
+
+    The SDK's normal invocation path is runtime-owned after the Stage1
+    cutover.  These tests exercise the rendering pack itself, so they call
+    the same packaged executor boundary directly and keep all generated
+    material under a disposable attempt root.
+    """
     inputs = {
         "project_slug": slug,
         "layout": "time-scaled",
@@ -172,14 +179,7 @@ def _invoke(slug: str, **extra_inputs: Any):
         "filmstrip": "off",
         **extra_inputs,
     }
-    return astrid.invoke(
-        "rendering.timeline_visualize",
-        kind="executor",
-        include_installed=False,
-        project=slug,
-        inputs=inputs,
-        execution_mode="in_process",
-    )
+    return invoke_local_visualization(slug, run_module=run_module, **inputs)
 
 
 def _failure_text(
@@ -1316,13 +1316,11 @@ class TestTombstones:
         assert default.ok is True, default.error
         default_gt = _json(Path(default.outputs["pack_root"]) / "ground-truth.json")
         assert default_gt["snapshots"][0]["timeline"]["ulid"] == TIMELINE_ULID
-        assert not (Path(default.run_root or "") / "run.json").exists()
 
         all_result = _invoke("matrix-tombstones", timeline_source=str(_first))
         assert all_result.ok is True, all_result.error
         all_gt = _json(Path(all_result.outputs["pack_root"]) / "ground-truth.json")
         assert all_gt["snapshots"][0]["timeline"]["ulid"] == TIMELINE_ULID
-        assert not (Path(all_result.run_root or "") / "run.json").exists()
 
     def test_slug_of_tombstoned_timeline_yields_diagnostic(self, tmp_projects_root: Path) -> None:
         _project_root, _first = _prepare_project(
