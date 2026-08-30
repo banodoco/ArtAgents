@@ -155,11 +155,18 @@ def test_packaged_factoring_uses_only_locked_dependencies_and_explicit_roots(
     )
     monkeypatch.setenv("PYTHONPATH", str(host_site))
     monkeypatch.setenv("PYTHONUSERBASE", str(user_base))
+    hostile_pythonhome = tmp_path / "hostile-pythonhome"
+    # A real PYTHONHOME attack does not need a valid Python installation: an
+    # incomplete fake root is enough to make CPython select the wrong prefix
+    # and fail while bootstrapping its standard library.
+    (hostile_pythonhome / "lib").mkdir(parents=True)
+    monkeypatch.setenv("PYTHONHOME", str(hostile_pythonhome))
 
     artifact_root = tmp_path / "artifact"
     artifact_root.mkdir()
     env = _artifact_environment(artifact_root)
     assert env["PYTHONPATH"] == str(artifact_root.resolve())
+    assert "PYTHONHOME" not in env
     assert str(host_site) not in env["PYTHONPATH"]
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["PYTHONSAFEPATH"] == "1"
@@ -170,7 +177,10 @@ def test_packaged_factoring_uses_only_locked_dependencies_and_explicit_roots(
             "-c",
             (
                 "import json, jsonschema, yaml; "
-                "print(json.dumps({'yaml': yaml.__file__, 'jsonschema': jsonschema.__file__}))"
+                "import os, sys, sysconfig; "
+                "print(json.dumps({'yaml': yaml.__file__, 'jsonschema': jsonschema.__file__, "
+                "'prefix': sys.prefix, 'stdlib': sysconfig.get_path('stdlib'), "
+                "'os': os.__file__}))"
             ),
         ],
         cwd=artifact_root,
@@ -182,7 +192,11 @@ def test_packaged_factoring_uses_only_locked_dependencies_and_explicit_roots(
     assert probe.returncode == 0, probe.stdout + probe.stderr
     origins = json.loads(probe.stdout)
     venv_root = packaged_harness.venv_dir.resolve()
-    for origin in origins.values():
+    assert Path(origins["prefix"]).resolve() == venv_root
+    assert not Path(origins["stdlib"]).resolve().is_relative_to(hostile_pythonhome)
+    assert not Path(origins["os"]).resolve().is_relative_to(hostile_pythonhome)
+    for name in ("yaml", "jsonschema"):
+        origin = origins[name]
         resolved = Path(origin).resolve()
         assert resolved.is_relative_to(venv_root), resolved
         assert not resolved.is_relative_to(host_site)

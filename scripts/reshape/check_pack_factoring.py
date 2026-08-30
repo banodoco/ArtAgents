@@ -449,6 +449,11 @@ def _artifact_environment(*roots: Path) -> dict[str, str]:
     environment["PYTHONPATH"] = os.pathsep.join(
         str(Path(root).resolve()) for root in roots
     )
+    # Never inherit PYTHONHOME from the parent process.  CPython evaluates it
+    # before the selected interpreter starts, so a hostile value can redirect
+    # prefix/stdlib resolution (or make the child fail during encodings
+    # bootstrap) even when PYTHONPATH and user-site imports are scrubbed.
+    environment.pop("PYTHONHOME", None)
     environment["PYTHONNOUSERSITE"] = "1"
     environment["PYTHONSAFEPATH"] = "1"
     environment["ASTRID_INTERNAL_INVOCATION"] = "1"

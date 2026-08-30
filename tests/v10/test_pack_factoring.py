@@ -116,6 +116,11 @@ def test_source_factoring_proof_resolves_dependencies_inside_lock_venv(
     user_base = tmp_path / "user-base"
     monkeypatch.setenv("PYTHONPATH", str(hostile_site))
     monkeypatch.setenv("PYTHONUSERBASE", str(user_base))
+    hostile_pythonhome = tmp_path / "hostile-pythonhome"
+    (hostile_pythonhome / "lib").mkdir(parents=True)
+    monkeypatch.setenv("PYTHONHOME", str(hostile_pythonhome))
+    lane_env = proof_environment.environment()
+    assert "PYTHONHOME" not in lane_env
     probe = subprocess.run(
         [
             str(proof_environment.python_executable),
@@ -123,8 +128,11 @@ def test_source_factoring_proof_resolves_dependencies_inside_lock_venv(
             "-c",
             (
                 "import json, jsonschema, pytest, yaml; "
+                "import os, sys, sysconfig; "
                 "print(json.dumps({'yaml': yaml.__file__, "
-                "'jsonschema': jsonschema.__file__, 'pytest': pytest.__file__}))"
+                "'jsonschema': jsonschema.__file__, 'pytest': pytest.__file__, "
+                "'prefix': sys.prefix, 'stdlib': sysconfig.get_path('stdlib'), "
+                "'os': os.__file__}))"
             ),
         ],
         cwd=tmp_path,
@@ -136,7 +144,11 @@ def test_source_factoring_proof_resolves_dependencies_inside_lock_venv(
     assert probe.returncode == 0, probe.stdout + probe.stderr
     origins = json.loads(probe.stdout)
     venv_root = proof_environment.venv_dir.resolve()
-    for origin in origins.values():
+    assert Path(origins["prefix"]).resolve() == venv_root
+    assert not Path(origins["stdlib"]).resolve().is_relative_to(hostile_pythonhome)
+    assert not Path(origins["os"]).resolve().is_relative_to(hostile_pythonhome)
+    for name in ("yaml", "jsonschema", "pytest"):
+        origin = origins[name]
         resolved = Path(origin).resolve()
         assert resolved.is_relative_to(venv_root), resolved
         assert not resolved.is_relative_to(hostile_site)
