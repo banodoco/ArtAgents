@@ -101,7 +101,11 @@ GA_DESCRIPTIONS: dict[int, str] = {
 _ITEM11_SOURCE_PATHS = (
     "scripts/reshape/authority_lint.py",
     "astrid/core/gateway/dispatch.py",
-    "tests/v10/test_m6_gate.py",
+    # The pre-cutover m6 gate was retired with the local application/serve
+    # authority.  Keep item 11's provisional source evidence anchored to the
+    # surviving doctor contract instead of making the gate depend on a deleted
+    # test file.
+    "tests/v10/test_doctor.py",
 )
 _ITEM12_SOURCE_PATHS = (
     "scripts/reshape/check_pack_factoring.py",

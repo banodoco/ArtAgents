@@ -260,7 +260,11 @@ def _migrate(
     from astrid.core.repositories.runs import RunRepository
     from astrid.core.store.ownership import DatabaseOwnerLock
     from astrid.core.store.uow import UnitOfWork
-    from astrid.packs import open_standard_writer
+    # The offline migrator is the one remaining legacy-layout reader, but its
+    # writes still go through the kernel-owned writer seam.  Do not resurrect
+    # the removed ``astrid.packs.open_standard_writer`` compatibility export:
+    # the pack layer must remain storage-free after the Stage 1 cutover.
+    from astrid.core.store.writer import open_database_writer
     from astrid.packs.runaway.repository import (
         RUNAWAY_CREATED_EVENT_KIND,
         RUNAWAY_STREAM_TYPE,
@@ -273,7 +277,7 @@ def _migrate(
     owner_lock = DatabaseOwnerLock(db_path)
     writer = None
     try:
-        writer = open_standard_writer(db_path, registry=registry)
+        writer = open_database_writer(db_path, registry=registry)
         events = EventAppendService(registry)
         receipts = ReceiptService()
         project_repo = ProjectRepository(events=events, receipts=receipts)

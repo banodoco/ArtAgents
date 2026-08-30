@@ -45,24 +45,31 @@ def _commands_from_line(raw_line: str) -> list[list[str]]:
     Trailing comments and shell metacharacters terminate the command. A
     literal ``...`` (signature shorthand) is not a command token.
     """
-    line = raw_line.split("#", 1)[0].strip()
-    if not line:
-        return []
-    match = re.search(r"(?:^|\s)(?:python3\s+-m\s+)?astrid(?=\s|$)", line)
-    if not match:
-        return []
-    tail = re.split(r"[;&|]", line[match.end():].strip())[0].strip()
-    if not tail:
-        return [["--help"]]
-    try:
-        tokens = shlex.split(tail, comments=False)
-    except ValueError:
-        # Unbalanced quotes: not a well-formed command example.
-        return []
-    tokens = [token for token in tokens if token != "..."]
-    if not tokens:
-        return []
-    return [tokens]
+    # Inline code spans can contain a complete fenced example.  Parse each
+    # physical line and anchor the command at its start; otherwise a value
+    # such as ``--profile astrid`` is mistaken for an Astrid invocation and
+    # the remaining lines are folded into a bogus ``python3 -m`` command.
+    commands: list[list[str]] = []
+    for raw in raw_line.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        match = re.match(r"(?:python3\s+-m\s+)?astrid(?=\s|$)", line)
+        if not match:
+            continue
+        tail = re.split(r"[;&|]", line[match.end():].strip())[0].strip()
+        if not tail:
+            commands.append(["--help"])
+            continue
+        try:
+            tokens = shlex.split(tail, comments=False)
+        except ValueError:
+            # Unbalanced quotes: not a well-formed command example.
+            continue
+        tokens = [token for token in tokens if token != "..."]
+        if tokens:
+            commands.append(tokens)
+    return commands
 
 
 def _astrid_commands(text: str) -> list[list[str]]:

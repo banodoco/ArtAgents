@@ -387,13 +387,38 @@ class DoctorV10ChecksTest(unittest.TestCase):
     """The v10 doctor reports six checks and fails closed on a corrupt DB."""
 
     def _fresh_project(self, root) -> None:
-        from astrid.application import compose_standard_application
+        # ``astrid.application`` was the pre-cutover in-process composition;
+        # Stage 1 retires it in favour of the kernel writer seam.  Seed the
+        # doctor fixture through that seam so this test exercises the current
+        # authority without resurrecting a compatibility module.
+        from astrid.core.repositories.projects import ProjectRepository
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.receipts.service import ReceiptService
+        from astrid.core.schema_packs.standard import build_standard_registry
+        from astrid.core.store.ownership import DatabaseOwnerLock
+        from astrid.core.store.uow import UnitOfWork
+        from astrid.core.store.writer import open_database_writer
 
-        with compose_standard_application(projects_root=root) as app:
-            created = app.projects_service.create(
-                slug="demo", name="Demo", idempotency_key="p1"
-            )
-        self.assertTrue(created.ok, created.error)
+        database = Path(root) / ".astrid" / "astrid.sqlite3"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        registry = build_standard_registry()
+        with DatabaseOwnerLock(database):
+            writer = open_database_writer(database, registry)
+            try:
+                events = EventAppendService(registry)
+                repo = ProjectRepository(events=events, receipts=ReceiptService())
+                UnitOfWork(writer).run(
+                    lambda uow: repo.create(
+                        uow,
+                        project_id="01jdoctorfixture000000000000",
+                        slug="demo",
+                        name="Demo",
+                        settings={},
+                        idempotency_key="p1",
+                    )
+                )
+            finally:
+                writer.close()
 
     def test_doctor_reports_six_v10_checks(self) -> None:
         from astrid.core import doctor as doctor_mod

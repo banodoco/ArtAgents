@@ -247,8 +247,11 @@ def test_installed_help_exposes_exact_seven_family_ownership_census(
     assert "tasks       [kernel]" in text
     assert "runs        [kernel]" in text
     assert "timelines   [pack: timeline]" in text
-    assert "doctor      [kernel]" in text
-    assert "backup      [kernel]" in text
+    # Stage 1's operational families are neutral-runtime commands, not local
+    # Astrid kernel authorities.  The old [kernel] assertions described the
+    # pre-cutover in-process application and are intentionally retired.
+    assert "doctor      [runtime]" in text
+    assert "backup      [runtime]" in text
     assert "timelines shots       [pack: shots]" in text
     assert "media references      [pack: references]" in text
     assert "Family census (exactly seven families):" in text
