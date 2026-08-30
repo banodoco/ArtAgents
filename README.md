@@ -34,6 +34,13 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 
 </div>
 
+Astrid's product CLI and Python SDK are clients of the Banodoco workspace
+runtime. Start the runtime with `banodoco-local up --profile astrid`, then use
+the generated-client-backed `python3 -m astrid` gateway or `import astrid`.
+The runtime owns projects, media, timelines, tasks, runs, receipts, and event
+history; Astrid does not use a checkout-local project database as live
+authority. See [Getting Started](docs/getting-started.md).
+
 ## License
 
 Open Source Native License (OSNL) v0.2 — see [`LICENSE`](LICENSE).

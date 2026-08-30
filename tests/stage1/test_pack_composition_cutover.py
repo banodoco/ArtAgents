@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ast
+import pkgutil
 from pathlib import Path
 
 import astrid.packs
+import astrid.sdk
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,3 +49,19 @@ def test_pack_production_modules_have_no_local_service_or_bridge_imports() -> No
 def test_retired_local_timeline_bridge_is_not_a_pack_authority() -> None:
     assert not (ROOT / "astrid/packs/timeline/bridge.py").exists()
 
+
+def test_sdk_surface_has_no_retired_local_service_modules() -> None:
+    """The generated SDK surface no longer advertises local service facades."""
+    retired = {
+        "projects",
+        "media",
+        "timelines",
+        "runs",
+        "tasks",
+        "references",
+        "shots",
+    }
+    assert not retired.intersection(astrid.sdk.__all__)
+    available = {name for _, name, _ in pkgutil.iter_modules(astrid.sdk.__path__)}
+    assert not retired.intersection(available)
+    assert all(not (ROOT / "astrid/sdk" / f"{name}.py").exists() for name in retired)

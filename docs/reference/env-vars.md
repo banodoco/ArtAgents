@@ -1,6 +1,26 @@
 # Astrid Environment Variables
 
-Canonical reference for every `ASTRID_*` environment variable.
+Stage1 runtime connection and the remaining Astrid process variables.
+
+## Stage1 runtime connection
+
+The live CLI and SDK connect to the Banodoco workspace runtime. The runtime
+owns durable projects, media, receipts, events, and execution state; Astrid
+does not select a project root or open a local database/CAS.
+
+| Variable | Who sets | Effect |
+|---|---|---|
+| `BANODOCO_RUNTIME_ENDPOINT` | Runtime launcher / operator | Runtime HTTP endpoint. Overrides discovery when set. |
+| `BANODOCO_RUNTIME_DISCOVERY` | Runtime launcher / operator | Path to the runtime discovery JSON used when no endpoint is set. |
+| `BANODOCO_RUNTIME_CREDENTIAL` | Runtime launcher / operator | Path to the credential/token file used by the generated workspace client. |
+
+If the connection is unavailable, start it with
+`banodoco-local up --profile astrid`. These are runtime variables, not
+project-store overrides.
+
+The `ASTRID_*` registry below remains useful for pack subprocesses, tests, and
+authoring tools. Variables marked **historical/internal** are not live workspace
+authority and must not be used to configure product state.
 
 **Source of truth**: `astrid/core/env_vars.py`.  All constants listed here are
 defined in that module following the invariant `constant_name == constant_value`
@@ -24,13 +44,13 @@ falls back to the legacy key with a deprecation warning.  Use
 
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
-| `ASTRID_HOME` | `ASTRID_HOME` | User / CI | `session/paths.py` | Overrides the per-user Astrid state directory (default `~/.astrid`). |
-| `ASTRID_SESSION_ID` | `ASTRID_SESSION_ID` | (retired) | Gateway, session binding, task harness | Active session UUID.  Propagated into subprocess env. |
-| `ASTRID_PROJECTS_ROOT` | `ASTRID_PROJECTS_ROOT` | Tests / CI | `project/paths.py` | Overrides the projects root directory. |
+| `ASTRID_HOME` | `ASTRID_HOME` | User / CI | `session/paths.py` | Internal authoring/test state directory (default `~/.astrid`); not workspace state. |
+| `ASTRID_SESSION_ID` | `ASTRID_SESSION_ID` | Historical/internal | Legacy session/task code | Retained for historical compatibility; not a Stage1 runtime selector. |
+| `ASTRID_PROJECTS_ROOT` | `ASTRID_PROJECTS_ROOT` | Historical/tests | Legacy local project code | Historical/test-only compatibility variable. It is not read by the live runtime client and must not be used as workspace authority. |
 | `ASTRID_REMOTION_PROJECT_DIR` | `ASTRID_REMOTION_PROJECT_DIR` | Release operator | Reigh render adapter | Absolute server-owned Remotion project with `node_modules`; never accepted from task input. |
 | `ASTRID_NODE_EXECUTABLE` | `ASTRID_NODE_EXECUTABLE` | Release operator | Reigh render adapter | Absolute server-owned executable Node path. Readiness performs a bounded `--version` probe; never resolved from `PATH` or accepted from task input. |
 | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | Release operator | Reigh render adapter / child transport | Absolute server-owned install root containing `banodoco_timeline_schema`; validated by module origin before Remotion-only admission. |
-| `ASTRID_GATEWAY_RESOLVED_PROJECT` | `ASTRID_GATEWAY_RESOLVED_PROJECT` | `gateway._dispatch_with_resolved_project` | `executor/cli.py`, `orchestrator/cli.py` | Project slug resolved for the current request; injected as `--project` when omitted by the user. |
+| `ASTRID_GATEWAY_RESOLVED_PROJECT` | `ASTRID_GATEWAY_RESOLVED_PROJECT` | Internal subprocess | Pack CLI shims | Ephemeral project hint for a runtime-admitted subprocess; it is not persisted state. |
 
 ## Project run context
 
@@ -63,7 +83,7 @@ These are propagated into subprocess env by `build_child_subprocess_env`.
 
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
-| `ASTRID_PACKS_PATH` | `ASTRID_PACKS_PATH` | User / CI | `core/pack/discovery.py` | Colon-separated list of additional pack search directories. |
+| `ASTRID_PACKS_PATH` | `ASTRID_PACKS_PATH` | Authoring/tests | `core/pack/discovery.py` | Optional authoring/test discovery path. Stage1 live capability registration is checkout/runtime-owned; this does not install or update a live pack. |
 
 ## Logging
 
@@ -91,15 +111,15 @@ These are propagated into subprocess env by `build_child_subprocess_env`.
 
 ---
 
-## Allowlisted modules
+## Internal/authoring-only variables
 
 The following directories contain references to `ASTRID_*` env vars but are
-**not required** to import from `env_vars.py`.  Their constants are catalogued
-above for documentation purposes only.
+**not required** to import from `env_vars.py`. Their constants are catalogued
+for historical or authoring purposes only; none is a live workspace authority.
 
 | Directory | Reason |
 |---|---|
-| `astrid/core/threads/` | Contract-locked; separately versioned subsystem. |
+| `astrid/core/threads/` | Historical thread subsystem; not a Stage1 product surface. |
 | `astrid/core/audit/` | Separate concern; defines its own context (`ASTRID_AUDIT_*`). |
 | `astrid/packs/` | Executor `run.py` files that do not import astrid core. |
 

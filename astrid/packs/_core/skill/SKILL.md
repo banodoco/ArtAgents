@@ -6,59 +6,59 @@ description: "Use for the Astrid repo: a file-based toolkit for agents to make a
 
 # Astrid
 
-Astrid is a file-based toolkit for making video, image, and audio art alongside
-a human. There are exactly two surfaces:
+Astrid is a pack and client toolkit for making video, image, and audio art
+alongside a human. Stage1 has two supported user surfaces:
 
-- **The CLI gateway** — `python3 -m astrid` owns the eight families: five
-  product families (`projects`, `timelines`, `media`, `tasks`, `runs`) and
-  three operational families (`serve`, `doctor`, `backup`), plus the two
-  manifest-declared nested mounts (`timelines shots`, `media references`).
-  One verb = one SDK call.
-- **The SDK** — `import astrid` (`astrid.sdk.client.AstridClient`,
-  `astrid.sdk.discover` / `get_capability` / `invoke`) is the sanctioned
-  programmatic surface; every pack capability runs through it.
+- **The CLI gateway** — `python3 -m astrid` exposes five product families
+  (`projects`, `timelines`, `media`, `tasks`, `runs`) and two operational
+  routes (`doctor`, `backup`), plus the nested mounts (`timelines shots`,
+  `media references`). Every command is sent to the workspace runtime.
+- **The SDK** — `import astrid` is the sanctioned programmatic surface;
+  `AstridClient` and capability invocation use the generated workspace client.
+
+The Banodoco workspace runtime is the sole live authority for projects, media,
+timeline versions, tasks, runs, receipts, and events. Start it with
+`banodoco-local up --profile astrid`. The Astrid checkout supplies packs and
+client code; it does not own a project database, CAS, session/thread store, or
+execution ledger.
 
 Nothing else is a command. `next`, `status`, `attach`, `setup`, `start`,
 `ack`, `executors`, `orchestrators`, `elements`, `sessions`, `packs`, and
 `skills` are not gateway verbs — the legacy task-mode CLI (attach/next/start/
-ack) and the old filesystem task-run store are gone; use the eight-family CLI
+ack) and the old filesystem task-run store are gone; use the seven-family CLI
 and the SDK.
 
 ## When in doubt, run the census
 
 ```bash
-python3 -m astrid --help          # the complete eight-family census
+python3 -m astrid --help          # the complete seven-family census
 python3 -m astrid help            # same census, plus mounts and exit codes
 python3 -m astrid --version       # the app name (importlib.metadata)
 python3 -m astrid projects --help # inspect one family's verbs
 ```
 
-`--help` prints exactly the eight families and the two nested mounts. There
+`--help` prints exactly the seven families and the two nested mounts. There
 is no other CLI surface to discover; when you do not know which family a
 question belongs to, read the census first.
 
-## Bootstrap and the store
+## Runtime connection
 
-- `ASTRID_PROJECTS_ROOT` selects the projects root (default `<repo>/projects`
-  from a checkout).
-- The first product command lazily creates
-  `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` — the SQLite kernel: 14 core
-  tables plus the timeline/shots/references pack tables, WAL mode, one
-  exclusive-owner lock.
-- `python3 -m astrid doctor --json` is the read-only health check. It reports
-  `schema_versions`, media paths, a SQLite quick-check, and foreign-key status
-  without repairing or rewriting data. On a pristine root it returns
-  `state: "uninitialized"`, `ok: true`, and exit 0 with the create command;
-  after initialization, `state: "ready"` means all checks pass and
-  `state: "unhealthy"` means a real failure. A failing `schema_versions`
-  check on an existing root means the database is newer or incompatible with
-  this checkout.
+Resolve the runtime from `BANODOCO_RUNTIME_ENDPOINT`, or from the discovery
+JSON named by `BANODOCO_RUNTIME_DISCOVERY`; the token is read from
+`BANODOCO_RUNTIME_CREDENTIAL`. If any of these are unavailable, the typed
+recovery action is `banodoco-local up --profile astrid`.
+
+`doctor --json` asks the runtime for health. `backup` is currently unavailable
+until the runtime exposes its backup route. Neither command opens or repairs a
+checkout-local store. Do not set `ASTRID_PROJECTS_ROOT` to try to redirect
+product state; that legacy/test variable is not Stage1 authority.
 
 ## Start Here
 
 The canonical clean-machine flow is:
 
 ```bash
+banodoco-local up --profile astrid
 python3 -m astrid doctor --json
 python3 -m astrid projects create demo --name "Demo" --json
 python3 -m astrid projects list --json
@@ -69,43 +69,26 @@ python3 -m astrid tasks create --project demo --capability rendering.timeline_vi
 python3 -m astrid runs list --project demo --json
 ```
 
-`media import` accepts existing files and directories. Video/audio containers
-are strictly probed with `ffprobe` before import admission; a Git-LFS pointer
-or other undecodable `.mp4`/`.wav` returns a typed validation error with no
-media row, event, receipt, or managed bytes. If `ffprobe` is unavailable,
-install it from the ffmpeg package and retry. Generic files retain the
-extension-based import path.
-
-Product commands need no configuration file, credentials, or hosted service.
-`serve` is only needed when an HTTP editor client is used. Product and nested
-mount commands support `--json` as the stable machine surface: exactly one
-five-key envelope (`ok` / `data` / `error` / `receipt` / `idempotency_key`).
-`doctor --json` is the deliberate exception: it emits its diagnostic object
-(`state`, `checks`, `next_action`, `ok`), while `serve` and `backup` do not
-offer `--json`. Exit codes are stable: `0` success, `1` typed SDK error, `2`
-usage/parse error.
+`media import` accepts existing files and directories. Product and nested-mount
+commands support `--json` as the stable machine surface: exactly one five-key
+envelope (`ok` / `data` / `error` / `receipt` / `idempotency_key`). `doctor
+--json` is the diagnostic exception; it returns the runtime health object.
+`backup` has no stable product route in Stage1. Exit codes are stable: `0`
+success, `1` typed SDK/runtime error, `2` usage/parse error.
 
 ## Product families
 
 | Family | Verbs | Notes |
 | --- | --- | --- |
-| `projects` | `create`, `list`, `show`, `update`, `select`, `current` | `select` sets a workspace/user routing preference; `current` reads it back; the slug is immutable |
+| `projects` | `create`, `list`, `show`, `update` | Project selection is runtime-scoped; pass `--project` explicitly. |
 | `timelines` | `create`, `list`, `show`, `save`, `archive`, `unarchive`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `unarchive` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
-| `media` | `import`, `list`, `show`, `verify`, `relocate`, `relate` | `verify` checks every matching `--realm` location by default; use `--location-id` or `--locator` for one; `relocate` requires `--realm`; `relate` has the frozen five-kind `--kind` |
+| `media` | `import`, `list`, `show`, `verify` | Media is ingested and addressed as runtime-owned objects; reference-in-place repair is not a Stage1 user operation. |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
 | `runs` | `list`, `show`, `cancel`, `retry-failed`, `events` | `retry-failed` is the batch-retry surface (all-failed-children or explicit `--task` subset) |
 
-`projects select` persists a file-side routing preference (workspace scope by
-default, or `--scope user`) without a database receipt. With
-`ASTRID_PROJECTS_ROOT` set and no explicit `--cwd`, the workspace preference is
-stored under that projects root, keeping disposable roots isolated; pass
-`--cwd` when you intentionally want another workspace boundary.
-`projects current`
-resolves workspace before user scope, verifies the selected ref against the
-kernel, and reports the selected project, canonical path, preference path,
-and supplying scope. That preference is orientation state, not execution
-authority: project-scoped CLI commands still require explicit `--project`
-unless `ASTRID_PROJECT_SLUG` supplies an attached project.
+The former file-side `projects select/current` preference is not Stage1
+authority. Pass `--project` explicitly; runtime selection is resolved by the
+connected workspace service.
 
 Nested mounts (reachable only beneath their parent family, never top-level):
 
@@ -125,27 +108,15 @@ python3 -m astrid media references list --project demo --include-archived --json
 python3 -m astrid media references unarchive "Character Name" --project demo --json
 ```
 
-Both unarchive commands report `changed: false` when the item is already
-active. An ambiguous reference name fails closed with candidate ids; retry
-with one exact id from the inclusive list.
+Routes not exposed by the connected runtime return a typed `unavailable`
+result. Do not fall back to local files, a checkout database, or a second
+authority.
 
 ## Runs & tasks
 
-There is no `runs create` verb anywhere: a run comes into existence through
-the kernel, never by hand. Every capability invocation — including
-`sdk.invoke(...)` and the typed facades — is admitted into the kernel as a
-run with its ordered child tasks (`RunRepository.create` fan-out) and
-executes through one lifecycle: admit → claim → start → execute →
-complete|fail, with hash-chained events, receipts, attempts, and leases
-recording each transition. Status is derived once, in the kernel:
-`derive_run_progress_counts` recomputes a run's progress from its child
-task rows at read time. The filesystem `<project>/runs/<id>/run.json` is a
-write-once finalize-time projection of that state, stamped
-`"authority": "kernel"` with `kernel_task_id` / `kernel_run_id` — never an
-authority itself; see docs/contracts/run-ledger-contract.md for the
-single-ledger contract. `client.tasks.create` admits standalone tasks that
-belong to no run. The CLI `tasks`/`runs` families then list and drive that
-work — `--project` takes the project slug or id:
+Tasks and runs are runtime resources. Every capability admission and lifecycle
+transition crosses the generated workspace client; local projections are not
+status authority. Use an explicit runtime project reference:
 
 ```bash
 python3 -m astrid tasks list --project demo --json
@@ -154,39 +125,21 @@ python3 -m astrid runs cancel <run_id> --project demo --json
 python3 -m astrid runs retry-failed <run_id> --project demo --json
 ```
 
-A run with zero children (or a legacy all-terminal run) may require the
-coordinator-only SDK transition `client.runs.close(project, run_id)`. There
-is intentionally no operator CLI for `close`: operators should use
-`runs cancel` or `runs retry-failed`; coordinators use `close` only when they
-own the zero-child lifecycle. Terminal runs remain immutable and cannot be
-relabelled.
+Read events with `client.read_events(...)` or the runtime-backed
+`client.runs.events(...)`; event ordering and retention belong to the runtime.
+`projects_root`, local `events.jsonl`, and SQLite fallbacks are historical
+interfaces and must not be used for live observation.
 
-For read-only event observation, `astrid.read_events(project, run_id,
-projects_root=..., verify=True)` prefers a run's optional local
-`events.jsonl` projection. When that file or run directory is absent — as is
-normal after a portable backup/restore — it falls back to the canonical
-SQLite `core.run` stream and returns `EventStreamRecord(source="kernel", ...)`.
-The fallback preserves event ids, order, kinds, and integrity hashes and
-fails closed with `CapabilityEventLogError` on a head, link, or hash mismatch;
-it never creates a projection or treats filesystem files as status authority.
-
-## Operational families
+## Operational routes
 
 ```bash
-python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]  # HTTP editor bridge
-python3 -m astrid doctor [--json]                                           # read-only health check
-python3 -m astrid backup create [--out PATH]                                # staged, validated backup
-python3 -m astrid backup restore <BACKUP_PATH>                              # journaled restore
+python3 -m astrid doctor [--json]   # runtime health check
+python3 -m astrid backup             # unavailable until a runtime route exists
 ```
 
-Backups are portable by default: readable `external_local` files are copied
-once per content hash, while every original locator remains in the backup
-manifest and restored media provenance. Restore rebases those locators to the
-verified backup-owned bytes inside the destination root atomically. If an
-external source is missing or changes while a backup is being created, the
-backup fails before publication; if a backup snapshot is missing or mutated,
-restore fails before touching the live root. Older backups without external
-snapshots restore their database but report unresolved external locators.
+There is no public `astrid serve` command in Stage1. Start the separate
+workspace runtime with `banodoco-local up --profile astrid`. Backup and restore
+are runtime-owned operations; do not copy or edit a local SQLite/CAS tree.
 
 ## The SDK is the pack surface
 
@@ -235,55 +188,33 @@ services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
 Rendering has two deliberately explicit contracts. `rendering.render` with
 `timeline` consumes a project-owned exported or pipeline JSON file; a value
 like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
-a canonical kernel slug/UUID/ULID and optionally enforces `expected_version`;
+a canonical runtime slug/UUID/ULID and optionally enforces `expected_version`;
 use `astrid timelines render <ref>` for the product CLI. Managed visualization
-likewise resolves the canonical kernel timeline and pins its actual stream
+likewise resolves the canonical runtime timeline and pins its actual stream
 head. Visualization's `timeline_source` remains the explicit legacy filesystem
 compatibility route.
 
 ### How capabilities execute
 
-Every capability executes through one kernel path:
+Every live capability invocation crosses the workspace runtime:
 
-- **Admission + execution** — `sdk.invoke(...)` and the typed facades admit
-  the invocation into the kernel (run + child task) and drive it through
-  claim/start/execute to complete|fail. The pack's `run.py` executor remains
-  the unit of work: the runner invokes it as a subprocess
-  (`ASTRID_INTERNAL_INVOCATION=1`); every executor with a `runtime_module`
-  works this way, outputs are file-based and returned in the
-  `InvocationResult` manifest, and the finalize-time `run.json` projection
-  lands under the project's `runs/<run-id>/` tree.
-- **Custom drivers** — code that drives an admitted task with its own loop
-  implements the kernel `TaskHandler` protocol (`astrid.core.task_executor`,
-  `execute(task, staging_dir)`); the executor service wraps it with the
-  same fences — status versions, leases, receipts — every other execution
-  uses.
+- **Runtime admission** — `sdk.invoke(...)` and typed clients send a
+  capability id, digest, project, and spec to the generated workspace client.
+  The runtime owns claim/start/execute/complete|fail, attempts, receipts,
+  leases, and event ordering.
+- **Attempt-local artifacts** — pack code may write files in its provided
+  attempt workspace and return a manifest. Those files are delivery artifacts,
+  not a second project/run authority; publish durable objects through the
+  runtime contract.
 - **Never invoke `run.py` modules directly** — the canonical-entrypoint
   guard refuses it; `astrid.sdk.invoke` is the entry.
 
 ## Retired legacy surface
 
-The legacy task-mode CLI (`attach`/`next`/`start`/`ack`, plus the retired
-`executors`/`orchestrators` verb families) and the old filesystem task-run
-store are gone — use the eight-family CLI and the SDK.
-`text_analysis.summarize` and `builtin.agent_probe` were removed with the
-task-mode runtime. Legacy pre-kernel data under `projects/` migrates with the
-scripts in `scripts/migrations/v10/` (see its `MIGRATION.md`).
-
-## Per-project plan.md
-
-Every project has a `plan.md` at its root — a per-project markdown doc for
-live, human/agent-readable working notes (current focus, open threads, key
-decisions, scratch notes).
-
-- **Read on create/show.** After `projects create` or `projects show`, read
-  `<project>/plan.md` alongside the project row as part of orienting. New
-  projects ship with an empty skeleton; that's fine.
-- **Update when project-level state changes.** A new focus, a closed thread, a
-  settled decision, a fresh open question. Don't log ephemeral per-run state.
-- **Refactor when it grows tangled.** Promote stale items to an `## Archive`
-  section, keep `## Current focus` short, and trim `## Open threads` past ~10
-  entries. Treat it as a living doc, not an append-only log.
+The legacy task-mode CLI (`attach`/`next`/`start`/`ack`) and filesystem task
+store are retired. Historical pre-runtime plans and thread/session records may
+remain for migration or research, but they are not live authority and must not
+be updated as part of a runtime operation.
 
 ## Shared Knowledge With Hivemind
 
@@ -359,8 +290,8 @@ and **overrides** (redirect an id to a preferred fork). Full details:
 - Generated files live under `runs/` or another ignored output directory.
 - Do not commit source media, rendered videos, local dependency envs, or secrets.
 - Do not print or hardcode API keys; use `--env-file` or nearby `.env` files.
-- Do not edit `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` or the event
-  streams by hand; mutate through the CLI and SDK only.
+- Do not edit runtime state, receipts, or event streams by hand; mutate through
+  the generated client-backed CLI and SDK only.
 - Treat curated tool stages as protected unless explicitly asked to edit them,
   notably `astrid/packs/moirae/executors/moirae/STAGE.md` and
   `astrid/packs/vibecomfy/executors/run/STAGE.md`.
@@ -557,7 +488,7 @@ transitions `cross-fade`, `fade`.
 ## Further Reading
 
 - [docs/getting-started.md](../../../../docs/getting-started.md) — the canonical human setup doc
-- [docs/guides/cli-journeys.md](../../../../docs/guides/cli-journeys.md) — the eight families, journeys, recovery
+- [docs/guides/cli-journeys.md](../../../../docs/guides/cli-journeys.md) — runtime-backed families, journeys, recovery
 - [docs/reference/sdk.md](../../../../docs/reference/sdk.md) — Python SDK (DTOs, exceptions, typed facades)
 - [docs/contracts/cli-contract.md](../../../../docs/contracts/cli-contract.md) — CLI stream/exit-code discipline
 - [docs/guides/creating-tools.md](../../../../docs/guides/creating-tools.md) — when to create each capability kind

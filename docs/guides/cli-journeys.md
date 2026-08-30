@@ -1,21 +1,28 @@
-# CLI journeys — supported product and recovery commands
+# CLI journeys — runtime-backed product commands
 
 This guide walks the five product families (`projects`, `media`, `tasks`,
 `runs`, `timelines`), the two nested mounts (`media references`, `timelines
-shots`), and the local backup/diagnostic commands. Examples use `--json` where
-the command returns an SDK envelope; `doctor --json` is a separate diagnostic
-object, and `serve`/`backup` are human-readable operational commands.
+shots`), and the runtime health/backup routes. Examples use `--json` where the
+command returns an SDK envelope. The Banodoco workspace runtime is the sole
+authority for all durable state; the Astrid checkout has no live project store.
 
 Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6),
 `docs/contracts/astrid-sdk-v10.md` (envelope contract).
 
 ---
 
-## Clean-machine preamble (zero configuration)
+## Runtime preamble
 
-Astrid's product commands need no configuration file, credentials, or hosted
-service. The only runtime prerequisite is a project to operate on, created
-with the `projects` family below. Run commands from the repository root.
+Start the separate local workspace runtime before issuing product commands:
+
+```bash
+banodoco-local up --profile astrid
+```
+
+If discovery does not find it, configure `BANODOCO_RUNTIME_ENDPOINT`,
+`BANODOCO_RUNTIME_DISCOVERY`, and `BANODOCO_RUNTIME_CREDENTIAL`. Run commands
+from the repository root; project, object, receipt, and event state remains in
+the runtime.
 
 ```bash
 # 1. Confirm the CLI is reachable (prints the product census).
@@ -32,9 +39,8 @@ python3 -m astrid timelines save --help
 
 Notes:
 
-- **No server required for product commands.** The product families below run
-  directly against the local store through one composed client. `serve` is
-  only needed when an HTTP editor client is being used.
+- **Runtime required for product commands.** Product families below cross the
+  generated workspace client. There is no public `astrid serve` command.
 - **One verb = one SDK call.** Every handler parses arguments, makes exactly
   one SDK service call, and renders the result. There is no SQL or domain
   logic in the CLI layer.
@@ -118,18 +124,13 @@ python3 -m astrid projects select demo --scope workspace --json
 python3 -m astrid projects current --json
 ```
 
-`select` is a file-side routing preference (workspace scope by default, or
-`--scope user`): it writes no receipt and performs no database mutation. The
-`current` read-back resolves workspace before user scope, verifies the selected
-ref against the kernel, and reports the selected project plus preference path
-and scope. When `ASTRID_PROJECTS_ROOT` is set and `--cwd` is omitted, the
-workspace preference lives under that projects root; pass `--cwd` to opt into a
-different intentional workspace boundary. Every project-scoped product CLI command accepts an omitted
-`--project` and uses that selection; an explicit `--project` always wins.
+Pass `--project` explicitly to project-scoped commands. The former file-side
+`select/current` preference and `ASTRID_PROJECTS_ROOT` routing are historical;
+they are not Stage1 runtime authority.
 
 ---
 
-## 2. `media` — import / list / show / verify / relocate / relate
+## 2. `media` — import / list / show / verify / relate
 
 ```bash
 # import — accepts ONLY a file or directory; one exact-media result per file
@@ -150,13 +151,8 @@ python3 -m astrid media show M_01ABC --project demo --json
 
 # verify — fingerprint-verified; requires --realm (all matching locations)
 python3 -m astrid media verify M_01ABC --project demo --realm managed_local --json
-# verify one ambiguous realm location precisely
-python3 -m astrid media verify M_01ABC --project demo --realm external_local \
-  --location-id 01LOC... --json
-
-# relocate — identity unchanged; requires --realm and --locator
-python3 -m astrid media relocate M_01ABC --project demo \
-  --realm external_local --locator "s3://bucket/shots/shot.png" --json
+# verify one runtime object precisely
+python3 -m astrid media verify M_01ABC --project demo --realm managed_local --json
 
 # relate — one typed relation edge; frozen five-kind --kind
 python3 -m astrid media relate --project demo \
@@ -300,7 +296,7 @@ python3 -m astrid timelines list --project demo --json
 # show — by UUID, ULID, or slug
 python3 -m astrid timelines show --project demo primary --json
 
-# save — whole-document CAS save (config and registry both required);
+# save — whole-document compare-and-swap (config and registry both required);
 # create sets config_version 1, so a fresh timeline saves with --expected-version 1
 python3 -m astrid timelines save --project demo primary \
   --config '{"tracks":[{"id":"main","kind":"visual","label":"Main"}],"clips":[],"output":{"resolution":"320x180","fps":30,"file":"primary.mp4"}}' \
@@ -384,28 +380,17 @@ process exit code as the coarse success/failure signal.
 
 ## 8. Diagnostics and failure recovery
 
-Run the read-only doctor before changing a project:
+Run the runtime health check before changing a project:
 
 ```bash
-python3 -m astrid doctor --json --projects-root ./projects
+python3 -m astrid doctor --json
 ```
 
-On a pristine root, `doctor --json` returns `state: "uninitialized"` with
-`ok: true` and exit 0; after the first product command it returns
-`state: "ready"` when healthy. `state: "unhealthy"` (or a failed check)
-indicates a real problem. An unavailable local service or owner lock is reported as the typed
-`unavailable` condition. When `error.details.reason` is `store_owned`,
-`astrid serve` owns the store: use `GET /routes` and its HTTP routes while it
-runs, or wait for a clean shutdown. Reads may retry after release; writes must
-preserve the exact payload and idempotency key, then verify state. Do not open
-a second writer. A doctor result with `schema_versions: fail` indicates a
-too-new migration or schema incompatibility. Keep the original project and
-select a compatible checkout or restore a compatible backup.
-
-An unexpected command failure is reported as the typed `internal_error`
-condition with a bounded, redacted message. Preserve the original project,
-record the command and error code, and diagnose the implementation before
-retrying; do not edit kernel state to work around it.
+If it reports `state: "unavailable"`, start the runtime with
+`banodoco-local up --profile astrid` and retry. Do not create a local database,
+tail local event files, or edit runtime state by hand. An unexpected command
+failure is returned as a typed error; preserve the idempotency key and retry
+only when the error's recovery guidance permits it.
 
 Timeline saves are compare-and-swap operations. A stale expected version is
 an HTTP `409 timeline_version_conflict` (or SDK `stale_version`) and changes
@@ -419,41 +404,16 @@ python3 -m astrid timelines save --project demo primary \
   --registry '{"assets":{}}' --expected-version 1 --json
 ```
 
-For missing or byte-mutated media, run verification again with the recorded
-realm. The service rejects the read without rewriting the media; the public
-envelope reports the typed `integrity_error` code for this failure.
+For missing or byte-mutated media, run runtime verification again. The service
+rejects the read without rewriting the object; the public envelope reports the
+typed `integrity_error` code for this failure.
 
 ```bash
 python3 -m astrid media verify M_01ABC --project demo \
   --realm managed_local --json
 ```
 
-When one media id has multiple locations in a realm, `verify` checks every
-location in deterministic creation/id order and returns per-location results.
-Healthy locations are stamped and committed independently; missing or mutated
-locations remain unchanged. A mixed result is a typed `integrity_error` whose
-details include both successes and failures, plus recovery commands. Repair a
-specific location and retry with `--location-id <id>` or `--locator <path>`.
-
-Backups are staged and validated before publication. If a restore process is
-interrupted, run the same restore command again or start the local bridge; the
-startup path reads its durable journal before opening the writer and accepts
-only the previous complete state or the complete restored state:
-
-```bash
-python3 -m astrid backup create --projects-root ./projects --out ./backup
-python3 -m astrid backup restore ./backup --projects-root ./projects
-python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
-```
-
-`backup create` also snapshots every readable `external_local` file into a
-deduplicated SHA-256 tree. The backup envelope reports the number of unique
-external snapshots and locator dependencies, and retains each original
-locator as provenance. On restore, the database locators are atomically rebased
-to the verified backup-owned bytes under the restored `.astrid/media` tree;
-the original external path is preserved in `media.metadata_json` under
-`backup_provenance.external_local`. Missing or byte-mutated external inputs
-fail backup creation, while missing or mutated snapshot bytes fail restore
-before either the database or media tree is published. Older backups without
-the external section remain supported but report unresolved external locators
-until those files are relocated or re-imported.
+When a runtime route is unavailable, the command reports the typed
+`unavailable` condition and its next action. `backup` remains unavailable in
+the Stage1 gateway until the runtime exposes a backup route; use the runtime's
+own backup tooling when it is provided.

@@ -1,8 +1,17 @@
 # Astrid Python SDK
 
 The `astrid` package exposes a public Python SDK for capability discovery,
-schema inspection, generation, and invocation. Import the top-level package —
-the SDK surface is available directly from `import astrid`.
+schema inspection, generation, and runtime-backed invocation. Import the
+top-level package — the supported SDK surface is available from `import
+astrid`.
+
+Stage1 runtime boundary: start `banodoco-local up --profile astrid`. Product
+clients resolve `BANODOCO_RUNTIME_ENDPOINT` (or
+`BANODOCO_RUNTIME_DISCOVERY`) and `BANODOCO_RUNTIME_CREDENTIAL`, then use the
+generated workspace client. The runtime is the sole authority for projects,
+media, timelines, tasks, runs, receipts, and events. `AstridClient` does not
+open a checkout-local database/CAS or execute a pack in-process as the live
+authority.
 
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in
@@ -28,7 +37,6 @@ result = astrid.invoke(
     "iteration.experiment_review",
     kind="executor",
     include_installed=False,
-    out="/tmp/review-out",
     project="demo",
     inputs={"review": "experiments/prompt-brevity/review.json"},
     dry_run=True,
@@ -55,10 +63,7 @@ print(gen_result)
 ```python
 import astrid
 
-inventory = astrid.discover(
-    project_root="./my-project",
-    include_installed=False,
-)
+inventory = astrid.discover(include_installed=False)
 
 # Typed grouped access
 for executor in inventory.executors:
@@ -75,11 +80,10 @@ import json
 json.dumps(inventory.to_dict())
 ```
 
-`include_installed=False` scopes discovery to the in-tree packs. Externally
-installed packs load with the registry by default. Installed/external pack
-roots are fault-tolerant: a pack whose manifests fail validation is skipped
-with a logged warning instead of failing the whole discovery call, so
-scripted and agent workflows keep working when one external pack is broken.
+`include_installed=False` scopes discovery to the checkout's pack inventory.
+Stage1 runtime capability registration is explicit and runtime-owned; dynamic
+installed-pack discovery is not a live product extension point. Use local pack
+directories only while authoring or testing a pack.
 
 `kind="executor"` (or `"orchestrator"` / `"element"`) filters the returned
 inventory to that capability type — `capabilities` then carries only those
@@ -158,11 +162,10 @@ of an existing project).
 
 ### Regular Invocation
 
-A real executor run addressed with `project=` executes inside a private,
-attempt-owned staging directory and publishes successful outputs to managed
-content-addressed media. The staging directory is removed after completion;
-durable locators are returned in `result.outputs`. Do **not** pass `out=`
-together with `project=` (the two are mutually exclusive):
+A real executor run addressed with `project=` is admitted by the workspace
+runtime. Pack code may write attempt-local files and return a result manifest;
+the runtime owns durable object publication and task/run state. Do **not** pass
+`out=` together with `project=` (the two are mutually exclusive):
 
 ```python
 import astrid
@@ -176,8 +179,8 @@ result = astrid.invoke(
 )
 print(result.ok)        # True on success
 print(result.run_id)    # durable kernel run identity
-print(result.run_root)  # None for kernel-managed invocations; staging is private
-print(result.outputs)   # durable managed-media artifacts/locators
+    print(result.run_root)  # runtime-owned result reference
+    print(result.outputs)   # runtime-published artifact references
 print(result.error)     # error mapping if not ok
 ```
 
@@ -256,13 +259,10 @@ except astrid.CapabilityInvocationError as e:
 
 ### Event Observation
 
-`read_events()` returns a verified, read-only snapshot of a completed run's
-event stream. A filesystem `events.jsonl` projection is preferred when it is
-present. If that optional local-process projection is absent — for example
-after a portable backup/restore — the SDK reads the canonical SQLite
-`core.run` stream instead, so restored runs remain observable. The fallback
-does not create or repair a projection. `subscribe_events()` yields the
-filesystem stream for an in-progress run as it is appended.
+`read_events()` returns a verified, read-only snapshot from the workspace
+runtime's event stream. The SDK does not scan local `events.jsonl` files or
+fall back to a checkout SQLite stream. `subscribe_events()` is likewise a
+runtime observation request; it does not tail a local projection.
 
 ```python
 import astrid
@@ -271,7 +271,6 @@ import astrid
 events = astrid.read_events(
     "my-project",
     "my-run-id",
-    projects_root="/tmp/astrid-projects",
     verify=True,
 )
 for event in events:
@@ -281,7 +280,6 @@ for event in events:
 for event in astrid.subscribe_events(
     "my-project",
     "my-run-id",
-    projects_root="/tmp/astrid-projects",
     follow=True,
     poll_interval=0.5,
 ):
@@ -292,18 +290,16 @@ Each event is an `EventStreamRecord` with fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `source` | `str` | `"task"`, `"audit"`, or `"kernel"` for the canonical restored-run fallback |
+| `source` | `str` | Runtime event stream source (for example `task`) |
 | `line` | `int` | One-indexed line number in the event log |
 | `timestamp` | `str \| None` | ISO-8601 timestamp from the event |
 | `kind` | `str \| None` | Event kind (`"run_started"`, `"step_dispatched"`, `"run_completed"`, etc.) |
 | `hash` | `str \| None` | SHA-256 hash for chain verification |
-| `payload` | `dict[str, Any]` | The raw JSONL event, or the canonical kernel event fields (including `event_id`, `seq`, `data`, and integrity hashes) |
+| `payload` | `dict[str, Any]` | Runtime event payload and integrity metadata |
 
-When `verify=True` (the default), the selected source is verified before
-returning or yielding. Filesystem streams validate their JSONL chain; kernel
-fallback streams validate the SQLite stream head, contiguous sequence, every
-previous-hash link, and every recomputed event hash. A broken or mismatched
-chain raises `CapabilityEventLogError`.
+When `verify=True` (the default), the runtime stream is verified before
+returning or yielding. A broken or mismatched chain raises
+`CapabilityEventLogError`.
 An invalid project slug raises `CapabilityPreconditionError`.
 
 `subscribe_events()` accepts two additional keyword arguments:
@@ -322,19 +318,19 @@ See [platform-contract.md](../contracts/platform-contract.md).
 
 `manifest_path` is an additive optional pointer to a universal
 `manifest.json` emitted by the invoked capability. When present it is an
-absolute path. For kernel-managed invocations it may be the managed-CAS path
-published at completion; callers must not infer a logical pack root from that
-file's hash-fanout parent. The SDK derives it from the normalized payload when
-the payload already exposes a universal manifest pointer, otherwise it falls
-back to discovering `{out}/manifest.json`.
+absolute path or a runtime object reference. Callers must not infer a logical
+pack root from an artifact path. The SDK derives it from the normalized runtime
+payload when the payload exposes a universal manifest pointer; attempt-local
+manifests are valid only for that invocation.
 
 The discovery follows a two-step fallback:
 
 1. **Payload preference**: If the executor's stdout `payload` includes a
    `manifest_path` or `manifest` key pointing to a file named `manifest.json`,
    that path is used directly.
-2. **Output-directory fallback**: Otherwise, the SDK checks whether
-   `{out}/manifest.json` exists on disk and returns its absolute path.
+2. **Attempt output fallback**: Otherwise, the SDK may return an
+   attempt-workspace `manifest.json` when the invocation explicitly exposes
+   that local artifact.
 
 When neither source yields a `manifest.json` file, `manifest_path` is `None`.
 
@@ -443,9 +439,9 @@ the localized request, hashed inputs, redacted logs and partial result,
 pinned digests. See the worked example in
 [render-backend-v1.md](../contracts/render-backend-v1.md#the-replay-verb).
 
-V1 is synchronous local execution only; asynchronous job scheduling, remote
-render infrastructure, and layer compositing are explicitly deferred beyond
-V1 and are NOT part of the V1 renderer contract.
+The rendering DTO and `RenderContext` below remain the pack-authoring and
+attempt-local artifact contract. They are not a second live execution
+authority; product renders are admitted and recorded by the workspace runtime.
 
 ### `RenderContext`
 
@@ -537,6 +533,7 @@ theme overlay is resolved at registry load time and reflected in the returned
 the resolved post-overlay values.
 
 Pass `include_missing_roots=True` to include element roots that are declared
-but not yet installed. This is useful for discovery in setup/install workflows
+but not yet present in the checkout. This is useful for pack authoring and
+local validation workflows
 where the operator needs to see what elements are available before they are
 locally fetched.
