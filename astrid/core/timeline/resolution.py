@@ -287,16 +287,21 @@ def resolve_asset_authorized_path(
     *,
     project_root: Path,
     expected_sha256: str | None = None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> Path | None:
     """Resolve a project source or exact project-owned managed CAS asset.
 
     The historical local contract remains ``project_root/sources``.  Kernel
     timelines may additionally name Astrid's shared managed-media tree; that
-    path is accepted only when the active project's kernel row owns the
-    recorded digest and the current bytes verify.  When an entry omitted an
-    explicit hash, an exact managed CAS locator supplies only a candidate
-    digest; it is still authorized through the same ownership and byte-hash
-    checks.  Arbitrary paths, foreign locators, and tampered bytes fail closed.
+    path is accepted only when the active project's runtime media snapshot
+    admits the recorded digest and the current bytes verify.  When an entry
+    omitted an explicit hash, an exact managed CAS locator supplies only a
+    candidate digest; it is still authorized through the same runtime
+    ownership and byte-hash checks.  Arbitrary paths, foreign locators, and
+    tampered bytes fail closed.  ``runtime_client`` or an already-admitted
+    ``media_snapshot`` must be supplied for this managed path; there is no
+    local-database fallback.
     """
 
     contained = resolve_asset_local_path_contained(
@@ -313,6 +318,8 @@ def resolve_asset_authorized_path(
         project_ref=Path(project_root).name,
         content_hash=digest,
         requested_path=asset_file,
+        runtime_client=runtime_client,
+        media_snapshot=media_snapshot,
     )
 
 
@@ -366,6 +373,8 @@ def classify_asset(
     project_root: Path,
     roles: set[str] | None = None,
     default_role: str = "timeline_media",
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> AssetIntegrity:
     """Classify a single registry entry into an :class:`AssetIntegrity`.
 
@@ -423,6 +432,8 @@ def classify_asset(
             local_ref,
             project_root=project_root,
             expected_sha256=expected,
+            runtime_client=runtime_client,
+            media_snapshot=media_snapshot,
         )
         if managed is not None:
             managed_digest = expected or managed_locator_digest(local_ref)
@@ -669,6 +680,8 @@ def classify_registry(
     *,
     project_root: Path,
     default_role: str = "timeline_media",
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> dict[str, AssetIntegrity]:
     """Classify every asset in *registry* (``{"assets": {...}}`` or ``[...]``)."""
     return {
@@ -677,6 +690,8 @@ def classify_registry(
             entry,
             project_root=project_root,
             default_role=default_role,
+            runtime_client=runtime_client,
+            media_snapshot=media_snapshot,
         )
         for key, entry in _iter_registry_assets(registry)
     }
