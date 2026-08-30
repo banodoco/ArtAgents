@@ -128,18 +128,15 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert astrid.timelines.show(project_id, timeline_id).data["references"][0]["reference_id"] == "reference-1"
 
         record = GenericPackHost(pack_roots=[pack]).discover()[0]
-        generated.register_capability(
-            record.id,
-            record.capability_digest,
-            required_resource_keys=["cpu"],
-            idempotency_key="capability",
-        )
         host = GenericPackHost(
             pack_roots=[pack],
             client=RuntimeProtocolClient(metadata["endpoint"], (support / "credentials" / "owner.token").read_text().strip()),
             executor_id="acceptance-host",
         )
         assert host.register()["registration"]["executor_id"] == "acceptance-host"
+        assert host.register()["registration"]["executor_id"] == "acceptance-host"
+        registered = {item.capability_id: item for item in generated.list_capabilities()}
+        assert registered[record.id].definition_digest == record.capability_digest
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,

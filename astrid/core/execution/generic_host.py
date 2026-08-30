@@ -210,10 +210,35 @@ class RuntimeProtocolClient:
             # operation has succeeded; preserve its neutral response shape.
             return payload
 
-    def register_capability(self, capability_id: str, *, definition: Mapping[str, Any], digest: str):
-        raise HostError(
-            "generated workspace client has no capability-registration operation; "
-            "runtime client route needed: POST /v1/capabilities"
+    def register_capability(
+        self,
+        capability_id: str,
+        *,
+        definition: Mapping[str, Any],
+        digest: str,
+        required_resource_keys: list[str] | None = None,
+        status: str = "ready",
+        estimated_scratch_bytes: int = 0,
+        estimated_output_bytes: int = 0,
+        unavailable_reason: str | None = None,
+    ):
+        """Publish one capability through the generated runtime client.
+
+        The definition itself remains pack-owned; the runtime stores its
+        digest and admission metadata only.  ``definition`` is accepted to
+        keep the host/fake seam compatible, but is intentionally not sent as a
+        second schema owned by Astrid.
+        """
+        del definition
+        return self.generated.register_capability(
+            capability_id,
+            digest,
+            required_resource_keys=list(required_resource_keys or []),
+            status=status,
+            estimated_scratch_bytes=int(estimated_scratch_bytes),
+            estimated_output_bytes=int(estimated_output_bytes),
+            unavailable_reason=unavailable_reason,
+            idempotency_key=f"capability:{capability_id}:{digest}",
         )
 
     def preflight_executor(self, executor_id: str, *, checks: Mapping[str, Any], ready: bool):
@@ -404,6 +429,30 @@ class GenericPackHost:
         if self.client is None:
             self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
             return {"executor_id": self.executor_id, "capabilities": [r.manifest() for r in self.capabilities.values()], "ready": [r.id for r in self.capabilities.values() if r.ready]}
+        # Publish capability admission metadata before advertising the executor.
+        # A real runtime must be able to validate a task against the exact
+        # definition digest/source-derived readiness before it can claim work.
+        if hasattr(self.client, "register_capability"):
+            for record in self.capabilities.values():
+                disposition = str(record.matrix.get("disposition", ""))
+                status = "ready" if record.ready else (disposition if disposition in {"unsupported", "retired"} else "unavailable")
+                unavailable_reason = None if record.ready else (
+                    str(record.matrix.get("evidence_reason") or "capability preflight is not ready")
+                )
+                if isinstance(self.client, RuntimeProtocolClient):
+                    self.client.register_capability(
+                        record.id,
+                        definition=record.definition.to_dict(),
+                        digest=record.capability_digest,
+                        required_resource_keys=list(record.resource_keys),
+                        status=status,
+                        estimated_scratch_bytes=record.estimated_scratch_bytes,
+                        estimated_output_bytes=record.estimated_output_bytes,
+                        unavailable_reason=unavailable_reason,
+                    )
+                else:
+                    # Legacy fakes retain their definition-shaped seam.
+                    self.client.register_capability(record.id, definition=record.definition.to_dict(), digest=record.capability_digest)
         all_keys = sorted({key for record in self.capabilities.values() for key in record.resource_keys})
         digests = {key: record.capability_digest for key, record in self.capabilities.items()}
         registration_kwargs = {
@@ -420,13 +469,6 @@ class GenericPackHost:
                 raise
             registration_kwargs.pop("capability_digests")
             registration = self.client.register_executor(self.executor_id, **registration_kwargs)
-        # Legacy fakes retain their old registration seam.  The generated
-        # client has no capability-registration operation yet, so its
-        # canonical definition digests travel in the executor registration;
-        # do not fall back to hand-written HTTP here.
-        if hasattr(self.client, "register_capability") and not isinstance(self.client, RuntimeProtocolClient):
-            for record in self.capabilities.values():
-                self.client.register_capability(record.id, definition=record.definition.to_dict(), digest=record.capability_digest)
         if not isinstance(self.client, RuntimeProtocolClient):
             for record in self.capabilities.values():
                 self.client.preflight_executor(record.id, checks=record.preflight, ready=record.ready)

@@ -33,8 +33,8 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         json.dumps(
             {
                 "schema_version": 1,
-                # control2 seeds this neutral fixture capability on every
-                # realm; the command body is the testing.echo actor.
+                # The runtime fixture is updated by the host registration below;
+                # admission must use the exact discovered definition digest.
                 "id": "render.basic",
                 "name": "Testing Echo",
                 "kind": "external",
@@ -60,8 +60,8 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    # Use the daemon's seeded neutral fixture capability.  Capability
-    # registration is intentionally not reimplemented through raw HTTP here.
+    # The host registers this discovered capability through the generated
+    # client; admission then pins the same definition digest.
     probe = GenericPackHost(pack_roots=[pack])
     record = probe.discover()[0]
 
@@ -80,7 +80,7 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
 
         task = generated.admit_task(
             capability_id=record.id,
-            capability_digest="sha256:" + hashlib.sha256(record.id.encode()).hexdigest(),
+            capability_digest=record.capability_digest,
             input_object_ids=[],
             idempotency_key="echo-task",
         )
