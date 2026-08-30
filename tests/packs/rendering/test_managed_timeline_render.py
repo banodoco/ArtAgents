@@ -282,6 +282,56 @@ def test_managed_render_snapshot_pins_kernel_authority_and_materializes(tmp_path
         assert resolved.timeline_id == created["timeline_id"]
 
 
+def test_runtime_snapshot_rebases_admitted_media_identity_to_cas_path(tmp_path: Path) -> None:
+    digest = "a" * 64
+    with AstridClient.open() as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        created = client.timelines.create(
+            project="demo",
+            slug="media",
+            name="Media",
+            config={"tracks": [], "clips": []},
+            registry={
+                "assets": {
+                    "hero": {
+                        "media_id": "media-1",
+                        "content_sha256": digest,
+                    }
+                }
+            },
+        )
+        assert created.ok
+    snapshot = resolve_managed_render_snapshot(
+        tmp_path, project_ref="demo", timeline_ref="media", expected_version=1
+    )
+    assert snapshot.registry["assets"]["hero"]["file"] == str(
+        tmp_path / ".astrid" / "media" / "sha256" / "aa" / "aa" / digest
+    )
+    assert snapshot.registry["assets"]["hero"]["media_id"] == "media-1"
+
+
+def test_runtime_snapshot_rejects_conflicting_media_identity(tmp_path: Path) -> None:
+    first = "a" * 64
+    second = "b" * 64
+    with AstridClient.open() as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        created = client.timelines.create(
+            project="demo",
+            slug="conflict",
+            name="Conflict",
+            config={"tracks": [], "clips": []},
+            registry={
+                "assets": {
+                    "one": {"media_id": "media-1", "content_sha256": first},
+                    "two": {"media_id": "media-1", "content_sha256": second},
+                }
+            },
+        )
+        assert created.ok
+    with pytest.raises(ValueError, match="conflicting entries for media_id"):
+        resolve_managed_render_snapshot(tmp_path, project_ref="demo", timeline_ref="conflict")
+
+
 def test_managed_render_snapshot_rejects_stale_and_archived_before_admission(
     tmp_path: Path,
 ) -> None:

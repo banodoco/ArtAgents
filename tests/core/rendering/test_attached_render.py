@@ -13,6 +13,12 @@ from astrid.core.rendering import attached
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
 
+def test_attached_render_has_no_local_kernel_sqlite_authority_path() -> None:
+    source = Path(attached.__file__).read_text(encoding="utf-8")
+    assert "kernel_run_info" not in source
+    assert "import sqlite3" not in source
+
+
 class _Registry:
     def __init__(self, resolved_id: str = "rendering.render") -> None:
         self.resolved_id = resolved_id

@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from astrid.core import timeline
 from astrid.core._shared.jsonio import write_json_atomic
+from astrid.core.io.media_import import managed_media_path, validate_digest
 
 
 class ManagedRenderValidationError(ValueError):
@@ -138,6 +139,78 @@ def _canonical_bytes(value: Any) -> bytes:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _runtime_snapshot_registry(
+    registry: Mapping[str, Any], *, projects_root: Path
+) -> dict[str, Any]:
+    """Rebase runtime-admitted media identities to child-readable CAS paths.
+
+    The runtime snapshot is the authority and carries the stable ``media_id``
+    and content digest.  The renderer child cannot consult that runtime's
+    database, so admission derives the frozen local CAS locator directly from
+    the digest.  URLs and ordinary/unmanaged file references are intentionally
+    untouched.
+    """
+
+    rebased = json.loads(json.dumps(dict(registry), ensure_ascii=False))
+    raw_assets = rebased.get("assets", rebased)
+    if not isinstance(raw_assets, dict):
+        return rebased
+    seen_media: dict[str, str] = {}
+    seen_locator: dict[str, str] = {}
+    for key, entry in raw_assets.items():
+        if not isinstance(entry, dict):
+            continue
+        media_id = entry.get("media_id")
+        digest_value = (
+            entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+        )
+        # A signed/remote URL remains the caller's explicit transport choice;
+        # media identity does not turn an external URL into local CAS media.
+        if isinstance(entry.get("url"), str):
+            continue
+        if not isinstance(media_id, str) or not media_id.strip() or digest_value in (None, ""):
+            continue
+        try:
+            digest = validate_digest(digest_value)
+        except (TypeError, ValueError) as exc:
+            raise ManagedRenderValidationError(
+                f"canonical registry asset {key!r} has an invalid content_sha256; "
+                "runtime media snapshots require a lowercase 64-hex digest",
+                path=f"$.assets[{json.dumps(str(key))}].content_sha256",
+                reason="invalid managed media digest",
+                recovery="Refresh the timeline from the runtime media snapshot and retry.",
+                validator="managed_media_digest",
+            ) from exc
+        previous_digest = seen_media.get(media_id)
+        if previous_digest is not None and previous_digest != digest:
+            raise ManagedRenderValidationError(
+                f"canonical registry contains conflicting entries for media_id {media_id!r}",
+                path="$.assets",
+                reason="one media_id claims multiple content digests",
+                recovery="Keep one runtime-admitted digest for each media_id and retry.",
+                validator="managed_media_identity",
+            )
+        seen_media[media_id] = digest
+        raw_file = entry.get("file")
+        if isinstance(raw_file, str) and raw_file.strip():
+            prior_locator = seen_locator.get(raw_file)
+            if prior_locator is not None and prior_locator != digest:
+                raise ManagedRenderValidationError(
+                    f"canonical registry contains conflicting aliases for {raw_file!r}",
+                    path="$.assets",
+                    reason="one locator claims multiple content digests",
+                    recovery="Keep one runtime-admitted digest for each locator and retry.",
+                    validator="managed_media_identity",
+                )
+            seen_locator[raw_file] = digest
+        # A media identity is runtime-admitted; its child input must use the
+        # deterministic CAS locator, even when the stored projection is stale
+        # or omitted after a portable restore.
+        entry["content_sha256"] = digest
+        entry["file"] = str(managed_media_path(projects_root, digest))
+    return rebased
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,10 +361,10 @@ def resolve_managed_render_snapshot(
     stored_registry = timeline_data.get("registry")
     if not isinstance(config, dict) or not isinstance(stored_registry, dict):
         raise ValueError("canonical timeline snapshot is not a JSON object")
-    # The SDK's read model is already the canonical persisted registry. Any
-    # path rebasing belongs to the client/runtime media surface, not this
-    # resolver's authority read.
-    registry = dict(stored_registry)
+    # The SDK's read model is the authority. Materialize runtime-admitted
+    # media identities to the deterministic local CAS path before handing the
+    # snapshot to a child, without any local database lookup.
+    registry = _runtime_snapshot_registry(stored_registry, projects_root=projects_root)
     project_id = str(project["id"])
     config_hash = _digest(config)
     registry_hash = _digest(stored_registry)

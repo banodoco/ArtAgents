@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
+import json
 import os
 import shutil
 import threading
@@ -275,6 +276,73 @@ def test_declared_managed_locator_does_not_open_a_local_kernel_database(
 
     # No database was bootstrapped as a side effect of child rendering.
     assert not (projects_root / ".astrid" / "astrid.sqlite3").exists()
+
+
+def test_managed_snapshot_rejects_conflicting_alias_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    digest = hashlib.sha256(b"canonical bytes").hexdigest()
+    managed = projects_root / ".astrid" / "media" / "sha256" / digest[:2] / digest[2:4] / digest
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"canonical bytes")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    registry_path = _write_registry(
+        project / "assets.json",
+        {
+            "first": {"file": str(managed), "content_sha256": digest},
+            "conflicting-alias": {"file": str(managed), "content_sha256": "f" * 64},
+        },
+    )
+    with pytest.raises(ValueError, match="conflicting aliases"):
+        AssetMaterializer(registry_path)
+
+
+def test_managed_snapshot_rejects_uppercase_digest_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    digest = hashlib.sha256(b"uppercase path bytes").hexdigest()
+    uppercase = digest.upper()
+    managed = projects_root / ".astrid" / "media" / "sha256" / uppercase[:2] / uppercase[2:4] / uppercase
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"uppercase path bytes")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    registry_path = project / "assets.json"
+    registry_path.write_text(
+        json.dumps({"assets": {"asset": {"file": str(managed), "content_sha256": uppercase}}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="lowercase hex"):
+        AssetMaterializer(registry_path)
+
+
+def test_managed_snapshot_rejects_intermediate_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    digest = hashlib.sha256(b"secret outside bytes").hexdigest()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / digest[2:4]).mkdir()
+    (outside / digest[2:4] / digest).write_bytes(b"secret outside bytes")
+    shard = projects_root / ".astrid" / "media" / "sha256"
+    shard.mkdir(parents=True)
+    (shard / digest[:2]).symlink_to(outside, target_is_directory=True)
+    managed = shard / digest[:2] / digest[2:4] / digest
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    registry_path = _write_registry(
+        project / "assets.json",
+        {"asset": {"file": str(managed), "content_sha256": digest}},
+    )
+    with pytest.raises(ValueError, match="outside the allowed project root"):
+        AssetMaterializer(registry_path)
 
 
 def test_managed_asset_free_registry_may_be_invocation_temporary(

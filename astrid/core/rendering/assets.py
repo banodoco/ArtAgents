@@ -33,7 +33,6 @@ from astrid.core.env_vars import (
     ASTRID_GATEWAY_RESOLVED_PROJECT,
     ASTRID_PROJECT_SLUG,
 )
-from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.rendering import asset_cache
 
@@ -133,6 +132,8 @@ def _declared_managed_locators(
     if not isinstance(raw_assets, Mapping):
         return {}
     authorized: dict[Path, str] = {}
+    media_ids: dict[str, tuple[Path, str]] = {}
+    declared_paths: dict[Path, tuple[str | None, str | None]] = {}
     for entry in raw_assets.values():
         if not isinstance(entry, Mapping):
             continue
@@ -143,24 +144,63 @@ def _declared_managed_locators(
             locator = Path(raw_file).expanduser().resolve(strict=False)
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
+        raw_recorded = entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+        recorded_text = (
+            str(raw_recorded).removeprefix("sha256:")
+            if raw_recorded not in (None, "")
+            else None
+        )
+        media_id = entry.get("media_id")
+        media_text = media_id if isinstance(media_id, str) and media_id else None
+        prior_declared = declared_paths.get(locator)
+        if (
+            prior_declared is not None
+            and prior_declared[0] is not None
+            and recorded_text is not None
+            and prior_declared[0] != recorded_text
+        ):
+            raise ValueError(
+                f"managed asset registry contains conflicting aliases for {locator}"
+            )
+        declared_paths[locator] = (
+            prior_declared[0] if prior_declared and prior_declared[0] is not None else recorded_text,
+            media_text,
+        )
         if locator not in requested or not _contained(locator, managed_root):
             continue
-        parts = locator.parts
-        if len(parts) < 4 or parts[-4] != "sha256":
+        try:
+            relative = locator.relative_to(managed_root)
+        except ValueError:
             continue
-        digest = parts[-1]
+        parts = relative.parts
+        if len(parts) != 4 or parts[0] != "sha256":
+            continue
+        digest = parts[3]
         if (
             len(digest) != 64
-            or any(char not in "0123456789abcdefABCDEF" for char in digest)
-            or parts[-3].lower() != digest[:2].lower()
-            or parts[-2].lower() != digest[2:4].lower()
+            or any(char not in "0123456789abcdef" for char in digest)
+            or parts[1] != digest[:2]
+            or parts[2] != digest[2:4]
         ):
             continue
-        recorded = entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+        recorded = raw_recorded
         content_hash = digest if recorded in (None, "") else str(recorded).removeprefix("sha256:")
-        if len(content_hash) != 64 or content_hash.lower() != digest.lower():
+        if len(content_hash) != 64 or content_hash != digest:
             continue
-        authorized[locator] = content_hash.lower()
+        previous = authorized.get(locator)
+        if previous is not None and previous != content_hash:
+            raise ValueError(
+                f"managed asset registry contains conflicting aliases for {locator}: "
+                f"{previous} versus {content_hash}"
+            )
+        if media_text is not None:
+            prior_media = media_ids.get(media_text)
+            if prior_media is not None and prior_media != (locator, content_hash):
+                raise ValueError(
+                    f"managed asset registry contains conflicting entries for media_id {media_text!r}"
+                )
+            media_ids[media_text] = (locator, content_hash)
+        authorized[locator] = content_hash
     return authorized
 
 
@@ -317,18 +357,12 @@ class AssetMaterializer:
                         f"Asset {key!r} at {resolved} is outside the allowed project root "
                         f"{containment_root} and is not an owned managed media locator"
                     ) from exc
-                actual_hash = sha256_file(resolved)
-                if actual_hash != expected_hash:
-                    raise ValueError(
-                        f"Asset {key!r} managed media locator failed integrity check: "
-                        f"expected {expected_hash}, got {actual_hash}"
-                    )
-                return self._stage(
+                return self._stage_managed_cas(
                     key,
                     file_value,
                     resolved,
+                    expected_hash,
                     index,
-                    trusted_source=True,
                 )
             return self._stage_contained_local(
                 key,
@@ -392,23 +426,9 @@ class AssetMaterializer:
                 raise FileNotFoundError(
                     f"Asset {key!r} is not a regular file: {containment_root / relative}"
                 )
-            try:
-                os.link(
-                    source_name,
-                    destination,
-                    src_dir_fd=directory_fd,
-                    follow_symlinks=False,
-                )
-                destination_stat = os.stat(destination, follow_symlinks=False)
-                if (
-                    stat.S_ISREG(destination_stat.st_mode)
-                    and destination_stat.st_dev == source_stat.st_dev
-                    and destination_stat.st_ino == source_stat.st_ino
-                ):
-                    return destination
-            except OSError:
-                pass
-            destination.unlink(missing_ok=True)
+            # Copy from the already-open descriptor. Re-opening or linking
+            # ``source_name`` after the component walk would reintroduce a
+            # symlink/name-swap race between validation and staging.
             with (
                 os.fdopen(os.dup(descriptor), "rb") as input_file,
                 destination.open("xb") as output_file,
@@ -424,6 +444,77 @@ class AssetMaterializer:
         except BaseException:
             destination.unlink(missing_ok=True)
             raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(directory_fd)
+
+    def _stage_managed_cas(
+        self,
+        key: str,
+        reference: str,
+        source: Path,
+        expected_hash: str,
+        index: int,
+    ) -> Path:
+        """Stage a managed CAS file through one no-follow component walk."""
+
+        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(strict=False)
+        try:
+            # ``source`` was resolved during admission; do not resolve it a
+            # second time here, since that would follow a raced symlink before
+            # the descriptor walk gets a chance to reject it.
+            relative = source.relative_to(managed_root)
+        except ValueError as exc:
+            raise ValueError(f"Asset {key!r} is not in the managed CAS root") from exc
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            directory_flags |= os.O_NOFOLLOW
+        directory_fd = os.open(managed_root, directory_flags)
+        descriptor: int | None = None
+        try:
+            for component in relative.parts[:-1]:
+                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            file_flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                file_flags |= os.O_NOFOLLOW
+            descriptor = os.open(relative.parts[-1], file_flags, dir_fd=directory_fd)
+            source_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise FileNotFoundError(f"Asset {key!r} is not a regular file: {source}")
+            digest = hashlib.sha256()
+            with os.fdopen(os.dup(descriptor), "rb") as input_file:
+                while chunk := input_file.read(1024 * 1024):
+                    digest.update(chunk)
+            actual_hash = digest.hexdigest()
+            if actual_hash != expected_hash:
+                raise ValueError(
+                    f"Asset {key!r} managed media locator failed integrity check: "
+                    f"expected {expected_hash}, got {actual_hash}"
+                )
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            destination = self.staging_dir / _safe_staging_name(key, reference, index)
+            try:
+                with (
+                    os.fdopen(os.dup(descriptor), "rb") as input_file,
+                    destination.open("xb") as output_file,
+                ):
+                    shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+                os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
+            except BaseException:
+                destination.unlink(missing_ok=True)
+                raise
+            return destination
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise FileNotFoundError(f"Asset {key!r} resolved to missing file: {source}") from exc
+        except OSError as exc:
+            raise ValueError(
+                f"Asset {key!r} does not resolve to a contained regular file: {source}"
+            ) from exc
         finally:
             if descriptor is not None:
                 os.close(descriptor)

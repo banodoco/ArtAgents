@@ -1214,6 +1214,7 @@ def _prepare_managed_render_inputs(
         ManagedRenderValidationError,
         materialize_managed_render_snapshot,
         resolve_managed_render_snapshot,
+        _runtime_snapshot_registry,
         validate_managed_render_snapshot,
     )
 
@@ -1304,6 +1305,9 @@ def _prepare_managed_render_inputs(
             raise CapabilityValidationError(str(exc)) from exc
         from dataclasses import replace
 
+        expanded_registry = _runtime_snapshot_registry(
+            expanded_registry, projects_root=projects_root
+        )
         snapshot = replace(
             snapshot,
             config=expanded_config,
