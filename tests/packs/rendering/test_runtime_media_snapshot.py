@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from astrid.packs.rendering.executors.timeline_visualize import run as run_module
 
 
@@ -68,6 +70,20 @@ def test_runtime_media_snapshot_paginates_beyond_first_page_and_deduplicates(
     ]
 
 
+def test_runtime_media_snapshot_rejects_page_larger_than_requested_limit(
+    monkeypatch,
+) -> None:
+    runtime = _PagedRuntime(
+        {
+            None: ([_row(number) for number in range(51)], None),
+        }
+    )
+    _patch_runtime(monkeypatch, runtime)
+
+    assert run_module._runtime_media_snapshot("demo") is None
+    assert runtime.calls == [("project-1", None, 50)]
+
+
 def test_runtime_media_snapshot_continues_after_empty_page(monkeypatch) -> None:
     runtime = _PagedRuntime(
         {
@@ -85,6 +101,20 @@ def test_runtime_media_snapshot_fails_closed_on_repeated_cursor(monkeypatch) -> 
         {
             None: ([_row(1)], "cursor-1"),
             "cursor-1": ([_row(2)], "cursor-1"),
+        }
+    )
+    _patch_runtime(monkeypatch, runtime)
+
+    assert run_module._runtime_media_snapshot("demo") is None
+
+
+@pytest.mark.parametrize("next_cursor", ["", "   ", "cursor\t1", "cursor\x001"])
+def test_runtime_media_snapshot_rejects_malformed_next_cursor(
+    monkeypatch, next_cursor: str
+) -> None:
+    runtime = _PagedRuntime(
+        {
+            None: ([_row(1)], next_cursor),
         }
     )
     _patch_runtime(monkeypatch, runtime)

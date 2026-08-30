@@ -142,8 +142,22 @@ def _runtime_media_page(result: Any) -> tuple[list[Any], str | None] | None:
         return None
     if not isinstance(items, (list, tuple)):
         return None
-    if next_cursor is not None and not isinstance(next_cursor, str):
+    # The runtime call is explicitly bounded.  A response larger than the
+    # requested page is malformed: accepting it would make the snapshot
+    # boundary depend on an untrusted adapter rather than the pagination
+    # contract we requested.
+    if len(items) > _RUNTIME_MEDIA_PAGE_LIMIT:
         return None
+    if next_cursor is not None:
+        # ``None`` is the only terminal marker.  Empty/whitespace/control
+        # strings are malformed cursors, not alternate spellings of it.
+        if (
+            not isinstance(next_cursor, str)
+            or not next_cursor
+            or any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+                   for character in next_cursor)
+        ):
+            return None
     return list(items), next_cursor
 
 
