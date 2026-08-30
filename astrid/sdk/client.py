@@ -64,14 +64,17 @@ class AstridClient:
     context manager closes deterministically on exit).
     """
 
-    def __init__(self, app: StandardApplication) -> None:
+    def __init__(self, app: StandardApplication | None = None, *, remote: Any | None = None) -> None:
         """Bind the client to an already-composed *app* (no construction).
 
         ``app`` must be a :class:`~astrid.application.StandardApplication`
         produced by ``astrid.application.compose_standard_application`` (or
         an equivalent composition); the client never builds services.
         """
+        if app is None and remote is None:
+            raise ValueError("AstridClient requires an application or runtime connection")
         self._app = app
+        self._remote = remote
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -93,18 +96,27 @@ class AstridClient:
         composition is imported here — never at module import time — so
         importing this module opens nothing.
         """
+        # An explicit root is retained as a narrow compatibility seam for
+        # repository/pack tests. Normal product dispatch has no root and must
+        # resolve the selected neutral daemon instead of opening local state.
+        if projects_root is None and database_path is None:
+            from astrid.sdk.remote import RemoteAstridClient
+            from astrid.sdk.workspace_client import WorkspaceClientError, resolve_runtime_connection, WorkspaceClient
+            from astrid.sdk.exceptions import ServiceUnavailableError
+            try:
+                endpoint, token = resolve_runtime_connection()
+                return cls(remote=RemoteAstridClient(WorkspaceClient(endpoint, token)))
+            except WorkspaceClientError as exc:
+                raise ServiceUnavailableError("runtime unavailable; run `banodoco-local up --profile astrid`", details={"next_action": "banodoco-local up --profile astrid", "reason": exc.code}) from exc
         from astrid.application import compose_standard_application
-
-        app = compose_standard_application(
-            projects_root,
-            registry=registry,
-            database_path=database_path,
-        )
-        return cls(app)
+        return cls(compose_standard_application(projects_root, registry=registry, database_path=database_path))
 
     def close(self) -> None:
         """Close the bound application (deterministic and idempotent)."""
-        self._app.close()
+        if self._remote is not None:
+            self._remote.close()
+        elif self._app is not None:
+            self._app.close()
 
     def __enter__(self) -> Self:
         return self
@@ -117,6 +129,8 @@ class AstridClient:
     @property
     def app(self) -> StandardApplication:
         """The bound standard application (repositories, events, writer)."""
+        if self._app is None:
+            raise RuntimeError("remote runtime clients do not expose local application state")
         return self._app
 
     # -- the seven application-owned services --------------------------------
@@ -124,7 +138,7 @@ class AstridClient:
     @property
     def projects(self) -> ProjectsService:
         """Typed project service (create/list/show/update/select)."""
-        return self._app.projects_service
+        return self._remote.projects if self._remote is not None else self._app.projects_service
 
     def selected_project_ref(self, *, cwd: str | Path | None = None) -> str | None:
         """Return the workspace/user-selected project ref for CLI routing.
@@ -140,37 +154,39 @@ class AstridClient:
     @property
     def timelines(self) -> TimelinesService:
         """Typed timeline service (create/list/show/save/archive/...)."""
-        return self._app.timelines_service
+        return self._remote.timelines if self._remote is not None else self._app.timelines_service
 
     @property
     def media(self) -> MediaService:
         """Typed media service (import/verify/relocate/relate/...)."""
-        return self._app.media_service
+        return self._remote.media if self._remote is not None else self._app.media_service
 
     @property
     def tasks(self) -> TasksService:
         """Typed task service (create/list/show/cancel/retry/...)."""
-        return self._app.tasks_service
+        return self._remote.tasks if self._remote is not None else self._app.tasks_service
 
     @property
     def runs(self) -> RunsService:
         """Typed run service (list/show/cancel/retry_failed/...)."""
-        return self._app.runs_service
+        return self._remote.runs if self._remote is not None else self._app.runs_service
 
     @property
     def references(self) -> ReferencesService:
         """Typed reference service (create/update/archive/associate/...)."""
-        return self._app.references_service
+        return self._remote.references if self._remote is not None else self._app.references_service
 
     @property
     def shots(self) -> ShotsService:
         """Typed shot service (list/show/create/add/remove/reorder)."""
-        return self._app.shots_service
+        return self._remote.shots if self._remote is not None else self._app.shots_service
 
     # -- lazy capability APIs ------------------------------------------------
 
     def _bound_root(self) -> str:
         """The client's bound projects root (resolved by the application)."""
+        if self._app is None:
+            return ""
         return str(self._app.projects_root)
 
     def discover(self, **kwargs: Any) -> Any:

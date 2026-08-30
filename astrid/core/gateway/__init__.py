@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Astrid top-level command gateway.
 
-The gateway dispatches to exactly eight families: the five product families
+The gateway dispatches to exactly seven families: the five product families
 (``projects``, ``timelines``, ``media``, ``tasks``, ``runs``) plus the three
-operational families (``serve``, ``doctor``, ``backup``). ``--help``/``-h``
+operational families (``doctor``, ``backup``). ``--help``/``-h``
 and ``help`` print documentation (help is documentation and never requires a
 session); ``--version`` prints the version. Everything else is dispatched to
-one of the eight family handlers.
+one of the seven family handlers.
 
 The settled unbound allowlist is recorded in
-``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: ``serve``, ``doctor``, and
+``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: ``doctor`` and
 ``backup`` are operational families that must run before any session exists,
 and ``help``/``--version`` are documentation.
 """
@@ -29,7 +29,6 @@ from astrid.core.gateway.dispatch import (
     _dispatch_backup,
     _dispatch_doctor,
     _dispatch_product,
-    _dispatch_serve,
     _top_level_commands,
 )
 from astrid.core.gateway.help import (
@@ -42,8 +41,8 @@ from astrid.core.gateway.help import (
 from . import dispatch as _gateway_dispatch
 
 
-# Canonical accepted unbound contract for the eight-family gateway. Only the
-# three operational families (which must run before any session exists) and
+# Canonical accepted unbound contract for the seven-family gateway. Only the
+# two operational families (which must run before any session exists) and
 # help/version documentation are sessionless; everything else dispatches to a
 # family handler.
 SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
@@ -51,7 +50,6 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("--help",),
     ("help",),
     ("--version",),
-    ("serve",),
     ("doctor",),
     ("backup",),
 )
@@ -77,7 +75,7 @@ def _main_impl(raw: list[str]) -> int:
         _print_entrypoint_help()
         return 0
     # `astrid help` is the product-focused executable help (m4 plan step
-    # 24, task T26): the eight families, nested mounts, the --json envelope
+    # 24, task T26): the seven families, nested mounts, the --json envelope
     # convention, and stable exit codes. It is session-free by construction
     # (help is documentation).
     if first_arg == "help":

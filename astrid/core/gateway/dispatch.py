@@ -491,7 +491,6 @@ _TOP_LEVEL_HANDLERS = {
     "media": _dispatch_media,
     "tasks": lambda args: _dispatch_product(["tasks", *args]),
     "runs": lambda args: _dispatch_product(["runs", *args]),
-    "serve": _dispatch_serve,
     "doctor": _dispatch_doctor,
     "backup": _dispatch_backup,
 }

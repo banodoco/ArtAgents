@@ -6,12 +6,12 @@ callers and monkeypatch seams rely on via ``astrid.core.gateway._print_entrypoin
 and ``astrid.core.gateway._packs_subcommand_list``.
 
 ``_product_help_text`` / ``_print_product_help`` (m4 plan step 24, task
-T26) are the executable help. As of m6 they document the complete
-eight-family surface: the five product families from the explicit registry
+T26) are the executable help. They document the seven-family surface: the
+five product families from the explicit registry
 (``astrid/core/cli/domain_product.py``) with their kernel/pack ownership,
 the two manifest-declared nested mounts, the ``--json`` envelope
-convention, the stable exit codes, and the three operational families
-(``serve``, ``doctor``, ``backup``).
+convention, the stable exit codes, and the two operational families
+(``doctor``, ``backup``).
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ def _print_entrypoint_help() -> None:
         """Astrid command gateway — Python SDK + CLI
 
 The canonical Python boundary is ``import astrid`` (see docs/reference/sdk.md).
-This gateway is the CLI entry point for the eight families: the five product
-families (projects, timelines, media, tasks, runs) and the three operational
-families (serve, doctor, backup).
+This gateway is the CLI entry point for the seven families: the five product
+families (projects, timelines, media, tasks, runs) and the two operational
+families (doctor, backup).
 
 Usage:
   python3 -m astrid <family> <command> [options]
@@ -60,7 +60,6 @@ Timeline evidence:
       [--format FORMAT[,FORMAT...]] [--json]
 
 Operational families:
-  python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]
   python3 -m astrid doctor [--json]
   python3 -m astrid backup create [--out PATH]
   python3 -m astrid backup restore <BACKUP_PATH> [--force]
@@ -72,7 +71,7 @@ Nested mounts (manifest-owned):
 Options:
   --json      product commands print the five-key SDK envelope
               (ok/data/error/receipt/idempotency_key); doctor emits its
-              diagnostic object (serve/backup have no --json flag)
+              diagnostic object (backup has no --json flag)
   -h, --help  show help
 
 Notes:
@@ -81,37 +80,34 @@ Notes:
   ownership, nested mounts, and stable exit codes.
 
 Ownership handoff:
-  ``astrid serve`` exclusively owns the store while it runs. Use ``GET
-  /routes`` and the HTTP routes for reads/writes during that session, or wait
-  for a clean shutdown before using product CLI commands. Reads may retry;
-  writes must preserve the exact payload and idempotency key, then verify
-  state after release.
+  Product commands connect to the selected runtime through the generated
+  client. If it is unavailable, run ``banodoco-local up --profile astrid``.
 """
     )
 
 
 def _product_help_text() -> str:
-    """Return the executable help for the eight-family gateway surface.
+    """Return the executable help for the seven-family gateway surface.
 
-    The text is generated from the explicit product registry plus the three
+    The text is generated from the explicit product registry plus the two
     operational families, so the advertised census can never drift from
     ``astrid/core/cli/domain_product.py``: the five product families (with
     their kernel/pack ownership), the two manifest-declared nested mounts,
     the ``--json`` envelope convention, the stable exit codes, and the
-    three operational families (``serve``, ``doctor``, ``backup``).
+    two operational families (``doctor``, ``backup``).
     """
-    families = "projects timelines media tasks runs serve doctor backup"
-    return f"""Astrid product commands — the eight m6 families
+    families = "projects timelines media tasks runs doctor backup"
+    return f"""Astrid product commands — the seven runtime-client families
 
-The gateway owns exactly eight families: the five product families and the
-three operational families. ``shots`` mounts beneath ``timelines`` and
+The gateway owns exactly seven families: the five product families and the
+two operational families. ``shots`` mounts beneath ``timelines`` and
 ``references`` mounts beneath ``media``.
 
 Usage:
   python3 -m astrid <family> <command> [options]
   python3 -m astrid <family> --help
 
-Family census (exactly eight families): {families}
+Family census (exactly seven families): {families}
 
 Product families:
   projects    [kernel] project create/list/show/update/select/current
@@ -121,7 +117,6 @@ Product families:
   timelines   [pack: timeline] timeline create/list/show/save/archive/unarchive/history/diff/visualize/render
 
 Operational families:
-  serve       [kernel] start the local repository bridge
   doctor      [kernel] read-only database/filesystem diagnostics
   backup      [kernel] create/restore SQLite + managed-media backups
 
@@ -132,7 +127,7 @@ Nested mounts (manifest-owned):
 Options:
   --json      product commands print the five-key SDK envelope
               (ok/data/error/receipt/idempotency_key); doctor emits its
-              diagnostic object (serve/backup have no --json flag)
+              diagnostic object (backup has no --json flag)
   -h, --help  show help
 
 Exit codes:
@@ -141,12 +136,8 @@ Exit codes:
   2  usage/parse error
 
 Ownership handoff:
-  ``astrid serve`` exclusively owns the store while it runs. Use ``GET
-  /routes`` and the HTTP routes during that session, or wait for a clean
-  shutdown before using product CLI commands. Reads may retry; writes must
-  preserve the exact payload and idempotency key, then verify state after
-  release. Owner contention is ``error.code=unavailable`` with
-  ``error.details.reason=store_owned``.
+  Product commands connect to the selected runtime through the generated
+  client. If it is unavailable, run ``banodoco-local up --profile astrid``.
 """
 
 
