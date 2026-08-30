@@ -208,6 +208,49 @@ def test_cancellation_reaps_sigterm_resistant_descendant_after_leader_exit(tmp_p
         pytest.fail("SIGTERM-resistant descendant survived leader-exit cancellation")
 
 
+def test_cancellation_reaps_descendant_spawned_by_sigterm_handler(tmp_path):
+    """A TERM handler may create a child after the first group census."""
+    root = tmp_path / "late-child"
+    _write_manifest(root)
+    manifest = json.loads((root / "executor.yaml").read_text(encoding="utf-8"))
+    child_code = (
+        "import os,signal,sys,time; from pathlib import Path; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    leader_code = (
+        "import signal,subprocess,sys,time\n"
+        f"def late(*_):\n    subprocess.Popen([sys.executable,'-c',{child_code!r},'{str(root / 'child.pid')}'])\n"
+        "signal.signal(signal.SIGTERM, late)\n"
+        "time.sleep(30)\n"
+    )
+    manifest["command"]["argv"] = ["{python_exec}", "-c", leader_code]
+    (root / "executor.yaml").write_text(json.dumps(manifest), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[tmp_path])
+    host.discover()
+    attempt = tmp_path / "attempt"
+    output_root = attempt / "outputs"
+    output_root.mkdir(parents=True)
+    started = time.monotonic()
+
+    def cancelled():
+        return time.monotonic() - started > 0.75
+
+    with pytest.raises(HostCancelled):
+        host._run_command_definition(
+            host.capabilities["test.echo"], {}, output_root, attempt, cancelled=cancelled
+        )
+    child_pid = int((root / "child.pid").read_text(encoding="utf-8"))
+    for _ in range(40):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("SIGTERM-handler child survived cancellation")
+
+
 def test_cleanup_does_not_signal_a_reused_group_after_leader_exit(monkeypatch):
     """An exited leader PID must never be reused as a killpg target."""
     process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)

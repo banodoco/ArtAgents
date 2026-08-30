@@ -31,6 +31,7 @@ from astrid.core.execution.process_group import (
     popen_owned_group,
     release_group as _release_owned_group,
     signal_group as _signal_owned_group,
+    terminate_tree as _terminate_owned_tree,
     terminate_group as _terminate_owned_group,
 )
 from astrid.packs.training.executors.asset_cache import run as asset_cache
@@ -382,24 +383,18 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 if _callback_cancelled(args):
                     cancelled = True
                     if internal_worker:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=1.0)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        # Nested command steps inherit the outer worker
+                        # session.  Kill only this command and its descendants;
+                        # killing the process group would also kill the Hype
+                        # worker that must report cancellation upstream.
+                        _terminate_owned_tree(process)
                     else:
                         _terminate_process_group(process)
                     break
                 if deadline is not None and time.monotonic() >= deadline:
                     timed_out = True
                     if internal_worker:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=1.0)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        _terminate_owned_tree(process)
                     else:
                         _terminate_process_group(process)
                     break
