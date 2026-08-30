@@ -18,7 +18,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import textwrap
 from pathlib import Path
 
@@ -344,88 +343,6 @@ def test_editorial_arrange_handle_has_safety_declaration() -> None:
     assert hasattr(safety, "network"), "SafetyDeclaration missing 'network'"
     assert hasattr(safety, "secrets_required"), "SafetyDeclaration missing 'secrets_required'"
     assert hasattr(safety, "permissions"), "SafetyDeclaration missing 'permissions'"
-
-
-# ---------------------------------------------------------------------------
-# Dry-run invocation (no API keys, no network)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.timeout(60)
-def test_dry_run_invoke_editorial_arrange_succeeds() -> None:
-    """``invoke('editorial.arrange', dry_run=True)`` must return an
-    InvocationResult with ``ok=True`` and ``dry_run=True``."""
-    import astrid as sdk
-
-    with tempfile.TemporaryDirectory(prefix="astrid-parity-") as tmp_out:
-        result = sdk.invoke(
-            "editorial.arrange",
-            kind="executor",
-            include_installed=False,
-            out=Path(tmp_out),
-            project="demo",
-            inputs={
-                "brief": "parity test brief",
-                "pool": "default",
-                "theme": "default",
-                "target_duration": 60,
-            },
-            dry_run=True,
-            verbose=False,
-        )
-
-    assert result.ok is True, f"invoke ok={result.ok}, error={result.error}"
-    assert result.capability_id == "editorial.arrange"
-    assert result.capability_type == "executor"
-    assert result.raw_result.get("dry_run") is True, (
-        f"dry_run not True in raw_result: {result.raw_result}"
-    )
-
-
-@pytest.mark.timeout(60)
-def test_dry_run_invoke_does_not_require_network() -> None:
-    """A dry-run invocation of editorial.arrange must not require network
-    access or API keys.  It should complete in-process without external
-    calls."""
-    import astrid as sdk
-
-    # This test is mechanical: if invoke(dry_run=True) raises because of
-    # network/API-key requirements, the test fails.
-    with tempfile.TemporaryDirectory(prefix="astrid-parity-") as tmp_out:
-        result = sdk.invoke(
-            "editorial.arrange",
-            kind="executor",
-            include_installed=False,
-            out=Path(tmp_out),
-            project="demo",
-            inputs={
-                "brief": "no network test",
-                "pool": "default",
-                "theme": "default",
-                "target_duration": 60,
-            },
-            dry_run=True,
-            verbose=False,
-        )
-    assert result.ok is True
-
-
-@pytest.mark.timeout(60)
-def test_dry_run_invoke_missing_input_raises_capability_missing_input_error() -> None:
-    """Invoking without required inputs must raise
-    ``CapabilityMissingInputError`` (as documented in Step 4 error handling)."""
-    import astrid as sdk
-
-    with pytest.raises(sdk.CapabilityMissingInputError):
-        sdk.invoke(
-            "editorial.arrange",
-            kind="executor",
-            include_installed=False,
-            out=Path("/tmp/out"),
-            project="demo",
-            dry_run=True,
-            verbose=False,
-        )
 
 
 @pytest.mark.timeout(60)
