@@ -80,3 +80,17 @@ def test_provider_ledger_rows_are_networked_and_credential_dispositions_match():
         # agree on the family; this catches a provider accidentally advertised
         # as a CPU/local capability after a manifest edit.
         assert record.matrix["adapter_family"] == "provider"
+
+
+def test_manifest_secrets_reconcile_to_provider_readiness(monkeypatch):
+    for key in ("GIPHY_API_KEY", "FAL_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    host = GenericPackHost(pack_roots=[Path("astrid/packs")])
+    host.discover()
+    host.preflight()
+    assert host.capabilities["media.gif_search"].preflight["credentials"]["missing"] == ["GIPHY_API_KEY"]
+    assert host.capabilities["media.gif_search"].ready is False
+    for capability_id in ("media.speech_repair_lavasr", "fal.h3_video"):
+        record = host.capabilities[capability_id]
+        assert record.preflight["credentials"]["missing"] == ["FAL_KEY"]
+        assert record.ready is False

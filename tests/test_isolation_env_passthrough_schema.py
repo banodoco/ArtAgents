@@ -61,6 +61,19 @@ def test_orchestrator_isolation_env_passthrough_round_trips() -> None:
     assert orchestrator.to_dict()["isolation"]["env_passthrough"] == ["CUSTOM_PUBLIC_FLAG"]
 
 
+def test_isolation_secrets_round_trip_for_executor_and_orchestrator() -> None:
+    executor = validate_executor_definition(
+        _executor_manifest(isolation={"secrets_required": ["GIPHY_API_KEY"]})
+    )
+    orchestrator = validate_orchestrator_definition(
+        _orchestrator_manifest(isolation={"secrets_required": ["FAL_KEY"]})
+    )
+    assert executor.isolation.secrets_required == ("GIPHY_API_KEY",)
+    assert executor.to_dict()["isolation"]["secrets_required"] == ["GIPHY_API_KEY"]
+    assert orchestrator.isolation.secrets_required == ("FAL_KEY",)
+    assert orchestrator.to_dict()["isolation"]["secrets_required"] == ["FAL_KEY"]
+
+
 def test_executor_isolation_env_passthrough_rejects_invalid_or_duplicate_names() -> None:
     for names in (["1BAD"], ["CUSTOM_PUBLIC_FLAG", "CUSTOM_PUBLIC_FLAG"]):
         with pytest.raises(ExecutorValidationError, match="env_passthrough"):

@@ -171,6 +171,7 @@ def _parse_isolation(raw: Any, path: str, *, primitives: SchemaValidator) -> Iso
         binaries=tuple(primitives.optional_string_list(data, "binaries", f"{path}.binaries")),
         network=primitives.optional_bool(data, "network", f"{path}.network", default=False),
         env_passthrough=tuple(primitives.optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
+        secrets_required=tuple(primitives.optional_string_list(data, "secrets_required", f"{path}.secrets_required")),
     )
 
 
@@ -191,6 +192,7 @@ def _validate_isolation(isolation: IsolationMetadata, *, error_cls: type[ValueEr
     if isolation.mode not in ISOLATION_MODES:
         raise error_cls(f"isolation.mode must be one of {sorted(ISOLATION_MODES)}")
     _validate_unique_env_passthrough(isolation.env_passthrough, error_cls=error_cls)
+    _validate_unique_env_passthrough(isolation.secrets_required, error_cls=error_cls)
 
 
 def _validate_unique_env_passthrough(

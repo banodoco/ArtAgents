@@ -13,7 +13,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from .generic_host import _canonical_digest, _source_digest
+from .generic_host import _canonical_digest, _source_digest_for_roots
 
 
 def _json_value(value: Any) -> Any:
@@ -69,9 +69,15 @@ def run(payload_path: str | Path) -> int:
     expected_version = admission.get("version")
     if expected_version is not None and str(definition_payload.get("version")) != str(expected_version):
         raise ValueError("admitted capability version changed")
-    source_root = admission.get("source_root")
     expected_source = str(admission.get("source_digest") or "")
-    if source_root and expected_source and _source_digest(Path(str(source_root))) != expected_source:
+    source_roots = admission.get("source_roots")
+    if isinstance(source_roots, (list, tuple)) and source_roots:
+        roots = tuple(Path(str(value)).expanduser().resolve() for value in source_roots)
+    elif admission.get("source_root"):
+        roots = (Path(str(admission["source_root"])).expanduser().resolve(),)
+    else:
+        roots = ()
+    if roots and expected_source and _source_digest_for_roots(roots) != expected_source:
         raise ValueError("admitted capability source digest changed")
     if kind == "executor":
         from astrid.core.execution.executor.registry import ExecutorRegistry

@@ -106,6 +106,47 @@ def test_admitted_definition_and_source_are_fenced_before_child_dispatch(tmp_pat
         )
 
 
+def test_external_pack_import_root_is_fenced_before_direct_command(tmp_path):
+    """A mutation in an imported external-pack module blocks command launch."""
+    pack_root = tmp_path / "fixture_provider"
+    executor_root = pack_root / "executors" / "echo"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: fixture_provider\nname: Fixture\nversion: 1.0\n"
+        "capabilities: [echo]\ncontent:\n  executors: executors\n",
+        encoding="utf-8",
+    )
+    (pack_root / "helper.py").write_text("VALUE = 'before'\n", encoding="utf-8")
+    (executor_root / "executor.yaml").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "id": "fixture_provider.echo",
+            "name": "Echo",
+            "kind": "external",
+            "version": "1.0",
+            "command": {"argv": [sys.executable, "-c", "from fixture_provider import helper; from pathlib import Path; Path('{out}/answer').write_text(helper.VALUE)"]},
+            "outputs": [],
+        }),
+        encoding="utf-8",
+    )
+    host = GenericPackHost(pack_roots=[pack_root])
+    host.discover()
+    record = host.capabilities["fixture_provider.echo"]
+    (pack_root / "helper.py").write_text("VALUE = 'after'\n", encoding="utf-8")
+    with pytest.raises(HostError, match="source digest changed"):
+        host._run_command_definition(
+            record,
+            {},
+            tmp_path / "attempt" / "outputs",
+            tmp_path / "attempt",
+            admission={
+                "source_digest": record.source_digest,
+                "source_root": str(record.source_root),
+                "source_roots": [str(root) for root in (record.source_root, pack_root)],
+            },
+        )
+
+
 def test_input_materialization_rejects_traversal_names(tmp_path):
     _write_manifest(tmp_path / "echo")
 

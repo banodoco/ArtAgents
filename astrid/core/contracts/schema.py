@@ -77,6 +77,10 @@ class IsolationMetadata:
     binaries: tuple[str, ...] = ()
     network: bool = False
     env_passthrough: tuple[str, ...] = ()
+    # Credentials required by the executable itself.  This lives in the
+    # isolation contract (rather than only in free-form metadata) so every
+    # discovery/host path sees the same readiness declaration.
+    secrets_required: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -249,11 +253,14 @@ def to_capability_handle(
         ),
         safety=SafetyDeclaration(
             network=definition.isolation.network,
-            secrets_required=tuple(
+            secrets_required=tuple(dict.fromkeys(
                 str(item)
-                for item in metadata.get("secrets_required", ())
+                for item in (
+                    *definition.isolation.secrets_required,
+                    *(metadata.get("secrets_required", ()) or ()),
+                )
                 if isinstance(item, str) and item
-            ),
+            )),
         ),
         description=definition.description,
         short_description=definition.short_description,

@@ -266,6 +266,38 @@ def _source_digest(root: Path) -> str:
     return _canonical_digest(entries)
 
 
+def _admitted_source_roots(root: Path, definition: "ExecutorDefinition") -> tuple[Path, ...]:
+    """Return every executable root admitted for one capability."""
+    roots: list[Path] = [root.resolve()]
+    pack_root = _pack_root_for_executor(root)
+    if pack_root is not None and str(definition.kind) == "external":
+        roots.append(pack_root.resolve())
+    return tuple(dict.fromkeys(roots))
+
+
+def _source_digest_for_roots(roots: tuple[Path, ...] | list[Path]) -> str:
+    return _canonical_digest([
+        {"root": str(root.resolve()), "digest": _source_digest(root.resolve())}
+        for root in roots
+    ])
+
+
+def _verify_admitted_source(admission: Mapping[str, Any]) -> None:
+    """Revalidate the source fence immediately before command/provider execution."""
+    expected = str(admission.get("source_digest") or "")
+    if not expected:
+        return
+    raw_roots = admission.get("source_roots")
+    if isinstance(raw_roots, (list, tuple)) and raw_roots:
+        roots = tuple(Path(str(value)).expanduser().resolve() for value in raw_roots)
+    elif admission.get("source_root"):
+        roots = (Path(str(admission["source_root"])).expanduser().resolve(),)
+    else:
+        return
+    if _source_digest_for_roots(roots) != expected:
+        raise HostError("admitted capability source digest changed")
+
+
 def _vcs_revision(root: Path) -> str:
     """Return the checked-out revision for source-epoch invalidation."""
     checkout = next((candidate for candidate in (root, *root.parents) if (candidate / ".git").exists()), None)
@@ -378,6 +410,7 @@ class CapabilityRecord:
         return int(self.definition.metadata.get("estimated_output_bytes", 0) or 0)
 
     def manifest(self) -> dict[str, Any]:
+        source_roots = _admitted_source_roots(self.source_root, self.definition)
         return {
             "id": self.id,
             "definition": self.definition.to_dict(),
@@ -387,6 +420,7 @@ class CapabilityRecord:
             "source_digest": self.source_digest,
             "dependency_digest": self.dependency_digest,
             "source_root": str(self.source_root),
+            "source_roots": [str(root) for root in source_roots],
             "manifest_path": str(self.manifest_path) if self.manifest_path else None,
             "resource_keys": list(self.resource_keys),
             "estimated_scratch_bytes": self.estimated_scratch_bytes,
@@ -419,10 +453,23 @@ class RuntimeProtocolClient:
                 "workspace runtime client or set PYTHONPATH to its packages/python"
             ) from exc
         self.generated = WorkspaceClient(self.endpoint, self.credential)
+        self._runtime_epoch: int | None = None
 
     def health(self):
         """Read protocol/schema/runtime epoch through the generated client."""
-        return self.generated.health()
+        value = self.generated.health()
+        epoch = value.get("runtime_epoch") if isinstance(value, Mapping) else getattr(value, "runtime_epoch", None)
+        if epoch is not None:
+            self._runtime_epoch = int(epoch)
+        return value
+
+    def _current_runtime_epoch(self) -> int:
+        """Read the live bootstrap epoch before every mutating operation."""
+        value = self.health()
+        epoch = value.get("runtime_epoch") if isinstance(value, Mapping) else getattr(value, "runtime_epoch", None)
+        if epoch is None:
+            raise HostError("runtime health returned no runtime_epoch")
+        return int(epoch)
 
     def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None, capability_digests: Mapping[str, str] | None = None, dependency_digest: str | None = None, source_epoch: str | None = None, protocol_version: str = "workspace.v1", schema_digest: str | None = None, runtime_epoch: int | None = None, capability_states: Mapping[str, Mapping[str, str]] | None = None):
         payload = {
@@ -514,6 +561,7 @@ class RuntimeProtocolClient:
             lease_id=lease_token,
             fence=int(fence),
             idempotency_key=f"heartbeat:{attempt_id}:{fence}",
+            runtime_epoch=self._current_runtime_epoch(),
         )
 
     def claim(self, task_id: str, worker_id: str, lease_token: str):
@@ -526,6 +574,7 @@ class RuntimeProtocolClient:
             executor_id=executor_id,
             capability_ids=capability_ids,
             idempotency_key=idempotency_key,
+            runtime_epoch=self._current_runtime_epoch(),
         )
 
     def task(self, task_id: str):
@@ -541,6 +590,7 @@ class RuntimeProtocolClient:
             "outputs": outputs,
             "effect": effect,
             "result": dict(result),
+            "runtime_epoch": self._current_runtime_epoch(),
         }
         return self.generated.settle_attempt(
             attempt_id,
@@ -548,10 +598,17 @@ class RuntimeProtocolClient:
             idempotency_key=f"settle:{attempt_id}:{fence}",
         )
 
-    def fail(self, task_id: str, lease_token: str, error: str, *, retryable: bool = False):
-        raise HostError(
-            "generated workspace client has no attempt-fail operation; "
-            "runtime client route needed: POST /v1/attempts/{attempt_id}/fail"
+    def fail(self, task_id: str, lease_token: str, error: str, *, retryable: bool = False, attempt_id: str | None = None, fence: int | None = None):
+        if not attempt_id or fence is None:
+            raise HostError("generated failure requires attempt_id and fence")
+        payload: Any = {"message": str(error), "retryable": bool(retryable)}
+        return self.generated.fail_attempt(
+            attempt_id,
+            lease_id=lease_token,
+            fence=int(fence),
+            error=payload,
+            runtime_epoch=self._current_runtime_epoch(),
+            idempotency_key=f"fail:{attempt_id}:{fence}",
         )
 
     def cancel(self, task_id: str):
@@ -645,7 +702,8 @@ class GenericPackHost:
                 definition = _attach_pack_metadata(definition, executor_root)
                 manifest = next((executor_root / name for name in ("executor.yaml", "executor.yml", "executor.json") if (executor_root / name).is_file()), None)
                 matrix_entry = self.matrix.get(definition.id, {})
-                record = CapabilityRecord(definition=definition, capability_digest=_canonical_digest(definition.to_dict()), source_digest=_source_digest(executor_root), source_root=executor_root, manifest_path=manifest, matrix=matrix_entry)
+                source_roots = _admitted_source_roots(executor_root, definition)
+                record = CapabilityRecord(definition=definition, capability_digest=_canonical_digest(definition.to_dict()), source_digest=_source_digest_for_roots(source_roots), source_root=executor_root, manifest_path=manifest, matrix=matrix_entry)
                 records[record.id] = record
         if self.matrix:
             discovered = set(records)
@@ -696,6 +754,7 @@ class GenericPackHost:
                 "dependency_digest": record.dependency_digest,
                 "version": record.definition.version,
                 "source_root": str(record.source_root),
+                "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
             }
         if capability_kind == "orchestrator":
             from astrid.core.execution.orchestrator.folder import (
@@ -711,7 +770,8 @@ class GenericPackHost:
                         continue
                     if definition.id != capability_id:
                         continue
-                    source_digest = _source_digest(orchestrator_root)
+                    source_roots = (orchestrator_root.resolve(),)
+                    source_digest = _source_digest_for_roots(source_roots)
                     capability_digest = _canonical_digest(definition.to_dict())
                     return definition.to_dict(), {
                         "capability_digest": capability_digest,
@@ -722,6 +782,7 @@ class GenericPackHost:
                         }),
                         "version": definition.version,
                         "source_root": str(orchestrator_root),
+                        "source_roots": [str(root) for root in source_roots],
                     }
             raise HostError(f"capability not discovered: {capability_id}")
         raise HostError(f"unsupported capability kind {capability_kind!r}")
@@ -739,8 +800,17 @@ class GenericPackHost:
                 checks["binaries"] = {"ok": False, "missing": missing}
             else:
                 checks["binaries"] = {"ok": True}
-            required_env = record.matrix.get("required_env") or record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
-            missing_env = [str(name) for name in (required_env or ()) if not os.environ.get(str(name))]
+            declared_env = record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
+            required_env = tuple(dict.fromkeys(
+                str(name)
+                for name in (
+                    *(record.matrix.get("required_env") or ()),
+                    *(record.definition.isolation.secrets_required or ()),
+                    *(record.definition.metadata.get("secrets_required") or ()),
+                    *(declared_env or ()),
+                )
+            ))
+            missing_env = [name for name in required_env if not os.environ.get(name)]
             checks["credentials"] = {"ok": not missing_env, "missing": missing_env}
             required_packages = record.matrix.get("required_packages") or record.definition.metadata.get("required_packages", adapter.required_packages)
             missing_packages = [package for package in (required_packages or ()) if importlib.util.find_spec(str(package)) is None]
@@ -1019,7 +1089,7 @@ class GenericPackHost:
                 uploaded.append({key: value for key, value in descriptor.items() if key != "path"})
         return uploaded
 
-    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None) -> Any:
+    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None, admission: Mapping[str, Any] | None = None) -> Any:
         """Run a manifest command without importing Astrid's project authority.
 
         The legacy runner is still available for built-in pipeline steps, but
@@ -1028,6 +1098,8 @@ class GenericPackHost:
         command = record.definition.command
         if command is None:
             raise HostError(f"capability {record.id!r} has no dispatchable command")
+        if admission is not None:
+            _verify_admitted_source(admission)
         values = {"out": str(output_root), "run_root": str(attempt), "python_exec": sys.executable, **inputs}
         for port in record.definition.inputs:
             if port.name not in values and port.default is not None:
@@ -1164,6 +1236,8 @@ class GenericPackHost:
                     source_root=source_root,
                     values=request,
                 )
+        if admission is not None:
+            _verify_admitted_source(admission)
         request_path = attempt_path / ".astrid-capability-request.json"
         result_path = attempt_path / ".astrid-capability-result.json"
         payload = {
@@ -1311,7 +1385,18 @@ class GenericPackHost:
 
             try:
                 if record.definition.command is not None:
-                    result = self._run_command_definition(record, inputs, output_root, root, cancelled=cancelled)
+                    result = self._run_command_definition(
+                        record,
+                        inputs,
+                        output_root,
+                        root,
+                        cancelled=cancelled,
+                        admission={
+                            "source_digest": record.source_digest,
+                            "source_root": str(record.source_root),
+                            "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+                        },
+                    )
                 else:
                     # Dispatch through the process boundary.  The immutable
                     # admitted definition is serialized for the child so a
@@ -1339,6 +1424,7 @@ class GenericPackHost:
                             "dependency_digest": record.dependency_digest,
                             "version": record.definition.version,
                             "source_root": str(record.source_root),
+                            "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
                         },
                     )
             finally:
@@ -1377,7 +1463,19 @@ class GenericPackHost:
             return {"task_id": task_id, "status": "cancelled", "cancelled": True}
         except Exception as exc:
             if self.client is not None and hasattr(self.client, "fail"):
-                self.client.fail(task_id, lease_token, str(exc), retryable=False)
+                try:
+                    self.client.fail(
+                        task_id,
+                        lease_token,
+                        str(exc),
+                        retryable=False,
+                        attempt_id=attempt_id,
+                        fence=fence,
+                    )
+                except TypeError:
+                    # Compatibility with simple offline fakes; real generated
+                    # clients always use the typed attempt-fail operation.
+                    self.client.fail(task_id, lease_token, str(exc), retryable=False)
             raise
         finally:
             if not keep_attempt and self.attempt_root is None and settled:
@@ -1403,9 +1501,16 @@ class GenericPackHost:
         )
         if claim is None:
             return None
-        if not isinstance(claim, Mapping) or not claim.get("task_id"):
+        claim_data = dict(claim) if isinstance(claim, Mapping) else {
+            "attempt_id": getattr(claim, "attempt_id", None),
+            "task_id": getattr(claim, "task_id", None),
+            "lease_id": getattr(claim, "lease_id", None),
+            "fence": getattr(claim, "fence", None),
+            "runtime_epoch": getattr(claim, "runtime_epoch", None),
+        }
+        if not claim_data.get("task_id"):
             raise HostError("generated claim operation returned no task_id")
-        task_id = str(claim["task_id"])
+        task_id = str(claim_data["task_id"])
         if not hasattr(self.client, "task"):
             raise HostError("runtime client lacks canonical task read operation")
         task = self.client.task(task_id)
@@ -1420,15 +1525,15 @@ class GenericPackHost:
         task_data.update(
             {
                 "id": task_id,
-                "attempt_id": claim.get("attempt_id"),
-                "fence": claim.get("fence"),
+                "attempt_id": claim_data.get("attempt_id"),
+                "fence": claim_data.get("fence"),
             }
         )
         return self.run_task(
             {"task": task_data},
-            lease_token=str(claim.get("lease_id") or ""),
-            attempt_id=str(claim["attempt_id"]),
-            fence=int(claim["fence"]),
+            lease_token=str(claim_data.get("lease_id") or ""),
+            attempt_id=str(claim_data["attempt_id"]),
+            fence=int(claim_data["fence"]),
         )
 
     def run(self, *, once: bool = False, poll_seconds: float = 1.0, max_tasks: int | None = None) -> list[Mapping[str, Any]]:

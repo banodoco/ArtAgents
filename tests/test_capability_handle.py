@@ -279,6 +279,14 @@ class TestExecutorToCapabilityHandle:
         h = executor_to_handle(ex)
         assert h.safety.network is True
 
+    def test_safety_secrets_merge_isolation_and_metadata(self):
+        ex = _make_executor(
+            isolation=IsolationMetadata(network=True, secrets_required=("FAL_KEY",)),
+            metadata={"secrets_required": ["OPENAI_API_KEY", "FAL_KEY"]},
+        )
+        h = executor_to_handle(ex)
+        assert h.safety.secrets_required == ("FAL_KEY", "OPENAI_API_KEY")
+
     def test_safety_network_default_false(self):
         ex = _make_executor(isolation=IsolationMetadata())
         h = executor_to_handle(ex)
