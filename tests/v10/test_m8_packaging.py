@@ -19,7 +19,7 @@ from scripts.reshape.installed_artifact import build_once
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_FAMILIES = "projects timelines media tasks runs serve doctor backup"
+EXPECTED_FAMILIES = "projects timelines media tasks runs doctor backup"
 EXPECTED_RUNTIME_MODULES = {
     "astrid/__init__.py",
     "astrid/__main__.py",
@@ -32,11 +32,8 @@ EXPECTED_RUNTIME_MODULES = {
     "astrid/core/schema_packs/manifest.py",
     "astrid/core/schema_packs/registry.py",
     "astrid/core/schema_packs/standard.py",
-    "astrid/core/integrations/reigh/local_bridge.py",
-    "astrid/core/integrations/reigh/local_bridge_server.py",
     "astrid/packs/__init__.py",
     "astrid/packs/timeline/__init__.py",
-    "astrid/packs/timeline/bridge.py",
     "astrid/packs/timeline/repository.py",
     "astrid/packs/shots/__init__.py",
     "astrid/packs/shots/repository.py",
@@ -140,7 +137,6 @@ def installed(wheel: Path, tmp_path_factory: pytest.TempPathFactory) -> tuple[Pa
         "PATH": os.environ.get("PATH", os.defpath),
         "HOME": str(root / "home"),
         "ASTRID_HOME": str(root / "state"),
-        "ASTRID_PROJECTS_ROOT": str(root / "projects"),
         "XDG_CACHE_HOME": str(root / "cache"),
         "XDG_CONFIG_HOME": str(root / "config"),
         "PYTHONNOUSERSITE": "1",
@@ -239,24 +235,23 @@ def test_installed_module_and_console_entry_paths_report_one_version(
     assert result.stdout.strip() == "astrid"
 
 
-def test_installed_help_exposes_exact_eight_family_ownership_census(
+def test_installed_help_exposes_exact_seven_family_ownership_census(
     installed: tuple[Path, Path],
 ) -> None:
     result = _run_installed(installed, ["-m", "astrid", "help"])
     assert result.returncode == 0, result.stderr
     text = result.stdout
-    assert f"Family census (exactly eight families): {EXPECTED_FAMILIES}" in text
+    assert f"Family census (exactly seven families): {EXPECTED_FAMILIES}" in text
     assert "projects    [kernel]" in text
     assert "media       [kernel]" in text
     assert "tasks       [kernel]" in text
     assert "runs        [kernel]" in text
     assert "timelines   [pack: timeline]" in text
-    assert "serve       [kernel]" in text
     assert "doctor      [kernel]" in text
     assert "backup      [kernel]" in text
     assert "timelines shots       [pack: shots]" in text
     assert "media references      [pack: references]" in text
-    assert "Family census (exactly eight families):" in text
+    assert "Family census (exactly seven families):" in text
     assert "references [kernel]" not in text
 
 
@@ -314,7 +309,7 @@ def test_shared_harness_smoke_checks_installed_basics_and_failure_boundaries(
         assert version.stdout.strip() == "astrid"
 
         help_record = harness.run_module("installed-help", "astrid", ["help"], check=True)
-        assert "Family census (exactly eight families):" in help_record.stdout
+        assert "Family census (exactly seven families):" in help_record.stdout
 
         doctor_help = harness.run_module(
             "installed-doctor-help", "astrid", ["doctor", "--help"], check=True
