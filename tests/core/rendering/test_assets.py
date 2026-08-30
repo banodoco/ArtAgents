@@ -266,7 +266,15 @@ def test_declared_managed_locator_does_not_open_a_local_kernel_database(
     (project / "render-snapshot").mkdir()
     registry_path = _write_registry(
         project / "render-snapshot" / "assets.json",
-        {"asset": {"file": str(managed), "content_sha256": digest}},
+        {
+            "asset": {
+                "file": str(managed),
+                "content_sha256": digest,
+                # Runtime admission supplies this stable ownership identity;
+                # the child must not infer ownership from the digest path.
+                "media_id": "media-runtime-admitted",
+            }
+        },
     )
 
     with AssetMaterializer(registry_path) as materializer:
@@ -276,6 +284,31 @@ def test_declared_managed_locator_does_not_open_a_local_kernel_database(
 
     # No database was bootstrapped as a side effect of child rendering.
     assert not (projects_root / ".astrid" / "astrid.sqlite3").exists()
+
+
+def test_unowned_digest_shaped_cas_file_is_rejected_without_runtime_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A guessed CAS digest never grants managed-media ownership."""
+
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    digest = hashlib.sha256(b"unowned CAS bytes").hexdigest()
+    managed = projects_root / ".astrid" / "media" / "sha256" / digest[:2] / digest[2:4] / digest
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"unowned CAS bytes")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    snapshot_dir = project / "render-snapshot"
+    snapshot_dir.mkdir()
+    registry_path = _write_registry(
+        snapshot_dir / "assets.json",
+        {"asset": {"file": str(managed), "content_sha256": digest}},
+    )
+
+    with pytest.raises(ValueError, match="outside the allowed project root"):
+        AssetMaterializer(registry_path)
 
 
 def test_managed_snapshot_rejects_conflicting_alias_digest(

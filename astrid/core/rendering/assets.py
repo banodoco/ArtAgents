@@ -183,6 +183,13 @@ def _declared_managed_locators(
             or parts[2] != digest[2:4]
         ):
             continue
+        # A digest-shaped path is an integrity locator, not an ownership
+        # credential.  Only a registry entry carrying the runtime-admitted
+        # media identity may authorize staging bytes from the shared CAS.
+        # Without this fence, any project-local registry could point at an
+        # existing (possibly foreign) CAS object by guessing its digest.
+        if media_text is None:
+            continue
         recorded = raw_recorded
         content_hash = digest if recorded in (None, "") else str(recorded).removeprefix("sha256:")
         if len(content_hash) != 64 or content_hash != digest:
