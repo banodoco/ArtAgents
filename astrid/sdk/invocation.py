@@ -886,7 +886,7 @@ def _prepare_managed_render_inputs(
         # using AstridClient.invoke inject their already-open client.
         from astrid.sdk.client import AstridClient
 
-        with AstridClient.open(project_root) as owned_client:
+        with AstridClient.open() as owned_client:
             return _prepare_managed_render_inputs(
                 values,
                 project=project,
@@ -1318,367 +1318,96 @@ def _kernel_invoke(
     extra_pack_roots: tuple[str, ...] = (),
     idempotency_context: Mapping[str, Any] | None = None,
     registry: FrozenSchemaPackRegistry | None = None,
+    _client: Any | None = None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
-    """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
-    from astrid.core.events.service import EventAppendService
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path
-    from astrid.core.io.media_import import managed_media_path
-    from astrid.core.kernel.read import schema_registry_context
-    from astrid.core.receipts.service import ReceiptService
-    from astrid.core.repositories.media import MediaRepository
-    from astrid.core.repositories.projects import ProjectRepository
-    from astrid.core.repositories.runs import RunRepository
-    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import open_database_writer
-    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
+    """Admit an invocation through the runtime client and generic host.
 
-    if registry is None:
-        from astrid.core.schema_packs.standard import build_standard_registry
+    The SDK is a client of the workspace runtime.  It must not compose a
+    local application, open SQLite, or execute a capability in-process on the
+    normal invocation path.  ``projects_root`` and ``registry`` remain in the
+    signature solely for compatibility with injectable test doubles and are
+    intentionally unused here.
+    """
+    del projects_root, registry
 
-        registry = build_standard_registry()
-    db_path = derive_database_path(projects_root)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = open_database_writer(db_path, registry)
-    try:
-        events = EventAppendService(registry)
-        receipts = ReceiptService()
-        runs = RunRepository(events=events, receipts=receipts)
-        tasks = TaskRepository(events=events, receipts=receipts)
-        projects = ProjectRepository(events=events, receipts=receipts)
-        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
-        project_id = project if project else "default"
-        try:
-            UnitOfWork(writer).run(
-                lambda u: projects.create(
-                    u,
-                    slug=project_id,
-                    name=project_id,
-                    settings={},
-                    idempotency_key=f"proj:{project_id}",
-                    project_id=project_id,
-                )
-            )
-        except Exception:
-            pass
-        # Public SDK callers address projects by slug or id.  RunRepository
-        # stores the canonical project id, so resolve the reference after the
-        # idempotent create attempt rather than leaking a slug into runs.
-        project_id = projects.resolve(writer, project_id)
-        spec_payload = {
-            "capability_id": capability.id,
-            "inputs": dict(inputs or {}),
-            "outputs": dict(outputs or {}),
-            "project": project,
-            "kind": str(kind),
-            "extra_pack_roots": list(extra_pack_roots),
-        }
-        idempotency_payload = dict(spec_payload)
-        if idempotency_context is not None:
-            idempotency_payload["authority_context"] = dict(idempotency_context)
-        authority_context = dict(idempotency_context or {})
-        stored_executor_version = authority_context.get("executor_version")
-        if not isinstance(stored_executor_version, str) or not stored_executor_version:
-            stored_executor_version = None
-        idempotency_key = compute_spec_hash(idempotency_payload, [])
-        # Deterministic ids for idempotent replay: run_id derived from
-        # idempotency_key so identical retry returns same run_id via receipt
-        # (request_hash includes run_id). Child task_id also deterministic
-        # so request identity is stable; receipt replay returns same ids.
-        deterministic_run_id = hashlib.sha256(f"run:{idempotency_key}".encode()).hexdigest()[:26]
-        deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[
-            :26
-        ]
-        child_spec = {
-            "capability_id": capability.id,
-            "inputs": dict(inputs or {}),
-            "outputs": dict(outputs or {}),
-            "project": project,
-            "kind": str(kind),
-            "extra_pack_roots": list(extra_pack_roots),
-            "authority_context": authority_context,
-        }
-
-        def _create(u):
-            return runs.create(
-                u,
-                project_id=project_id,
-                children=[
-                    {
-                        "capability": capability.id,
-                        "spec": child_spec,
-                        "input_manifest": [],
-                        "task_id": deterministic_task_id,
-                    }
-                ],
-                idempotency_key=idempotency_key,
-                kind=capability.capability_type,
-                title=capability.id,
-                input=child_spec,
-                run_id=deterministic_run_id,
-            )
-
-        fanout = UnitOfWork(writer).run(_create)
-        run_id = fanout.run_id
-        task_id = fanout.task_ids[0] if fanout.task_ids else None
-        if task_id is None:
-            raise RuntimeError("kernel admission produced no task")
-        # If run already terminal (idempotent replay after success), skip re-drive.
-        # Query run status without receipt side-effects.
-        try:
-            row = UnitOfWork(writer).run(
-                lambda u: u.query_one("SELECT status FROM runs WHERE id = ?", (run_id,))
-            )
-            if row is not None and row["status"] in ("succeeded", "failed", "cancelled"):
-                # Derive winning attempt for stable return.
-                trow = UnitOfWork(writer).run(
-                    lambda u: u.query_one(
-                        "SELECT winning_attempt_id, spec_json FROM tasks WHERE id = ?", (task_id,)
-                    )
-                )
-                replay_executor_version = stored_executor_version
-                if trow is not None:
-                    try:
-                        persisted_spec = json.loads(str(trow["spec_json"]))
-                    except (TypeError, ValueError):
-                        persisted_spec = None
-                    persisted_context = (
-                        persisted_spec.get("authority_context")
-                        if isinstance(persisted_spec, Mapping)
-                        else None
-                    )
-                    persisted_version = (
-                        persisted_context.get("executor_version")
-                        if isinstance(persisted_context, Mapping)
-                        else None
-                    )
-                    if isinstance(persisted_version, str) and persisted_version:
-                        replay_executor_version = persisted_version
-                winning = (
-                    trow["winning_attempt_id"]
-                    if trow is not None and trow["winning_attempt_id"]
-                    else f"{idempotency_key}:complete"
-                )
-                terminal_attempt = None
-                if row["status"] != "succeeded":
-                    terminal_attempt = UnitOfWork(writer).run(
-                        lambda u: u.query_one(
-                            "SELECT id, error_json FROM execution_attempts "
-                            "WHERE task_id = ? AND status IN ('failed', 'cancelled') "
-                            "ORDER BY attempt_no DESC LIMIT 1",
-                            (task_id,),
-                        )
-                    )
-                    if terminal_attempt is not None:
-                        winning = str(terminal_attempt["id"])
-                raw_result = {
-                    "ok": row["status"] == "succeeded",
-                    "run_id": run_id,
-                    "kernel_run_id": run_id,
-                    "kernel_task_id": task_id,
-                    "kernel_attempt_id": winning,
-                    "executor_version": replay_executor_version,
-                }
-                if row["status"] == "succeeded":
-                    # Exact replay returns the durable stored output set, not
-                    # an empty success envelope whose artifacts vanished with
-                    # staging cleanup.
-                    output_rows = UnitOfWork(writer).run(
-                        lambda u: u.query(
-                            "SELECT o.ordinal, o.role, o.is_primary, o.params_json, "
-                            "m.id AS media_id, m.content_hash, l.locator "
-                            "FROM task_outputs o JOIN media m ON m.id = o.media_id "
-                            "JOIN media_locations l ON l.media_id = m.id "
-                            "AND l.realm = 'managed_local' "
-                            "WHERE o.task_id = ? ORDER BY o.ordinal ASC",
-                            (task_id,),
-                        )
-                    )
-                    artifacts: list[dict[str, Any]] = []
-                    mpath = None
-                    for output_row in output_rows:
-                        try:
-                            params = json.loads(str(output_row["params_json"]))
-                        except (TypeError, ValueError):
-                            params = {}
-                        label = params.get("label") if isinstance(params, Mapping) else None
-                        locator = str(output_row["locator"])
-                        artifact = {
-                            "path": locator,
-                            "label": label,
-                            "role": str(output_row["role"]),
-                            "is_primary": bool(output_row["is_primary"]),
-                            "media_id": str(output_row["media_id"]),
-                            "content_hash": str(output_row["content_hash"]),
-                        }
-                        artifacts.append(artifact)
-                        if label == "manifest.json":
-                            mpath = Path(locator)
-                    raw_result["outputs"] = {"artifacts": artifacts}
-                    return (
-                        run_id,
-                        task_id,
-                        winning,
-                        mpath,
-                        raw_result,
-                        row["status"] == "succeeded",
-                        None,
-                    )
-                if terminal_attempt is not None:
-                    try:
-                        terminal_error = json.loads(str(terminal_attempt["error_json"]))
-                    except (TypeError, ValueError):
-                        terminal_error = None
-                    if isinstance(terminal_error, Mapping):
-                        raw_result["error"] = dict(terminal_error)
-                return run_id, task_id, winning, None, raw_result, False, None
-        except Exception:
-            pass
-        claim_key = f"{idempotency_key}:claim"
-        claim = UnitOfWork(writer).run(
-            lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key)
+    spec: dict[str, Any] = {
+        "capability_id": str(capability.id),
+        "kind": str(kind),
+        "inputs": _json_safe_mapping(dict(inputs or {})),
+        "outputs": _json_safe_mapping(dict(outputs or {})),
+        "extra_pack_roots": list(extra_pack_roots),
+    }
+    if idempotency_context:
+        spec["authority_context"] = _json_safe_mapping(dict(idempotency_context))
+    idempotency_key = hashlib.sha256(
+        json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
         )
-        if claim is None:
-            # Idempotent replay after task already succeeded but run not yet
-            # marked terminal (task succeeded before run derived status).
-            raw_result: dict[str, Any] = {
-                "ok": True,
-                "run_id": run_id,
-                "kernel_run_id": run_id,
-                "kernel_task_id": task_id,
-                "kernel_attempt_id": claim_key,
-                "executor_version": stored_executor_version,
-            }
-            return run_id, task_id, claim_key, None, raw_result, True, None
-        handler = CapabilityTaskHandler(
-            capability_kind=capability.capability_type,
-            capability_id=capability.id,
-            projects_root=projects_root,
+    ).hexdigest()
+
+    if _client is None:
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as owned_client:
+            return _kernel_invoke(
+                capability,
+                kind=kind,
+                project=project,
+                projects_root=Path(),
+                inputs=inputs,
+                outputs=outputs,
+                extra_pack_roots=extra_pack_roots,
+                idempotency_context=idempotency_context,
+                _client=owned_client,
+            )
+
+    tasks = getattr(_client, "tasks", None)
+    create_task = getattr(tasks, "create", None)
+    if not callable(create_task):
+        raise CapabilityInvocationError(
+            "runtime client does not expose generated task admission"
         )
-        svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
-        with schema_registry_context(registry):
-            exec_res = svc.execute(
-                UnitOfWork(writer),
-                project_id=project_id,
-                task_id=claim.task.id,
-                attempt_id=claim.attempt.id,
-                lease_id=claim.attempt.lease_id,
-                expected_status_version=claim.attempt.status_version,
-                idempotency_key=f"{idempotency_key}:exec",
-                handler=handler,
-            )
-        if exec_res.outcome == "failed":
-            raw_result: dict[str, Any] = {
-                "ok": False,
-                "run_id": run_id,
-                "kernel_run_id": run_id,
-                "kernel_task_id": task_id,
-                "kernel_attempt_id": claim.attempt.id,
-                "error": exec_res.error,
-                "executor_version": stored_executor_version,
+    result = create_task(
+        project_id=project,
+        capability=str(capability.id),
+        spec=spec,
+        input_manifest=[],
+        idempotency_key=idempotency_key,
+    )
+    result_ok = bool(getattr(result, "ok", isinstance(result, Mapping)))
+    data = getattr(result, "data", result if isinstance(result, Mapping) else None)
+    if not result_ok:
+        error = getattr(result, "error", None)
+        if hasattr(error, "as_dict"):
+            error = error.as_dict()
+        elif isinstance(error, Mapping):
+            error = dict(error)
+        else:
+            error = {
+                "code": "runtime_error",
+                "message": "runtime rejected task admission",
+                "details": {},
             }
-            return run_id, task_id, claim.attempt.id, None, raw_result, False, None
-        if exec_res.outcome == "cancelled":
-            raw_result = {
-                "ok": False,
-                "run_id": run_id,
-                "kernel_run_id": run_id,
-                "kernel_task_id": task_id,
-                "kernel_attempt_id": claim.attempt.id,
-                "error": exec_res.error
-                or {
-                    "reason": "cancelled",
-                    "message": "operator cancellation won; no artifact was published",
-                },
-                "executor_version": stored_executor_version,
-            }
-            return run_id, task_id, claim.attempt.id, None, raw_result, False, None
-        assert exec_res.prepared is not None
-        prepared = exec_res.prepared
-        with schema_registry_context(registry):
-            comp = svc.complete(
-                UnitOfWork(writer),
-                prepared=prepared,
-                media_repo=media_repo,
-                idempotency_key=f"{idempotency_key}:complete",
-            )
-        ok = comp.outcome == "completed"
-        # A kernel invocation has no durable filesystem run root. The attempt
-        # directory is a private publication fence and is removed after CAS
-        # completion; exposing it as ``run_root`` leaves callers holding a
-        # path that is guaranteed to be stale. Durable locators are returned
-        # under outputs.artifacts instead.
-        raw_result = {
-            "ok": ok,
-            "run_id": run_id,
-            "kernel_run_id": run_id,
-            "kernel_task_id": task_id,
-            "kernel_attempt_id": prepared.attempt.id,
-            "executor_version": stored_executor_version,
-        }
-        if comp.outcome != "completed":
-            raw_result["error"] = dict(
-                comp.error
-                or {
-                    "reason": "cancelled",
-                    "message": "operator cancellation won; no artifact was published",
-                }
-            )
-        durable_manifest_path = None
-        if comp.completed is not None:
-            # The universal manifest is intentionally held in the kernel
-            # completion boundary rather than written as a second authority.
-            # Return its ordered media identities and staged paths without
-            # pretending the first artifact is a JSON manifest (rendering
-            # outputs are commonly MP4s, with a provenance sidecar alongside).
-            artifacts: list[dict[str, Any]] = []
-            for prepared_output, stored_output in zip(prepared.outputs, comp.completed.outputs):
-                digest = (
-                    prepared_output.prepared.digest
-                    if prepared_output.prepared is not None
-                    else None
-                )
-                # The staging tree is an execution detail and is cleaned up
-                # after terminal completion. Return the managed digest path
-                # for materialized media so callers can open the artifact
-                # after the invocation has finished.
-                durable_path = (
-                    str(managed_media_path(projects_root, digest)) if digest is not None else None
-                )
-                artifact: dict[str, Any] = {
-                    "path": durable_path,
-                    "label": prepared_output.label,
-                    "role": stored_output.role,
-                    "is_primary": stored_output.is_primary,
-                    "media_id": stored_output.media_id,
-                    "content_hash": digest,
-                }
-                if prepared_output.label == "manifest.json" and durable_path is not None:
-                    durable_manifest_path = Path(durable_path)
-                requested_name = inputs.get("output_name") if isinstance(inputs, Mapping) else None
-                if isinstance(requested_name, str) and requested_name:
-                    artifact["requested_output_name"] = requested_name
-                artifacts.append(artifact)
-            raw_result["outputs"] = {"artifacts": artifacts}
-        mpath = None
-        # CapabilityTaskHandler returns an in-memory universal manifest. If an
-        # executor produced its own manifest, expose the durable managed media
-        # locator rather than the execution-only staging path.
-        if durable_manifest_path is not None:
-            mpath = durable_manifest_path
-        # A successful completion has materialized every output into managed
-        # media; the exact generated staging directory is no longer live and
-        # can be removed. Failed handlers already clean their staging in
-        # ExecutionService.execute. Leave a non-completed/stale completion
-        # quarantined for startup GC because another worker may still own it.
-        if comp.outcome in ("completed", "losing"):
-            svc.cleanup_staging(prepared.staging_dir)
-        return run_id, task_id, prepared.attempt.id, mpath, raw_result, ok, None
-    finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
+        return "", "", "", None, {"ok": False, "error": error}, False, None
+    if not isinstance(data, Mapping):
+        raise CapabilityInvocationError("runtime task admission returned no task resource")
+
+    run_id = str(data.get("run_id") or "")
+    task_id = str(data.get("task_id") or "")
+    if not run_id or not task_id:
+        raise CapabilityInvocationError(
+            "runtime task admission returned an incomplete task resource"
+        )
+    attempt_id = str(data.get("attempt_id") or "")
+    raw_result = {
+        "ok": True,
+        "run_id": run_id,
+        "kernel_run_id": run_id,
+        "kernel_task_id": task_id,
+        "kernel_attempt_id": attempt_id,
+        "task": dict(data),
+    }
+    return run_id, task_id, attempt_id, None, raw_result, True, None
 
 
 def invoke(
@@ -1926,6 +1655,7 @@ def invoke(
         kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(
             capability,
             **kernel_kwargs,
+            _client=_client,
         )
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
         run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
