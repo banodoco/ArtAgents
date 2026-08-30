@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ import pytest
 from astrid.core.execution.generic_host import (
     AdapterRegistry,
     GenericPackHost,
+    HostCancelled,
     HostError,
     RuntimeProtocolClient,
 )
@@ -48,7 +51,13 @@ class FakeRuntime:
         self.failures.append((task_id, lease_token, error, kwargs))
 
 
-def _write_manifest(root: Path, *, version: str = "1.0", capability_id: str = "test.echo") -> Path:
+def _write_manifest(
+    root: Path,
+    *,
+    version: str = "1.0",
+    capability_id: str = "test.echo",
+    cwd: str | None = None,
+) -> Path:
     root.mkdir(parents=True)
     manifest = {
         "schema_version": 1,
@@ -66,9 +75,88 @@ def _write_manifest(root: Path, *, version: str = "1.0", capability_id: str = "t
         "outputs": [{"name": "answer", "type": "file", "path_template": "{out}/answer.txt", "artifact_type": "text/plain"}],
         "metadata": {"resource_keys": ["cpu"], "estimated_scratch_bytes": 1},
     }
+    if cwd is not None:
+        manifest["command"]["cwd"] = cwd
     path = root / "executor.yaml"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     return path
+
+
+def test_admitted_definition_and_source_are_fenced_before_child_dispatch(tmp_path):
+    _write_manifest(tmp_path / "echo")
+    host = GenericPackHost(pack_roots=[tmp_path])
+    definition, admission = host.admit("executor", "test.echo")
+    # Mutating the source after admission must fail closed; the child may not
+    # reopen the mutable default registry and silently run a different command.
+    (tmp_path / "echo" / "runtime.py").write_text("changed", encoding="utf-8")
+    with pytest.raises(HostError, match="source digest changed"):
+        host.invoke_capability(
+            capability_kind="executor",
+            capability_id="test.echo",
+            request={"out": str(tmp_path / "attempt"), "inputs": {}},
+            attempt=tmp_path / "attempt",
+            definition=definition,
+            admission=admission,
+        )
+
+
+def test_input_materialization_rejects_traversal_names(tmp_path):
+    _write_manifest(tmp_path / "echo")
+
+    class Objects(FakeRuntime):
+        def get_object(self, digest):
+            return b"input"
+
+    host = GenericPackHost(pack_roots=[tmp_path], client=Objects())
+    with pytest.raises(HostError, match="input name escapes"):
+        host._materialize_inputs(
+            {"input_digests": [{"name": "../escape", "digest": "a" * 64}]},
+            tmp_path / "attempt",
+        )
+
+
+def test_command_cwd_must_stay_in_attempt_or_source_scope(tmp_path):
+    _write_manifest(tmp_path / "echo", cwd=str(tmp_path / "outside"))
+    host = GenericPackHost(pack_roots=[tmp_path])
+    host.discover()
+    record = host.capabilities["test.echo"]
+    with pytest.raises(HostError, match="cwd escapes"):
+        host._run_command_definition(record, {}, tmp_path / "attempt" / "outputs", tmp_path / "attempt")
+
+
+def test_cancellation_terminates_descendant_process_group(tmp_path):
+    root = tmp_path / "group"
+    _write_manifest(root)
+    manifest = json.loads((root / "executor.yaml").read_text(encoding="utf-8"))
+    manifest["command"]["argv"] = [
+        "{python_exec}",
+        "-c",
+        "import os,time; from pathlib import Path; p=os.fork(); Path('{out}/child.pid').write_text(str(p if p else os.getpid())); time.sleep(30)",
+    ]
+    (root / "executor.yaml").write_text(json.dumps(manifest), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[tmp_path])
+    host.discover()
+    attempt = tmp_path / "attempt"
+    output_root = attempt / "outputs"
+    output_root.mkdir(parents=True)
+    started = time.monotonic()
+
+    def cancelled():
+        return time.monotonic() - started > 0.75
+
+    with pytest.raises(HostCancelled):
+        host._run_command_definition(
+            host.capabilities["test.echo"], {}, output_root, attempt, cancelled=cancelled
+        )
+    child_pid = int((output_root / "child.pid").read_text(encoding="utf-8"))
+    for _ in range(20):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("descendant survived cancellation")
 
 
 def test_discovery_digest_and_truthful_preflight(tmp_path):

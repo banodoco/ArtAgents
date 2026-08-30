@@ -13,6 +13,8 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .generic_host import _canonical_digest, _source_digest
+
 
 def _json_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -56,22 +58,37 @@ def run(payload_path: str | Path) -> int:
         raise ValueError("capability worker payload request must be an object")
 
     definition_payload = payload.get("definition")
+    admission = payload.get("admission")
+    if not isinstance(definition_payload, Mapping) or not isinstance(admission, Mapping):
+        raise ValueError("capability worker requires an admitted definition and admission fence")
+    if str(definition_payload.get("id") or "") != capability_id:
+        raise ValueError("admitted definition does not match capability identity")
+    expected_digest = str(admission.get("capability_digest") or "")
+    if expected_digest and _canonical_digest(definition_payload) != expected_digest:
+        raise ValueError("admitted capability definition digest changed")
+    expected_version = admission.get("version")
+    if expected_version is not None and str(definition_payload.get("version")) != str(expected_version):
+        raise ValueError("admitted capability version changed")
+    source_root = admission.get("source_root")
+    expected_source = str(admission.get("source_digest") or "")
+    if source_root and expected_source and _source_digest(Path(str(source_root))) != expected_source:
+        raise ValueError("admitted capability source digest changed")
     if kind == "executor":
         from astrid.core.execution.executor.registry import ExecutorRegistry
         from astrid.core.execution.executor.runner import run_executor
 
-        registry = None
-        if isinstance(definition_payload, Mapping):
-            from astrid.core.execution.executor.schema import validate_executor_definition
+        from astrid.core.execution.executor.schema import validate_executor_definition
 
-            registry = ExecutorRegistry([validate_executor_definition(definition_payload)])
+        registry = ExecutorRegistry([validate_executor_definition(definition_payload)])
         result = run_executor(_request_object(request_payload, kind=kind, capability_id=capability_id), registry)
     else:
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+        from astrid.core.execution.orchestrator.schema import validate_orchestrator_definition
         from astrid.core.execution.orchestrator.runner import run_orchestrator
 
         result = run_orchestrator(
             _request_object(request_payload, kind=kind, capability_id=capability_id),
-            None,
+            OrchestratorRegistry([validate_orchestrator_definition(definition_payload)]),
         )
 
     result_path = Path(str(payload["result_path"]))

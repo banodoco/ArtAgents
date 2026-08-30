@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import importlib.util
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -70,6 +71,7 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
         capability_id="testing.stdout",
         projects_root=tmp_path,
     )
+    parent_internal = os.environ.get("ASTRID_INTERNAL_INVOCATION")
 
     manifest = handler.execute(
         task=SimpleNamespace(
@@ -87,6 +89,7 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     marker = (tmp_path / "staging" / "out" / "result.txt").read_text()
     assert f"pid={os.getpid()}" not in marker
     assert "internal=1" in marker
+    assert os.environ.get("ASTRID_INTERNAL_INVOCATION") == parent_internal
 
 
 def test_retried_legacy_executor_task_fails_closed_without_version(
@@ -143,3 +146,26 @@ def test_callback_pipeline_step_does_not_invoke_parent_callback(
     assert "child callback stdout" in (tmp_path / "logs" / "callback.log").read_text(
         encoding="utf-8"
     )
+
+
+def test_callback_timeout_kills_child_process_group(tmp_path: Path, monkeypatch) -> None:
+    module_path = tmp_path / "hung_callback.py"
+    module_path.write_text(
+        "import time\n"
+        "def callback(args):\n"
+        "    while True:\n"
+        "        time.sleep(1)\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("hung_callback", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    step = Step("hung", (), lambda _args: [], invoke=module.callback)
+    args = SimpleNamespace(out=tmp_path, verbose=False, callback_timeout=0.1)
+
+    started = time.monotonic()
+    assert run_step(step, [], args) == 124
+    assert time.monotonic() - started < 3
+    assert "timed out" in (tmp_path / "logs" / "hung.log").read_text(encoding="utf-8")

@@ -14,6 +14,10 @@ import os
 import subprocess
 import sys
 import pickle
+import queue
+import signal
+import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -188,6 +192,29 @@ def print_log_tail(step_name: str, log_path: Path) -> None:
         )
     )
 
+
+def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 1.0) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            process.kill()
+        process.wait()
+
+
+def _callback_cancelled(args: argparse.Namespace) -> bool:
+    callback = getattr(args, "cancelled", None)
+    if callable(callback) and callback():
+        return True
+    event = getattr(args, "cancel_event", None)
+    return bool(event is not None and event.is_set())
+
 def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
     logs_dir = log_dir_for_step(step, args)
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -199,12 +226,15 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
             # built-in executor can mutate the parent runner's Python state
             # despite its subprocess execution mode.
             request_path = log_path.with_suffix(log_path.suffix + ".request")
+            child_args = argparse.Namespace(**vars(args))
+            child_args.__dict__.pop("cancelled", None)
+            child_args.__dict__.pop("cancel_event", None)
             request_path.write_bytes(
                 pickle.dumps(
                     {
                         "module": step.invoke.__module__,
                         "function": step.invoke.__name__,
-                        "args": args,
+                        "args": child_args,
                     },
                     protocol=pickle.HIGHEST_PROTOCOL,
                 )
@@ -225,14 +255,64 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
+                start_new_session=True,
             )
             assert process.stdout is not None
-            for line in process.stdout:
-                log_handle.write(line)
-                if args.verbose:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
+            lines: queue.Queue[str | None] = queue.Queue()
+
+            def read_output() -> None:
+                for line in process.stdout:
+                    lines.put(line)
+                lines.put(None)
+
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+            deadline = time.monotonic() + max(
+                0.0, float(getattr(args, "callback_timeout", 300.0))
+            )
+            timed_out = False
+            cancelled = False
+            stream_closed = False
+            while process.poll() is None:
+                try:
+                    while True:
+                        line = lines.get_nowait()
+                        if line is None:
+                            stream_closed = True
+                            break
+                        log_handle.write(line)
+                        if args.verbose:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+                except queue.Empty:
+                    pass
+                if _callback_cancelled(args):
+                    cancelled = True
+                    _terminate_process_group(process)
+                    break
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _terminate_process_group(process)
+                    break
+                time.sleep(0.02)
             returncode = process.wait()
+            reader.join(timeout=1)
+            while True:
+                try:
+                    line = lines.get_nowait()
+                except queue.Empty:
+                    break
+                if line is not None:
+                    log_handle.write(line)
+                    if args.verbose:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+            if timed_out:
+                log_handle.write("callback timed out\n")
+                returncode = 124
+            elif cancelled:
+                log_handle.write("callback cancelled\n")
+                returncode = 143
             request_path.unlink(missing_ok=True)
         else:
             env = os.environ.copy()
@@ -250,6 +330,7 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 bufsize=1,
                 text=True,
                 env=env,
+                start_new_session=True,
             )
             assert process.stdout is not None
             for line in process.stdout:

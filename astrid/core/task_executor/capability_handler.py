@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping
 
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.audit.util import SECRET_VALUE_RE
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH, ASTRID_PROJECTS_ROOT
+from astrid.core.env_vars import ASTRID_PACKS_PATH, ASTRID_PROJECTS_ROOT
 from astrid.core.execution.generic_host import GenericPackHost, HostError
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.runtime.manifest import (
@@ -226,7 +226,6 @@ class CapabilityTaskHandler:
         )
         with (
             _scoped_pack_roots(extra_pack_roots),
-            _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"),
             root_scope,
             authority_scope,
         ):
@@ -237,6 +236,7 @@ class CapabilityTaskHandler:
                 if isinstance(root, (str, os.PathLike)) and str(root)
             )
             host = GenericPackHost(pack_roots=host_roots)
+            admitted_definition, admission = host.admit(self._kind, self._capability_id)
             request_payload = {
                 "out": str(out_dir),
                 "project": project,
@@ -262,6 +262,8 @@ class CapabilityTaskHandler:
                     capability_id=self._capability_id,
                     request=request_payload,
                     attempt=staging_dir,
+                    definition=admitted_definition,
+                    admission=admission,
                 )
             except HostError as exc:
                 detail = _failure_log_detail(out_dir)

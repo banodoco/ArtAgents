@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,53 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     return str(value)
+
+
+def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 2.0) -> None:
+    """Terminate a child session and all descendants, then reap the leader."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+        process.wait()
+
+
+def _confined_cwd(
+    raw_cwd: str | Path | None,
+    *,
+    attempt: Path,
+    source_root: Path | None = None,
+    values: Mapping[str, Any] | None = None,
+) -> Path:
+    """Resolve a command cwd inside the attempt or admitted source tree."""
+    value = str(raw_cwd or "")
+    for key, replacement in (values or {}).items():
+        value = value.replace("{" + str(key) + "}", str(replacement))
+    candidate = Path(value) if value else attempt
+    if not candidate.is_absolute():
+        candidate = attempt / candidate
+    resolved = candidate.expanduser().resolve()
+    allowed = [attempt.resolve()]
+    if source_root is not None:
+        allowed.append(source_root.expanduser().resolve())
+    if not any(resolved == root or resolved.is_relative_to(root) for root in allowed):
+        raise HostError(
+            f"command cwd escapes the attempt/source scope: {raw_cwd!r}"
+        )
+    return resolved
 
 
 def _preflight_unavailable_reason(record: "CapabilityRecord") -> str:
@@ -522,6 +570,58 @@ class GenericPackHost:
         })
         return tuple(records[key] for key in sorted(records))
 
+    def admit(self, capability_kind: str, capability_id: str) -> tuple[Mapping[str, Any], Mapping[str, str]]:
+        """Capture the exact definition and source epoch used by a task child."""
+        if capability_kind == "executor":
+            if not self.capabilities:
+                # Admission of an invocation-selected extra pack is scoped to
+                # that pack; the global capability matrix is for registration
+                # and must not reject an otherwise valid isolated definition.
+                matrix = self.matrix
+                self.matrix = {}
+                try:
+                    self.discover()
+                finally:
+                    self.matrix = matrix
+            record = self.capabilities.get(capability_id)
+            if record is None:
+                raise HostError(f"capability not discovered: {capability_id}")
+            return record.definition.to_dict(), {
+                "capability_digest": record.capability_digest,
+                "source_digest": record.source_digest,
+                "dependency_digest": record.dependency_digest,
+                "version": record.definition.version,
+                "source_root": str(record.source_root),
+            }
+        if capability_kind == "orchestrator":
+            from astrid.core.execution.orchestrator.folder import (
+                discover_folder_orchestrator_roots,
+                load_folder_orchestrator,
+            )
+
+            for root in self.pack_roots:
+                for orchestrator_root in discover_folder_orchestrator_roots(root):
+                    try:
+                        definition = load_folder_orchestrator(orchestrator_root)
+                    except (OSError, ValueError):
+                        continue
+                    if definition.id != capability_id:
+                        continue
+                    source_digest = _source_digest(orchestrator_root)
+                    capability_digest = _canonical_digest(definition.to_dict())
+                    return definition.to_dict(), {
+                        "capability_digest": capability_digest,
+                        "source_digest": source_digest,
+                        "dependency_digest": _canonical_digest({
+                            "child_executors": definition.child_executors,
+                            "child_orchestrators": definition.child_orchestrators,
+                        }),
+                        "version": definition.version,
+                        "source_root": str(orchestrator_root),
+                    }
+            raise HostError(f"capability not discovered: {capability_id}")
+        raise HostError(f"unsupported capability kind {capability_kind!r}")
+
     def preflight(self, capability_id: str | None = None) -> tuple[CapabilityRecord, ...]:
         selected = [self.capabilities[capability_id]] if capability_id else list(self.capabilities.values())
         updated: dict[str, CapabilityRecord] = dict(self.capabilities)
@@ -749,13 +849,21 @@ class GenericPackHost:
         for item in spec.get("input_digests", ()) if isinstance(spec.get("input_digests", ()), list) else ():
             if isinstance(item, Mapping) and item.get("name") and item.get("digest"):
                 values.setdefault(str(item["name"]), {"digest": str(item["digest"])})
+        for name in values:
+            input_name = Path(str(name))
+            if not str(name) or input_name.is_absolute() or ".." in input_name.parts:
+                raise HostError(f"input name escapes the attempt directory: {name!r}")
         for name, value in list(values.items()):
             digest = value.get("digest") if isinstance(value, Mapping) else (value if isinstance(value, str) and len(value) == 64 else None)
             if digest and self.client is not None and hasattr(self.client, "get_object"):
+                input_name = Path(str(name))
+                input_root = (attempt / "inputs").resolve()
+                path = (input_root / input_name).resolve()
+                if not path.is_relative_to(input_root):
+                    raise HostError(f"input name escapes the attempt directory: {name!r}")
                 data = self.client.get_object(digest)
                 if hashlib.sha256(data).hexdigest() != digest:
                     raise HostError(f"input object hash mismatch for {name}")
-                path = attempt / "inputs" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
                 values[name] = str(path)
@@ -838,15 +946,24 @@ class GenericPackHost:
         # boundary, so mark the child invocation just as executor_runner does.
         env[ASTRID_INTERNAL_INVOCATION] = "1"
         env.update({str(key): str(value) for key, value in command.env.items()})
-        process = subprocess.Popen(argv, cwd=str(command.cwd or attempt), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        cwd = _confined_cwd(
+            command.cwd,
+            attempt=attempt,
+            source_root=record.source_root,
+            values=values,
+        )
+        process = subprocess.Popen(
+            argv,
+            cwd=str(cwd),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
         while process.poll() is None:
             if cancelled is not None and cancelled():
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                _terminate_process_group(process)
                 raise HostCancelled(f"capability {record.id!r} cancelled")
             time.sleep(0.05)
         stdout, stderr = process.communicate()
@@ -875,6 +992,7 @@ class GenericPackHost:
         attempt: str | Path,
         cancelled=None,
         definition: Mapping[str, Any] | None = None,
+        admission: Mapping[str, Any] | None = None,
     ) -> Any:
         """Run one pack capability in a dedicated child process.
 
@@ -889,6 +1007,26 @@ class GenericPackHost:
             raise HostError(f"unsupported capability kind {capability_kind!r}")
         attempt_path = Path(attempt).expanduser().resolve()
         attempt_path.mkdir(parents=True, exist_ok=True)
+        if definition is not None:
+            command_data: Mapping[str, Any] | None = None
+            if capability_kind == "executor":
+                candidate = definition.get("command")
+                command_data = candidate if isinstance(candidate, Mapping) else None
+            else:
+                runtime_data = definition.get("runtime")
+                if isinstance(runtime_data, Mapping):
+                    candidate = runtime_data.get("command")
+                    command_data = candidate if isinstance(candidate, Mapping) else None
+            if command_data is not None and command_data.get("cwd"):
+                source_root = None
+                if isinstance(admission, Mapping) and admission.get("source_root"):
+                    source_root = Path(str(admission["source_root"]))
+                _confined_cwd(
+                    str(command_data["cwd"]),
+                    attempt=attempt_path,
+                    source_root=source_root,
+                    values=request,
+                )
         request_path = attempt_path / ".astrid-capability-request.json"
         result_path = attempt_path / ".astrid-capability-result.json"
         payload = {
@@ -896,6 +1034,7 @@ class GenericPackHost:
             "capability_id": capability_id,
             "request": _json_safe(request),
             "definition": _json_safe(definition) if definition is not None else None,
+            "admission": _json_safe(admission) if admission is not None else None,
             "result_path": str(result_path),
         }
         request_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
@@ -922,16 +1061,12 @@ class GenericPackHost:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         try:
             while process.poll() is None:
                 if cancelled is not None and cancelled():
-                    process.terminate()
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                    _terminate_process_group(process)
                     raise HostCancelled(f"capability {capability_id!r} cancelled")
                 time.sleep(0.05)
             stdout, stderr = process.communicate()
@@ -1061,6 +1196,13 @@ class GenericPackHost:
                         attempt=root,
                         cancelled=cancelled,
                         definition=record.definition.to_dict(),
+                        admission={
+                            "capability_digest": record.capability_digest,
+                            "source_digest": record.source_digest,
+                            "dependency_digest": record.dependency_digest,
+                            "version": record.definition.version,
+                            "source_root": str(record.source_root),
+                        },
                     )
             finally:
                 pump_stop.set()
