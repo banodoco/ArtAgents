@@ -26,6 +26,13 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.execution.capability_ledger import load_capability_ledger
+from astrid.core.execution.process_group import (
+    group_exists as _owned_group_exists,
+    popen_owned_group,
+    release_group as _release_owned_group,
+    signal_group as _signal_owned_group,
+    terminate_group as _terminate_owned_group,
+)
 
 if TYPE_CHECKING:
     from astrid.core.execution.executor.schema import ExecutorDefinition
@@ -123,38 +130,12 @@ def _json_safe(value: Any) -> Any:
 
 
 def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
-    """Signal the session created for *process*, with a portable fallback."""
-    if hasattr(os, "killpg"):
-        try:
-            # ``start_new_session=True`` makes the child pid the process-group
-            # id.  Do this even after the leader exits: descendants can keep
-            # the group alive while the direct child has already been reaped.
-            os.killpg(process.pid, sig)
-            return
-        except ProcessLookupError:
-            return
-        except (PermissionError, OSError):
-            pass
-    if process.poll() is None:
-        try:
-            process.send_signal(sig)
-        except OSError:
-            pass
+    _signal_owned_group(process, sig)
+    return
 
 
 def _process_group_exists(process: subprocess.Popen) -> bool:
-    """Check for any remaining member, including a leader that already exited."""
-    if hasattr(os, "killpg"):
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return process.poll() is None
-        return True
-    return process.poll() is None
+    return _owned_group_exists(process)
 
 
 def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 2.0) -> None:
@@ -168,26 +149,7 @@ def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float 
     ``waitpid``-reaped here; killing the owned session is the relevant
     containment guarantee.
     """
-    _signal_process_group(process, signal.SIGTERM)
-    deadline = time.monotonic() + max(0.0, grace_seconds)
-    while _process_group_exists(process) and time.monotonic() < deadline:
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
-
-    if _process_group_exists(process):
-        _signal_process_group(process, signal.SIGKILL)
-        kill_deadline = time.monotonic() + max(1.0, grace_seconds)
-        while _process_group_exists(process) and time.monotonic() < kill_deadline:
-            # Repeat SIGKILL while the group is being reaped.  This handles a
-            # leader that exited during the grace window but left a stubborn
-            # descendant holding the session open.
-            _signal_process_group(process, signal.SIGKILL)
-            time.sleep(0.01)
-
-    try:
-        process.wait(timeout=max(1.0, grace_seconds))
-    except subprocess.TimeoutExpired:
-        _signal_process_group(process, signal.SIGKILL)
-        process.wait()
+    _terminate_owned_group(process, grace_seconds=grace_seconds)
 
 
 def _confined_cwd(
@@ -998,36 +960,38 @@ class GenericPackHost:
             source_root=record.source_root,
             values=values,
         )
-        process = subprocess.Popen(
+        process = popen_owned_group(
             argv,
             cwd=str(cwd),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,
         )
-        while process.poll() is None:
-            if cancelled is not None and cancelled():
-                _terminate_process_group(process)
-                raise HostCancelled(f"capability {record.id!r} cancelled")
-            time.sleep(0.05)
-        stdout, stderr = process.communicate()
-        if process.returncode != 0:
-            raise HostError(f"capability {record.id!r} exited {process.returncode}: {(stderr or stdout).strip()}")
-        outputs = {}
-        for output in record.definition.outputs:
-            template = output.path_template or output.placeholder
-            if template:
-                path = str(template)
-                for key, value in values.items():
-                    path = path.replace("{" + key + "}", str(value))
-            else:
-                path = str(output_root / output.name)
-            candidate = Path(path)
-            if candidate.is_file():
-                outputs[output.name] = str(candidate)
-        return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
+        try:
+            while process.poll() is None:
+                if cancelled is not None and cancelled():
+                    _terminate_process_group(process)
+                    raise HostCancelled(f"capability {record.id!r} cancelled")
+                time.sleep(0.05)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                raise HostError(f"capability {record.id!r} exited {process.returncode}: {(stderr or stdout).strip()}")
+            outputs = {}
+            for output in record.definition.outputs:
+                template = output.path_template or output.placeholder
+                if template:
+                    path = str(template)
+                    for key, value in values.items():
+                        path = path.replace("{" + key + "}", str(value))
+                else:
+                    path = str(output_root / output.name)
+                candidate = Path(path)
+                if candidate.is_file():
+                    outputs[output.name] = str(candidate)
+            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
+        finally:
+            _release_owned_group(process)
 
     def invoke_capability(
         self,
@@ -1100,14 +1064,13 @@ class GenericPackHost:
             existing = [item for item in env.get("ASTRID_PACKS_PATH", "").split(os.pathsep) if item]
             roots = [str(root) for root in (*self.pack_roots, *map(Path, existing))]
             env["ASTRID_PACKS_PATH"] = os.pathsep.join(dict.fromkeys(roots))
-        process = subprocess.Popen(
+        process = popen_owned_group(
             [sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)],
             cwd=str(attempt_path),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,
         )
         try:
             while process.poll() is None:
@@ -1141,6 +1104,7 @@ class GenericPackHost:
                 stderr=stderr,
             )
         finally:
+            _release_owned_group(process)
             request_path.unlink(missing_ok=True)
             result_path.unlink(missing_ok=True)
 

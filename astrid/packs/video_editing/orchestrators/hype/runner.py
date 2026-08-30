@@ -26,6 +26,13 @@ from astrid.core import timeline
 from astrid.core.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.execution.process_group import (
+    group_exists as _owned_group_exists,
+    popen_owned_group,
+    release_group as _release_owned_group,
+    signal_group as _signal_owned_group,
+    terminate_group as _terminate_owned_group,
+)
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import STEP_ORDER
@@ -194,38 +201,13 @@ def print_log_tail(step_name: str, log_path: Path) -> None:
 
 
 def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
-    """Signal the owned child session, falling back to the direct child."""
-    if hasattr(os, "killpg"):
-        try:
-            # The child starts a fresh session, making its pid the process
-            # group id.  Signal the group even if the leader already exited;
-            # a descendant may still be keeping that group alive.
-            os.killpg(process.pid, sig)
-            return
-        except ProcessLookupError:
-            return
-        except (PermissionError, OSError):
-            pass
-    if process.poll() is None:
-        try:
-            process.send_signal(sig)
-        except OSError:
-            pass
+    """Signal the owned child session, using its stable keeper when set."""
+    _signal_owned_group(process, sig)
 
 
 def _process_group_exists(process: subprocess.Popen) -> bool:
     """Return whether any member of the owned session is still alive."""
-    if hasattr(os, "killpg"):
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return process.poll() is None
-        return True
-    return process.poll() is None
+    return _owned_group_exists(process)
 
 
 def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 1.0) -> None:
@@ -236,23 +218,7 @@ def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float 
     then leak that descendant.  Group liveness is checked independently and
     the remaining group is escalated to SIGKILL before the leader is reaped.
     """
-    _signal_process_group(process, signal.SIGTERM)
-    deadline = time.monotonic() + max(0.0, grace_seconds)
-    while _process_group_exists(process) and time.monotonic() < deadline:
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
-
-    if _process_group_exists(process):
-        _signal_process_group(process, signal.SIGKILL)
-        kill_deadline = time.monotonic() + max(1.0, grace_seconds)
-        while _process_group_exists(process) and time.monotonic() < kill_deadline:
-            _signal_process_group(process, signal.SIGKILL)
-            time.sleep(0.01)
-
-    try:
-        process.wait(timeout=max(1.0, grace_seconds))
-    except subprocess.TimeoutExpired:
-        _signal_process_group(process, signal.SIGKILL)
-        process.wait()
+    _terminate_owned_group(process, grace_seconds=grace_seconds)
 
 
 def _callback_cancelled(args: argparse.Namespace) -> bool:
@@ -295,14 +261,13 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 if not existing_pythonpath
                 else os.pathsep.join((package_parent, existing_pythonpath))
             )
-            process = subprocess.Popen(
+            process = popen_owned_group(
                 [sys.executable, "-m", "astrid.packs.video_editing.orchestrators.hype.step_worker", str(request_path)],
                 cwd=str(args.out),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
-                start_new_session=True,
             )
             assert process.stdout is not None
             lines: queue.Queue[str | None] = queue.Queue()
@@ -360,6 +325,7 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
             elif cancelled:
                 log_handle.write("callback cancelled\n")
                 returncode = 143
+            _release_owned_group(process)
             request_path.unlink(missing_ok=True)
         else:
             env = os.environ.copy()
@@ -370,22 +336,94 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                     env[PARENT_IDS_ENV] = ",".join(parent_ids)
             if getattr(args, "no_audit", False):
                 env["ASTRID_AUDIT_DISABLED"] = "1"
-            process = subprocess.Popen(
+            # Command steps deliberately inherit the worker's session.  A
+            # command-step-created session would be invisible to the outer
+            # GenericPackHost cancellation group and could leave a render
+            # running after the task had been cancelled.
+            internal_worker = env.get("ASTRID_INTERNAL_INVOCATION") == "1"
+            launcher = subprocess.Popen if internal_worker else popen_owned_group
+            process = launcher(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=1,
                 text=True,
                 env=env,
-                start_new_session=True,
+                **({"start_new_session": False} if internal_worker else {}),
             )
             assert process.stdout is not None
-            for line in process.stdout:
-                log_handle.write(line)
-                if args.verbose:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
+            lines: queue.Queue[str | None] = queue.Queue()
+
+            def read_output() -> None:
+                for line in process.stdout:
+                    lines.put(line)
+                lines.put(None)
+
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+            deadline = None
+            command_timeout = getattr(args, "command_timeout", None)
+            if command_timeout is not None:
+                deadline = time.monotonic() + max(0.0, float(command_timeout))
+            cancelled = False
+            timed_out = False
+            while process.poll() is None:
+                try:
+                    while True:
+                        line = lines.get_nowait()
+                        if line is None:
+                            break
+                        log_handle.write(line)
+                        if args.verbose:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+                except queue.Empty:
+                    pass
+                if _callback_cancelled(args):
+                    cancelled = True
+                    if internal_worker:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                    else:
+                        _terminate_process_group(process)
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    timed_out = True
+                    if internal_worker:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                    else:
+                        _terminate_process_group(process)
+                    break
+                time.sleep(0.02)
             returncode = process.wait()
+            reader.join(timeout=1)
+            while True:
+                try:
+                    line = lines.get_nowait()
+                except queue.Empty:
+                    break
+                if line is not None:
+                    log_handle.write(line)
+                    if args.verbose:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+            if timed_out:
+                log_handle.write("command timed out\n")
+                returncode = 124
+            elif cancelled:
+                log_handle.write("command cancelled\n")
+                returncode = 143
+            if not internal_worker:
+                _release_owned_group(process)
     if returncode != 0:
         print_log_tail(step.name, log_path)
     elif getattr(args, "audit", None) is not None:

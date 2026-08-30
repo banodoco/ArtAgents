@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import importlib.util
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -213,3 +214,36 @@ def test_callback_timeout_kills_sigterm_resistant_descendant_after_leader_exit(
         time.sleep(0.05)
     else:
         pytest.fail("SIGTERM-resistant callback descendant survived timeout")
+
+
+def test_command_step_cancellation_does_not_create_detached_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A nested Hype command inherits the outer host's cancellation group."""
+    pid_path = tmp_path / "command.pid"
+    command = [
+        sys.executable,
+        "-c",
+        f"import os,time; from pathlib import Path; Path({str(pid_path)!r}).write_text(str(os.getpid())); time.sleep(30)",
+    ]
+    # This is the same marker set by GenericPackHost for an admitted worker.
+    # The command must therefore stay in that worker's group rather than
+    # opening a detached session that the host cannot reach.
+    monkeypatch.setenv("ASTRID_INTERNAL_INVOCATION", "1")
+    started = time.monotonic()
+
+    def cancelled() -> bool:
+        return time.monotonic() - started > 0.25
+
+    step = Step("command", (), lambda _args: [], invoke=None)
+    args = SimpleNamespace(out=tmp_path, verbose=False, cancelled=cancelled)
+    assert run_step(step, command, args) == 143
+    pid = int(pid_path.read_text(encoding="utf-8"))
+    for _ in range(40):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("cancelled nested command survived")

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from astrid.core.execution.generic_host import (
     HostCancelled,
     HostError,
     RuntimeProtocolClient,
+    _terminate_process_group,
 )
 
 
@@ -203,6 +206,18 @@ def test_cancellation_reaps_sigterm_resistant_descendant_after_leader_exit(tmp_p
         time.sleep(0.05)
     else:
         pytest.fail("SIGTERM-resistant descendant survived leader-exit cancellation")
+
+
+def test_cleanup_does_not_signal_a_reused_group_after_leader_exit(monkeypatch):
+    """An exited leader PID must never be reused as a killpg target."""
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    process.wait()
+
+    def unexpected_killpg(*_args):
+        raise AssertionError("cleanup signaled a group after its leader exited")
+
+    monkeypatch.setattr(os, "killpg", unexpected_killpg)
+    _terminate_process_group(process)
 
 
 def test_discovery_digest_and_truthful_preflight(tmp_path):
