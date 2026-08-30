@@ -12,32 +12,26 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.env_vars import ASTRID_PACKS_PATH
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
-    pack_manifest_path,
     pack_taxonomy_from_manifest,
     packs_root,
 )
 from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
-from astrid.core.pack.validate import (
-    extract_trust_summary,
-)
 
 from ._cli_shared import _pack_payload, _pack_taxonomy, _print_taxonomy_block
-
-if TYPE_CHECKING:
-    from astrid.core.pack.store import InstallRecord
 
 # ---------------------------------------------------------------------------
 # pack inspect
 # ---------------------------------------------------------------------------
 
 
+'''REMOVED_INSTALLED_INSPECT
 def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
     """Render installed-pack inspect output for the public wrapper and CLI."""
     from astrid.core.pack.store import InstalledPackStore
@@ -93,16 +87,17 @@ def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> 
         _print_full_inspect(full_data)
 
     return 0
+'''
 
 
 def cmd_inspect(argv: list[str]) -> int:
-    """Show details for an installed pack.
+    """Show details for a discovered manifest-ledger pack.
 
     Usage: python3 -m astrid packs inspect <pack_id> [--agent] [--json]
     """
     parser = argparse.ArgumentParser(
         prog="python3 -m astrid packs inspect",
-        description="Show details for an installed pack.",
+        description="Show details for a discovered pack.",
     )
     parser.add_argument(
         "pack_id",
@@ -125,10 +120,11 @@ def cmd_inspect(argv: list[str]) -> int:
         help="Additional pack collection root (also honors ASTRID_PACKS_PATH).",
     )
     args = parser.parse_args(argv)
-    return _inspect_installed_pack(
+    return _inspect_discovered_pack(
         pack_id=args.pack_id,
         agent=bool(args.agent),
         json_output=bool(args.json),
+        pack_roots=tuple(args.pack_roots or ()),
     )
 
 
@@ -786,19 +782,9 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool, pa
 
 def _handle_inspect(args: argparse.Namespace) -> int:
     """Handler for ``packs inspect``."""
-    from astrid.core.pack.store import InstalledPackStore
-
-    store = InstalledPackStore()
-    if store.get_active(args.pack_id) is None:
-        return _inspect_discovered_pack(
-            pack_id=args.pack_id,
-            agent=bool(args.agent),
-            json_output=bool(args.json),
-            pack_roots=tuple(args.pack_roots or ()),
-        )
-
-    return _inspect_installed_pack(
+    return _inspect_discovered_pack(
         pack_id=args.pack_id,
         agent=bool(args.agent),
         json_output=bool(args.json),
+        pack_roots=tuple(args.pack_roots or ()),
     )

@@ -32,7 +32,6 @@ from astrid.core.pack.alias_resolver import (
 from astrid.core.pack.discovery import DiscoveredPack, discover_pack_metadata
 from astrid.core.pack.manifest import load_manifest_mapping
 from astrid.core.pack.override import OverrideStore
-from astrid.core.pack.store import InstallRecord
 from astrid.core.registry import CapabilityRegistry, RegistryError
 
 from .contracts import FinalizerManifest, PlannerManifest, RendererManifest
@@ -709,8 +708,6 @@ def _derive_pack_trust(discovered: DiscoveredPack) -> _PackTrust:
             False,
             "environment-discovered packs are inspectable but not executable",
         )
-    if source_kind == "installed":
-        return _installed_pack_trust(discovered.pack)
     return _PackTrust(False, f"unknown pack source kind {source_kind!r}")
 
 

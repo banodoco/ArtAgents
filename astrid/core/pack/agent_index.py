@@ -1,14 +1,14 @@
 """Agent-facing pack index: deterministic, machine-readable pack summary.
 
-``build_agent_index(store)`` assembles a JSON-serializable dict that
-describes every discovered pack (built-in + installed) so agents can inspect
+``build_agent_index()`` assembles a JSON-serializable dict that describes every
+manifest-ledger pack so agents can inspect
 available packs and choose the right entrypoint without reading every manifest
 or doc file themselves.
 
 No LLM calls, no heuristics — purely deterministic assembly from structured
 manifest fields, component metadata, doc paths, and bounded STAGE.md excerpts.
 
-**Resolution strategy (dual-path):**
+**Resolution strategy:**
 
 1.  **Primary — pack-system canonical resolver** (``discover_packs()``):
     Enumerates built-in packs via the pack-system's canonical discovery
@@ -16,12 +16,8 @@ manifest fields, component metadata, doc paths, and bounded STAGE.md excerpts.
     authoritative source and always runs first.  When a pack is also
     installed, the installed entry overwrites the built-in entry on collision.
 
-2.  **Fallback — PR #8 installed-pack store** (``InstalledPackStore``):
-    After built-in packs are collected, installed packs are layered on
-    top.  An installed pack always wins over a built-in pack with the same
-    ``pack_id``.  This is the same behaviour as the original PR #8
-    implementation, but the discovery order is reversed: built-ins first,
-    then installed overlays.
+External roots are supplied explicitly through the pack discovery API; there
+is no user-local installed-pack overlay or mutation store.
 
 The dual-path design preserves backward compatibility with PR #8's index
 format while anchoring enumeration on the pack-system's canonical resolver.
@@ -43,7 +39,6 @@ from astrid.core.pack import (
     pack_manifest_path,
     packs_root,
 )
-from astrid.core.pack.store import InstalledPackStore
 
 # ---------------------------------------------------------------------------
 # STAGE.md excerpt helpers
@@ -294,20 +289,18 @@ def _normalize_dependencies(manifest: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def build_agent_index(
-    store: InstalledPackStore | None = None,
+    store: object | None = None,
     *,
     pack_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic agent-facing pack index.
 
-    Primary enumeration uses pack-system's canonical resolver
-    (``discover_packs()``).  Installed packs (via ``InstalledPackStore``)
-    are layered on top — an installed pack always wins over a built-in
-    pack with the same ``pack_id``.
+    Enumeration uses the pack-system's canonical manifest resolver
+    (``discover_packs()``).  The deprecated *store* positional argument is
+    accepted only so older callers fail soft; it is ignored and never loaded.
 
     Parameters:
-        store: Optional InstalledPackStore for installed packs.  Created with
-            defaults when ``None``.
+        store: Deprecated compatibility argument; ignored.
         pack_id: When set, return only the matching pack (or ``None``).
 
     Returns:
@@ -323,10 +316,7 @@ def build_agent_index(
     """
     from astrid.core.pack.validate import extract_trust_summary
 
-    if store is None:
-        store = InstalledPackStore()
-
-    # Collect packs from both sources.  Installed packs win on collision.
+    # Collect packs from the source/manifest ledger only.
     pack_map: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
@@ -346,32 +336,6 @@ def build_agent_index(
         pack_map[pid] = _assemble_pack_entry(
             pack_def.root, pid, manifest, trust, source_type="built-in"
         )
-
-    # ------------------------------------------------------------------
-    # Fallback: installed packs (via InstalledPackStore) — overwrite built-in dupes
-    # ------------------------------------------------------------------
-    for record in store.list_installed():
-        pid = record.pack_id
-        if pack_id is not None and pid != pack_id:
-            continue
-
-        rev_dir = store.active_revision_path(pid)
-        if rev_dir is None:
-            continue
-
-        try:
-            trust = extract_trust_summary(rev_dir)
-        except Exception:
-            trust = {}
-
-        manifest = _load_manifest(rev_dir)
-        entry = _assemble_pack_entry(
-            rev_dir, pid, manifest, trust,
-            source_type=record.source_type or "installed",
-        )
-        entry["source_type"] = record.source_type or "local"
-        entry["trust_tier"] = record.trust_tier or "local"
-        pack_map[pid] = entry
 
     # ------------------------------------------------------------------
     # Filter and sort

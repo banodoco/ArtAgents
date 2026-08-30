@@ -410,38 +410,12 @@ class TestAgentIndexPermissionsAndTrust(unittest.TestCase):
 
 
 class TestAgentIndexAndInspectWiring(unittest.TestCase):
-    """Regression: agent-index and the installed-pack inspect path referenced
-    names that were never imported (PackResolver / extract_trust_summary) and
-    blew up on invocation. No CLI-level test exercised them."""
+    """The surviving agent-index and manifest inspect surfaces are importable."""
 
     def test_extract_trust_summary_bound_in_cli_module(self) -> None:
         # The installed-inspect path calls extract_trust_summary; it must be
         # importable from the cli module (was previously unbound -> NameError).
         self.assertTrue(callable(packs_cli.extract_trust_summary))
-
-    def test_inspect_installed_path_executes_without_nameerror(self) -> None:
-        gen_root = _REPO_ROOT / "astrid" / "packs" / "generation"
-        record = InstallRecord(
-            pack_id="generation", name="Astrid Generation", version="1.0.0",
-            schema_version=1, source_path=str(gen_root),
-            installed_at="2025-01-01T00:00:00Z", revision="generation",
-            install_root=str(gen_root),
-        )
-        with mock.patch(
-            "astrid.core.pack.store.InstalledPackStore.get_active",
-            return_value=record,
-        ), mock.patch(
-            "astrid.core.pack.store.InstalledPackStore.active_revision_path",
-            return_value=gen_root,
-        ):
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = packs_cli._inspect_installed_pack(
-                    pack_id="generation", agent=False, json_output=True,
-                )
-        self.assertEqual(rc, 0)
-        payload = json.loads(buf.getvalue())
-        self.assertEqual(payload["pack_id"], "generation")
 
 
 if __name__ == "__main__":

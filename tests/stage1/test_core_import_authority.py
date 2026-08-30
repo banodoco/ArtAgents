@@ -200,3 +200,50 @@ def test_normal_gateway_sdk_host_backup_timeline_imports_exclude_retired_bridge(
         check=True,
     )
     assert result.stdout.strip() == "[]"
+
+
+def test_normal_pack_graph_excludes_installed_store_and_install_modules() -> None:
+    """Manifest-ledger discovery must not load the retired mutation authority."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; import astrid.sdk; "
+                "import astrid.core.gateway; import astrid.core.pack; "
+                "import astrid.core.pack.discovery; "
+                "import astrid.core.pack.agent_index; "
+                "import astrid.core.execution.executor.registry; "
+                "import astrid.core.execution.orchestrator.registry; "
+                "import astrid.core.rendering.registry; "
+                "legacy = ('sqlite3', 'astrid.core.pack.store', "
+                "'astrid.core.pack.install', 'astrid.core.pack.install_cli', "
+                "'astrid.core.pack.install_git', 'astrid.core.pack.install_local', "
+                "'astrid.core.pack.install_trust'); "
+                "print([name for name in sys.modules if any(name == item or "
+                "name.startswith(item + '.') for item in legacy)])"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_pack_cli_rejects_retired_mutation_commands() -> None:
+    """The pack CLI exposes read/validate/discovery commands only."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "astrid.core.pack.cli", "install", "demo"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr

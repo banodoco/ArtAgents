@@ -20,7 +20,6 @@ from pathlib import Path
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.pack import ensure_local_pack_for_elements
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"
@@ -132,7 +131,6 @@ def scaffold(
         + "\n",
         encoding="utf-8",
     )
-    ensure_local_pack_for_elements(project_root=project_root)
 
     timeline_clip = {
         "id": f"{effect_id}-sample",

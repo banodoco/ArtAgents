@@ -373,11 +373,10 @@ class PackDiscoveryTest(unittest.TestCase):
             self.assertEqual([o.id for o in orchestrators], ["env_full.orch1"])
             self.assertEqual([(e.kind, e.id) for e in elements], [("animations", "slide")])
 
-    def test_env_layer_ordered_after_extra_before_installed(self) -> None:
-        """Precedence across source/extra/env/installed is observable through
+    def test_env_layer_ordered_after_extra(self) -> None:
+        """Precedence across source/extra/env is observable through
         executor discovery.  The test uses distinct executor ids per layer so
-        layer provenance is unambiguous; it also asserts that the executor
-        registry prefers the first-seen (source) entry when duplicates exist."""
+        layer provenance is unambiguous."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)
 
@@ -402,10 +401,6 @@ class PackDiscoveryTest(unittest.TestCase):
             write_executor(env_pack_root, "exec1", "gamma.exec1")
             env_packs = discover_packs(env_root)
 
-            # Installed pack.
-            installed_root = write_pack(tmp_root / "installed", "delta")
-            write_executor(installed_root, "exec1", "delta.exec1")
-
             scan = self._make_multi_layer_scan(
                 src_packs,
                 **{
@@ -416,18 +411,14 @@ class PackDiscoveryTest(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
                 with mock.patch("astrid.core.execution.executor.registry.discover_packs", side_effect=scan):
-                    with mock.patch(
-                        "astrid.core.pack.store.installed_pack_roots",
-                        return_value=[installed_root],
-                    ):
-                        executors = load_pack_executors(
-                            extra_pack_roots=(str(extra_root),),
-                            include_installed=True,
-                        )
+                    executors = load_pack_executors(
+                        extra_pack_roots=(str(extra_root),),
+                        include_installed=True,
+                    )
 
             ids = [e.id for e in executors]
-            # source (alpha), extra (beta), env (gamma), installed (delta).
-            self.assertEqual(ids, ["alpha.exec1", "beta.exec1", "gamma.exec1", "delta.exec1"])
+            # source (alpha), extra (beta), env (gamma).
+            self.assertEqual(ids, ["alpha.exec1", "beta.exec1", "gamma.exec1"])
 
             registry = ExecutorRegistry(executors)
             winner = registry.get("alpha.exec1")
@@ -436,7 +427,7 @@ class PackDiscoveryTest(unittest.TestCase):
 
     def test_no_env_var_falls_through_gracefully(self) -> None:
         """When ASTRID_PACKS_PATH is empty, registry discovery proceeds
-        through source/extra/installed without error."""
+            through source/extra without error."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)
             src_root = tmp_root / "src_packs"

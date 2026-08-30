@@ -307,49 +307,21 @@ def cmd_new(argv: list[str]) -> int:
 
 
 def _list_installed_packs() -> int:
-    """Render the installed-pack list used by the public wrapper."""
-    from astrid.core.pack.store import InstalledPackStore
-
-    store = InstalledPackStore()
-    records = store.list_installed()
-
-    if not records:
-        print("No packs installed.")
-        return 0
-
-    col_id = max(max(len(r.pack_id) for r in records), 2)
-    col_name = max(max(len(r.name) for r in records), 4)
-    col_version = max(max(len(r.version) for r in records), 7)
-    col_status = 6
-    col_installed = 19
-
-    header = (
-        f"{'ID':<{col_id}}  {'NAME':<{col_name}}  "
-        f"{'VERSION':<{col_version}}  {'STATUS':<{col_status}}  "
-        f"{'INSTALLED':<{col_installed}}"
-    )
-    print(header)
-    print("-" * len(header))
-
-    for record in records:
-        status = "active" if record.active else "inactive"
-        print(
-            f"{record.pack_id:<{col_id}}  {record.name:<{col_name}}  "
-            f"{record.version:<{col_version}}  {status:<{col_status}}  "
-            f"{record.installed_at:<{col_installed}}"
-        )
-
+    """Render the source/manifest pack list for legacy wrapper callers."""
+    for pack in discover_packs(packs_root()):
+        if pack.visibility != "hidden":
+            print(f"{pack.id}\t{pack.name}\t{pack.version}")
     return 0
 
 
 def cmd_list(argv: list[str]) -> int:
-    """List installed external packs.
+    """List source and explicitly configured external packs.
 
     Usage: python3 -m astrid packs list
     """
     parser = argparse.ArgumentParser(
         prog="python3 -m astrid packs list",
-        description="List installed external packs.",
+        description="List source and explicitly configured external packs.",
     )
     parser.parse_args(argv)  # no arguments, just parses --help
     return _list_installed_packs()

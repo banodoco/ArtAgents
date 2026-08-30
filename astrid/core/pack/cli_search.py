@@ -17,12 +17,9 @@ def _handle_agent_index(args: argparse.Namespace) -> int:
     """Handler for ``packs agent-index``."""
 
     from astrid.core.pack.agent_index import build_agent_index
-    from astrid.core.pack.store import InstalledPackStore
-
-    store = InstalledPackStore()
 
     pack_id = getattr(args, "pack_id", None)
-    result = build_agent_index(store, pack_id=pack_id)
+    result = build_agent_index(pack_id=pack_id)
 
     if args.text_output:
         # Text table output
@@ -160,14 +157,13 @@ def _score_pack(pack: dict[str, Any], terms: list[str]) -> float:
 def _handle_search(args: argparse.Namespace) -> int:
     """Handler for ``packs search``."""
     from astrid.core.pack.agent_index import build_agent_index
-    from astrid.core.pack.store import InstalledPackStore
 
     terms = [t.lower() for t in args.query if t.strip()]
     if not terms:
         print("search: empty query", file=sys.stderr)
         return 2
 
-    index = build_agent_index(InstalledPackStore())
+    index = build_agent_index()
     packs = index.get("packs", []) if isinstance(index, dict) else []
 
     scored = [

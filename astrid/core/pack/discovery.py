@@ -1,17 +1,15 @@
 """Shared pack discovery across executor, orchestrator, and element registries.
 
-Each registry previously re-implemented the same four-layer discovery walk
-(source-tree packs, the project-scoped ``local`` scratch pack, extra pack
-roots, and installed packs). The duplication made it easy for the layers or
-their ordering to drift apart. This module centralizes the walk and exposes a
-``DiscoveredPack`` metadata shape so every registry — and, ahead of Step 13,
-skills discovery — consumes one ordered list with identical priority semantics.
+Each registry consumes the same manifest-ledger discovery walk. The walk is
+read-only: it can see source-tree packs, an already-materialized project
+``local`` pack, explicit extra roots, and read-only roots named by
+``ASTRID_PACKS_PATH``. It never creates a project pack and never consults an
+installed-pack store.
 
-Fault tolerance: the ``extra`` / ``env`` / ``installed`` layers are
-external by definition. A pack whose manifest fails to load — or an
-installed pack that fails validation — is skipped individually with a
-logged warning so one broken external pack cannot hide its valid
-neighbors. The source-tree scan stays strict: first-party packs must
+Fault tolerance: the ``extra`` / ``env`` layers are
+external by definition. A pack whose manifest fails to load is skipped
+individually with a logged warning so one broken external pack cannot hide its
+valid neighbors. The source-tree scan stays strict: first-party packs must
 always load.
 """
 
@@ -28,7 +26,6 @@ from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
-    ensure_local_pack_for_elements,
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
@@ -37,7 +34,7 @@ from astrid.core.pack import (
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
 
 # Source-kind labels in discovery (and therefore priority) order.
-SOURCE_KINDS: tuple[str, ...] = ("source", "local", "extra", "env", "installed")
+SOURCE_KINDS: tuple[str, ...] = ("source", "local", "extra", "env")
 ASTRID_PACKS_PATH_ENV = "ASTRID_PACKS_PATH"
 
 
@@ -94,11 +91,11 @@ def discover_pack_metadata(
 ) -> tuple[DiscoveredPack, ...]:
     """Return discovered packs in layered priority order.
 
-    Layers, in order: source-tree packs (excluding ``local``), the
-    project-scoped ``local`` scratch pack when *project_root* differs from the
-    repository root, explicit extra pack roots (excluding ``local``),
-    ``ASTRID_PACKS_PATH`` roots (excluding ``local``), and installed packs
-    (excluding ``local``) when *include_installed* is set.
+    Layers, in order: source-tree packs (excluding ``local``), an existing
+    project-scoped ``local`` pack, explicit extra pack roots (excluding
+    ``local``), and ``ASTRID_PACKS_PATH`` roots (excluding ``local``).
+    ``include_installed`` is retained as a source-compatible keyword but is
+    intentionally ignored; installed packs are not a discovery authority.
 
     *discover_packs_fn* overrides the source/local/extra layer scanner; callers
     pass their own module-level ``discover_packs`` so the historical per-registry
@@ -108,7 +105,12 @@ def discover_pack_metadata(
     scan = discover_packs_fn if discover_packs_fn is not None else discover_packs
     repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
     project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
-    local_pack_root = ensure_local_pack_for_elements(project_root=project_root)
+    # Discovery is observational. Do not materialize a project-local pack just
+    # because a registry was loaded; only an explicitly-authored manifest is
+    # eligible for the local layer.
+    local_pack_root = project_pack_root / "local"
+    if not any((local_pack_root / name).is_file() for name in ("pack.yaml", "pack.yml")):
+        local_pack_root = None
 
     discovered: list[DiscoveredPack] = []
     scanned_external_roots: set[Path] = set()
@@ -225,36 +227,13 @@ def discover_pack_metadata(
         return candidate.resolve()
 
     raw_env_roots = os.environ.get(ASTRID_PACKS_PATH_ENV, "")
-    if extra_pack_roots or raw_env_roots or include_installed:
+    if extra_pack_roots or raw_env_roots:
         for extra_root in extra_pack_roots:
             _scan_external_root(extra_root, "extra")
         for env_root in raw_env_roots.split(os.pathsep):
             if env_root == "":
                 continue
             _scan_external_root(env_root, "env")
-        if include_installed:
-            from astrid.core.pack import load_pack_manifest
-            from astrid.core.pack import pack_manifest_path as _pmp
-            from astrid.core.pack.store import installed_pack_roots
-
-            for installed_root in installed_pack_roots():
-                if not installed_root.is_dir():
-                    continue
-                mp = _pmp(installed_root)
-                if mp is None:
-                    continue
-                try:
-                    pack = load_pack_manifest(mp)
-                except Exception as exc:  # noqa: BLE001 - installed packs are fault-tolerant
-                    _LOGGER.warning(
-                        "skipping installed pack %s: manifest failed to load: %s",
-                        installed_root,
-                        exc,
-                    )
-                    continue
-                if pack.id == "local":
-                    continue
-                _add(pack, "installed")
 
     return tuple(discovered)
 

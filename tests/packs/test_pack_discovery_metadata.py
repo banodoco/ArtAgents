@@ -2,8 +2,8 @@
 
 These exercise the shared ``astrid.core.pack.discovery`` module that the
 executor, orchestrator, and element registries now delegate to. The focus is
-the five-layer walk (source / local / explicit-extra / environment /
-installed), identical ordering across registry consumers, and that skills
+the source / local / explicit-extra / environment walk, identical ordering
+across registry consumers, and that skills
 discovery can consume the same metadata.
 """
 
@@ -19,7 +19,6 @@ from unittest import mock
 from astrid.core.pack import (
     PackValidationError,
     discover_packs,
-    ensure_local_pack_for_elements,
     load_pack_manifest,
     pack_manifest_path,
 )
@@ -90,18 +89,7 @@ def _make_pack(root: Path, pack_id: str, *, folder: str | None = None):
 
 
 class PackDiscoveryMetadataTest(unittest.TestCase):
-    def test_local_pack_manifest_not_materialized_without_element_manifests(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_root = Path(tmp) / "project"
-            local_pack = project_root / "astrid" / "packs" / "local"
-            (local_pack / "elements" / "effects" / "scratch").mkdir(parents=True)
-
-            result = ensure_local_pack_for_elements(project_root=project_root)
-
-            self.assertIsNone(result)
-            self.assertFalse((local_pack / "pack.yaml").exists())
-
-    def test_repo_root_local_layer_materializes_when_element_manifest_exists(self) -> None:
+    def test_local_layer_requires_an_authored_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp) / "repo"
             packs_root = repo_root / "astrid" / "packs"
@@ -137,9 +125,8 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                     include_installed=False,
                 )
 
-            self.assertTrue((local_pack / "pack.yaml").is_file())
-            self.assertEqual([dp.id for dp in discovered], ["local"])
-            self.assertEqual([dp.source_kind for dp in discovered], ["local"])
+            self.assertFalse((local_pack / "pack.yaml").is_file())
+            self.assertEqual([dp.id for dp in discovered], [])
 
     def test_existing_invalid_local_pack_manifest_is_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -178,8 +165,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             def scan(arg=None):
                 return (alpha, local, beta)
 
-            with mock.patch("astrid.core.pack.discovery.ensure_local_pack_for_elements", return_value=None):
-                discovered = discover_pack_metadata(discover_packs_fn=scan, include_installed=False)
+            discovered = discover_pack_metadata(discover_packs_fn=scan, include_installed=False)
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "beta"])
         self.assertTrue(all(dp.source_kind == "source" for dp in discovered))
@@ -245,7 +231,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
         self.assertEqual([dp.source_kind for dp in discovered], ["source", "extra"])
 
     def test_source_kinds_include_env_in_priority_order(self) -> None:
-        self.assertEqual(SOURCE_KINDS, ("source", "local", "extra", "env", "installed"))
+        self.assertEqual(SOURCE_KINDS, ("source", "local", "extra", "env"))
 
     def test_env_layer_uses_pathsep_and_skips_empty_or_missing_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,82 +288,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
         self.assertEqual([dp.source_kind for dp in discovered], ["source", "extra"])
-
-    def test_env_layer_expands_and_resolves_after_extra_before_installed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_root = Path(tmp)
-            project_root = tmp_root / "project"
-            project_root.mkdir()
-            source_pack = _make_pack(tmp_root / "src", "alpha")
-
-            extra_root = tmp_root / "extra"
-            extra_root.mkdir()
-            extra_pack = _make_pack(extra_root, "beta")
-
-            env_parent = tmp_root / "env-parent"
-            env_parent.mkdir()
-            env_root = env_parent / "packs"
-            env_root.mkdir()
-            env_pack = _make_pack(env_root, "gamma")
-
-            installed_root = write_pack(tmp_root / "installed", "delta")
-
-            relative_env_root = os.path.relpath(env_root, project_root)
-
-            def scan(arg=None):
-                if arg is None:
-                    return (source_pack,)
-                resolved = Path(arg).resolve()
-                if resolved == extra_root.resolve():
-                    return (extra_pack,)
-                if resolved == env_root.resolve():
-                    return (env_pack,)
-                return ()
-
-            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: relative_env_root}, clear=False):
-                with mock.patch(
-                    "astrid.core.pack.store.installed_pack_roots",
-                    return_value=[installed_root],
-                ):
-                    discovered = discover_pack_metadata(
-                        project_root=project_root,
-                        discover_packs_fn=scan,
-                        extra_pack_roots=(str(extra_root),),
-                        include_installed=True,
-                    )
-
-        self.assertEqual([dp.id for dp in discovered], ["alpha", "beta", "gamma", "delta"])
-        self.assertEqual(
-            [dp.source_kind for dp in discovered],
-            ["source", "extra", "env", "installed"],
-        )
-
-    def test_installed_layer_excludes_local_and_orders_last(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / "src"
-            src.mkdir()
-            source_pack = _make_pack(src, "alpha")
-
-            installed_dir = Path(tmp) / "installed"
-            installed_dir.mkdir()
-            installed_pack_root = write_pack(installed_dir, "delta")
-
-            def scan(arg=None):
-                if arg is None:
-                    return (source_pack,)
-                return ()
-
-            with mock.patch(
-                "astrid.core.pack.store.installed_pack_roots",
-                return_value=[installed_pack_root],
-            ):
-                discovered = discover_pack_metadata(
-                    discover_packs_fn=scan,
-                    include_installed=True,
-                )
-
-        self.assertEqual([dp.id for dp in discovered], ["alpha", "delta"])
-        self.assertEqual([dp.source_kind for dp in discovered], ["source", "installed"])
 
     def test_skill_roots_expose_pack_and_nested_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
