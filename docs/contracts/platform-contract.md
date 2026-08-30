@@ -232,7 +232,7 @@ The stable v1 contract for generation extensions is:
 - `generation.features` and `generation.modes` entries may be strings or
   objects with `id`, optional `label`, and optional `description`.
 - Packs discovered through source packs, explicit SDK `extra_pack_roots`,
-  `ASTRID_PACKS_PATH`, or installed-pack discovery can contribute these
+  `ASTRID_PACKS_PATH` can contribute these
   declarations.
 - `astrid.discover()` exposes normalized records through
   `DiscoveryResult.generation_backends`,

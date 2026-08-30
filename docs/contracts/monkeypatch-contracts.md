@@ -32,14 +32,13 @@
 | `astrid.core.session.cli.SessionStore.delete` | `tests/session/test_session_attach_detach.py` : 408 | `SessionStore.delete` | `monkeypatch.setattr(cli.SessionStore, ...)` |
 | `astrid.core.session.lifecycle.SessionStore.save` | `tests/session/test_session_lifecycle.py` : 409 | `SessionStore.save` | `monkeypatch.setattr(lifecycle.SessionStore, ...)` |
 
-## 2. pack/install
+## 2. pack (read-only)
+
+The retired `pack/install` mutation surface has no supported monkeypatch
+contracts. The remaining pack contract below covers only resolver behavior.
 
 | Dotted path / attribute | Test file : line | Symbol pinned | How patched |
 |---|---|---|---|
-| `astrid.core.pack.install._confirm_trust` | `tests/packs/test_pack_install.py` : 334, 347, 368, 445 | `_confirm_trust` | `mock.patch("astrid.core.pack.install._confirm_trust")` |
-| `astrid.core.pack.install._confirm` | `tests/packs/test_pack_install.py` : 335, 348, 369, 446 | `_confirm` | `mock.patch("astrid.core.pack.install._confirm")` |
-| `astrid.core.pack.install.install_pack` | `tests/packs/test_pack_install.py` : 521, 538 | `install_pack` | `mock.patch("astrid.core.pack.install.install_pack")` |
-| `astrid.core.pack.install.update_pack` | `tests/packs/test_pack_install.py` : 528, 548 | `update_pack` | `mock.patch("astrid.core.pack.install.update_pack")` |
 | `astrid.core.pack.resolver.resolve_callable_from_metadata` | `tests/test_pipeline_dispatch_aliases.py` : 92 | `resolve_callable_from_metadata` | `mock.patch("astrid.core.pack.resolver.resolve_callable_from_metadata")` |
 
 ## 3. pack/cli

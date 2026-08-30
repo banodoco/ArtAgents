@@ -19,15 +19,16 @@ metadata comes from `astrid.sdk.discover()`.
 ```python
 import astrid.sdk as sdk
 
-inventory = sdk.discover(include_installed=False)  # in-tree packs, pack by pack
+inventory = sdk.discover()  # manifest-ledger packs, pack by pack
 cap = sdk.get_capability(
     "rendering.render", kind="executor", include_installed=False
 )  # typed lookup of one capability
 ```
 
-Pin `include_installed=False` in scripted/agent workflows: externally
-installed packs load with the registry by default, and one broken installed
-manifest fails the whole discovery call.
+Discovery is read-only and manifest-ledger based.  It includes in-tree packs
+and only explicitly configured external roots (`extra_pack_roots` or
+`ASTRID_PACKS_PATH`); there is no user-local installed-pack overlay or install
+mutation path.
 
 Every discoverable capability (executor, orchestrator, element) belongs to a
 pack and is exposed through a consistent discovery surface.
@@ -53,7 +54,7 @@ see [docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
 
 ```python
 import astrid.sdk as sdk
-inventory = sdk.discover(include_installed=False)
+inventory = sdk.discover()
 ```
 
 `discover()` returns a `DiscoveryResult`: the discovered pack inventory, each

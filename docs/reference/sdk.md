@@ -80,9 +80,10 @@ import json
 json.dumps(inventory.to_dict())
 ```
 
-`include_installed=False` scopes discovery to the checkout's pack inventory.
-Stage1 runtime capability registration is explicit and runtime-owned; dynamic
-installed-pack discovery is not a live product extension point. Use local pack
+Discovery is scoped to the checkout's manifest-ledger pack inventory plus any
+explicitly configured read-only external roots. Stage1 runtime capability
+registration is explicit and runtime-owned; dynamic installed-pack discovery
+and install mutation are not product extension points. Use local pack
 directories only while authoring or testing a pack.
 
 `kind="executor"` (or `"orchestrator"` / `"element"`) filters the returned
