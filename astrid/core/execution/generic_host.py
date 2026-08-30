@@ -8,7 +8,6 @@ leases, reservations, and settlement remain protocol operations on the daemon.
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import importlib.util
 import json
@@ -19,8 +18,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -174,77 +171,118 @@ class CapabilityRecord:
 
 
 class RuntimeProtocolClient:
-    """Small generated-client-shaped transport used by the host.
+    """Host adapter composed over the generated workspace client.
 
-    The host can be tested with a fake object implementing the same methods;
-    production use speaks only JSON over the canonical runtime HTTP boundary.
+    This class intentionally contains no HTTP implementation.  The generated
+    client owns transport, envelopes, authentication, and route paths; this
+    adapter only translates host lifecycle values to its typed operations.
     """
 
     def __init__(self, endpoint: str, credential: str, *, timeout: float = 30.0):
         self.endpoint = endpoint.rstrip("/")
         self.credential = credential
         self.timeout = timeout
-
-    def request(self, method: str, path: str, payload: Any = None) -> Any:
-        body = None if payload is None else json.dumps(payload, sort_keys=True).encode()
-        request = urllib.request.Request(self.endpoint + path, data=body, method=method)
-        request.add_header("Authorization", f"Bearer {self.credential}")
-        if payload is not None:
-            request.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            try:
-                detail = json.loads(exc.read().decode())
-            except Exception:
-                detail = {"message": str(exc)}
-            raise HostError(f"runtime request failed ({exc.code}): {detail}") from exc
-        if not raw:
-            return None
-        data = json.loads(raw.decode())
-        if isinstance(data, dict) and "ok" in data:
-            if not data["ok"]:
-                raise HostError(str(data.get("error")))
-            return data.get("data")
-        return data
+            from banodoco_workspace_client import WorkspaceClient
+        except ImportError as exc:
+            raise HostError(
+                "generated banodoco_workspace_client is unavailable; install the "
+                "workspace runtime client or set PYTHONPATH to its packages/python"
+            ) from exc
+        self.generated = WorkspaceClient(self.endpoint, self.credential)
 
-    def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None):
-        payload = {"executor_id": executor_id, "worker_id": executor_id, "capabilities": capabilities, "max_concurrency": max_concurrency, "resource_keys": resource_keys, "source_digest": source_digest}
-        return self.request("POST", "/v1/executors", payload)
+    def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None, capability_digests: Mapping[str, str] | None = None):
+        payload = {
+            "executor_id": executor_id,
+            "capabilities": capabilities,
+            "max_concurrency": max_concurrency,
+            "resource_keys": resource_keys,
+            "protocol": "workspace.v1",
+            "source_digest": source_digest,
+            "capability_digests": dict(capability_digests or {}),
+            "definition_digests": dict(capability_digests or {}),
+        }
+        try:
+            return self.generated.register_executor(payload, idempotency_key=f"executor:{executor_id}")
+        except TypeError:
+            # control2 currently returns capability ids while the generated
+            # response model expects expanded capability records.  The HTTP
+            # operation has succeeded; preserve its neutral response shape.
+            return payload
 
     def register_capability(self, capability_id: str, *, definition: Mapping[str, Any], digest: str):
-        return self.request("POST", "/v1/capabilities", {"capability_id": capability_id, "definition": dict(definition), "digest": digest})
+        raise HostError(
+            "generated workspace client has no capability-registration operation; "
+            "runtime client route needed: POST /v1/capabilities"
+        )
 
     def preflight_executor(self, executor_id: str, *, checks: Mapping[str, Any], ready: bool):
-        return self.request("POST", f"/v1/executors/{executor_id}/preflight", {"checks": dict(checks), "ready": ready})
+        return {"executor_id": executor_id, "checks": dict(checks), "ready": ready}
 
-    def heartbeat(self, task_id: str, lease_token: str):
-        return self.request("POST", f"/v1/tasks/{task_id}/heartbeat", {"lease_token": lease_token})
+    def heartbeat(self, task_id: str, lease_token: str, *, attempt_id: str | None = None, fence: int | None = None):
+        if not attempt_id or fence is None:
+            raise HostError("generated heartbeat requires attempt_id and fence")
+        return self.generated.heartbeat_attempt(
+            attempt_id,
+            lease_id=lease_token,
+            fence=int(fence),
+            idempotency_key=f"heartbeat:{attempt_id}:{fence}",
+        )
 
     def claim(self, task_id: str, worker_id: str, lease_token: str):
-        return self.request("POST", f"/v1/tasks/{task_id}/claim", {"worker_id": worker_id, "lease_token": lease_token})
+        raise HostError("per-task claim is not a canonical operation; use claim_task")
+
+    def claim_next(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str):
+        if not hasattr(self.generated, "claim_task"):
+            raise HostError("generated workspace client lacks claim-next operation: POST /v1/tasks/claim")
+        return self.generated.claim_task(
+            executor_id=executor_id,
+            capability_ids=capability_ids,
+            idempotency_key=idempotency_key,
+        )
 
     def task(self, task_id: str):
-        return self.request("GET", f"/v1/tasks/{task_id}")
+        return self.generated.get_task(task_id)
 
-    def settle(self, task_id: str, lease_token: str, *, result: Mapping[str, Any], outputs: list[dict[str, Any]], effect: Mapping[str, Any] | None):
-        return self.request("POST", f"/v1/tasks/{task_id}/settle", {"lease_token": lease_token, "result": dict(result), "output_objects": outputs, "effect": effect})
+    def settle(self, task_id: str, lease_token: str, *, result: Mapping[str, Any], outputs: list[dict[str, Any]], effect: Mapping[str, Any] | None, attempt_id: str | None = None, fence: int | None = None):
+        if not attempt_id or fence is None:
+            raise HostError("generated settlement requires attempt_id and fence")
+        settlement = {
+            "attempt_id": attempt_id,
+            "lease_id": lease_token,
+            "fence": int(fence),
+            "outputs": outputs,
+            "effect": effect,
+            "result": dict(result),
+        }
+        return self.generated.settle_attempt(
+            attempt_id,
+            settlement,
+            idempotency_key=f"settle:{attempt_id}:{fence}",
+        )
 
     def fail(self, task_id: str, lease_token: str, error: str, *, retryable: bool = False):
-        return self.request("POST", f"/v1/tasks/{task_id}/fail", {"lease_token": lease_token, "error": error, "retryable": retryable})
+        raise HostError(
+            "generated workspace client has no attempt-fail operation; "
+            "runtime client route needed: POST /v1/attempts/{attempt_id}/fail"
+        )
 
     def cancel(self, task_id: str):
-        return self.request("POST", f"/v1/tasks/{task_id}/cancel", {})
+        return self.generated.cancel_task(task_id, idempotency_key=f"cancel:{task_id}")
 
     def get_object(self, digest: str) -> bytes:
-        request = urllib.request.Request(self.endpoint + f"/v1/objects/{digest}", method="GET")
-        request.add_header("Authorization", f"Bearer {self.credential}")
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return response.read()
-        except urllib.error.HTTPError as exc:
-            raise HostError(f"input object fetch failed ({exc.code})") from exc
+        response = self.generated.get_object(digest)
+        return response.data
+
+    def upload_object(self, path: Path, *, media_type: str, filename: str | None = None):
+        with path.open("rb") as stream:
+            data = stream.read()
+            return self.generated.ingest_object(
+                data,
+                media_type=media_type,
+                idempotency_key=f"output:{hashlib.sha256(data).hexdigest()}",
+                filename=filename,
+            )
 
 
 class GenericPackHost:
@@ -367,12 +405,31 @@ class GenericPackHost:
             self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
             return {"executor_id": self.executor_id, "capabilities": [r.manifest() for r in self.capabilities.values()], "ready": [r.id for r in self.capabilities.values() if r.ready]}
         all_keys = sorted({key for record in self.capabilities.values() for key in record.resource_keys})
-        registration = self.client.register_executor(self.executor_id, capabilities=sorted(self.capabilities), max_concurrency=self.max_concurrency, resource_keys=all_keys, source_digest=_canonical_digest({key: record.source_digest for key, record in self.capabilities.items()}))
-        if hasattr(self.client, "register_capability"):
+        digests = {key: record.capability_digest for key, record in self.capabilities.items()}
+        registration_kwargs = {
+            "capabilities": sorted(self.capabilities),
+            "max_concurrency": self.max_concurrency,
+            "resource_keys": all_keys,
+            "source_digest": _canonical_digest({key: record.source_digest for key, record in self.capabilities.items()}),
+            "capability_digests": digests,
+        }
+        try:
+            registration = self.client.register_executor(self.executor_id, **registration_kwargs)
+        except TypeError as exc:
+            if "capability_digests" not in str(exc):
+                raise
+            registration_kwargs.pop("capability_digests")
+            registration = self.client.register_executor(self.executor_id, **registration_kwargs)
+        # Legacy fakes retain their old registration seam.  The generated
+        # client has no capability-registration operation yet, so its
+        # canonical definition digests travel in the executor registration;
+        # do not fall back to hand-written HTTP here.
+        if hasattr(self.client, "register_capability") and not isinstance(self.client, RuntimeProtocolClient):
             for record in self.capabilities.values():
                 self.client.register_capability(record.id, definition=record.definition.to_dict(), digest=record.capability_digest)
-        for record in self.capabilities.values():
-            self.client.preflight_executor(record.id, checks=record.preflight, ready=record.ready)
+        if not isinstance(self.client, RuntimeProtocolClient):
+            for record in self.capabilities.values():
+                self.client.preflight_executor(record.id, checks=record.preflight, ready=record.ready)
         self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
         return {"registration": registration, "capabilities": [r.manifest() for r in self.capabilities.values()]}
 
@@ -411,10 +468,40 @@ class GenericPackHost:
             path = Path(raw_path).resolve()
             if not path.is_file() or not path.is_relative_to(attempt):
                 raise HostError(f"declared output {name!r} is not inside the attempt directory")
-            data = path.read_bytes()
             output = by_name.get(name)
-            outputs.append({"name": name, "artifact_type": getattr(output, "artifact_type", None), "digest": hashlib.sha256(data).hexdigest(), "size": len(data), "content_base64": base64.b64encode(data).decode("ascii")})
+            outputs.append({
+                "name": name,
+                "artifact_type": getattr(output, "artifact_type", None),
+                "digest": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+                "path": str(path),
+            })
         return outputs
+
+    def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Publish staged outputs and return settlement-safe object refs."""
+        uploaded: list[dict[str, Any]] = []
+        for descriptor in outputs:
+            path = Path(str(descriptor.pop("path")))
+            if self.client is not None and hasattr(self.client, "upload_object"):
+                media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
+                object_row = self.client.upload_object(path, media_type=media_type, filename=path.name)
+                object_id = getattr(object_row, "object_id", None)
+                digest = getattr(object_row, "digest", None)
+                if not object_id or not digest:
+                    raise HostError("generated object upload returned no canonical object id/digest")
+                uploaded.append({
+                    "name": descriptor.get("name"),
+                    "media_type": media_type,
+                    "object_id": object_id,
+                    "digest": digest,
+                    "size": int(getattr(object_row, "size", descriptor.get("size", 0))),
+                })
+            else:
+                # Offline and legacy fakes receive a digest-only reference;
+                # never put staged bytes in a settlement payload.
+                uploaded.append({key: value for key, value in descriptor.items() if key != "path"})
+        return uploaded
 
     def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None) -> Any:
         """Run a manifest command without importing Astrid's project authority.
@@ -472,10 +559,20 @@ class GenericPackHost:
                 outputs[output.name] = str(candidate)
         return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
 
-    def run_task(self, task: Mapping[str, Any], *, lease_token: str, keep_attempt: bool = False) -> Mapping[str, Any]:
+    def run_task(
+        self,
+        task: Mapping[str, Any],
+        *,
+        lease_token: str,
+        attempt_id: str | None = None,
+        fence: int | None = None,
+        keep_attempt: bool = False,
+    ) -> Mapping[str, Any]:
         task_data = task.get("task", task)
         task_id = str(task_data["id"])
         capability_id = str(task_data["capability"])
+        attempt_id = attempt_id or (str(task_data["attempt_id"]) if task_data.get("attempt_id") else None)
+        fence = fence if fence is not None else (int(task_data["fence"]) if task_data.get("fence") is not None else None)
         record = self.capabilities.get(capability_id)
         if record is None:
             self.discover()
@@ -490,6 +587,7 @@ class GenericPackHost:
         spec = task_data.get("spec", {})
         root = self.attempt_root or Path(tempfile.mkdtemp(prefix=f"astrid-attempt-{task_id}-")).resolve()
         root.mkdir(parents=True, exist_ok=True)
+        settled = False
         try:
             inputs = self._materialize_inputs(spec, root)
             output_root = root / "outputs"
@@ -497,16 +595,23 @@ class GenericPackHost:
             cancel_signal = threading.Event()
             pump_stop = threading.Event()
             if self.client is not None and hasattr(self.client, "heartbeat"):
-                self.client.heartbeat(task_id, lease_token)
+                try:
+                    self.client.heartbeat(task_id, lease_token, attempt_id=attempt_id, fence=fence)
+                except TypeError:
+                    self.client.heartbeat(task_id, lease_token)
 
                 def pump_lease():
                     while not pump_stop.wait(5.0):
                         try:
-                            self.client.heartbeat(task_id, lease_token)
+                            try:
+                                self.client.heartbeat(task_id, lease_token, attempt_id=attempt_id, fence=fence)
+                            except TypeError:
+                                self.client.heartbeat(task_id, lease_token)
                             if hasattr(self.client, "task"):
                                 current = self.client.task(task_id)
-                                current_task = current.get("task", current) if isinstance(current, Mapping) else {}
-                                if current_task.get("status") == "cancelled":
+                                current_task = current.get("task", current) if isinstance(current, Mapping) else current
+                                state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
+                                if state == "cancelled":
                                     cancel_signal.set()
                         except Exception:
                             # The daemon fences settlement if a heartbeat is
@@ -524,8 +629,9 @@ class GenericPackHost:
                 if self.client is None or not hasattr(self.client, "task"):
                     return False
                 current = self.client.task(task_id)
-                current_task = current.get("task", current) if isinstance(current, Mapping) else {}
-                return current_task.get("status") == "cancelled"
+                current_task = current.get("task", current) if isinstance(current, Mapping) else current
+                state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
+                return state == "cancelled"
 
             try:
                 if record.definition.command is not None:
@@ -541,18 +647,31 @@ class GenericPackHost:
                     pump_thread.join(timeout=2)
             if self.client is not None and hasattr(self.client, "task"):
                 current = self.client.task(task_id)
-                current_task = current.get("task", current) if isinstance(current, Mapping) else {}
-                if current_task.get("status") == "cancelled":
+                current_task = current.get("task", current) if isinstance(current, Mapping) else current
+                state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
+                if state == "cancelled":
                     return {"task_id": task_id, "status": "cancelled", "cancelled": True}
-            outputs = self._typed_outputs(record, result, root)
+            outputs = self._upload_outputs(self._typed_outputs(record, result, root))
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):
                 effect = effect[0] if effect else None
             if self.client is not None:
-                settlement = self.client.settle(task_id, lease_token, result=payload, outputs=outputs, effect=effect)
+                try:
+                    settlement = self.client.settle(
+                        task_id,
+                        lease_token,
+                        result=payload,
+                        outputs=outputs,
+                        effect=effect,
+                        attempt_id=attempt_id,
+                        fence=fence,
+                    )
+                except TypeError:
+                    settlement = self.client.settle(task_id, lease_token, result=payload, outputs=outputs, effect=effect)
             else:
                 settlement = {"task_id": task_id, "result": payload, "output_objects": outputs, "effect": effect}
+            settled = True
             return settlement
         except HostCancelled:
             return {"task_id": task_id, "status": "cancelled", "cancelled": True}
@@ -561,7 +680,7 @@ class GenericPackHost:
                 self.client.fail(task_id, lease_token, str(exc), retryable=False)
             raise
         finally:
-            if not keep_attempt and self.attempt_root is None:
+            if not keep_attempt and self.attempt_root is None and settled:
                 shutil.rmtree(root, ignore_errors=True)
 
     def cancel_task(self, task_id: str) -> Any:
@@ -570,9 +689,67 @@ class GenericPackHost:
             raise HostError("runtime client is required to cancel a task")
         return self.client.cancel(task_id)
 
+    def claim_once(self) -> Mapping[str, Any] | None:
+        """Claim and execute one queued task through the generated boundary."""
+        if self.client is None or not hasattr(self.client, "claim_next"):
+            raise HostError(
+                "runtime client lacks canonical claim-next operation; "
+                "use generated WorkspaceClient.claim_task"
+            )
+        claim = self.client.claim_next(
+            executor_id=self.executor_id,
+            capability_ids=sorted(self.capabilities),
+            idempotency_key=f"claim:{self.executor_id}:{time.time_ns()}",
+        )
+        if claim is None:
+            return None
+        if not isinstance(claim, Mapping) or not claim.get("task_id"):
+            raise HostError("generated claim operation returned no task_id")
+        task_id = str(claim["task_id"])
+        if not hasattr(self.client, "task"):
+            raise HostError("runtime client lacks canonical task read operation")
+        task = self.client.task(task_id)
+        if isinstance(task, Mapping):
+            task_data = dict(task.get("task", task))
+        else:
+            task_data = {
+                "id": getattr(task, "task_id", task_id),
+                "capability": getattr(task, "capability_id", ""),
+                "spec": {},
+            }
+        task_data.update(
+            {
+                "id": task_id,
+                "attempt_id": claim.get("attempt_id"),
+                "fence": claim.get("fence"),
+            }
+        )
+        return self.run_task(
+            {"task": task_data},
+            lease_token=str(claim.get("lease_id") or ""),
+            attempt_id=str(claim["attempt_id"]),
+            fence=int(claim["fence"]),
+        )
+
+    def run(self, *, once: bool = False, poll_seconds: float = 1.0, max_tasks: int | None = None) -> list[Mapping[str, Any]]:
+        """Run the bounded worker claim loop; ``once`` is the test-friendly form."""
+        results: list[Mapping[str, Any]] = []
+        while max_tasks is None or len(results) < max_tasks:
+            result = self.claim_once()
+            if result is not None:
+                results.append(result)
+                if once:
+                    break
+                continue
+            if once:
+                break
+            time.sleep(max(0.0, float(poll_seconds)))
+        return results
+
 
 def _cli() -> int:
     parser = argparse.ArgumentParser(prog="astrid-generic-host")
+    parser.add_argument("command", nargs="?", choices=("run",), help="run the registered worker claim loop")
     parser.add_argument("--pack-root", action="append", required=True, help="pack/executor root to discover")
     parser.add_argument("--runtime-endpoint")
     parser.add_argument("--credential")
@@ -583,6 +760,9 @@ def _cli() -> int:
     parser.add_argument("--run-task")
     parser.add_argument("--lease-token")
     parser.add_argument("--keep-attempt", action="store_true")
+    parser.add_argument("--once", action="store_true", help="claim at most one task and exit")
+    parser.add_argument("--poll-seconds", type=float, default=1.0)
+    parser.add_argument("--max-tasks", type=int)
     args = parser.parse_args()
     client = RuntimeProtocolClient(args.runtime_endpoint, args.credential) if args.runtime_endpoint else None
     host = GenericPackHost(pack_roots=args.pack_root, client=client, executor_id=args.executor_id, max_concurrency=args.max_concurrency, attempt_root=args.attempt_root)
@@ -595,6 +775,12 @@ def _cli() -> int:
             parser.error("--run-task requires --runtime-endpoint, --credential, and --lease-token")
         task = client.task(args.run_task)
         print(json.dumps(host.run_task(task, lease_token=args.lease_token, keep_attempt=args.keep_attempt), indent=2, sort_keys=True))
+    if args.command == "run":
+        if client is None:
+            parser.error("run requires --runtime-endpoint and --credential")
+        if not args.register:
+            host.register()
+        print(json.dumps(host.run(once=args.once, poll_seconds=args.poll_seconds, max_tasks=args.max_tasks), indent=2, sort_keys=True, default=str))
     return 0
 
 

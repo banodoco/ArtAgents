@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.execution.generic_host import GenericPackHost
+from astrid.core.execution.generic_host import GenericPackHost, HostError
 from astrid.core.execution.generic_host import AdapterRegistry
 
 
@@ -102,7 +102,7 @@ def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):
     outputs = runtime.settlements[0][2]["outputs"]
     assert outputs[0]["name"] == "answer"
     assert outputs[0]["digest"]
-    assert outputs[0]["content_base64"]
+    assert "content_base64" not in outputs[0]
     assert not list(tmp_path.glob("astrid-attempt-*"))
 
 
@@ -115,6 +115,14 @@ def test_unready_capability_is_not_dispatched(tmp_path, monkeypatch):
     # python_exec is resolved by the runner; with PATH empty the source still
     # remains a valid manifest and readiness is determined by its declaration.
     assert host.capabilities["test.echo"].ready
+
+
+def test_claim_loop_fails_explicitly_without_canonical_claim_operation(tmp_path):
+    _write_manifest(tmp_path / "echo")
+    host = GenericPackHost(pack_roots=[tmp_path], client=object())
+    host.discover()
+    with pytest.raises(HostError, match="canonical claim-next operation"):
+        host.run(once=True)
 
 
 def test_adapter_registry_classifies_provider_local_generation_and_render():
