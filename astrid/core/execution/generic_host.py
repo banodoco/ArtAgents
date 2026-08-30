@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
 import shutil
+import secrets as secrets_module
 import signal
 import subprocess
 import sys
@@ -206,24 +208,34 @@ def _required_secret_names(record: "CapabilityRecord") -> tuple[str, ...]:
     process injection.  In particular, an ambient ``OPENAI_API_KEY`` cannot
     cross the boundary merely because the parent happens to have one.
     """
-    declared_env = record.definition.metadata.get(
-        "required_env",
-        record.definition.metadata.get(
-            "required_credentials", record.definition.metadata.get("env", ())
-        ),
+    matrix_secret_names = tuple(
+        str(name) for name in (record.matrix.get("required_env") or ())
+        if str(name).upper().endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD"))
     )
-    if isinstance(declared_env, str):
-        declared_env = (declared_env,)
     return tuple(dict.fromkeys(
         str(name)
         for name in (
-            *(record.matrix.get("required_env") or ()),
+            *matrix_secret_names,
             *(record.definition.isolation.secrets_required or ()),
             *(record.definition.metadata.get("secrets_required") or ()),
-            *(declared_env or ()),
         )
         if str(name)
     ))
+
+
+def _required_env_names(record: "CapabilityRecord") -> tuple[str, ...]:
+    """Return all manifest-declared environment inputs (public or secret)."""
+    values: list[str] = []
+    for raw in (
+        record.matrix.get("required_env") or (),
+        record.definition.metadata.get("required_env") or (),
+        record.definition.metadata.get("env") or (),
+        _required_secret_names(record),
+    ):
+        if isinstance(raw, str):
+            raw = (raw,)
+        values.extend(str(name) for name in raw if str(name))
+    return tuple(dict.fromkeys(values))
 
 
 def _network_policy(record: "CapabilityRecord") -> dict[str, Any] | None:
@@ -236,6 +248,33 @@ def _network_policy(record: "CapabilityRecord") -> dict[str, Any] | None:
     if not isinstance(raw, Mapping):
         raise HostError(f"network_policy for {record.id!r} must be an object")
     return {str(key): value for key, value in raw.items()}
+
+
+def _native_network_command(record: "CapabilityRecord") -> bool:
+    """Whether a network-required manifest escapes Python hook observability."""
+    if record.definition.command is None:
+        return False
+    metadata = record.definition.metadata
+    if bool(metadata.get("native")) or str(metadata.get("execution_kind", "")).lower() == "native":
+        return True
+    first = str(record.definition.command.argv[0] if record.definition.command.argv else "").lower()
+    return first not in {"{python_exec}", sys.executable.lower(), "python", "python3"} and not first.endswith("/python") and not first.endswith("/python3")
+
+
+def _enforceable_network_gateway(policy: Mapping[str, Any] | None) -> bool:
+    """Accept native traffic only when a proxy/broker proves enforcement + observation."""
+    if not isinstance(policy, Mapping):
+        return False
+    enforcement = policy.get("enforcement")
+    if isinstance(enforcement, Mapping):
+        kind = str(enforcement.get("kind", "")).lower()
+        if kind in {"proxy", "broker"} and bool(enforcement.get("enforced")) and bool(enforcement.get("observable")):
+            return True
+    for key in ("proxy", "broker"):
+        value = policy.get(key)
+        if isinstance(value, Mapping) and bool(value.get("enforced")) and bool(value.get("observable")):
+            return True
+    return bool(policy.get("proxy_enforced")) and bool(policy.get("proxy_observable")) and bool(policy.get("proxy"))
 
 
 def _hivemind_source_preflight(record: "CapabilityRecord") -> dict[str, Any] | None:
@@ -843,7 +882,7 @@ class GenericPackHost:
                 checks["binaries"] = {"ok": False, "missing": missing}
             else:
                 checks["binaries"] = {"ok": True}
-            required_env = _required_secret_names(record)
+            required_env = _required_env_names(record)
             missing_env = [name for name in required_env if not self.credential_source.get(name)]
             checks["credentials"] = {"ok": not missing_env, "missing": missing_env}
             required_packages = record.matrix.get("required_packages") or record.definition.metadata.get("required_packages", adapter.required_packages)
@@ -858,8 +897,11 @@ class GenericPackHost:
                 lock_file = checkout / "remotion" / "package-lock.json" if checkout else None
                 node_modules = checkout / "remotion" / "node_modules" if checkout else None
                 checks["remotion"] = {"ok": bool(package_json and lock_file and node_modules and node_modules.is_dir()), "package_json": str(package_json) if package_json else None, "lock_file": str(lock_file) if lock_file else None, "dependencies": str(node_modules) if node_modules else None}
+            policy = _network_policy(record)
             if adapter.requires_network and not record.definition.isolation.network:
                 checks["network"] = {"ok": False, "reason": "adapter_requires_network"}
+            elif _native_network_command(record) and record.definition.isolation.network and not _enforceable_network_gateway(policy):
+                checks["network"] = {"ok": False, "reason": "native network requires an enforceable observable proxy or broker"}
             else:
                 checks["network"] = {"ok": True}
             pack_source = _hivemind_source_preflight(record)
@@ -1104,6 +1146,7 @@ class GenericPackHost:
         attempt: Path,
         *,
         explicit_env: Mapping[str, str] | None = None,
+        admission: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, str], dict[str, str]]:
         """Build a redacted, manifest-scoped child environment.
 
@@ -1112,8 +1155,10 @@ class GenericPackHost:
         in request JSON, evidence, or diagnostics.
         """
         declared = _required_secret_names(record)
+        all_declared = _required_env_names(record)
         secrets = {name: str(self.credential_source[name]) for name in declared if self.credential_source.get(name)}
         explicit = dict(explicit_env or {})
+        explicit.update({name: str(self.credential_source[name]) for name in all_declared if name not in declared and self.credential_source.get(name)})
         # A manifest may set ordinary fixed environment values, but secret
         # values are always sourced by the host and never trusted from YAML.
         for name in tuple(explicit):
@@ -1137,8 +1182,11 @@ class GenericPackHost:
                 encoding="utf-8",
             )
             evidence_path = attempt / "network-evidence.json"
+            evidence_key = secrets_module.token_hex(32)
             env["ASTRID_NETWORK_POLICY"] = json.dumps(policy, sort_keys=True, separators=(",", ":"))
             env["ASTRID_NETWORK_EVIDENCE"] = str(evidence_path)
+            env["ASTRID_NETWORK_EVIDENCE_KEY"] = evidence_key
+            env["ASTRID_NETWORK_ADMISSION"] = json.dumps(dict(admission or {}), sort_keys=True, separators=(",", ":"))
             env["PYTHONPATH"] = str(hook_root) + os.pathsep + env.get("PYTHONPATH", "")
             proxy = policy.get("proxy")
             if isinstance(proxy, str) and proxy:
@@ -1163,13 +1211,25 @@ class GenericPackHost:
         return result
 
     @staticmethod
-    def _network_evidence(attempt: Path) -> Mapping[str, Any] | None:
+    def _network_evidence(attempt: Path, *, evidence_key: str | None = None, admission: Mapping[str, Any] | None = None, required: bool = False) -> Mapping[str, Any] | None:
         path = attempt / "network-evidence.json"
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            if required:
+                raise HostError("network-required task produced no network evidence")
             return None
-        return value if isinstance(value, Mapping) else None
+        if not isinstance(value, Mapping):
+            if required:
+                raise HostError("network evidence is not an object")
+            return None
+        unsigned = {key: item for key, item in value.items() if key not in {"signature", "signature_algorithm"}}
+        expected = hmac.new(str(evidence_key or "").encode(), json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(), hashlib.sha256).hexdigest()
+        valid = bool(evidence_key) and value.get("signature_algorithm") == "hmac-sha256" and hmac.compare_digest(str(value.get("signature", "")), expected)
+        bound = isinstance(admission, Mapping) and dict(value.get("admission") or {}) == dict(admission)
+        if required and (not valid or not bound):
+            raise HostError("network evidence signature or admission binding is invalid")
+        return value if valid and bound else (None if not required else value)
 
     def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Publish staged outputs and return settlement-safe object refs."""
@@ -1234,6 +1294,7 @@ class GenericPackHost:
         env, secrets = self._child_environment(
             record,
             attempt,
+            admission=admission,
             explicit_env={
                 "PYTHONPATH": package_parent,
                 ASTRID_INTERNAL_INVOCATION: "1",
@@ -1296,7 +1357,7 @@ class GenericPackHost:
                 candidate = Path(path)
                 if candidate.is_file():
                     outputs[output.name] = str(candidate)
-            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}})()
+            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}, "network_evidence_key": env.get("ASTRID_NETWORK_EVIDENCE_KEY")})()
         finally:
             _release_owned_group(process)
             env.clear()
@@ -1463,6 +1524,7 @@ class GenericPackHost:
         root = self.attempt_root or Path(tempfile.mkdtemp(prefix=f"astrid-attempt-{task_id}-")).resolve()
         root.mkdir(parents=True, exist_ok=True)
         settled = False
+        network_evidence_key: str | None = None
         try:
             inputs = self._materialize_inputs(spec, root)
             output_root = root / "outputs"
@@ -1517,16 +1579,27 @@ class GenericPackHost:
                         root,
                         cancelled=cancelled,
                         admission={
+                            "capability_digest": record.capability_digest,
                             "source_digest": record.source_digest,
                             "source_root": str(record.source_root),
                             "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
                         },
                     )
+                    network_evidence_key = getattr(result, "network_evidence_key", None)
                 else:
                     # Dispatch through the process boundary.  The immutable
                     # admitted definition is serialized for the child so a
                     # registry reload cannot silently select a different pack.
-                    worker_env, worker_secrets = self._child_environment(record, root)
+                    worker_admission = {
+                        "capability_digest": record.capability_digest,
+                        "source_digest": record.source_digest,
+                        "dependency_digest": record.dependency_digest,
+                        "version": record.definition.version,
+                        "source_root": str(record.source_root),
+                        "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+                    }
+                    worker_env, worker_secrets = self._child_environment(record, root, admission=worker_admission)
+                    network_evidence_key = worker_env.get("ASTRID_NETWORK_EVIDENCE_KEY")
                     try:
                         result = self.invoke_capability(
                             capability_kind="executor",
@@ -1545,14 +1618,7 @@ class GenericPackHost:
                             attempt=root,
                             cancelled=cancelled,
                             definition=record.definition.to_dict(),
-                            admission={
-                                "capability_digest": record.capability_digest,
-                                "source_digest": record.source_digest,
-                                "dependency_digest": record.dependency_digest,
-                                "version": record.definition.version,
-                                "source_root": str(record.source_root),
-                                "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
-                            },
+                            admission=worker_admission,
                             child_env=worker_env,
                         )
                     finally:
@@ -1570,7 +1636,20 @@ class GenericPackHost:
                     return {"task_id": task_id, "status": "cancelled", "cancelled": True}
             outputs = self._upload_outputs(self._typed_outputs(record, result, root))
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
-            network_evidence = self._network_evidence(root)
+            network_evidence = self._network_evidence(
+                root,
+                evidence_key=network_evidence_key,
+                admission=worker_admission if record.definition.command is None else {
+                    "capability_digest": record.capability_digest,
+                    "source_digest": record.source_digest,
+                    "source_root": str(record.source_root),
+                    "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+                },
+                # Every network-required settlement needs signed evidence. A
+                # Python child emits it through the hook; a native child must
+                # have its admitted proxy/broker emit the same contract.
+                required=bool(record.adapter.requires_network or record.definition.isolation.network),
+            )
             if network_evidence is not None:
                 payload["network_evidence"] = network_evidence
             payload["process_evidence"] = {
@@ -1642,6 +1721,8 @@ class GenericPackHost:
             idempotency_key=f"claim:{self.executor_id}:{time.time_ns()}",
         )
         if claim is None:
+            return None
+        if getattr(claim, "waiting_reason", None) and not getattr(claim, "attempt_id", None):
             return None
         claim_data = dict(claim) if isinstance(claim, Mapping) else {
             "attempt_id": getattr(claim, "attempt_id", None),

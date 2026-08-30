@@ -155,6 +155,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
             lease_id=claim["lease_id"],
             fence=claim["fence"],
             idempotency_key="heartbeat",
+            runtime_epoch=generated.health().runtime_epoch,
         )
         assert heartbeat["attempt_id"] == claim["attempt_id"]
         result = host.run_task(

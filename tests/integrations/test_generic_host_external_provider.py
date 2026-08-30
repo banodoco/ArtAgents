@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import socket
+import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from astrid.core.execution.generic_host import GenericPackHost
-from astrid.core.execution.generic_host import HostError
+from astrid.core.execution.generic_host import GenericPackHost, HostError, RuntimeProtocolClient
+
+RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
+if RUNTIME.is_dir():
+    sys.path.insert(0, str(RUNTIME / "packages/python"))
+    sys.path.insert(0, str(RUNTIME))
+from banodoco_workspace_client import WorkspaceClient
+from runtime_protocol.daemon import RuntimeDaemon
 
 
 def test_external_pack_command_imports_from_its_admitted_pack_root(
@@ -74,6 +84,10 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
                 "metadata": {
                     "adapter_family": "provider",
                     "resource_keys": ["provider"],
+                        "network_policy": {
+                            "allowed_protocols": ["dns", "tcp"],
+                            "allowed_destinations": ["127.0.0.1"],
+                        },
                 },
             }
         ),
@@ -142,9 +156,9 @@ def test_hivemind_without_clean_pinned_source_is_optional_unavailable(tmp_path: 
                 "isolation": {
                     "mode": "subprocess",
                     "network": True,
-                    "env_passthrough": ["HIVEMIND_API_URL", "HIVEMIND_ANON_KEY"],
+                    "secrets_required": ["HIVEMIND_ANON_KEY"],
                 },
-                "metadata": {"adapter_family": "provider"},
+                "metadata": {"adapter_family": "provider", "required_env": ["HIVEMIND_API_URL"]},
             }
         ),
         encoding="utf-8",
@@ -249,3 +263,129 @@ def test_provider_network_policy_records_hermetic_dns_tcp_and_denies_redirect(
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_provider_network_policy_records_and_allows_quic_over_udp_fixture(tmp_path: Path) -> None:
+    """UDP/QUIC-shaped provider traffic is explicitly admitted and evidenced."""
+    received: list[bytes] = []
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.bind(("127.0.0.1", 0))
+    udp.settimeout(2)
+
+    def receive() -> None:
+        try:
+            data, _ = udp.recvfrom(1024)
+            received.append(data)
+        except socket.timeout:
+            pass
+
+    thread = threading.Thread(target=receive, daemon=True)
+    thread.start()
+    try:
+        pack_root = tmp_path / "quic_provider"
+        executor_root = pack_root / "executors" / "quic"
+        executor_root.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            "schema_version: 1\nid: quic_provider\nname: QUIC Provider\nversion: 1.0\ncontent:\n  executors: executors\n",
+            encoding="utf-8",
+        )
+        port = udp.getsockname()[1]
+        (executor_root / "executor.yaml").write_text(json.dumps({
+            "schema_version": 1, "id": "quic_provider.fetch", "name": "QUIC UDP Fixture",
+            "kind": "external", "version": "1.0",
+            "command": {"argv": ["{python_exec}", "-c", "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.sendto(b'quic-fixture', ('127.0.0.1', %d))" % port]},
+            "outputs": [], "isolation": {"mode": "subprocess", "network": True},
+            "metadata": {"adapter_family": "provider", "network_policy": {
+                "allowed_protocols": ["dns", "udp"], "allowed_destinations": ["127.0.0.1:%d" % port],
+            }},
+        }), encoding="utf-8")
+        host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+        record = host.discover()[0]
+        host.preflight()
+        assert host.capabilities[record.id].ready
+        host.run_task({"task": {"id": "quic-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        thread.join(timeout=2)
+        evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
+        assert b"quic-fixture" in received
+        assert any(event["kind"] == "udp" and event["allowed"] for event in evidence["events"])
+        assert evidence["signature_algorithm"] == "hmac-sha256"
+        assert evidence["admission"]["capability_digest"] == record.capability_digest
+    finally:
+        udp.close()
+
+
+def test_native_network_command_is_unready_without_enforceable_observable_gateway(tmp_path: Path) -> None:
+    pack_root = tmp_path / "native_provider"
+    executor_root = pack_root / "executors" / "native"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: native_provider\nname: Native Provider\nversion: 1.0\ncontent:\n  executors: executors\n",
+        encoding="utf-8",
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "native_provider.fetch", "name": "Native Fetch",
+        "kind": "external", "version": "1.0",
+        "command": {"argv": ["curl", "https://example.invalid/"]}, "outputs": [],
+        "isolation": {"mode": "subprocess", "network": True},
+        "metadata": {"adapter_family": "provider", "native": True,
+                      "network_policy": {"allowed_protocols": ["tcp"], "allowed_destinations": ["example.invalid:443"]}},
+    }), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+    record = host.discover()[0]
+    host.preflight()
+    assert host.capabilities[record.id].ready is False
+    assert "enforceable observable proxy or broker" in host.capabilities[record.id].preflight["network"]["reason"]
+    with pytest.raises(HostError, match="capability .* unavailable"):
+        host.run_task({"task": {"id": "native-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+
+
+def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Path) -> None:
+    """A committed local Hivemind-style pack is admitted by digest and settles via CAS."""
+    checkout = tmp_path / "hivemind-checkout"
+    executor_root = checkout / "packs" / "hivemind" / "executors" / "search"
+    executor_root.mkdir(parents=True)
+    pack_root = checkout / "packs" / "hivemind"
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: hivemind\nname: Hivemind\nversion: 2.0\ncontent:\n  executors: executors\n",
+        encoding="utf-8",
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "hivemind.search", "name": "Hivemind Search",
+        "kind": "external", "version": "2.0",
+        "command": {"argv": ["{python_exec}", "-c", "import json; from pathlib import Path; Path('{out}/result.json').write_text(json.dumps({'hits': []}), encoding='utf-8')"]},
+        "outputs": [{"name": "result", "type": "file", "path_template": "{out}/result.json", "artifact_type": "application/json"}],
+        "isolation": {"mode": "subprocess", "network": True, "secrets_required": ["HIVEMIND_ANON_KEY"]},
+        "metadata": {"adapter_family": "provider", "network_policy": {"allowed_protocols": ["dns", "tcp"], "allowed_destinations": []}},
+    }), encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    subprocess.run(["git", "-C", str(checkout), "config", "user.email", "fixture@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(checkout), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(checkout), "add", "packs"], check=True)
+    subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "pin hivemind fixture"], check=True)
+    host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt", credential_source={"HIVEMIND_ANON_KEY": "fixture-key"})
+    record = host.discover()[0]
+    host.preflight()
+    assert host.capabilities[record.id].preflight["pack_source"]["ok"]
+    revision = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+    assert host.capabilities[record.id].preflight["pack_source"]["revision"] == revision
+
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    try:
+        generated = WorkspaceClient(daemon.endpoint, daemon.token)
+        generated.handshake("hivemind-fixture", "0.1.0", ["projects:read", "worker:execute"])
+        runtime_host = GenericPackHost(
+            pack_roots=[pack_root], attempt_root=tmp_path / "attempt-runtime",
+            credential_source={"HIVEMIND_ANON_KEY": "fixture-key"},
+            client=RuntimeProtocolClient(daemon.endpoint, daemon.token), executor_id="hivemind-host",
+        )
+        registration = runtime_host.register()
+        assert registration["registration"]["capability_digests"][record.id] == record.capability_digest
+        task = generated.admit_task(capability_id=record.id, capability_digest=record.capability_digest, input_object_ids=[], idempotency_key="hivemind-fixture-task")
+        settled = runtime_host.run(once=True)
+        assert len(settled) == 1 and settled[0].state == "succeeded"
+        payload = b'{"hits": []}'
+        digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+        assert generated.get_object(digest).data == payload
+        assert generated.get_task(task.task_id).state == "succeeded"
+    finally:
+        daemon.stop()

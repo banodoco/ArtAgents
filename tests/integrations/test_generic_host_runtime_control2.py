@@ -131,7 +131,8 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
                     }
                 ],
                 "isolation": {"mode": "subprocess", "network": True},
-                "metadata": {"adapter_family": "provider", "resource_keys": ["provider"]},
+                "metadata": {"adapter_family": "provider", "resource_keys": ["provider"],
+                              "network_policy": {"allowed_protocols": ["dns", "tcp"], "allowed_destinations": []}},
             }
         ),
         encoding="utf-8",

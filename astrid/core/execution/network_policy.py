@@ -10,6 +10,8 @@ records only non-sensitive endpoint metadata.
 from __future__ import annotations
 
 import atexit
+import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -28,6 +30,8 @@ _DNS_NAMES: dict[str, set[str]] = {}
 _EVENTS: list[dict[str, Any]] = []
 _POLICY: dict[str, Any] = {}
 _EVIDENCE: Path | None = None
+_EVIDENCE_KEY = ""
+_ADMISSION: dict[str, Any] = {}
 
 
 class NetworkPolicyError(RuntimeError):
@@ -123,12 +127,19 @@ def _write_evidence() -> None:
         protocols = (protocols,)
     payload = {"schema_version": 1, "pid": os.getpid(), "events": list(_EVENTS), "limitations": [
         "application_hook_only; native children outside Python are not OS-firewall isolated",
-    ], "policy": {
+    ], "admission": dict(_ADMISSION), "policy": {
         "allowed_destinations": list(_destinations(_POLICY)),
         "allowed_protocols": list(protocols or ()),
         "redirects": _policy_bool(_POLICY, "redirects", _policy_bool(_POLICY, "allow_redirects", False)),
         "proxy": bool(_POLICY.get("proxy")),
     }}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    if not _EVIDENCE_KEY:
+        # A hook without its host-issued key cannot make settlement evidence
+        # trustworthy.  Leave no unsigned artifact for the host to accept.
+        return
+    payload["signature_algorithm"] = "hmac-sha256"
+    payload["signature"] = hmac.new(_EVIDENCE_KEY.encode(), canonical, hashlib.sha256).hexdigest()
     _EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
     _EVIDENCE.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
@@ -188,13 +199,15 @@ def _patch_redirects() -> None:
     HTTPRedirectHandler.redirect_request = redirect_request  # type: ignore[method-assign]
 
 
-def install(policy: Mapping[str, Any], evidence_path: str | Path) -> None:
+def install(policy: Mapping[str, Any], evidence_path: str | Path, *, admission: Mapping[str, Any] | None = None, evidence_key: str = "") -> None:
     """Install hooks in a child process and arrange structured evidence output."""
-    global _INSTALLED, _POLICY, _EVIDENCE
+    global _INSTALLED, _POLICY, _EVIDENCE, _EVIDENCE_KEY, _ADMISSION
     if _INSTALLED:
         return
     _POLICY = dict(policy)
     _EVIDENCE = Path(evidence_path)
+    _EVIDENCE_KEY = str(evidence_key)
+    _ADMISSION = dict(admission or {})
     _INSTALLED = True
     _patch_socket()
     _patch_redirects()
@@ -210,8 +223,14 @@ def install_from_environment() -> None:
         policy = json.loads(raw)
     except ValueError:
         return
-    if isinstance(policy, Mapping):
-        install(policy, evidence)
+    admission_raw = os.environ.get("ASTRID_NETWORK_ADMISSION", "{}")
+    try:
+        admission = json.loads(admission_raw)
+    except ValueError:
+        admission = {}
+    key = os.environ.get("ASTRID_NETWORK_EVIDENCE_KEY", "")
+    if isinstance(policy, Mapping) and isinstance(admission, Mapping):
+        install(policy, evidence, admission=admission, evidence_key=key)
 
 
 __all__ = ["NetworkPolicyError", "install", "install_from_environment"]
