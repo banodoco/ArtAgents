@@ -1,16 +1,15 @@
-"""Small generated-client transport used by the Astrid product adapter.
+"""Discovery and compatibility wrapper around the generated workspace client.
 
-The module intentionally contains only HTTP/discovery concerns: no SQLite,
-CAS, repository, or runtime imports.  The neutral runtime publishes direct
-JSON resources matching the generated workspace client contract.
+This module owns only runtime endpoint/credential discovery. HTTP protocol
+encoding, authentication, and response decoding are delegated to the
+generated ``banodoco_workspace_client`` package from the runtime contract.
 """
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-import urllib.error
-import urllib.request
 from typing import Any, Mapping
 
 
@@ -60,28 +59,36 @@ def resolve_runtime_connection() -> tuple[str, str]:
 
 
 class WorkspaceClient:
+    """Generated-client transport with the adapter's historical request seam."""
+
     def __init__(self, endpoint: str, token: str):
+        try:
+            from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
+        except ImportError as exc:
+            raise WorkspaceClientError(
+                0,
+                "unavailable",
+                "generated workspace client is unavailable; run `banodoco-local up --profile astrid`",
+            ) from exc
         self.endpoint, self.token = endpoint.rstrip("/"), token
+        self._generated = GeneratedWorkspaceClient(self.endpoint, token)
 
     def request(self, method: str, path: str, *, body: Any = None, headers: Mapping[str, str] | None = None, expected: tuple[int, ...] = (200,)) -> Any:
-        request_headers = {"Accept": "application/json", "Authorization": f"Bearer {self.token}", **dict(headers or {})}
         raw = body if isinstance(body, bytes) else (json.dumps(body, separators=(",", ":")).encode() if body is not None else None)
-        if body is not None and not isinstance(body, bytes): request_headers.setdefault("Content-Type", "application/json")
-        request = urllib.request.Request(self.endpoint + path, data=raw, headers=request_headers, method=method)
+        request_headers = dict(headers or {})
+        if body is not None and not isinstance(body, bytes):
+            request_headers.setdefault("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                status, response_body = response.status, response.read()
-                response_headers = dict(response.headers)
-        except urllib.error.HTTPError as exc:
-            response_body = exc.read()
-            try: value = json.loads(response_body.decode())
-            except (UnicodeDecodeError, json.JSONDecodeError): value = {}
-            raise WorkspaceClientError(exc.code, str(value.get("code", "http_error")), str(value.get("message", f"HTTP {exc.code}")), value.get("details", {})) from exc
-        except urllib.error.URLError as exc:
-            raise WorkspaceClientError(0, "unavailable", "runtime is unavailable; run `banodoco-local up --profile astrid`") from exc
-        if status not in expected:
-            raise WorkspaceClientError(status, "http_error", f"HTTP {status}")
-        if method == "HEAD" or not response_body: return {"status": status, "headers": response_headers, "body": response_body}
-        if response_headers.get("Content-Type", "").startswith("application/json"):
+            status, response_headers, response_body = self._generated._request(
+                method, path, body=raw, headers=request_headers, expected=expected
+            )
+        except Exception as exc:
+            code = str(getattr(exc, "code", "transport_error"))
+            message = str(getattr(exc, "message", exc))
+            details = getattr(exc, "details", {})
+            raise WorkspaceClientError(int(getattr(exc, "status", 0)), code, message, details) from exc
+        if method == "HEAD" or not response_body:
+            return {"status": status, "headers": dict(response_headers), "body": response_body}
+        if str(response_headers.get("Content-Type", "")).startswith("application/json"):
             return json.loads(response_body.decode())
-        return {"status": status, "headers": response_headers, "body": response_body}
+        return {"status": status, "headers": dict(response_headers), "body": response_body}

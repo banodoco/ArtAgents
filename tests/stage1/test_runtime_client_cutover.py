@@ -8,6 +8,7 @@ import pytest
 
 RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-convergence"
 sys.path.insert(0, str(RUNTIME))
+sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
 from astrid.core.gateway import dispatch  # noqa: E402
@@ -43,6 +44,42 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         daemon.stop()
 
 
+def test_remote_reads_are_scoped_and_unsupported_operations_fail_honestly(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        client = AstridClient.open()
+        project = client.projects.create(slug="scoped", name="Scoped", idempotency_key="p")
+        source = tmp_path / "scoped.bin"
+        source.write_bytes(b"scoped")
+        imported = client.media.import_file(project="scoped", path=source, idempotency_key="m")
+        assert imported.ok
+        listed = client.media.list("scoped")
+        assert listed.ok and any(item.get("digest") == imported.data["digest"] for item in listed.data)
+        verified = client.media.verify("scoped", imported.data["digest"])
+        assert verified.ok and verified.data["verified"] is True
+        assert not client.tasks.list("scoped").ok
+        assert not client.timelines.save("scoped", "missing").ok
+    finally:
+        daemon.stop()
+
+
+def test_client_reopens_after_close_against_same_daemon(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        first = AstridClient.open()
+        assert isinstance(first.health(), dict)
+        first.close()
+        second = AstridClient.open()
+        assert isinstance(second.health(), dict)
+        second.close()
+    finally:
+        daemon.stop()
+
+
 def test_serve_is_not_a_public_dispatch_command(capsys):
     assert "serve" not in dispatch._top_level_commands()
     assert dispatch._top_level_commands() == frozenset({"projects", "timelines", "media", "tasks", "runs", "doctor", "backup"})
@@ -52,6 +89,19 @@ def test_remote_boundary_has_no_storage_or_runtime_imports():
     source = "\n".join((Path(__file__).parents[2] / "astrid" / "sdk" / name).read_text() for name in ("remote.py", "workspace_client.py"))
     assert "import sqlite" not in source and "import cas" not in source
     assert "runtime_protocol" not in source
+
+
+def test_sdk_client_import_does_not_construct_local_authority():
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; import astrid.sdk.client; print([name for name in sys.modules if name == 'astrid.application' or name.startswith('astrid.core.threads') or name == 'sqlite3'])"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(Path(__file__).parents[2]),
+    )
+    assert result.stdout.strip() == "[]"
 
 
 def test_client_boundary_has_no_local_authority_escape_hatch():

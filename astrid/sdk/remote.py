@@ -64,7 +64,13 @@ class RemoteMedia(_RemoteFamily):
     def import_file(self, *, project=None, path: Path, realm="managed_local", idempotency_key=None, **kwargs):
         try: data = path.read_bytes()
         except OSError as exc: return DomainResult.failure(ErrorObject("not_found", "media source is unavailable", {}), idempotency_key=idempotency_key or "")
-        result = self._call("POST", "/v1/objects", body=data, key=idempotency_key, expected=(200, 201))
+        if project is None:
+            return DomainResult.failure(ErrorObject("validation_error", "media import requires a project", {"field": "project"}), idempotency_key=idempotency_key or "")
+        result = self._call("POST", f"/v1/projects/{_path(project)}/objects", body=data, key=idempotency_key, expected=(200, 201))
+        if result.ok and isinstance(result.data, dict):
+            result.data.setdefault("object_id", "sha256:" + str(result.data.get("digest", "")))
+            if isinstance(result.data.get("digest"), str) and not result.data["digest"].startswith("sha256:"):
+                result.data["digest"] = "sha256:" + result.data["digest"]
         return result
     def import_directory(self, *, project=None, directory: Path, realm="managed_local", idempotency_key=None, **kwargs):
         items = []
@@ -73,17 +79,42 @@ class RemoteMedia(_RemoteFamily):
             if not result.ok: return result
             items.append(result.data)
         return DomainResult.success(items, idempotency_key=idempotency_key or "")
-    def list(self, project): return DomainResult.success([], idempotency_key="")
-    def show(self, project, ref): return self._call("GET", f"/v1/objects/{_path(ref)}")
-    def verify(self, *args, idempotency_key=None, **kwargs): return DomainResult.success({"verified": True}, idempotency_key=idempotency_key or "")
+    def list(self, project):
+        result = self._call("GET", f"/v1/projects/{_path(project)}/objects")
+        if result.ok and isinstance(result.data, list):
+            for item in result.data:
+                if isinstance(item, dict) and isinstance(item.get("digest"), str) and not item["digest"].startswith("sha256:"):
+                    item["digest"] = "sha256:" + item["digest"]
+        return result
+    def show(self, project, ref):
+        listed = self.list(project)
+        if not listed.ok:
+            return listed
+        wanted = str(ref)
+        matches = [
+            item for item in (listed.data or [])
+            if isinstance(item, dict) and wanted in {str(item.get("digest")), str(item.get("object_id"))}
+        ]
+        if not matches:
+            return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
+        return self._call("GET", f"/v1/objects/{_path(ref)}")
+    def verify(self, project, ref, *, idempotency_key=None, **kwargs):
+        del kwargs
+        scoped = self.show(project, ref)
+        if not scoped.ok:
+            return scoped
+        result = self._call("HEAD", f"/v1/objects/{_path(ref)}", key=idempotency_key, expected=(200, 206))
+        if result.ok:
+            result = DomainResult.success({"verified": True, "object_id": str(ref)}, idempotency_key=result.idempotency_key)
+        return result
     def relate(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "media relations are not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
 
 
 class RemoteTasks(_RemoteFamily):
     def create(self, *, project_id=None, capability, spec, input_manifest=None, idempotency_key=None, **kwargs):
         digest = "sha256:" + hashlib.sha256(str(capability).encode()).hexdigest()
-        return self._call("POST", "/v1/tasks", body={"capability_id": capability, "capability_digest": digest, "input_object_ids": input_manifest or [], "schema_version": "1", "spec": spec}, key=idempotency_key, expected=(200, 201))
-    def list(self, project_id=None): return DomainResult.success([], idempotency_key="")
+        return self._call("POST", "/v1/tasks", body={"capability_id": capability, "capability_digest": digest, "input_object_ids": input_manifest or [], "schema_version": "1", "spec": spec, "project": project_id}, key=idempotency_key, expected=(200, 201))
+    def list(self, project_id=None): return DomainResult.failure(ErrorObject("unavailable", "task listing is not supported by the workspace contract", {}), idempotency_key="")
     def show(self, task_id, project=None): return self._call("GET", f"/v1/tasks/{_path(task_id)}")
     def cancel(self, project, task_id, *, idempotency_key=None): return self._call("POST", f"/v1/tasks/{_path(task_id)}/cancel", body={}, key=idempotency_key)
     def retry(self, project, task_id, *, idempotency_key=None): return self._call("POST", f"/v1/tasks/{_path(task_id)}/retry", body={}, key=idempotency_key)
@@ -91,7 +122,7 @@ class RemoteTasks(_RemoteFamily):
 
 
 class RemoteRuns(_RemoteFamily):
-    def list(self, project_id=None): return DomainResult.success([], idempotency_key="")
+    def list(self, project_id=None): return DomainResult.failure(ErrorObject("unavailable", "run listing is not supported by the workspace contract", {}), idempotency_key="")
     def show(self, project, run_id, **kwargs): return self._call("GET", f"/v1/runs/{_path(run_id)}")
     def cancel(self, project, run_id, *, idempotency_key=None): return DomainResult.failure(ErrorObject("unavailable", "run cancellation is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
     def retry_failed(self, project, run_id, *, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "run retry is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
@@ -103,14 +134,14 @@ class RemoteReferences(_RemoteFamily):
         if timeline_id is None: return DomainResult.failure(ErrorObject("unavailable", "references require a timeline id in workspace.v1", {}), idempotency_key=kwargs.get("idempotency_key") or "")
         key = kwargs.pop("idempotency_key", None)
         return self._call("POST", f"/v1/timelines/{_path(timeline_id)}/references", body=kwargs, key=key, expected=(200, 201))
-    def list(self, project, **kwargs): return DomainResult.success([], idempotency_key="")
+    def list(self, project, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "reference listing is not supported by the workspace contract", {}), idempotency_key="")
     def show(self, project, ref): return self._call("GET", f"/v1/references/{_path(ref)}")
     def update(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "reference update is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
     archive = update; unarchive = update; associate = update; set_primary = update; link = update
 
 
 class RemoteShots(_RemoteFamily):
-    def list(self, project, **kwargs): return DomainResult.success([], idempotency_key="")
+    def list(self, project, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "shot listing is not supported by the workspace contract", {}), idempotency_key="")
     def show(self, project, shot_id): return self._call("GET", f"/v1/shots/{_path(shot_id)}")
     def create(self, *, timeline_id=None, shot=None, idempotency_key=None, **kwargs):
         if timeline_id is None: return DomainResult.failure(ErrorObject("unavailable", "shots require a timeline id in workspace.v1", {}), idempotency_key=idempotency_key or "")
@@ -135,4 +166,8 @@ class RemoteAstridClient:
         return self._transport.request("POST", "/v1/handshake", body={"protocol": "workspace.v1", "client_name": client_name, "client_version": client_version, "requested_scopes": requested_scopes or []})
     def read_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)
     def subscribe_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)
+    def invoke(self, *args, **kwargs):
+        return DomainResult.failure(ErrorObject("unavailable", "capability invocation is not supported by the workspace contract", {}), idempotency_key=kwargs.get("idempotency_key") or "")
+    def render(self, *args, **kwargs):
+        return DomainResult.failure(ErrorObject("unavailable", "rendering is not supported by the workspace contract", {}), idempotency_key=kwargs.get("idempotency_key") or "")
     def close(self): pass

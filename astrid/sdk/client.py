@@ -106,3 +106,9 @@ class AstridClient:
 
     def subscribe_events(self, *args: Any, **kwargs: Any) -> Any:
         return self._remote.subscribe_events(*args, **kwargs)
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._remote.invoke(*args, **kwargs)
+
+    def render(self, *args: Any, **kwargs: Any) -> Any:
+        return self._remote.render(*args, **kwargs)
