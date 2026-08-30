@@ -118,21 +118,14 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
     if isinstance(exc, ProjectPathError):
         return CapabilityValidationError(str(exc))
 
-    from astrid.core.contracts.event_log_error import EventLogError
-    from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError
-    from astrid.core.execution.executor.runner import ExecutorRunnerError
-    from astrid.core.execution.executor.schema import ExecutorValidationError
-    from astrid.core.execution.orchestrator.runner import (
-        OrchestratorRunError,
-        OrchestratorRunnerError,
-    )
-    from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
+    error_name = type(exc).__name__
+    error_module = type(exc).__module__
 
-    if isinstance(exc, (ExecutorRunnerError, OrchestratorRunnerError)):
+    if error_name in {"ExecutorRunnerError", "OrchestratorRunnerError"}:
         if _looks_like_missing_input(str(exc)):
             return CapabilityMissingInputError(str(exc))
         return CapabilityValidationError(str(exc))
-    if isinstance(exc, (ExecutorValidationError, OrchestratorValidationError)):
+    if error_name in {"ExecutorValidationError", "OrchestratorValidationError"}:
         return CapabilityValidationError(str(exc))
     if isinstance(exc, ExecError):
         if exc.type == "precondition":
@@ -140,7 +133,7 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
         if exc.type == "process":
             return CapabilityRuntimeError(exc.message)
         return CapabilityInvocationError(exc.message)
-    if isinstance(exc, OrchestratorRunError):
+    if error_name == "OrchestratorRunError":
         if exc.kind == "precondition":
             return CapabilityPreconditionError(exc.message)
         return CapabilityRuntimeError(exc.message)
@@ -150,11 +143,11 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
     # so they are classified by origin module path — never by import — and
     # map to the lease-error category alongside the kernel writer/epoch
     # errors (the SDK class stays for the public envelope surface).
-    if isinstance(exc, (NotWriterError, StaleEpochError)):
+    if error_name in {"NotWriterError", "StaleEpochError"}:
         return CapabilityLeaseError(str(exc))
-    if type(exc).__module__.startswith("astrid.core.session"):
+    if error_module.startswith("astrid.core.session"):
         return CapabilityLeaseError(str(exc))
-    if isinstance(exc, (StaleTailError, EventLogError)):
+    if error_name in {"StaleTailError", "EventLogError"}:
         return CapabilityEventLogError(str(exc))
     return None
 
@@ -364,7 +357,7 @@ _SERVICE_ERROR_MESSAGES: dict[str, str] = {
 def _stale_version_error(
     exc: BaseException,
     *,
-    timeline_error_type: type[BaseException],
+    timeline_error: bool = False,
 ) -> ServiceStaleVersionError:
     """Map a stale CAS error with actionable, bounded recovery guidance.
 
@@ -385,7 +378,7 @@ def _stale_version_error(
     if isinstance(current_version, int) and not isinstance(current_version, bool):
         details["current_version"] = current_version
 
-    if isinstance(exc, timeline_error_type) and {
+    if timeline_error and {
         "expected_version",
         "current_version",
     } <= details.keys():
@@ -472,93 +465,15 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
     anything not listed falls through to ``internal_error`` in
     :func:`map_error`.
     """
-    from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError
-    from astrid.core.events.service import (
-        EventChainError,
-        EventHeadConflictError,
-        EventIdempotencyError,
-        EventStreamNotFoundError,
-        EventValidationError,
-    )
-    from astrid.core.io.media_import import MediaDecodabilityError, MediaIntegrityError
-    from astrid.core.receipts.service import (
-        ReceiptMismatchError,
-        ReceiptValidationError,
-    )
-    from astrid.core.repositories.errors import (
-        CommandVocabularyError,
-        EventVocabularyError,
-        StreamAgreementError,
-        StreamVocabularyError,
-    )
-    from astrid.core.repositories.evidence import EvidenceValidationError
-    from astrid.core.repositories.media import (
-        MediaAlreadyExistsError,
-        MediaConflictError,
-        MediaLocationNotFoundError,
-        MediaNotFoundError,
-        MediaRelationError,
-        MediaValidationError,
-        MediaVerificationError,
-    )
-    from astrid.core.repositories.projects import (
-        ProjectAlreadyExistsError,
-        ProjectAmbiguousError,
-        ProjectNotFoundError,
-        ProjectSlugConflictError,
-        ProjectValidationError,
-    )
-    from astrid.core.repositories.runs import (
-        RunAlreadyExistsError,
-        RunNotFoundError,
-        RunRetryIneligibleError,
-        RunStaleHeadError,
-        RunTerminalError,
-        RunValidationError,
-    )
-    from astrid.core.repositories.tasks import (
-        TaskAlreadyExistsError,
-        TaskAttemptNotFoundError,
-        TaskDependencyError,
-        TaskNotFoundError,
-        TaskTransitionError,
-        TaskValidationError,
-    )
-    from astrid.core.store.writer import (
-        TransactionControlError,
-        WriterBusyError,
-        WriterShutdownError,
-        WriterSidecarError,
-    )
-    from astrid.packs.references.repository import (
-        ReferenceAlreadyExistsError,
-        ReferenceArchivedError,
-        ReferenceAssociationError,
-        ReferenceLinkError,
-        ReferenceMediaError,
-        ReferenceNotFoundError,
-        ReferencePrimaryError,
-        ReferenceValidationError,
-    )
-    from astrid.packs.shots.repository import (
-        ShotAlreadyExistsError,
-        ShotItemNotFoundError,
-        ShotMediaError,
-        ShotNotFoundError,
-        ShotReorderError,
-        ShotValidationError,
-    )
-    from astrid.packs.timeline.repository import (
-        TimelineAlreadyExistsError,
-        TimelineAmbiguousError,
-        TimelineNotFoundError,
-        TimelineSlugConflictError,
-        TimelineUlidConflictError,
-        TimelineValidationError,
-        TimelineVersionConflictError,
-    )
+    # Do not import local repositories, receipts, events, or the SQLite writer
+    # here.  SDK errors can be raised while the runtime is unavailable, and
+    # mapping those errors must not re-enter the retired local authority.
+    error_name = type(exc).__name__
 
-    if isinstance(exc, MediaDecodabilityError):
+    def is_error(*names: str) -> bool:
+        return error_name in names
+
+    if is_error("MediaDecodabilityError"):
         recovery = (
             "install ffprobe (from the ffmpeg package) and retry"
             if exc.probe_reason == "ffprobe_unavailable"
@@ -576,7 +491,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             },
         )
 
-    if isinstance(exc, TimelineNotFoundError):
+    if is_error("TimelineNotFoundError"):
         return ServiceNotFoundError(
             "the requested timeline does not exist in this project; verify the project and timeline ref",
             details={
@@ -586,7 +501,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "run `astrid timelines list --project <project>` and retry with a listed slug or id",
             },
         )
-    if isinstance(exc, TimelineSlugConflictError):
+    if is_error("TimelineSlugConflictError"):
         return ServiceConflictError(
             "timeline slug is already in use in this project; choose a different slug",
             details={
@@ -597,7 +512,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "run `astrid timelines list --project <project>` and retry with a new slug",
             },
         )
-    if isinstance(exc, TimelineAmbiguousError):
+    if is_error("TimelineAmbiguousError"):
         return ServiceValidationError(
             "timeline display name is ambiguous; retry with one candidate id, ULID, or slug",
             details={
@@ -613,7 +528,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
     # Pack ownership guards already know which endpoint was foreign. Preserve
     # those facts in the public error details instead of collapsing an
     # actionable cross-project rejection into the generic validation message.
-    if isinstance(exc, ShotMediaError):
+    if is_error("ShotMediaError"):
         details = {
             "entity": "shot_media",
             "reason": exc.detail,
@@ -630,7 +545,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             "shot media must belong to the target project; see details for the offending id",
             details=details,
         )
-    if isinstance(exc, ShotReorderError):
+    if is_error("ShotReorderError"):
         return ServiceValidationError(
             "shot reorder rejected; supply the complete current item permutation",
             details={
@@ -644,7 +559,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 ),
             },
         )
-    if isinstance(exc, ReferenceMediaError):
+    if is_error("ReferenceMediaError"):
         return ServiceValidationError(
             "reference media must belong to the target project; see details for the offending id",
             details={
@@ -658,7 +573,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 ),
             },
         )
-    if isinstance(exc, ReferenceAssociationError):
+    if is_error("ReferenceAssociationError"):
         details = {
             "entity": "reference_association",
             "reason": exc.detail,
@@ -682,7 +597,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             "reference association rejected; see details for the offending ownership or role",
             details=details,
         )
-    if isinstance(exc, ReferenceArchivedError):
+    if is_error("ReferenceArchivedError"):
         return ServiceTerminalStateError(
             "reference is archived; unarchive it before adding an association",
             details={
@@ -694,7 +609,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 ),
             },
         )
-    if isinstance(exc, ReferencePrimaryError):
+    if is_error("ReferencePrimaryError"):
         details = {
             "entity": "reference_primary",
             "reason": exc.detail,
@@ -711,7 +626,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             "reference primary change rejected; see details for the offending association",
             details=details,
         )
-    if isinstance(exc, ReferenceLinkError):
+    if is_error("ReferenceLinkError"):
         details = {
             "entity": "reference_link",
             "reason": exc.detail,
@@ -729,7 +644,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             details=details,
         )
 
-    if isinstance(exc, ReceiptMismatchError):
+    if is_error("ReceiptMismatchError"):
         return ServiceIdempotencyMismatchError(
             _SERVICE_ERROR_MESSAGES["idempotency_mismatch"],
             details={
@@ -738,94 +653,52 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
             },
         )
 
-    not_found = (
-        ProjectNotFoundError,
-        TimelineNotFoundError,
-        TaskNotFoundError,
-        TaskAttemptNotFoundError,
-        MediaNotFoundError,
-        MediaLocationNotFoundError,
-        RunNotFoundError,
-        ShotNotFoundError,
-        ShotItemNotFoundError,
-        ReferenceNotFoundError,
-        EventStreamNotFoundError,
-    )
-    conflict = (
-        ProjectAlreadyExistsError,
-        ProjectSlugConflictError,
-        TimelineAlreadyExistsError,
-        TimelineSlugConflictError,
-        TimelineUlidConflictError,
-        TaskAlreadyExistsError,
-        MediaAlreadyExistsError,
-        MediaConflictError,
-        RunAlreadyExistsError,
-        ShotAlreadyExistsError,
-        ReferenceAlreadyExistsError,
-        EventIdempotencyError,
-        StaleEpochError,
-        StaleTailError,
-    )
-    stale_version = (
-        TimelineVersionConflictError,
-        RunStaleHeadError,
-        EventHeadConflictError,
-    )
-    terminal_state = (
-        RunTerminalError,
-        TaskTransitionError,
-        ReferenceArchivedError,
-    )
-    validation = (
-        ProjectAmbiguousError,
-        ProjectValidationError,
-        TimelineValidationError,
-        TaskValidationError,
-        TaskDependencyError,
-        MediaValidationError,
-        MediaRelationError,
-        RunValidationError,
-        ShotValidationError,
-        ShotMediaError,
-        ShotReorderError,
-        ReferenceValidationError,
-        ReferenceAssociationError,
-        ReferencePrimaryError,
-        ReferenceLinkError,
-        ReferenceMediaError,
-        EvidenceValidationError,
-        ReceiptValidationError,
-        EventValidationError,
-        StreamVocabularyError,
-        EventVocabularyError,
-        CommandVocabularyError,
-        StreamAgreementError,
-    )
-    unavailable = (
-        NotWriterError,
-        WriterBusyError,
-        WriterShutdownError,
-        TransactionControlError,
-        WriterSidecarError,
-    )
-    integrity = (EventChainError, MediaVerificationError, MediaIntegrityError)
+    not_found = {
+        "ProjectNotFoundError", "TimelineNotFoundError", "TaskNotFoundError",
+        "TaskAttemptNotFoundError", "MediaNotFoundError", "MediaLocationNotFoundError",
+        "RunNotFoundError", "ShotNotFoundError", "ShotItemNotFoundError",
+        "ReferenceNotFoundError", "EventStreamNotFoundError",
+    }
+    conflict = {
+        "ProjectAlreadyExistsError", "ProjectSlugConflictError", "TimelineAlreadyExistsError",
+        "TimelineSlugConflictError", "TimelineUlidConflictError", "TaskAlreadyExistsError",
+        "MediaAlreadyExistsError", "MediaConflictError", "RunAlreadyExistsError",
+        "ShotAlreadyExistsError", "ReferenceAlreadyExistsError", "EventIdempotencyError",
+        "StaleEpochError", "StaleTailError",
+    }
+    stale_version = {"TimelineVersionConflictError", "RunStaleHeadError", "EventHeadConflictError"}
+    terminal_state = {"RunTerminalError", "TaskTransitionError", "ReferenceArchivedError"}
+    validation = {
+        "ProjectAmbiguousError", "ProjectValidationError", "TimelineValidationError",
+        "TaskValidationError", "TaskDependencyError", "MediaValidationError",
+        "MediaRelationError", "RunValidationError", "ShotValidationError", "ShotMediaError",
+        "ShotReorderError", "ReferenceValidationError", "ReferenceAssociationError",
+        "ReferencePrimaryError", "ReferenceLinkError", "ReferenceMediaError",
+        "EvidenceValidationError", "ReceiptValidationError", "EventValidationError",
+        "StreamVocabularyError", "EventVocabularyError", "CommandVocabularyError",
+        "StreamAgreementError",
+    }
+    unavailable = {
+        "NotWriterError", "WriterBusyError", "WriterShutdownError",
+        "TransactionControlError", "WriterSidecarError",
+    }
+    integrity = {"EventChainError", "MediaVerificationError", "MediaIntegrityError"}
 
     # Dependency admission and blocked-task retry need their typed context;
     # flattening either to the generic validation/terminal message forces an
     # agent to guess the accepted schema or recovery action.
-    if isinstance(exc, TaskDependencyError):
+    if error_name == "TaskDependencyError":
         return _task_dependency_error(exc)
-    if isinstance(exc, TaskValidationError) and getattr(exc, "details", None):
+    if error_name == "TaskValidationError" and getattr(exc, "details", None):
         return _task_dependency_error(exc)
     if (
-        isinstance(exc, TaskTransitionError)
+        error_name == "TaskTransitionError"
         and exc.reason == "not_retryable"
         and "hard prerequisite" in str(getattr(exc, "detail", ""))
     ):
         return _blocked_task_retry_error(exc)
 
-    if isinstance(exc, ProjectNotFoundError):
+    if error_name == "ProjectNotFoundError":
         return ServiceNotFoundError(
             "the requested project does not exist; use its canonical id or slug",
             details={
@@ -834,7 +707,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "run `astrid projects list --json`, then retry with a listed slug or id",
             },
         )
-    if isinstance(exc, ProjectSlugConflictError):
+    if error_name == "ProjectSlugConflictError":
         return ServiceConflictError(
             "project slug is already in use; choose a different immutable slug",
             details={
@@ -844,7 +717,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "run `astrid projects list --json`, then retry with a new slug",
             },
         )
-    if isinstance(exc, ProjectAlreadyExistsError):
+    if error_name == "ProjectAlreadyExistsError":
         return ServiceConflictError(
             "project already exists for this idempotency request",
             details={
@@ -854,7 +727,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "reuse the same request/key to replay, or use a fresh key for a new project",
             },
         )
-    if isinstance(exc, ProjectAmbiguousError):
+    if error_name == "ProjectAmbiguousError":
         return ServiceValidationError(
             "project display name is ambiguous; retry with one candidate id or slug",
             details={
@@ -866,12 +739,12 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "recovery": "retry with candidates[].slug or candidates[].id",
             },
         )
-    if isinstance(exc, ProjectValidationError) and getattr(exc, "details", None):
+    if error_name == "ProjectValidationError" and getattr(exc, "details", None):
         return ServiceValidationError(str(exc), details=dict(exc.details))
-    if isinstance(exc, TimelineValidationError) and getattr(exc, "details", None):
+    if error_name == "TimelineValidationError" and getattr(exc, "details", None):
         return ServiceValidationError(str(exc), details=dict(exc.details))
 
-    if isinstance(exc, RunRetryIneligibleError):
+    if error_name == "RunRetryIneligibleError":
         return ServiceValidationError(
             "run retry found no eligible failed or expired children; inspect child task state before retrying",
             details={
@@ -895,13 +768,13 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         (unavailable, "unavailable"),
         (integrity, "integrity_error"),
     ):
-        if isinstance(exc, error_type):
+        if error_name in error_type:
             return _SERVICE_ERROR_CLASSES[code](_SERVICE_ERROR_MESSAGES[code])
 
-    if isinstance(exc, stale_version):
+    if error_name in stale_version:
         return _stale_version_error(
             exc,
-            timeline_error_type=TimelineVersionConflictError,
+            timeline_error=error_name == "TimelineVersionConflictError",
         )
 
     return None

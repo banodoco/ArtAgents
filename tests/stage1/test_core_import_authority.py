@@ -247,3 +247,32 @@ def test_pack_cli_rejects_retired_mutation_commands() -> None:
     )
     assert result.returncode == 2
     assert "invalid choice" in result.stderr
+
+
+def test_sdk_error_mapping_failure_path_stays_local_authority_free() -> None:
+    """Mapping a writer-shaped failure must not import the retired store graph."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; from astrid.sdk.exceptions import map_error; "
+                "WriterShutdownError = type('WriterShutdownError', (RuntimeError,), "
+                "{'__module__': 'astrid.core.store.writer'}); "
+                "mapped = map_error(WriterShutdownError('closed')); "
+                "print(mapped.code); "
+                "print([name for name in sys.modules if name == 'sqlite3' or "
+                "name.startswith('astrid.core.store') or "
+                "name.startswith('astrid.core.repositories') or "
+                "name.startswith('astrid.core.receipts.service') or "
+                "name.startswith('astrid.core.events.service')])"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["unavailable", "[]"]
