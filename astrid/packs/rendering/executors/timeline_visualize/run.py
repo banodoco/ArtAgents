@@ -106,6 +106,119 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
 )
 
 _AUTHORITY_CONTEXT_ENV = "ASTRID_TIMELINE_VISUALIZE_AUTHORITY_CONTEXT"
+_RUNTIME_MEDIA_PAGE_LIMIT = 50
+_RUNTIME_MEDIA_MAX_PAGES = 10_000
+
+
+def _runtime_media_row_value(row: Any, *keys: str) -> Any:
+    """Read a generated-client row without requiring a mapping conversion."""
+
+    if isinstance(row, Mapping):
+        for key in keys:
+            if key in row:
+                return row[key]
+        return None
+    for key in keys:
+        try:
+            return getattr(row, key)
+        except AttributeError:
+            continue
+    return None
+
+
+def _runtime_media_page(result: Any) -> tuple[list[Any], str | None] | None:
+    """Normalize the compatibility wrapper and generated-client page shapes."""
+
+    if isinstance(result, Mapping):
+        items = result.get("items")
+        next_cursor = result.get("next_cursor")
+    elif isinstance(result, tuple) and len(result) == 2:
+        items, next_cursor = result
+    elif isinstance(result, (list, tuple)):
+        # Keep compatibility with older test doubles and local adapters that
+        # predate the cursor-bearing page envelope.
+        items, next_cursor = result, None
+    else:
+        return None
+    if not isinstance(items, (list, tuple)):
+        return None
+    if next_cursor is not None and not isinstance(next_cursor, str):
+        return None
+    return list(items), next_cursor
+
+
+def _runtime_media_snapshot_rows(
+    rows: Iterable[Any], *, project_id: str, project_slug: str
+) -> list[Any] | None:
+    """Validate ownership and make a cursor-assembled snapshot deterministic."""
+
+    unique: list[Any] = []
+    seen_object_ids: set[str] = set()
+    seen_digests: set[str] = set()
+    seen_rows: set[str] = set()
+    for row in rows:
+        # The current ManagedObject schema is project-scoped and omits an owner
+        # field.  If a newer/ test-double row includes one, fail closed rather
+        # than allowing a cross-project admission into a child-process snapshot.
+        row_project_id = _runtime_media_row_value(
+            row, "project_id", "owner_project_id", "owning_project_id"
+        )
+        if row_project_id is not None and str(row_project_id) != project_id:
+            return None
+        row_project = _runtime_media_row_value(row, "project")
+        if row_project is not None:
+            if isinstance(row_project, Mapping):
+                candidate = row_project.get("project_id") or row_project.get("id")
+                candidate_slug = row_project.get("slug")
+                if candidate is not None and str(candidate) != project_id:
+                    return None
+                if candidate_slug is not None and str(candidate_slug) != project_slug:
+                    return None
+            elif str(row_project) not in {project_id, project_slug}:
+                return None
+
+        object_id = _runtime_media_row_value(row, "object_id", "media_id", "id")
+        digest = _runtime_media_row_value(
+            row, "content_hash", "content_sha256", "sha256", "digest"
+        )
+        object_key = str(object_id) if isinstance(object_id, str) and object_id else None
+        digest_key = str(digest) if isinstance(digest, str) and digest else None
+        if object_key is not None and object_key in seen_object_ids:
+            continue
+        if digest_key is not None and digest_key in seen_digests:
+            continue
+        if object_key is None and digest_key is None:
+            # Malformed rows are retained for the resolver's existing
+            # fail-closed normalization, but exact duplicates are suppressed.
+            try:
+                row_key = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
+            except (TypeError, ValueError):
+                row_key = repr(row)
+            if row_key in seen_rows:
+                continue
+            seen_rows.add(row_key)
+        if object_key is not None:
+            seen_object_ids.add(object_key)
+        if digest_key is not None:
+            seen_digests.add(digest_key)
+        unique.append(row)
+
+    def sort_key(row: Any) -> tuple[str, str, str]:
+        object_id = _runtime_media_row_value(row, "object_id", "media_id", "id")
+        digest = _runtime_media_row_value(
+            row, "content_hash", "content_sha256", "sha256", "digest"
+        )
+        try:
+            stable = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
+        except (TypeError, ValueError):
+            stable = repr(row)
+        return (
+            str(object_id) if object_id is not None else "",
+            str(digest) if digest is not None else "",
+            stable,
+        )
+
+    return sorted(unique, key=sort_key)
 
 
 def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
@@ -139,12 +252,30 @@ def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
         project_id = project.get("project_id") or project.get("id")
         if not isinstance(project_id, str) or not project_id:
             return None
-        result = client.list_project_objects(project_id)
-        if isinstance(result, Mapping):
-            result = result.get("items", [])
-        if not isinstance(result, (list, tuple)):
-            return None
-        return list(result)
+        rows: list[Any] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for _ in range(_RUNTIME_MEDIA_MAX_PAGES):
+            result = client.list_project_objects(
+                project_id, cursor=cursor, limit=_RUNTIME_MEDIA_PAGE_LIMIT
+            )
+            page = _runtime_media_page(result)
+            if page is None:
+                return None
+            page_rows, next_cursor = page
+            rows.extend(page_rows)
+            if next_cursor is None:
+                return _runtime_media_snapshot_rows(
+                    rows, project_id=project_id, project_slug=project_slug
+                )
+            if next_cursor in seen_cursors or next_cursor == cursor:
+                return None
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        # A runtime that emits an unbounded stream of unique cursors is just as
+        # unsafe as one that repeats a cursor; never hand an incomplete snapshot
+        # to the managed-media resolver.
+        return None
     except Exception:  # noqa: BLE001 - managed media reads fail closed
         return None
 
