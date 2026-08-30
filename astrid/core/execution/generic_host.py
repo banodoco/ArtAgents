@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -36,6 +37,50 @@ from astrid.core.execution.executor.folder import discover_folder_executor_roots
 
 class HostError(RuntimeError):
     """A controlled host-side error suitable for a worker diagnostic."""
+
+
+class HostCancelled(HostError):
+    """The runtime cancelled the attempt while the subprocess was running."""
+
+
+@dataclass(frozen=True)
+class AdapterSpec:
+    family: str
+    resource_keys: tuple[str, ...] = ()
+    required_binaries: tuple[str, ...] = ()
+    required_packages: tuple[str, ...] = ()
+    requires_network: bool = False
+
+
+class AdapterRegistry:
+    """Small explicit family map; adapter code stays behind the host seam."""
+
+    _specs = {
+        "cpu": AdapterSpec("cpu", ("cpu",)),
+        "provider": AdapterSpec("provider", ("provider",), requires_network=True),
+        "render": AdapterSpec("render", ("render",), ("node", "ffmpeg")),
+        "local_generation": AdapterSpec("local_generation", ("gpu",), ()),
+    }
+
+    @classmethod
+    def resolve(cls, definition: ExecutorDefinition) -> AdapterSpec:
+        metadata = definition.metadata
+        explicit = metadata.get("adapter_family") or metadata.get("adapter")
+        if explicit:
+            family = str(explicit)
+        elif definition.id.startswith("rendering.") or "render" in definition.id:
+            family = "render"
+        elif definition.id.startswith(("vibecomfy.", "comfy_wrap.")) or metadata.get("vibecomfy_command"):
+            family = "local_generation"
+        elif metadata.get("api_provider") or metadata.get("env") or metadata.get("secrets_required") or definition.isolation.network:
+            family = "provider"
+        else:
+            family = "cpu"
+        return cls._specs.get(family, AdapterSpec(family))
+
+    @classmethod
+    def families(cls) -> tuple[str, ...]:
+        return tuple(sorted(cls._specs))
 
 
 def _canonical_digest(value: Any) -> str:
@@ -74,7 +119,8 @@ class CapabilityRecord:
         values = metadata.get("resource_keys", metadata.get("resources", ()))
         if isinstance(values, str):
             values = (values,)
-        return tuple(str(value) for value in (values or ()))
+        declared = tuple(str(value) for value in (values or ()))
+        return tuple(dict.fromkeys((*AdapterRegistry.resolve(self.definition).resource_keys, *declared)))
 
     @property
     def estimated_scratch_bytes(self) -> int:
@@ -88,6 +134,8 @@ class CapabilityRecord:
         return {
             "id": self.id,
             "definition": self.definition.to_dict(),
+            "inputs": [port.__dict__ for port in self.definition.inputs],
+            "outputs": [output.__dict__ for output in self.definition.outputs],
             "capability_digest": self.capability_digest,
             "source_digest": self.source_digest,
             "source_root": str(self.source_root),
@@ -95,6 +143,7 @@ class CapabilityRecord:
             "resource_keys": list(self.resource_keys),
             "estimated_scratch_bytes": self.estimated_scratch_bytes,
             "estimated_output_bytes": self.estimated_output_bytes,
+            "adapter_family": AdapterRegistry.resolve(self.definition).family,
             "preflight": dict(self.preflight),
             "ready": self.ready,
         }
@@ -207,7 +256,8 @@ class GenericPackHost:
         updated: dict[str, CapabilityRecord] = dict(self.capabilities)
         for record in selected:
             checks: dict[str, Any] = {"source": record.source_root.is_dir(), "definition": True}
-            missing = list(check_executor_binaries(record.definition))
+            adapter = AdapterRegistry.resolve(record.definition)
+            missing = list(dict.fromkeys((*check_executor_binaries(record.definition), *(binary for binary in adapter.required_binaries if shutil.which(binary) is None))))
             if missing:
                 checks["binaries"] = {"ok": False, "missing": missing}
             else:
@@ -215,6 +265,19 @@ class GenericPackHost:
             required_env = record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
             missing_env = [str(name) for name in (required_env or ()) if not os.environ.get(str(name))]
             checks["credentials"] = {"ok": not missing_env, "missing": missing_env}
+            required_packages = record.definition.metadata.get("required_packages", adapter.required_packages)
+            missing_packages = [package for package in (required_packages or ()) if importlib.util.find_spec(str(package)) is None]
+            checks["packages"] = {"ok": not missing_packages, "missing": missing_packages}
+            if adapter.family == "render":
+                checkout = next((parent.parent for parent in (record.source_root, *record.source_root.parents) if parent.name == "astrid" and (parent.parent / "remotion").is_dir()), None)
+                package_json = checkout / "remotion" / "package.json" if checkout else None
+                lock_file = checkout / "remotion" / "package-lock.json" if checkout else None
+                node_modules = checkout / "remotion" / "node_modules" if checkout else None
+                checks["remotion"] = {"ok": bool(package_json and lock_file and node_modules and node_modules.is_dir()), "package_json": str(package_json) if package_json else None, "lock_file": str(lock_file) if lock_file else None, "dependencies": str(node_modules) if node_modules else None}
+            if adapter.requires_network and not record.definition.isolation.network:
+                checks["network"] = {"ok": False, "reason": "adapter_requires_network"}
+            else:
+                checks["network"] = {"ok": True}
             ready = all(value is True or (isinstance(value, dict) and value.get("ok") is True) for value in checks.values())
             updated[record.id] = CapabilityRecord(**{**record.__dict__, "preflight": checks, "ready": ready})
         self.capabilities = updated
@@ -280,7 +343,7 @@ class GenericPackHost:
             outputs.append({"name": name, "artifact_type": getattr(output, "artifact_type", None), "digest": hashlib.sha256(data).hexdigest(), "size": len(data), "content_base64": base64.b64encode(data).decode("ascii")})
         return outputs
 
-    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path) -> Any:
+    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None) -> Any:
         """Run a manifest command without importing Astrid's project authority.
 
         The legacy runner is still available for built-in pipeline steps, but
@@ -290,15 +353,40 @@ class GenericPackHost:
         if command is None:
             raise HostError(f"capability {record.id!r} has no dispatchable command")
         values = {"out": str(output_root), "run_root": str(attempt), "python_exec": sys.executable, **inputs}
+        for port in record.definition.inputs:
+            if port.name not in values and port.default is not None:
+                values[port.name] = port.default
+        for output in record.definition.outputs:
+            if output.name not in values and output.name == "video":
+                values["output_name"] = "hype.mp4"
         argv = [str(part) for part in command.argv]
         for index, part in enumerate(argv):
             for key, value in values.items():
                 argv[index] = argv[index].replace("{" + key + "}", str(value))
+        for input_arg in command.input_args:
+            value = values.get(input_arg.input)
+            if value in (None, "") or any("{" + input_arg.input + "}" in part for part in command.argv):
+                continue
+            items = value if input_arg.repeatable and isinstance(value, (list, tuple)) else (value,)
+            for item in items:
+                if input_arg.flag:
+                    argv.extend((input_arg.flag, str(item)))
         env = os.environ.copy()
         env.update({str(key): str(value) for key, value in command.env.items()})
-        completed = subprocess.run(argv, cwd=str(command.cwd or attempt), env=env, check=False, capture_output=True, text=True)
-        if completed.returncode != 0:
-            raise HostError(f"capability {record.id!r} exited {completed.returncode}: {(completed.stderr or completed.stdout).strip()}")
+        process = subprocess.Popen(argv, cwd=str(command.cwd or attempt), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        while process.poll() is None:
+            if cancelled is not None and cancelled():
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise HostCancelled(f"capability {record.id!r} cancelled")
+            time.sleep(0.05)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            raise HostError(f"capability {record.id!r} exited {process.returncode}: {(stderr or stdout).strip()}")
         outputs = {}
         for output in record.definition.outputs:
             template = output.path_template or output.placeholder
@@ -309,7 +397,7 @@ class GenericPackHost:
             candidate = Path(path)
             if candidate.is_file():
                 outputs[output.name] = str(candidate)
-        return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": completed.returncode, "capability_digest": record.capability_digest}})()
+        return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
 
     def run_task(self, task: Mapping[str, Any], *, lease_token: str, keep_attempt: bool = False) -> Mapping[str, Any]:
         task_data = task.get("task", task)
@@ -333,22 +421,58 @@ class GenericPackHost:
             inputs = self._materialize_inputs(spec, root)
             output_root = root / "outputs"
             output_root.mkdir(parents=True, exist_ok=True)
+            cancel_signal = threading.Event()
+            pump_stop = threading.Event()
             if self.client is not None and hasattr(self.client, "heartbeat"):
                 self.client.heartbeat(task_id, lease_token)
-            if record.definition.command is not None:
-                result = self._run_command_definition(record, inputs, output_root, root)
+
+                def pump_lease():
+                    while not pump_stop.wait(5.0):
+                        try:
+                            self.client.heartbeat(task_id, lease_token)
+                            if hasattr(self.client, "task"):
+                                current = self.client.task(task_id)
+                                current_task = current.get("task", current) if isinstance(current, Mapping) else {}
+                                if current_task.get("status") == "cancelled":
+                                    cancel_signal.set()
+                        except Exception:
+                            # The daemon fences settlement if a heartbeat is
+                            # lost; the subprocess is still cleaned up here.
+                            cancel_signal.set()
+
+                pump_thread = threading.Thread(target=pump_lease, name=f"astrid-heartbeat-{task_id}", daemon=True)
+                pump_thread.start()
             else:
-                request = ExecutorRunRequest(executor_id=capability_id, out=output_root, inputs=inputs, project=task_data.get("project"), project_was_auto_resolved=True, python_exec=sys.executable, run_id=task_id, run_root=root, execution_mode="subprocess", invocation="runtime")
-                # Dispatch against the immutable definition selected at
-                # admission, rather than reloading a mutable global registry.
-                result = run_executor(request, ExecutorRegistry([record.definition]))
+                pump_thread = None
+
+            def cancelled():
+                if cancel_signal.is_set():
+                    return True
+                if self.client is None or not hasattr(self.client, "task"):
+                    return False
+                current = self.client.task(task_id)
+                current_task = current.get("task", current) if isinstance(current, Mapping) else {}
+                return current_task.get("status") == "cancelled"
+
+            try:
+                if record.definition.command is not None:
+                    result = self._run_command_definition(record, inputs, output_root, root, cancelled=cancelled)
+                else:
+                    request = ExecutorRunRequest(executor_id=capability_id, out=output_root, inputs=inputs, project=task_data.get("project"), project_was_auto_resolved=True, python_exec=sys.executable, run_id=task_id, run_root=root, execution_mode="subprocess", invocation="runtime")
+                    # Dispatch against the immutable definition selected at
+                    # admission, rather than reloading a mutable global registry.
+                    result = run_executor(request, ExecutorRegistry([record.definition]))
+            finally:
+                pump_stop.set()
+                if pump_thread is not None:
+                    pump_thread.join(timeout=2)
             if self.client is not None and hasattr(self.client, "task"):
                 current = self.client.task(task_id)
                 current_task = current.get("task", current) if isinstance(current, Mapping) else {}
                 if current_task.get("status") == "cancelled":
                     return {"task_id": task_id, "status": "cancelled", "cancelled": True}
             outputs = self._typed_outputs(record, result, root)
-            payload = getattr(result, "payload", {}) or {}
+            payload = {"adapter_family": AdapterRegistry.resolve(record.definition).family, **(getattr(result, "payload", {}) or {})}
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):
                 effect = effect[0] if effect else None
@@ -357,6 +481,8 @@ class GenericPackHost:
             else:
                 settlement = {"task_id": task_id, "result": payload, "output_objects": outputs, "effect": effect}
             return settlement
+        except HostCancelled:
+            return {"task_id": task_id, "status": "cancelled", "cancelled": True}
         except Exception as exc:
             if self.client is not None and hasattr(self.client, "fail"):
                 self.client.fail(task_id, lease_token, str(exc), retryable=False)
@@ -364,6 +490,12 @@ class GenericPackHost:
         finally:
             if not keep_attempt and self.attempt_root is None:
                 shutil.rmtree(root, ignore_errors=True)
+
+    def cancel_task(self, task_id: str) -> Any:
+        """Propagate cancellation through the runtime client boundary."""
+        if self.client is None or not hasattr(self.client, "cancel"):
+            raise HostError("runtime client is required to cancel a task")
+        return self.client.cancel(task_id)
 
 
 def _cli() -> int:

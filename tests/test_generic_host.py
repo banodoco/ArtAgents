@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.execution.generic_host import GenericPackHost
+from astrid.core.execution.generic_host import AdapterRegistry
 
 
 class FakeRuntime:
@@ -114,3 +115,23 @@ def test_unready_capability_is_not_dispatched(tmp_path, monkeypatch):
     # python_exec is resolved by the runner; with PATH empty the source still
     # remains a valid manifest and readiness is determined by its declaration.
     assert host.capabilities["test.echo"].ready
+
+
+def test_adapter_registry_classifies_provider_local_generation_and_render():
+    provider = GenericPackHost(pack_roots=[Path("astrid/packs/generation/executors")])
+    provider.discover()
+    assert AdapterRegistry.resolve(provider.capabilities["generation.generate_image_openai"].definition).family == "provider"
+
+    local = GenericPackHost(pack_roots=[Path("astrid/packs/vibecomfy/executors")])
+    local.discover()
+    assert AdapterRegistry.resolve(local.capabilities["vibecomfy.run"].definition).family == "local_generation"
+    local.preflight("vibecomfy.run")
+    assert local.capabilities["vibecomfy.run"].resource_keys == ("gpu",)
+
+    render = GenericPackHost(pack_roots=[Path("astrid/packs/rendering/executors/render")])
+    render.discover()
+    assert AdapterRegistry.resolve(render.capabilities["rendering.render"].definition).family == "render"
+    render.preflight("rendering.render")
+    report = render.capabilities["rendering.render"].preflight
+    assert report["binaries"]["ok"]
+    assert "remotion" in report
