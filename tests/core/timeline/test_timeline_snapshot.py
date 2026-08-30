@@ -10,7 +10,6 @@ import pytest
 
 import astrid.core.timeline.snapshot as snapshot_module
 from astrid.core._shared import jsonio
-from astrid.core.integrations.reigh import local_bridge
 from astrid.core.timeline import paths, projection
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineEvent, with_event_hash
@@ -212,11 +211,6 @@ def test_acquisition_never_calls_mutating_or_repair_apis(
         LocalFsBackend,
         "append_event",
         forbidden("LocalFsBackend.append_event"),
-    )
-    monkeypatch.setattr(
-        local_bridge,
-        "_ensure_bridge_registry",
-        forbidden("_ensure_bridge_registry"),
     )
     monkeypatch.setattr(
         jsonio,

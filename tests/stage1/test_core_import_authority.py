@@ -188,7 +188,8 @@ def test_normal_gateway_sdk_host_backup_timeline_imports_exclude_retired_bridge(
                 "import astrid.core.backup; import astrid.core.timeline; "
                 "retired = ('bridge_service', 'local_bridge_server', "
                 "'task_bridge', 'local_bridge', 'orchestrator_runner', "
-                "'asset_registry_edits'); "
+                "'asset_registry_edits', 'core.doctor', 'backup.operations', "
+                "'backup.cli', 'model_setup.repair'); "
                 "print([name for name in sys.modules if any(token in name "
                 "for token in retired)])"
             ),

@@ -351,7 +351,7 @@ def _registry_from_events(
         registry = getattr(event.payload, "registry", None)
         if not isinstance(registry, dict):
             # Erasure repair keeps the original event kind but replaces its
-            # payload.  Match local_bridge._registry_from_event_stream by
+            # payload. Match the event-stream registry projection by
             # continuing to the newest still-usable full replacement.
             skipped_replacements += 1
             continue

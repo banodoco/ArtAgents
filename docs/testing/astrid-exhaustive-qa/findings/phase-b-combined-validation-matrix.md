@@ -157,7 +157,6 @@ existing editor save/assets assertions while resolving the branch conflict.
 
 ```bash
 python3 -m pytest -q \
-  tests/v10/test_doctor_setup.py \
   tests/v10/test_setup_journal.py \
   tests/v10/test_setup_manifest_preflight.py \
   tests/v10/test_setup_probes.py \
@@ -338,4 +337,3 @@ unknown authority, unbounded failure, or data-loss issue blocking promotion.
 - Existing live reports remain evidence for already closed regressions. Only
   replay them if merge reconciliation touches their authority or lifecycle
   path, or if the combined journey discovers a regression.
-

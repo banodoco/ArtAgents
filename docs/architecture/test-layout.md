@@ -178,7 +178,6 @@ verification, runtime inventory) or have no clear single domain.
 
 | File | Lines | Rationale |
 | --- | --- | --- |
-| `test_doctor_setup.py` | 453 | Doctor/setup diagnostic — repo-level health check |
 | `test_gateway_status_routing.py` | 118 | Gateway status routing — top-level gateway |
 | `test_logo_ideas.py` | 98 | Logo ideas — miscellaneous, no clear domain |
 | `test_onboarding_docs.py` | 230 | Onboarding docs — cross-cutting documentation verification |
@@ -202,5 +201,4 @@ verification, runtime inventory) or have no clear single domain.
 | **SD1** | The relocation map (`test-relocation-map.json`) is authoritative for all `stay_root` designations. SDK/public-contract tests remain at `tests/` root. |
 | **SD2** | `tests/timeline/` is the sole canonical home for all timeline tests. `tests/core/timeline/` is not created. |
 | **SD3** | `tests/task/` is the sole canonical home for all task tests. Root task tests move to `tests/task/`, not `tests/core/task/`. |
-
 

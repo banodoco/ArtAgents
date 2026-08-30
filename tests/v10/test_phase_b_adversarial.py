@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -19,8 +18,7 @@ from astrid.core.model_setup.journal import (
     resolve_boot_state,
     staged_path,
 )
-from astrid.core.model_setup.manifest import ManifestError, make_manifest, save_manifest
-from astrid.core.model_setup.repair import doctor_setup
+from astrid.core.model_setup.manifest import ManifestError, make_manifest
 from astrid.core.store.writer import DatabaseWriter, WriterSidecarError
 
 
@@ -106,49 +104,6 @@ def test_replay_marks_complete_bad_fields_and_schema_corrupt(tmp_path: Path) -> 
     snapshot = journal.replay()
     assert snapshot.corrupt is True
     assert snapshot.states["bundle"].phase == "installed"
-
-
-def test_doctor_repairs_corrupt_bytes_after_journal_reconciliation(tmp_path: Path) -> None:
-    content = b"signed payload"
-    manifest = make_manifest(
-        "bundle", version="1", content=content,
-        license_identity="Apache-2.0", license_text=b"license",
-    )
-    manifest_dir = tmp_path / ".astrid" / "setup" / "manifests"
-    manifest_dir.mkdir(parents=True)
-    save_manifest(manifest, manifest_dir / "bundle.json")
-    target = artifact_path(tmp_path, "bundle")
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"tampered")
-    journal = SetupJournal(tmp_path)
-    journal.append("bundle", "installed", sha256=hashlib.sha256(content).hexdigest(), size=len(content))
-    journal_path(tmp_path).write_bytes(b"not-json\n" + journal_path(tmp_path).read_bytes())
-
-    def acquire(_manifest) -> None:
-        target.write_bytes(content)
-
-    reports = doctor_setup(tmp_path, acquire=acquire)
-    assert [(report.artifact_id, report.verdict) for report in reports] == [("bundle", "repaired")]
-    assert target.read_bytes() == content
-    assert resolve_boot_state(tmp_path, write=False).states["bundle"].phase == "installed"
-
-
-def test_doctor_does_not_call_a_noop_repair_success(tmp_path: Path) -> None:
-    content = b"signed payload"
-    manifest = make_manifest(
-        "bundle", version="1", content=content,
-        license_identity="Apache-2.0", license_text=b"license",
-    )
-    manifest_dir = tmp_path / ".astrid" / "setup" / "manifests"
-    manifest_dir.mkdir(parents=True)
-    save_manifest(manifest, manifest_dir / "bundle.json")
-    target = artifact_path(tmp_path, "bundle")
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"tampered")
-    SetupJournal(tmp_path).append("bundle", "installed", sha256=hashlib.sha256(content).hexdigest(), size=len(content))
-
-    reports = doctor_setup(tmp_path, acquire=lambda _manifest: None)
-    assert reports[0].verdict == "repair_failed"
 
 
 def test_boot_does_not_promote_staged_bytes_without_expected_metadata(tmp_path: Path) -> None:

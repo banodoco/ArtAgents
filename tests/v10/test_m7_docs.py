@@ -30,7 +30,9 @@ _NESTED_MOUNTS: dict[tuple[str, str], str] = {
     ("media", "references"): "astrid.packs.references.cli",
 }
 
-_BACKUP_PARSER_MODULE = "astrid.core.backup.cli"
+_BACKUP_COMMANDS = frozenset(
+    {"create", "restore", "export", "tombstone", "recover", "purge"}
+)
 
 
 def _read_docs() -> str:
@@ -150,10 +152,9 @@ def _validate_prefix(prefix: list[str]) -> list[str]:
         return errors
     if first == "backup":
         if len(prefix) >= 2 and prefix[1] not in {"--help", "-h"}:
-            verbs = _subcommands(_family_parser(_BACKUP_PARSER_MODULE))
-            if prefix[1] not in verbs:
+            if prefix[1] not in _BACKUP_COMMANDS:
                 errors.append(
-                    f"backup verb {prefix[1]!r} not in {sorted(verbs)}: {prefix!r}"
+                    f"backup verb {prefix[1]!r} not in {sorted(_BACKUP_COMMANDS)}: {prefix!r}"
                 )
         return errors
     if len(prefix) < 2:

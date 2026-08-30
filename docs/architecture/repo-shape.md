@@ -37,7 +37,7 @@ The 28 names in `astrid.__all__` are:
 | `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.core.gateway.main()`. |
 | `astrid.core.gateway` | `astrid/core/gateway/` | **Subcommand router package** — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
 | `astrid.core.orchestrate.cli` | `astrid/core/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
-| `astrid.core.doctor` | `astrid/core/doctor.py` | **Repo health diagnostic** — consumes `validate_repo_structure()`. |
+| `astrid doctor` | `astrid/core/gateway/dispatch.py` | **Runtime health diagnostic** — delegates to the generated workspace client. |
 | `astrid.skills.cli` | `astrid/skills/cli.py` | **Skills CLI** — skill discovery and harness management. |
 | `astrid.core.threads.cli` | `astrid/core/threads/cli.py` | **Threads CLI** — thread index and lineage commands. |
 | `astrid.core.timeline.cli` | `astrid/core/timeline/cli.py` | **Timeline CLI** — timeline inspection and manipulation commands. |

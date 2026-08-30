@@ -52,6 +52,10 @@ _FAMILY_PARSERS: dict[str, str] = {
     "runs": "astrid.core.cli.domain_runs",
 }
 
+_BACKUP_COMMANDS = frozenset(
+    {"create", "restore", "export", "tombstone", "recover", "purge"}
+)
+
 # Retired task-mode invocation strings that must not appear verbatim.
 _GHOST_STRINGS = (
     "astrid next",
@@ -204,9 +208,8 @@ def _validate_command(tokens: list[str], where: str) -> list[str]:
         return errors
     if first == "backup":
         if len(tokens) >= 2 and tokens[1] not in {"--help", "-h"}:
-            verbs = _subcommands(_family_parser("astrid.core.backup.cli"))
-            if tokens[1] not in verbs:
-                errors.append(f"{where}: backup verb {tokens[1]!r} not in {sorted(verbs)}")
+            if tokens[1] not in _BACKUP_COMMANDS:
+                errors.append(f"{where}: backup verb {tokens[1]!r} not in {sorted(_BACKUP_COMMANDS)}")
         return errors
     # Product family: verify the verb through the family's argparse parser.
     if len(tokens) < 2:

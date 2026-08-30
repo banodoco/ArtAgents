@@ -87,7 +87,6 @@ now share it:
 | `core.project.project` | project-show run list versus historical filesystem fallback |
 | `core.project.guidance` | project-selection run counts |
 | `iteration.experiment_import` | whether imported evidence may claim kernel-derived authority |
-| `core.doctor` | integrity, schema, media-locator checks and visible path diagnostics |
 
 The experiment importer also stopped performing a raw query with
 `project_id = project_slug`; it now uses `kernel_run_info`, which resolves the

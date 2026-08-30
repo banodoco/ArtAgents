@@ -180,5 +180,4 @@ pinning the attribute name on an imported module. The import path of the module 
 | `from astrid.core import doctor` | `main` | `tests/test_pipeline_dispatch_aliases.py` : 57 |
 | `from astrid.core.gateway import setup` | `main` | `tests/test_pipeline_dispatch_aliases.py` : 67 |
 | `from astrid.core import gateway` | tests reference `gateway.main` but don't monkeypatch it | — |
-| `from astrid.core.pack import packs_root` | `_check_env_template` (doctor) | `tests/test_doctor_setup.py` : 37, 55 |
 | `astrid.core.task.lifecycle.SessionStore` | `save` (spy) | `tests/session/test_session_lifecycle.py` : 409 |
