@@ -8,11 +8,15 @@ test modules on purpose: they are genuinely divergent.
 
 from __future__ import annotations
 
+import atexit
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,189 @@ from typing import Any
 from astrid.core.foundation.project_paths import project_dir
 
 _LOCAL_VISUALIZE_ATTEMPTS = 0
+
+# The visualization pack is intentionally invoked directly in these tests,
+# but frozen views now prove their owner through the workspace runtime.  Keep
+# one disposable daemon per test process so a root view and its child views
+# share real runtime admission/settlement evidence without making the
+# production reader accept filesystem ``run.json`` as authority.
+_RUNTIME_CONTEXT: dict[str, Any] | None = None
+_RUNTIME_STORAGE_ROOT = Path(tempfile.mkdtemp(prefix="astrid-frozen-runtime-"))
+_RUNTIME_CAPABILITY = "rendering.timeline_visualize"
+_RUNTIME_WORKER = "astrid-frozen-test-worker"
+
+
+def _stop_runtime() -> None:
+    global _RUNTIME_CONTEXT
+    if _RUNTIME_CONTEXT is not None:
+        _RUNTIME_CONTEXT["daemon"].stop()
+        _RUNTIME_CONTEXT = None
+
+
+atexit.register(_stop_runtime)
+
+
+def _runtime_for(slug: str) -> dict[str, Any]:
+    """Start/configure the disposable runtime backing local pack tests."""
+    global _RUNTIME_CONTEXT
+    if _RUNTIME_CONTEXT is None:
+        runtime_checkout = (
+            Path(__file__).resolve().parents[4]
+            / "banodoco-workspace-runtime-stage1-convergence"
+        )
+        for import_root in (runtime_checkout, runtime_checkout / "packages" / "python"):
+            if str(import_root) not in sys.path:
+                sys.path.insert(0, str(import_root))
+        from runtime_protocol.daemon import RuntimeDaemon
+        from astrid.sdk.workspace_client import WorkspaceClient
+
+        daemon = RuntimeDaemon(
+            _RUNTIME_STORAGE_ROOT / "realm",
+            support_root=_RUNTIME_STORAGE_ROOT / "support",
+        ).start()
+        os.environ["BANODOCO_RUNTIME_ENDPOINT"] = daemon.endpoint
+        os.environ["BANODOCO_RUNTIME_DISCOVERY"] = str(
+            _RUNTIME_STORAGE_ROOT / "support" / "discovery.json"
+        )
+        os.environ["BANODOCO_RUNTIME_CREDENTIAL"] = str(
+            _RUNTIME_STORAGE_ROOT / "support" / "credentials" / "owner.token"
+        )
+        client = WorkspaceClient(daemon.endpoint, daemon.token)
+        capability_digest = "sha256:" + hashlib.sha256(_RUNTIME_CAPABILITY.encode()).hexdigest()
+        daemon.service.register_capability(
+            {
+                "capability_id": _RUNTIME_CAPABILITY,
+                "definition_digest": capability_digest,
+                "required_resource_keys": [],
+                "status": "ready",
+            }
+        )
+        epoch = daemon.service.store._current_runtime_epoch()
+        daemon.service.register_worker(
+            {
+                "worker_id": _RUNTIME_WORKER,
+                "capabilities": [_RUNTIME_CAPABILITY],
+                "max_concurrency": 128,
+                "resource_keys": [],
+                "runtime_epoch": epoch,
+            }
+        )
+        _RUNTIME_CONTEXT = {
+            "daemon": daemon,
+            "client": client,
+            "project_ids": {},
+            "capability_digest": capability_digest,
+        }
+    context = _RUNTIME_CONTEXT
+    assert context is not None
+    if slug not in context["project_ids"]:
+        projects = context["client"].list_projects().get("items", [])
+        project = next((row for row in projects if row.get("slug") == slug), None)
+        if project is None:
+            project = context["client"].create_project(
+                slug,
+                idempotency_key=f"astrid-frozen-project-{slug}",
+                slug=slug,
+                metadata={"fixture": "timeline_visualize"},
+            )
+        context["project_ids"][slug] = project["project_id"]
+    return context
+
+
+def _runtime_request(context: dict[str, Any], path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    request = urllib.request.Request(
+        context["daemon"].endpoint + path,
+        data=json.dumps(payload, separators=(",", ":")).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {context['daemon'].worker_token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read())
+
+
+def _admit_runtime_run(slug: str) -> tuple[dict[str, Any], str, str]:
+    context = _runtime_for(slug)
+    task = context["client"].admit_task(
+        capability_id=_RUNTIME_CAPABILITY,
+        capability_digest=context["capability_digest"],
+        input_object_ids=[],
+        idempotency_key=f"astrid-frozen-{slug}-{os.urandom(8).hex()}",
+        project_id=context["project_ids"][slug],
+        spec={"fixture": "timeline_visualize"},
+    )
+    return context, task["run_id"], task["task_id"]
+
+
+def _settle_runtime_pack(
+    context: dict[str, Any],
+    *,
+    task_id: str,
+    pack_root: Path,
+) -> None:
+    epoch = context["daemon"].service.store._current_runtime_epoch()
+    lease = f"astrid-frozen-lease-{task_id}"
+    claimed = _runtime_request(
+        context,
+        f"/v1/tasks/{task_id}/claim",
+        {"worker_id": _RUNTIME_WORKER, "lease_token": lease, "runtime_epoch": epoch},
+    )
+    if claimed.get("state") != "running":
+        raise RuntimeError(f"fixture runtime task was not claimable: {claimed!r}")
+    manifest = json.loads((pack_root / "manifest.json").read_text(encoding="utf-8"))
+    outputs: list[dict[str, Any]] = []
+    for record in manifest.get("outputs", []):
+        relative = record["path"]
+        path = pack_root / relative
+        # Project-level visualization manifests declare child directories as
+        # navigation outputs.  They have no byte identity of their own; the
+        # child manifests are separate views and are never selected by this
+        # run's frozen-owner preflight.
+        if not path.is_file():
+            continue
+        outputs.append(
+            {
+                "path": f"agent-view/{relative}",
+                "digest": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+        )
+    # ``manifest.json`` cannot truthfully carry its own hash in the manifest
+    # contract; the reader binds the declared files plus the integrity ledger.
+    for relative in ("pack-hashes.json",):
+        path = pack_root / relative
+        if not path.is_file():
+            continue
+        outputs.append(
+            {
+                "path": f"agent-view/{relative}",
+                "digest": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+        )
+    _runtime_request(
+        context,
+        f"/v1/tasks/{task_id}/settle",
+        {
+            "lease_token": lease,
+            "runtime_epoch": epoch,
+            "result": {"outputs": outputs, "manifest_path": "agent-view/manifest.json"},
+        },
+    )
+
+
+def admit_runtime_run(slug: str) -> tuple[dict[str, Any], str, str]:
+    """Test fixture seam for a copied pack that needs a new run identity."""
+    return _admit_runtime_run(slug)
+
+
+def settle_runtime_pack(
+    context: dict[str, Any], *, task_id: str, pack_root: Path
+) -> None:
+    """Settle the exact copied bytes for an already-admitted fixture run."""
+    _settle_runtime_pack(context, task_id=task_id, pack_root=pack_root)
 
 
 @contextmanager
@@ -160,8 +347,8 @@ class LocalVisualizationInvocation:
         self.run_root = str(out_root)
         self.outputs = raw.get("outputs", {}) if self.ok else {}
         self.run_id = out_root.name
-        self.kernel_run_id = out_root.name
-        self.kernel_task_id = None
+        self.kernel_run_id = raw.get("kernel_run_id", out_root.name)
+        self.kernel_task_id = raw.get("kernel_task_id")
         self.kernel_attempt_id = None
         self.executor_version = None
 
@@ -193,7 +380,8 @@ def invoke_local_visualization(slug: str, *, run_module: Any, **extra_inputs: An
     }
     global _LOCAL_VISUALIZE_ATTEMPTS
     _LOCAL_VISUALIZE_ATTEMPTS += 1
-    out_root = project_dir(slug) / "runs" / f"attempt-{_LOCAL_VISUALIZE_ATTEMPTS}"
+    runtime_context, runtime_run_id, runtime_task_id = _admit_runtime_run(slug)
+    out_root = project_dir(slug) / "runs" / runtime_run_id
     out_root.mkdir(parents=True, exist_ok=False)
     argv = ["--out", str(out_root), "--project-slug", slug]
     scalar_flags = {
@@ -237,4 +425,22 @@ def invoke_local_visualization(slug: str, *, run_module: Any, **extra_inputs: An
         (out_root / "run.json").write_text(
             json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8"
         )
+        _settle_runtime_pack(
+            runtime_context,
+            task_id=runtime_task_id,
+            pack_root=out_root / "agent-view",
+        )
+    else:
+        # Avoid leaving queued runtime tasks behind when the pack itself
+        # rejected its inputs.  The failure result remains the test oracle.
+        try:
+            runtime_context["client"].cancel_task(
+                runtime_task_id,
+                idempotency_key=f"astrid-frozen-cancel-{runtime_task_id}",
+            )
+        except Exception:
+            pass
+    raw.setdefault("run_id", runtime_run_id)
+    raw.setdefault("kernel_run_id", runtime_run_id)
+    raw.setdefault("kernel_task_id", runtime_task_id)
     return LocalVisualizationInvocation(raw, out_root)

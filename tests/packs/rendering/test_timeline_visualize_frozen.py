@@ -27,7 +27,11 @@ from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     resolve_focus,
     snapshot_from_frozen,
 )
-from tests.packs.rendering._helpers import invoke_local_visualization
+from tests.packs.rendering._helpers import (
+    admit_runtime_run,
+    invoke_local_visualization,
+    settle_runtime_pack,
+)
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 SLICE_DIR = TESTS_ROOT / "fixtures" / "timeline_visualize" / "desert_slice"
@@ -145,7 +149,11 @@ def _editable_manifest(result: Any, project_root: Path) -> Path:
 
     durable = Path(result.manifest_path or "").resolve()
     frozen = load_frozen_view(durable, project_root=project_root)
-    run_id = f"{result.run_id}-editable"
+    # The copied pack is still project-owned, so give it a fresh runtime run
+    # and settle the copied bytes before integrity tests exercise it.  This
+    # keeps the mutation tests focused on their intended hash/lineage failure
+    # instead of falling through to the production ownership guard.
+    runtime_context, run_id, task_id = admit_runtime_run(project_root.name)
     run_root = project_root / "runs" / run_id
     target = run_root / "agent-view"
     shutil.copytree(frozen.pack_root, target, dirs_exist_ok=True)
@@ -159,6 +167,9 @@ def _editable_manifest(result: Any, project_root: Path) -> Path:
     )
     (run_root / "run.json").write_text(
         json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+    )
+    settle_runtime_pack(
+        runtime_context, task_id=task_id, pack_root=target
     )
     return target / "manifest.json"
 
