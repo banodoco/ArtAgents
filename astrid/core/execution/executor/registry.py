@@ -8,7 +8,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.foundation.paths import REPO_ROOT
@@ -34,7 +34,8 @@ from astrid.core.pack.override import OverrideStore
 from astrid.core.pack.resolver import PackResolver
 from astrid.core.registry import CapabilityRegistry
 
-from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
+if TYPE_CHECKING:
+    from .banodoco_catalog import BanodocoCatalogConfig
 from .folder import load_folder_executors
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
 
@@ -249,7 +250,7 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
 
 
 def load_default_registry(
-    banodoco_config: BanodocoCatalogConfig | None = None,
+    banodoco_config: "BanodocoCatalogConfig | None" = None,
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
@@ -269,6 +270,8 @@ def load_default_registry(
     for executor in _load_pack_executors_from_packs(packs):
         registry.register(executor)
     if banodoco_config is not None and banodoco_config.enabled:
+        from .banodoco_catalog import load_banodoco_catalog_executors
+
         for executor in load_banodoco_catalog_executors(banodoco_config):
             registry.register(executor)
     registry.validate_all()
@@ -400,6 +403,16 @@ def resolve_executor_callable(executor: ExecutorDefinition):
     """Resolve an executor's manifest-declared Python runtime callable."""
 
     return PackResolver().resolve(executor.metadata, owner_id=executor.id)
+
+
+def __getattr__(name: str):
+    """Resolve the optional Banodoco catalog type only for explicit callers."""
+
+    if name == "BanodocoCatalogConfig":
+        from .banodoco_catalog import BanodocoCatalogConfig
+
+        return BanodocoCatalogConfig
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

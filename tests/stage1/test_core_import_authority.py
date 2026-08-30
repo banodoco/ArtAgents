@@ -276,3 +276,54 @@ def test_sdk_error_mapping_failure_path_stays_local_authority_free() -> None:
         check=True,
     )
     assert result.stdout.splitlines() == ["unavailable", "[]"]
+
+
+def test_discovery_does_not_load_executor_install_runner_or_project_runtime() -> None:
+    """Manifest-ledger discovery must stay clear of optional execution code."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; astrid.discover(include_installed=False); "
+                "legacy = ('astrid.core.execution.executor.install', "
+                "'astrid.core.execution.executor.runner', "
+                "'astrid.core.execution.orchestrator.runner', "
+                "'astrid.core.execution.executor.banodoco_catalog', "
+                "'astrid.core.project.run', 'astrid.core.project.guidance'); "
+                "print([name for name in sys.modules if any(name == item or "
+                "name.startswith(item + '.') for item in legacy)])"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_explicit_banodoco_catalog_api_loads_optional_catalog_code() -> None:
+    """Optional catalog APIs remain available when explicitly requested."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid.core.execution.executor.registry; "
+                "print('astrid.core.execution.executor.banodoco_catalog' in sys.modules); "
+                "from astrid.core.execution.executor.registry import BanodocoCatalogConfig; "
+                "print(BanodocoCatalogConfig.__name__); "
+                "print('astrid.core.execution.executor.install' in sys.modules)"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["False", "BanodocoCatalogConfig", "True"]

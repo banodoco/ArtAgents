@@ -1,4 +1,12 @@
-"""Canonical orchestrator framework APIs."""
+"""Canonical orchestrator framework APIs.
+
+Runner helpers are lazy so manifest discovery does not import local project
+run bookkeeping or the legacy in-process execution path.
+"""
+
+from __future__ import annotations
+
+import importlib
 
 from .api import OrchestratorSpec, orchestrator
 from .folder import load_folder_orchestrator, load_folder_orchestrators
@@ -7,16 +15,6 @@ from .registry import (
     OrchestratorRegistryError,
     load_default_registry,
     load_pack_orchestrators,
-)
-from .runner import (
-    OrchestratorPlan,
-    OrchestratorPlanStep,
-    OrchestratorRunError,
-    OrchestratorRunnerError,
-    OrchestratorRunRequest,
-    OrchestratorRunResult,
-    build_orchestrator_command,
-    run_orchestrator,
 )
 from .schema import (
     CachePolicy,
@@ -61,3 +59,22 @@ __all__ = [
     "to_capability_handle",
     "validate_orchestrator_definition",
 ]
+
+_LAZY_EXPORTS = {
+    "OrchestratorPlan": ("runner", "OrchestratorPlan"),
+    "OrchestratorPlanStep": ("runner", "OrchestratorPlanStep"),
+    "OrchestratorRunError": ("runner", "OrchestratorRunError"),
+    "OrchestratorRunnerError": ("runner", "OrchestratorRunnerError"),
+    "OrchestratorRunRequest": ("runner", "OrchestratorRunRequest"),
+    "OrchestratorRunResult": ("runner", "OrchestratorRunResult"),
+    "build_orchestrator_command": ("runner", "build_orchestrator_command"),
+    "run_orchestrator": ("runner", "run_orchestrator"),
+}
+
+
+def __getattr__(name: str):
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = target
+    return getattr(importlib.import_module(f".{module_name}", __name__), attribute)
