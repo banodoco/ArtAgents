@@ -34,6 +34,7 @@ class _MemoryRuntime:
         self.projects_by_slug: dict[str, dict] = {}
         self.timeline_rows: dict[str, dict] = {}
         self.shot_rows: dict[str, dict] = {}
+        self.media_rows: list[dict] = []
         self.runs: list[dict] = []
         self._timeline_number = 0
 
@@ -46,6 +47,7 @@ class _MemoryRuntime:
             archive=self._archive_timeline,
         )
         self.timelines = self.timelines_api
+        self.media = SimpleNamespace(list=lambda _project: _result(list(self.media_rows)))
         self.shots_api = SimpleNamespace(create=self._create_shot, show=self._show_shot)
         self.shots = self.shots_api
         self.runs = SimpleNamespace(list=lambda _project: _result([]))
@@ -301,6 +303,9 @@ def test_runtime_snapshot_rebases_admitted_media_identity_to_cas_path(tmp_path: 
             },
         )
         assert created.ok
+        # The timeline's authored identity becomes renderable only after the
+        # selected project's runtime media read admits the same id and digest.
+        client.media_rows.append({"media_id": "media-1", "digest": digest})
     snapshot = resolve_managed_render_snapshot(
         tmp_path, project_ref="demo", timeline_ref="media", expected_version=1
     )
@@ -308,6 +313,64 @@ def test_runtime_snapshot_rebases_admitted_media_identity_to_cas_path(tmp_path: 
         tmp_path / ".astrid" / "media" / "sha256" / "aa" / "aa" / digest
     )
     assert snapshot.registry["assets"]["hero"]["media_id"] == "media-1"
+
+
+def test_runtime_snapshot_rejects_invented_or_foreign_media_identity(
+    tmp_path: Path,
+) -> None:
+    digest = "a" * 64
+    with AstridClient.open() as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        created = client.timelines.create(
+            project="demo",
+            slug="foreign",
+            name="Foreign",
+            config={"tracks": [], "clips": []},
+            registry={
+                "assets": {
+                    "hero": {
+                        "media_id": "not-in-demo",
+                        "content_sha256": digest,
+                    }
+                }
+            },
+        )
+        assert created.ok
+    with pytest.raises(ValueError, match="not admitted"):
+        resolve_managed_render_snapshot(
+            tmp_path, project_ref="demo", timeline_ref="foreign", expected_version=1
+        )
+
+
+def test_runtime_snapshot_preserves_existing_project_source_with_media_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "demo" / "sources" / "hero.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"project-local source")
+    digest = "a" * 64
+    with AstridClient.open() as client:
+        assert client.projects.create(slug="demo", name="Demo").ok
+        created = client.timelines.create(
+            project="demo",
+            slug="source",
+            name="Source",
+            config={"tracks": [], "clips": []},
+            registry={
+                "assets": {
+                    "hero": {
+                        "file": str(source),
+                        "media_id": "legacy-project-media",
+                        "content_sha256": digest,
+                    }
+                }
+            },
+        )
+        assert created.ok
+    snapshot = resolve_managed_render_snapshot(
+        tmp_path, project_ref="demo", timeline_ref="source", expected_version=1
+    )
+    assert snapshot.registry["assets"]["hero"]["file"] == str(source)
 
 
 def test_runtime_snapshot_rejects_conflicting_media_identity(tmp_path: Path) -> None:

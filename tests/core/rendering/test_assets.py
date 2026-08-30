@@ -276,6 +276,10 @@ def test_declared_managed_locator_does_not_open_a_local_kernel_database(
             }
         },
     )
+    (registry_path.parent / "authority.json").write_text(
+        json.dumps({"managed_media_admissions": {"media-runtime-admitted": digest}}),
+        encoding="utf-8",
+    )
 
     with AssetMaterializer(registry_path) as materializer:
         staged = materializer.assets["asset"].local_path
@@ -284,6 +288,73 @@ def test_declared_managed_locator_does_not_open_a_local_kernel_database(
 
     # No database was bootstrapped as a side effect of child rendering.
     assert not (projects_root / ".astrid" / "astrid.sqlite3").exists()
+
+
+def test_managed_stage_hashes_the_exact_bytes_published_when_source_mutates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mutation after the first read cannot change staged bytes unnoticed."""
+
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    payload = b"bytes admitted by runtime"
+    digest = hashlib.sha256(payload).hexdigest()
+    managed = projects_root / ".astrid" / "media" / "sha256" / digest[:2] / digest[2:4] / digest
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(payload)
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    registry_path = _write_registry(
+        project / "assets.json",
+        {"asset": {"file": str(managed), "content_sha256": digest}},
+    )
+
+    original_fdopen = asset_service.os.fdopen
+    mutated = False
+
+    class _MutatingReader:
+        def __init__(self, wrapped: object) -> None:
+            self._wrapped = wrapped
+
+        def __enter__(self) -> "_MutatingReader":
+            self._wrapped.__enter__()
+            return self
+
+        def __exit__(self, *args: object) -> object:
+            return self._wrapped.__exit__(*args)
+
+        def read(self, *args: object) -> bytes:
+            nonlocal mutated
+            data = self._wrapped.read(*args)
+            if not data and not mutated:
+                # This is the old hash-then-seek/copy race: mutate the inode
+                # after the hash pass but before a second read pass.
+                managed.write_bytes(b"mutated after hash")
+                mutated = True
+            return data
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._wrapped, name)
+
+    def fdopen(*args: object, **kwargs: object) -> object:
+        opened = original_fdopen(*args, **kwargs)
+        mode = args[1] if len(args) > 1 else kwargs.get("mode")
+        if mode == "rb" and not mutated:
+            return _MutatingReader(opened)
+        return opened
+
+    monkeypatch.setattr(asset_service.os, "fdopen", fdopen)
+    with AssetMaterializer(
+        registry_path,
+        allowed_root=project,
+        allowed_managed_paths={managed: digest},
+    ) as materializer:
+        staged = materializer.assets["asset"].local_path
+        assert staged is not None
+        assert staged.read_bytes() == payload
+        assert hashlib.sha256(staged.read_bytes()).hexdigest() == digest
+    assert mutated
 
 
 def test_unowned_digest_shaped_cas_file_is_rejected_without_runtime_identity(

@@ -141,24 +141,110 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
+def _runtime_media_admissions(client: Any, project_ref: str) -> dict[str, str]:
+    """Read the project-scoped runtime media identity map.
+
+    A timeline's ``media_id`` and digest are authored input, not proof of
+    ownership.  Only the generated runtime client's project-scoped media read
+    can authorize turning that identity into a local CAS projection.  Keep the
+    result deliberately small so it can be used as an admission snapshot and
+    never requires a child renderer to reopen runtime storage.
+    """
+
+    media_api = getattr(client, "media", None)
+    list_media = getattr(media_api, "list", None)
+    if not callable(list_media):
+        return {}
+    try:
+        result = list_media(project_ref)
+    except Exception:  # noqa: BLE001 - an unavailable authority fails closed
+        return {}
+    if hasattr(result, "ok"):
+        if not result.ok:
+            return {}
+        rows = result.data
+    else:
+        rows = result
+    if isinstance(rows, Mapping):
+        rows = rows.get("items", rows.get("media", rows))
+    if not isinstance(rows, (list, tuple, set)):
+        return {}
+    admitted: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        media_id = row.get("media_id") or row.get("id") or row.get("object_id")
+        if not isinstance(media_id, str) or not media_id.strip():
+            continue
+        raw_digest = (
+            row.get("content_hash")
+            or row.get("content_sha256")
+            or row.get("sha256")
+            or row.get("digest")
+            or row.get("object_id")
+        )
+        if not isinstance(raw_digest, str):
+            continue
+        try:
+            digest = validate_digest(raw_digest.removeprefix("sha256:"))
+        except (TypeError, ValueError):
+            continue
+        previous = admitted.get(media_id)
+        if previous is not None and previous != digest:
+            # A runtime response that is internally contradictory cannot
+            # authorize either value.
+            admitted.pop(media_id, None)
+            continue
+        admitted[media_id] = digest
+    return admitted
+
+
 def _runtime_snapshot_registry(
-    registry: Mapping[str, Any], *, projects_root: Path
+    registry: Mapping[str, Any], *, projects_root: Path, project_ref: str, client: Any
 ) -> dict[str, Any]:
     """Rebase runtime-admitted media identities to child-readable CAS paths.
 
     The runtime snapshot is the authority and carries the stable ``media_id``
     and content digest.  The renderer child cannot consult that runtime's
     database, so admission derives the frozen local CAS locator directly from
-    the digest.  URLs and ordinary/unmanaged file references are intentionally
-    untouched.
+    a project-scoped runtime media read.  URLs and ordinary/unmanaged file
+    references are intentionally untouched.
     """
 
     rebased = json.loads(json.dumps(dict(registry), ensure_ascii=False))
     raw_assets = rebased.get("assets", rebased)
     if not isinstance(raw_assets, dict):
         return rebased
+    admitted = _runtime_media_admissions(client, project_ref)
     seen_media: dict[str, str] = {}
     seen_locator: dict[str, str] = {}
+    # Detect contradictory authored aliases before checking runtime presence so
+    # malformed canonical documents are reported deterministically even when
+    # the runtime has no matching object.
+    for entry in raw_assets.values():
+        if not isinstance(entry, dict):
+            continue
+        media_id = entry.get("media_id")
+        digest_value = (
+            entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+        )
+        if not isinstance(media_id, str) or not media_id.strip() or digest_value in (None, ""):
+            continue
+        try:
+            digest = validate_digest(digest_value)
+        except (TypeError, ValueError):
+            continue
+        previous = seen_media.get(media_id)
+        if previous is not None and previous != digest:
+            raise ManagedRenderValidationError(
+                f"canonical registry contains conflicting entries for media_id {media_id!r}",
+                path="$.assets",
+                reason="one media_id claims multiple content digests",
+                recovery="Keep one runtime-admitted digest for each media_id and retry.",
+                validator="managed_media_identity",
+            )
+        seen_media[media_id] = digest
+    seen_media.clear()
     for key, entry in raw_assets.items():
         if not isinstance(entry, dict):
             continue
@@ -168,21 +254,51 @@ def _runtime_snapshot_registry(
         )
         # A signed/remote URL remains the caller's explicit transport choice;
         # media identity does not turn an external URL into local CAS media.
-        if isinstance(entry.get("url"), str):
+        # An existing ordinary project file is likewise a project-local
+        # source.  In particular, media_id+digest does not authorize replacing
+        # it with a guessed CAS path.
+        raw_file = entry.get("file")
+        if isinstance(entry.get("url"), str) or (
+            isinstance(raw_file, str)
+            and raw_file.strip()
+            and not _is_managed_locator(raw_file)
+        ):
             continue
-        if not isinstance(media_id, str) or not media_id.strip() or digest_value in (None, ""):
+        if not isinstance(media_id, str) or not media_id.strip():
             continue
-        try:
-            digest = validate_digest(digest_value)
-        except (TypeError, ValueError) as exc:
+        admitted_digest = admitted.get(media_id)
+        if admitted_digest is None:
             raise ManagedRenderValidationError(
-                f"canonical registry asset {key!r} has an invalid content_sha256; "
-                "runtime media snapshots require a lowercase 64-hex digest",
-                path=f"$.assets[{json.dumps(str(key))}].content_sha256",
-                reason="invalid managed media digest",
-                recovery="Refresh the timeline from the runtime media snapshot and retry.",
-                validator="managed_media_digest",
-            ) from exc
+                f"canonical registry asset {key!r} references media_id {media_id!r} "
+                "that is not admitted by the selected project runtime",
+                path=f"$.assets[{json.dumps(str(key))}].media_id",
+                reason="media identity is missing from the project-scoped runtime read",
+                recovery="Import the media into this project, refresh the timeline, and retry.",
+                validator="managed_media_runtime_admission",
+            )
+        if digest_value in (None, ""):
+            digest = admitted_digest
+        else:
+            try:
+                digest = validate_digest(digest_value)
+            except (TypeError, ValueError) as exc:
+                raise ManagedRenderValidationError(
+                    f"canonical registry asset {key!r} has an invalid content_sha256; "
+                    "runtime media snapshots require a lowercase 64-hex digest",
+                    path=f"$.assets[{json.dumps(str(key))}].content_sha256",
+                    reason="invalid managed media digest",
+                    recovery="Refresh the timeline from the runtime media snapshot and retry.",
+                    validator="managed_media_digest",
+                ) from exc
+            if digest != admitted_digest:
+                raise ManagedRenderValidationError(
+                    f"canonical registry asset {key!r} claims digest {digest!r} for "
+                    f"runtime media_id {media_id!r}, but the runtime admitted {admitted_digest!r}",
+                    path=f"$.assets[{json.dumps(str(key))}].content_sha256",
+                    reason="authored media identity does not match project runtime admission",
+                    recovery="Refresh the timeline from the runtime media snapshot and retry.",
+                    validator="managed_media_runtime_admission",
+                )
         previous_digest = seen_media.get(media_id)
         if previous_digest is not None and previous_digest != digest:
             raise ManagedRenderValidationError(
@@ -193,7 +309,6 @@ def _runtime_snapshot_registry(
                 validator="managed_media_identity",
             )
         seen_media[media_id] = digest
-        raw_file = entry.get("file")
         if isinstance(raw_file, str) and raw_file.strip():
             prior_locator = seen_locator.get(raw_file)
             if prior_locator is not None and prior_locator != digest:
@@ -211,6 +326,14 @@ def _runtime_snapshot_registry(
         entry["content_sha256"] = digest
         entry["file"] = str(managed_media_path(projects_root, digest))
     return rebased
+
+
+def _is_managed_locator(value: str) -> bool:
+    """Return whether *value* is a strict digest-shaped CAS locator."""
+
+    from astrid.core.io.managed_media_resolver import managed_locator_digest
+
+    return managed_locator_digest(value) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +370,28 @@ class ManagedRenderSnapshot:
         }
         if self.expansion is not None:
             result["expansion"] = dict(self.expansion)
+        admissions: dict[str, str] = {}
+        assets = self.registry.get("assets", {})
+        if isinstance(assets, Mapping):
+            for entry in assets.values():
+                if not isinstance(entry, Mapping):
+                    continue
+                media_id = entry.get("media_id")
+                digest = entry.get("content_sha256")
+                file_value = entry.get("file")
+                if (
+                    isinstance(media_id, str)
+                    and media_id.strip()
+                    and isinstance(digest, str)
+                    and isinstance(file_value, str)
+                    and _is_managed_locator(file_value)
+                ):
+                    admissions[media_id] = digest
+        if admissions:
+            # This is the immutable parent-to-child handoff.  A child may use
+            # it only as a runtime-admitted allowlist; registry media_id and
+            # digest fields alone are never ownership proof.
+            result["managed_media_admissions"] = admissions
         return result
 
 
@@ -364,7 +509,12 @@ def resolve_managed_render_snapshot(
     # The SDK's read model is the authority. Materialize runtime-admitted
     # media identities to the deterministic local CAS path before handing the
     # snapshot to a child, without any local database lookup.
-    registry = _runtime_snapshot_registry(stored_registry, projects_root=projects_root)
+    registry = _runtime_snapshot_registry(
+        stored_registry,
+        projects_root=projects_root,
+        project_ref=project_ref,
+        client=client,
+    )
     project_id = str(project["id"])
     config_hash = _digest(config)
     registry_hash = _digest(stored_registry)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -112,6 +113,7 @@ def _declared_managed_locators(
     *,
     projects_root: Path,
     registry: Mapping[str, Any],
+    runtime_admissions: Mapping[str, str] | None = None,
 ) -> dict[Path, str]:
     """Return declared CAS locators admitted by the runtime snapshot.
 
@@ -188,11 +190,11 @@ def _declared_managed_locators(
         # media identity may authorize staging bytes from the shared CAS.
         # Without this fence, any project-local registry could point at an
         # existing (possibly foreign) CAS object by guessing its digest.
-        if media_text is None:
-            continue
         recorded = raw_recorded
         content_hash = digest if recorded in (None, "") else str(recorded).removeprefix("sha256:")
         if len(content_hash) != 64 or content_hash != digest:
+            continue
+        if media_text is None or (runtime_admissions or {}).get(media_text) != content_hash:
             continue
         previous = authorized.get(locator)
         if previous is not None and previous != content_hash:
@@ -209,6 +211,26 @@ def _declared_managed_locators(
             media_ids[media_text] = (locator, content_hash)
         authorized[locator] = content_hash
     return authorized
+
+
+def _runtime_admissions_for_registry(registry_path: Path) -> dict[str, str]:
+    """Read the immutable runtime admission handoff beside a child snapshot."""
+
+    authority_path = registry_path.parent / "authority.json"
+    try:
+        authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(authority, Mapping):
+        return {}
+    raw = authority.get("managed_media_admissions")
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(media_id): str(digest)
+        for media_id, digest in raw.items()
+        if isinstance(media_id, str) and media_id.strip() and isinstance(digest, str)
+    }
 
 
 def _safe_staging_name(key: str, reference: str, index: int) -> str:
@@ -493,24 +515,26 @@ class AssetMaterializer:
             source_stat = os.fstat(descriptor)
             if not stat.S_ISREG(source_stat.st_mode):
                 raise FileNotFoundError(f"Asset {key!r} is not a regular file: {source}")
-            digest = hashlib.sha256()
-            with os.fdopen(os.dup(descriptor), "rb") as input_file:
-                while chunk := input_file.read(1024 * 1024):
-                    digest.update(chunk)
-            actual_hash = digest.hexdigest()
-            if actual_hash != expected_hash:
-                raise ValueError(
-                    f"Asset {key!r} managed media locator failed integrity check: "
-                    f"expected {expected_hash}, got {actual_hash}"
-                )
-            os.lseek(descriptor, 0, os.SEEK_SET)
             destination = self.staging_dir / _safe_staging_name(key, reference, index)
             try:
+                # Hash exactly the bytes written to the invocation-local
+                # destination.  Hashing first and then seeking/copying leaves
+                # a mutation window where a different byte stream could be
+                # published under the admitted digest.
+                digest = hashlib.sha256()
                 with (
                     os.fdopen(os.dup(descriptor), "rb") as input_file,
                     destination.open("xb") as output_file,
                 ):
-                    shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+                    while chunk := input_file.read(1024 * 1024):
+                        output_file.write(chunk)
+                        digest.update(chunk)
+                actual_hash = digest.hexdigest()
+                if actual_hash != expected_hash:
+                    raise ValueError(
+                        f"Asset {key!r} managed media locator failed integrity check: "
+                        f"expected {expected_hash}, got {actual_hash}"
+                    )
                 os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
             except BaseException:
                 destination.unlink(missing_ok=True)
@@ -587,6 +611,7 @@ class AssetMaterializer:
                 requested_managed_paths,
                 projects_root=resolve_projects_root(),
                 registry=loaded,
+                runtime_admissions=_runtime_admissions_for_registry(self.registry_path),
             )
         )
         now = datetime.now(timezone.utc)

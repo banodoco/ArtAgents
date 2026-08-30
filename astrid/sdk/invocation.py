@@ -1306,7 +1306,10 @@ def _prepare_managed_render_inputs(
         from dataclasses import replace
 
         expanded_registry = _runtime_snapshot_registry(
-            expanded_registry, projects_root=projects_root
+            expanded_registry,
+            projects_root=projects_root,
+            project_ref=str(project),
+            client=_client,
         )
         snapshot = replace(
             snapshot,
