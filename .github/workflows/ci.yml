@@ -110,7 +110,11 @@ jobs:
         run: timeout 120 python3 -m pytest tests/v10/test_m7_performance.py -q
 
       - name: Existing m3 pack-factoring gate
-        run: timeout 120 python3 -m pytest tests/v10/test_pack_factoring.py -q
+        # The hash-locked proof provisions 72 packages once, then fans the
+        # four independent source reductions out concurrently.  Keep this
+        # bounded above its declared 120s proof budget so slow setup cannot
+        # truncate a valid reduction, while a deadlock still fails closed.
+        run: timeout 180 python3 -m pytest tests/v10/test_pack_factoring.py -q
 
       - name: Existing m6 gate
         run: timeout 120 python3 -m pytest tests/v10/test_m6_gate.py -q

@@ -23,8 +23,10 @@ inventory binding is enforced.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator
 
@@ -48,7 +50,16 @@ from scripts.reshape.installed_artifact import (
 )
 
 LANE_TIMEOUT = 90
-"""Generous per-lane pytest bound; the measured lane wall time is ~32s."""
+"""Per-removal bound; the measured cached lane wall time is ~35s."""
+
+SOURCE_FACTORING_PROOF_BUDGET_SECONDS = 120
+"""Budget for one locked environment plus the four parallel removals.
+
+The clean local proof is about 90s (roughly 50s to provision the 72 locked
+packages and 40s for the four independent lanes).  The extra margin is a
+declared proof budget, not a test timeout: each child lane still has its own
+90s deadline, and the CI wrapper is tested to leave additional headroom.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -71,34 +82,66 @@ def proof_environment(
         environment.close()
 
 
-@pytest.mark.parametrize("removed_pack", DOMAIN_PACKS)
 def test_removing_each_domain_pack_keeps_kernel_lane_and_catalog_green(
-    removed_pack: str,
     proof_environment: LockedEnvironment,
+    tmp_path: Path,
 ) -> None:
-    """Removing timeline/shots/references one at a time from a temporary
-    source composition and the explicit registration tuple leaves the
-    complete enumerated kernel lane green and the remaining manifest-derived
-    catalog verified."""
-    result = check_removal(
-        removed_pack,
-        python=str(proof_environment.python_executable),
-        lane_timeout=LANE_TIMEOUT,
-    )
-    assert result.ok, (
-        f"kernel lane failed after removing {removed_pack} "
-        f"(exit {result.lane_returncode})\n"
-        f"{result.lane_output}\n{result.lane_error}"
-    )
-    assert "catalog-ok" in result.catalog_output
+    """Run the four independent reductions concurrently.
 
-    # The remaining registration tuple and catalog are derived, not assumed:
-    # kernel tables plus every remaining pack's declared tables.
-    remaining = tuple(pack for pack in DOMAIN_PACKS if pack != removed_pack)
-    remaining_tables = ALL_PACK_TABLES - set(PACK_TABLES[removed_pack])
-    expected_count = len(CORE_TABLES) + len(remaining_tables)
-    assert f"tables={expected_count}" in result.catalog_output
-    assert f"packs={sorted(remaining)}" in result.catalog_output
+    Every pack still gets its own temporary source copy, catalog/database
+    proof, and complete enumerated kernel subprocess.  Only the scheduling is
+    shared: the reductions do not share files or mutable interpreter state,
+    so parallel execution preserves the proof while avoiding four serial
+    copies of the same expensive kernel lane.
+    """
+    def check(pack: str):
+        return check_removal(
+            pack,
+            python=str(proof_environment.python_executable),
+            base_dir=tmp_path,
+            lane_timeout=LANE_TIMEOUT,
+        )
+
+    with ThreadPoolExecutor(max_workers=len(DOMAIN_PACKS)) as executor:
+        results = tuple(executor.map(check, DOMAIN_PACKS))
+
+    assert tuple(result.removed_pack for result in results) == DOMAIN_PACKS
+    for result in results:
+        removed_pack = result.removed_pack
+        assert result.ok, (
+            f"kernel lane failed after removing {removed_pack} "
+            f"(exit {result.lane_returncode})\n"
+            f"{result.lane_output}\n{result.lane_error}"
+        )
+        assert "catalog-ok" in result.catalog_output
+
+        # The remaining registration tuple and catalog are derived, not
+        # assumed: kernel tables plus every remaining pack's declared tables.
+        remaining = tuple(pack for pack in DOMAIN_PACKS if pack != removed_pack)
+        remaining_tables = ALL_PACK_TABLES - set(PACK_TABLES[removed_pack])
+        expected_count = len(CORE_TABLES) + len(remaining_tables)
+        assert f"tables={expected_count}" in result.catalog_output
+        assert f"packs={sorted(remaining)}" in result.catalog_output
+
+
+def test_source_factoring_ci_timeout_exceeds_declared_proof_budget() -> None:
+    """Keep the CI wrapper bounded without allowing it to truncate the proof.
+
+    The child lanes have deterministic 90s deadlines, while this outer guard
+    must also cover locked-environment provisioning and the parallel fan-out.
+    A separate, finite wrapper timeout remains essential: a deadlocked setup
+    or executor cannot turn the CI job into an unbounded wait.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(
+        r"run: timeout (\d+) python3 -m pytest tests/v10/test_pack_factoring\.py -q",
+        workflow,
+    )
+    assert match, "CI must retain a bounded source-factoring command"
+    workflow_timeout = int(match.group(1))
+    assert workflow_timeout >= SOURCE_FACTORING_PROOF_BUDGET_SECONDS + 30
 
 
 def test_source_factoring_proof_resolves_dependencies_inside_lock_venv(
