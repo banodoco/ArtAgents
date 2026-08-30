@@ -1,8 +1,8 @@
 """Product CLI family tests: media and nested references (m4 plan step 27).
 
 Task T30 proves the ``media`` product family
-(``astrid/core/cli/domain_media.py``): exactly the six planned verbs
-(``import|list|show|verify|relocate|relate``) are reachable through one-call
+(``astrid/core/cli/domain_media.py``): exactly the five planned verbs
+(``import|list|show|verify|relate``) are reachable through one-call
 SDK adapters, import accepts **only files/folders**, relate accepts only the
 frozen five relation kinds, and the manifest-declared nested ``references``
 mount (``astrid/packs/references/cli.py``) exposes exactly
@@ -141,26 +141,6 @@ class _RecordingMedia:
         return DomainResult.success(
             {"id": ref, "verified": True},
             receipt=_receipt("core.media.verified", key),
-            idempotency_key=key,
-        )
-
-    def relocate(self, project, ref, *, realm, locator, idempotency_key=None):
-        self._owner.calls.append(
-            (
-                "media.relocate",
-                {
-                    "project": project,
-                    "ref": ref,
-                    "realm": realm,
-                    "locator": locator,
-                    "idempotency_key": idempotency_key,
-                },
-            )
-        )
-        key = idempotency_key or "generated-key"
-        return DomainResult.success(
-            {"id": ref, "locations": [{"realm": realm, "locator": locator}]},
-            receipt=_receipt("core.media.relocate", key),
             idempotency_key=key,
         )
 
@@ -419,7 +399,7 @@ def _subparser_choices(parser: argparse.ArgumentParser) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
+def test_media_parser_has_exactly_five_verbs_plus_references_mount() -> None:
     from astrid.core.cli.domain_media import COMMANDS, build_parser
     from astrid.packs.references.cli import COMMANDS as REFERENCE_COMMANDS
 
@@ -428,7 +408,6 @@ def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
         "list",
         "show",
         "verify",
-        "relocate",
         "relate",
     )
     assert all(spec.aliases == () for spec in COMMANDS)
@@ -441,7 +420,6 @@ def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
         "list",
         "show",
         "verify",
-        "relocate",
         "relate",
         "references",
     }
@@ -692,53 +670,6 @@ def test_media_verify_rejects_unknown_realm() -> None:
     assert client.calls == []
 
 
-def test_media_relocate_is_one_sdk_call(capsys) -> None:
-    client = _FakeClient()
-    rc = _run(
-        "media",
-        [
-            "relocate",
-            "--project",
-            "demo",
-            "M-1",
-            "--realm",
-            "external_local",
-            "--locator",
-            "/data/new.png",
-            "--json",
-        ],
-        client=client,
-    )
-    assert rc == 0
-    assert client.calls == [
-        (
-            "media.relocate",
-            {
-                "project": "demo",
-                "ref": "M-1",
-                "realm": "external_local",
-                "locator": "/data/new.png",
-                "idempotency_key": None,
-            },
-        )
-    ]
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["ok"] is True
-    assert envelope["receipt"]["command_kind"] == "core.media.relocate"
-
-
-def test_media_relocate_requires_locator() -> None:
-    client = _FakeClient()
-    with pytest.raises(SystemExit) as excinfo:
-        _run(
-            "media",
-            ["relocate", "--project", "demo", "M-1", "--realm", "managed_local"],
-            client=client,
-        )
-    assert excinfo.value.code == 2
-    assert client.calls == []
-
-
 def test_media_relate_is_one_sdk_call_with_frozen_kind(capsys) -> None:
     client = _FakeClient()
     rc = _run(
@@ -846,7 +777,6 @@ def test_media_unknown_verb_is_a_usage_error() -> None:
         ["list", "--help"],
         ["show", "--help"],
         ["verify", "--help"],
-        ["relocate", "--help"],
         ["relate", "--help"],
     ],
 )
@@ -1376,7 +1306,7 @@ def test_dispatch_media_is_a_registered_top_level_command() -> None:
     from astrid.core.gateway import dispatch
 
     assert "media" in dispatch._top_level_commands()
-    # m6 surface: exactly the eight families (five product + three operational).
+    # Stage1 surface: exactly seven families (five product + two operational).
     assert dispatch._top_level_commands() == frozenset(
         {
             "projects",
@@ -1384,7 +1314,6 @@ def test_dispatch_media_is_a_registered_top_level_command() -> None:
             "media",
             "tasks",
             "runs",
-            "serve",
             "doctor",
             "backup",
         }
