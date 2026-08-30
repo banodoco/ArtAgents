@@ -407,70 +407,6 @@ def test_dispatch_product_routes_family_and_closes_client(monkeypatch) -> None:
     assert _FakeClient.closed
 
 
-def test_dispatch_product_owner_contention_is_typed_json(monkeypatch, capsys) -> None:
-    """A held serve owner is a retryable product error, not a gateway bug."""
-    import astrid.sdk.client as sdk_client
-    from astrid.core.gateway import dispatch
-    from astrid.sdk.exceptions import ServiceUnavailableError
-
-    def _raise_open(cls, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        raise ServiceUnavailableError(
-            "the Astrid serve bridge owns the store; use GET /routes and its "
-            "HTTP routes while it is running, or wait for a clean shutdown.",
-            details={"reason": "store_owned", "retryable": True},
-        )
-
-    monkeypatch.setattr(
-        sdk_client.AstridClient, "open", classmethod(_raise_open)
-    )
-
-    assert dispatch._dispatch_product(["projects", "list", "--json"]) == 1
-    output = capsys.readouterr()
-    assert output.err == ""
-    payload = json.loads(output.out)
-    assert set(payload) == {
-        "ok",
-        "data",
-        "error",
-        "receipt",
-        "idempotency_key",
-    }
-    assert payload["ok"] is False
-    assert payload["error"]["code"] == "unavailable"
-    assert payload["error"]["details"] == {
-        "reason": "store_owned",
-        "retryable": True,
-    }
-
-
-def test_dispatch_product_owner_contention_human_guidance(monkeypatch, capsys) -> None:
-    """Human contention output names the bridge handoff and safe retry rule."""
-    import astrid.sdk.client as sdk_client
-    from astrid.core.gateway import dispatch
-    from astrid.sdk.exceptions import ServiceUnavailableError
-
-    def _raise_open(cls, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        raise ServiceUnavailableError(
-            "the Astrid serve bridge owns the store; use GET /routes and its "
-            "HTTP routes while it is running, or wait for a clean shutdown. "
-            "Reads may retry after release. For writes, preserve the exact "
-            "payload and idempotency key, then verify state.",
-            details={"reason": "store_owned", "retryable": True},
-        )
-
-    monkeypatch.setattr(
-        sdk_client.AstridClient, "open", classmethod(_raise_open)
-    )
-
-    assert dispatch._dispatch_product(["projects", "list"]) == 1
-    output = capsys.readouterr()
-    assert output.out == ""
-    assert "error unavailable:" in output.err
-    assert "GET /routes" in output.err
-    assert "clean shutdown" in output.err
-    assert "exact payload and idempotency key" in output.err
-
-
 def test_dispatch_product_help_does_not_open_client(monkeypatch, capsys) -> None:
     """Family/verb help remains available without touching the store."""
     import astrid.sdk.client as sdk_client
@@ -528,7 +464,7 @@ def test_product_census_hook_matches_domain_registry() -> None:
     assert dispatch._product_top_level_commands() == product_top_level_commands()
 
 
-def test_top_level_commands_are_exactly_eight_families() -> None:
+def test_top_level_commands_are_exactly_seven_families() -> None:
     from astrid.core.gateway import dispatch
 
     assert dispatch._top_level_commands() == frozenset(
@@ -538,12 +474,11 @@ def test_top_level_commands_are_exactly_eight_families() -> None:
             "media",
             "tasks",
             "runs",
-            "serve",
             "doctor",
             "backup",
         }
     )
-    assert len(dispatch._top_level_commands()) == 8
+    assert len(dispatch._top_level_commands()) == 7
 
 
 def test_all_five_product_families_route_through_product_dispatch(
@@ -712,16 +647,18 @@ def test_print_result_returns_stable_exit_codes(capsys) -> None:
 def test_product_help_text_declares_exact_census_and_mounts() -> None:
     text = _product_help_text()
     assert (
-        "Family census (exactly eight families): "
-        "projects timelines media tasks runs serve doctor backup" in text
+        "Family census (exactly seven families): "
+        "projects timelines media tasks runs doctor backup" in text
     )
     for family in PRODUCT_FAMILIES:
         assert family in text
-    for operational in ("serve", "doctor", "backup"):
+    for operational in ("doctor", "backup"):
         assert operational in text
     assert "timelines shots" in text
     assert "media references" in text
-    for excluded in EXCLUDED_FROM_PRODUCT_CENSUS:
+    # ``serve`` remains a rejected legacy token but is no longer an advertised
+    # operational family after the Stage1 runtime cutover.
+    for excluded in EXCLUDED_FROM_PRODUCT_CENSUS - {"serve"}:
         assert excluded in text
 
 
@@ -731,13 +668,14 @@ def test_product_help_census_matches_explicit_registry() -> None:
         line for line in text.splitlines() if line.startswith("Family census")
     )
     census = census_line.split(":", 1)[1].split()
-    assert tuple(census[5:]) == ("serve", "doctor", "backup")
+    assert tuple(census[5:]) == ("doctor", "backup")
     assert set(census[:5]) == set(PRODUCT_FAMILIES)
     # Every advertised product family is a real registered product family.
     for family in census[:5]:
         assert is_product_family(family)
-    # The three operational families are exactly the excluded set.
-    assert set(census[5:]) == set(EXCLUDED_FROM_PRODUCT_CENSUS)
+    # Only the two current operational families are advertised; ``serve`` is
+    # a retired rejected token, not a public family.
+    assert set(census[5:]) == {"doctor", "backup"}
 
 
 def test_product_help_documents_stable_exit_codes() -> None:
@@ -753,7 +691,7 @@ def test_product_help_documents_json_envelope_convention() -> None:
     assert "--json" in text
     assert "ok/data/error/receipt/idempotency_key" in text
     assert "doctor emits" in text
-    assert "serve/backup have no --json flag" in text
+    assert "backup has no --json flag" in text
 
 
 def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> None:
@@ -765,17 +703,8 @@ def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> Non
     )
 
 
-def test_product_help_documents_store_handoff() -> None:
-    text = _product_help_text()
-    assert "astrid serve" in text
-    assert "GET" in text and "/routes" in text
-    assert "clean" in text and "shutdown" in text
-    assert "exact payload and idempotency key" in text
-    assert "error.details.reason=store_owned" in text
-
-
 def test_print_product_help_prints_to_stdout(capsys) -> None:
     _print_product_help()
     captured = capsys.readouterr()
     assert captured.out.startswith("Astrid product commands")
-    assert "Family census (exactly eight families)" in captured.out
+    assert "Family census (exactly seven families)" in captured.out

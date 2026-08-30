@@ -17,15 +17,14 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIn("Astrid command gateway", help_text)
         self.assertIn("python3 -m astrid is the package entry point", help_text)
         self.assertIn("doctor emits", help_text)
-        self.assertIn("serve/backup have no --json flag", help_text)
-        # The eight m6 families are all documented.
+        self.assertIn("backup has no --json flag", help_text)
+        # The seven Stage1 families are all documented.
         for family in (
             "projects",
             "timelines",
             "media",
             "tasks",
             "runs",
-            "serve",
             "doctor",
             "backup",
         ):
@@ -70,7 +69,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
-    def test_top_level_handlers_are_exactly_eight_families(self) -> None:
+    def test_top_level_handlers_are_exactly_seven_families(self) -> None:
         from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 
         self.assertEqual(
@@ -81,7 +80,6 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 "media",
                 "tasks",
                 "runs",
-                "serve",
                 "doctor",
                 "backup",
             },
@@ -121,17 +119,14 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                     self.assertEqual(seen["args"], [family, "list"])
 
     def test_operational_families_have_their_own_routes(self) -> None:
-        """serve/doctor/backup dispatch through their own handlers, never
+        """doctor/backup dispatch through their own handlers, never
         through the product boundary."""
         from astrid.core.gateway import dispatch
 
-        for family in ("serve", "doctor", "backup"):
+        for family in ("doctor", "backup"):
             with self.subTest(family=family):
                 handler = dispatch._TOP_LEVEL_HANDLERS[family]
                 self.assertNotEqual(handler, dispatch._dispatch_product)
-        self.assertIs(
-            dispatch._TOP_LEVEL_HANDLERS["serve"], dispatch._dispatch_serve
-        )
         self.assertIs(
             dispatch._TOP_LEVEL_HANDLERS["doctor"], dispatch._dispatch_doctor
         )
@@ -186,7 +181,6 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ("projects", "_dispatch_projects"),
             ("timelines", "_dispatch_timelines"),
             ("media", "_dispatch_media"),
-            ("serve", "_dispatch_serve"),
             ("doctor", "_dispatch_doctor"),
             ("backup", "_dispatch_backup"),
         ):
