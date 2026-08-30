@@ -47,6 +47,7 @@ class AdapterSpec:
     required_binaries: tuple[str, ...] = ()
     required_packages: tuple[str, ...] = ()
     requires_network: bool = False
+    requires_remotion: bool = False
 
 
 class AdapterRegistry:
@@ -73,7 +74,15 @@ class AdapterRegistry:
             family = "provider"
         else:
             family = "cpu"
-        return cls._specs.get(family, AdapterSpec(family))
+        base = cls._specs.get(family, AdapterSpec(family))
+        return AdapterSpec(
+            base.family,
+            base.resource_keys,
+            base.required_binaries,
+            base.required_packages,
+            base.requires_network,
+            bool(metadata.get("requires_remotion", base.requires_remotion)),
+        )
 
     @classmethod
     def families(cls) -> tuple[str, ...]:
@@ -93,6 +102,7 @@ class AdapterRegistry:
             tuple(entry.get("required_binaries") or builtin.required_binaries),
             tuple(entry.get("required_packages") or builtin.required_packages),
             builtin.requires_network,
+            bool(entry.get("requires_remotion", base.requires_remotion)),
         )
 
 
@@ -404,7 +414,10 @@ class GenericPackHost:
             required_packages = record.matrix.get("required_packages") or record.definition.metadata.get("required_packages", adapter.required_packages)
             missing_packages = [package for package in (required_packages or ()) if importlib.util.find_spec(str(package)) is None]
             checks["packages"] = {"ok": not missing_packages, "missing": missing_packages}
-            if adapter.family == "render":
+            # Only the final Remotion compositor needs the JavaScript render
+            # tree. Other rendering-pack executors are offline Python/FFmpeg
+            # work; the matrix must opt into this requirement explicitly.
+            if adapter.requires_remotion:
                 checkout = next((parent.parent for parent in (record.source_root, *record.source_root.parents) if parent.name == "astrid" and (parent.parent / "remotion").is_dir()), None)
                 package_json = checkout / "remotion" / "package.json" if checkout else None
                 lock_file = checkout / "remotion" / "package-lock.json" if checkout else None

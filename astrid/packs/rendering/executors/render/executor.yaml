@@ -200,6 +200,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "requires_remotion": true,
     "requires_timeline": false,
     "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
     "pipeline_step": "render",

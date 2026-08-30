@@ -35,9 +35,24 @@ def test_beta_reference_family_preflight_is_truthful_on_this_machine():
 
     render = host.capabilities["rendering.render"]
     assert render.adapter.family == "render"
+    assert render.adapter.requires_remotion is True
     assert "remotion" in render.preflight
     if not render.ready:
         assert not render.preflight["remotion"]["ok"] or render.preflight["binaries"]["missing"]
+
+    # These helpers are offline pack executors.  They share the rendering
+    # namespace but do not inherit the final compositor's Remotion dependency.
+    for capability_id in (
+        "rendering.html_canvas_effect",
+        "rendering.sprite_sheet",
+        "rendering.timeline_storyboard",
+        "rendering.timeline_visualize",
+    ):
+        helper = host.capabilities[capability_id]
+        assert helper.adapter.family == "render"
+        assert helper.adapter.requires_remotion is False
+        assert "remotion" not in helper.preflight
+        assert helper.ready
 
     local = host.capabilities["vibecomfy.run"]
     assert local.adapter.family == "local_generation"
