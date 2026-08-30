@@ -1,14 +1,20 @@
-"""Stream ownership at the in-process capability boundary."""
+"""Stream and process ownership at the capability boundary."""
 
 from __future__ import annotations
 
+import json
+import os
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from astrid.core.execution.executor.runner import ExecutorRunnerError
+from astrid.core.project.project import create_project
 from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
+from astrid.packs.video_editing.orchestrators.hype.runner import run_step
+from astrid.packs.video_editing.orchestrators.hype.steps import Step
 
 
 def test_executor_stdout_is_captured_from_outer_product_cli(
@@ -16,20 +22,48 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     monkeypatch,
     capsys,
 ) -> None:
-    """A direct-CLI path print must not corrupt an SDK JSON envelope."""
+    """The parent runner is untouched; output and stdout belong to a child."""
 
-    observed: dict[str, str] = {}
+    create_project("demo", root=tmp_path)
+    pack_root = tmp_path / "packs"
+    executor_root = pack_root / "testing" / "executors" / "stdout"
+    executor_root.mkdir(parents=True)
+    (pack_root / "testing" / "pack.yaml").write_text(
+        "id: testing\nname: Testing\nversion: '1'\n", encoding="utf-8"
+    )
+    (executor_root / "executor.yaml").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "testing.stdout",
+                "name": "Boundary marker",
+                "kind": "external",
+                "version": "1",
+                "command": {
+                    "argv": [
+                        "python3",
+                        "-c",
+                        "from pathlib import Path; import os; print('child stdout'); Path('{out}/result.txt').write_text(f'pid={os.getpid()} internal={os.environ.get(\"ASTRID_INTERNAL_INVOCATION\")}')",
+                    ]
+                },
+                "outputs": [
+                    {
+                        "name": "result",
+                        "type": "file",
+                        "path_template": "{out}/result.txt",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    def fake_run(request, _registry):
-        observed["execution_mode"] = request.execution_mode
-        output = Path(request.out) / "result.txt"
-        output.write_text("durable artifact\n", encoding="utf-8")
-        print(Path(request.out) / ".transient-staging" / "result.txt")
-        return SimpleNamespace(ok=True, payload={})
+    def parent_runner_must_not_run(*_args, **_kwargs):
+        raise AssertionError("parent executor runner was invoked")
 
     monkeypatch.setattr(
         "astrid.core.task_executor.capability_handler.executor_runner.run_executor",
-        fake_run,
+        parent_runner_must_not_run,
     )
     handler = CapabilityTaskHandler(
         capability_kind="executor",
@@ -38,7 +72,11 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     )
 
     manifest = handler.execute(
-        task=SimpleNamespace(spec={"inputs": {}}, created_at="2026-08-24T00:00:00Z"),
+        task=SimpleNamespace(
+            project="demo",
+            spec={"inputs": {}, "extra_pack_roots": [str(pack_root)]},
+            created_at="2026-08-24T00:00:00Z",
+        ),
         staging_dir=tmp_path / "staging",
     )
 
@@ -46,7 +84,9 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     assert captured.out == ""
     assert captured.err == ""
     assert [item["path"] for item in manifest["outputs"]] == ["out/result.txt"]
-    assert observed["execution_mode"] == "subprocess"
+    marker = (tmp_path / "staging" / "out" / "result.txt").read_text()
+    assert f"pid={os.getpid()}" not in marker
+    assert "internal=1" in marker
 
 
 def test_retried_legacy_executor_task_fails_closed_without_version(
@@ -64,3 +104,42 @@ def test_retried_legacy_executor_task_fails_closed_without_version(
             task=SimpleNamespace(spec={"inputs": {}}, created_at="2026-08-24T00:00:00Z"),
             staging_dir=tmp_path / "staging",
         )
+
+
+def test_callback_pipeline_step_does_not_invoke_parent_callback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Callback steps run in a child and retain the internal invocation fence."""
+
+    module_path = tmp_path / "boundary_callback.py"
+    module_path.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "def callback(args):\n"
+        "    print('child callback stdout')\n"
+        "    Path(args.out, 'callback.txt').write_text(f'pid={os.getpid()} internal={os.environ.get(\"ASTRID_INTERNAL_INVOCATION\")}')\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("boundary_callback", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+
+    callback = module.callback
+
+    def parent_callback_must_not_run(_args):
+        raise AssertionError("parent pipeline callback was invoked")
+
+    monkeypatch.setattr(module, "callback", parent_callback_must_not_run)
+    step = Step("callback", ("callback.txt",), lambda _args: [], invoke=callback)
+    args = SimpleNamespace(out=tmp_path, verbose=False)
+
+    assert run_step(step, [], args) == 0
+    marker = (tmp_path / "callback.txt").read_text(encoding="utf-8")
+    assert f"pid={os.getpid()}" not in marker
+    assert "internal=1" in marker
+    assert "child callback stdout" in (tmp_path / "logs" / "callback.log").read_text(
+        encoding="utf-8"
+    )

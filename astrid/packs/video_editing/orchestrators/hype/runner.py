@@ -211,6 +211,13 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
             )
             env = os.environ.copy()
             env["ASTRID_INTERNAL_INVOCATION"] = "1"
+            package_parent = str(Path(__file__).resolve().parents[5])
+            existing_pythonpath = env.get("PYTHONPATH")
+            env["PYTHONPATH"] = (
+                package_parent
+                if not existing_pythonpath
+                else os.pathsep.join((package_parent, existing_pythonpath))
+            )
             process = subprocess.Popen(
                 [sys.executable, "-m", "astrid.packs.video_editing.orchestrators.hype.step_worker", str(request_path)],
                 cwd=str(args.out),

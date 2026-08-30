@@ -257,7 +257,7 @@ class CapabilityTaskHandler:
             if self._kind == "executor":
                 request_payload["expected_executor_version"] = admitted_executor_version
             try:
-                host.invoke_capability(
+                result = host.invoke_capability(
                     capability_kind=self._kind,
                     capability_id=self._capability_id,
                     request=request_payload,

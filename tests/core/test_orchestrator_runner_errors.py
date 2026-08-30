@@ -113,6 +113,11 @@ def _unvalidated_registry(definition: OrchestratorDefinition) -> OrchestratorReg
     return registry
 
 
+def _require_timeline_schema() -> None:
+    """Skip project/timeline fixtures when the optional shared schema is absent."""
+    pytest.importorskip("banodoco_timeline_schema")
+
+
 # ---------------------------------------------------------------------------
 # build_orchestrator_command — error paths
 # ---------------------------------------------------------------------------
@@ -439,6 +444,7 @@ def test_project_command_orchestrator_in_process_mode_uses_kernel_staging_withou
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _require_timeline_schema()
     from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
     from astrid.core.timeline.crud import create_timeline
@@ -525,7 +531,7 @@ def test_python_orchestrator_rejects_invalid_runtime_spec(tmp_path: Path) -> Non
     registry = _unvalidated_registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="invalid Python runtime"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 def test_python_orchestrator_reports_import_failure(tmp_path: Path) -> None:
@@ -533,7 +539,7 @@ def test_python_orchestrator_reports_import_failure(tmp_path: Path) -> None:
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="failed to import orchestrator runtime module"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 def test_python_orchestrator_rejects_non_callable_target(tmp_path: Path) -> None:
@@ -545,7 +551,7 @@ def test_python_orchestrator_rejects_non_callable_target(tmp_path: Path) -> None
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="is not callable"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 def test_python_orchestrator_wraps_runtime_exceptions(
@@ -561,7 +567,7 @@ def test_python_orchestrator_wraps_runtime_exceptions(
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="Python runtime failed"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 def test_python_orchestrator_propagates_runner_errors_unchanged(
@@ -577,7 +583,7 @@ def test_python_orchestrator_propagates_runner_errors_unchanged(
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="nested runner error"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 def test_python_orchestrator_rejects_unsupported_result_type(
@@ -593,7 +599,7 @@ def test_python_orchestrator_rejects_unsupported_result_type(
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match="returned unsupported result type"):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +667,7 @@ def test_command_orchestrator_rejects_unknown_placeholder(tmp_path: Path) -> Non
 def test_project_python_orchestrator_uses_kernel_staging_without_legacy_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _require_timeline_schema()
     import astrid.core.execution.orchestrator.runner as runner_mod
     from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
@@ -685,6 +692,7 @@ def test_project_python_orchestrator_uses_kernel_staging_without_legacy_run(
             project="demo",
             projects_root=tmp_path / "projects",
             run_root=tmp_path / "attempt",
+            execution_mode="in_process",
         ),
         registry,
     )
@@ -724,6 +732,7 @@ def test_project_orchestrator_rejects_passthrough_out(
 def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _require_timeline_schema()
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     create_project("demo")
     create_timeline("demo", "main", is_default=True)
@@ -753,6 +762,7 @@ def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
 def test_orchestrator_out_only_requires_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _require_timeline_schema()
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
     create_project("default")
@@ -869,7 +879,7 @@ def test_python_runtime_dict_result_validation_errors(
     registry = _registry(orch)
 
     with pytest.raises(OrchestratorRunnerError, match=expected_match):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path, execution_mode="in_process"), registry)
 
 
 # ---------------------------------------------------------------------------
