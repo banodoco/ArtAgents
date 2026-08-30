@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -43,7 +43,8 @@ from astrid.core.receipts.canonical import (
     parse_json,
     request_hash,
 )
-from astrid.core.receipts.service import CommandReceipt
+if TYPE_CHECKING:
+    from astrid.core.receipts.service import CommandReceipt
 
 __all__ = [
     "CommandReceipt",
@@ -58,6 +59,15 @@ __all__ = [
 ]
 
 T = TypeVar("T")
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve the receipt compatibility export only when requested."""
+    if name == "CommandReceipt":
+        from astrid.core.receipts.service import CommandReceipt
+
+        return CommandReceipt
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 ENVELOPE_KEYS: tuple[str, ...] = (
     "ok",
@@ -181,8 +191,11 @@ class DomainResult(Generic[T]):
                 raise ValueError("ok=False requires a frozen error object")
         if not isinstance(self.idempotency_key, str):
             raise ValueError("idempotency_key must be a string")
-        if self.receipt is not None and not isinstance(self.receipt, CommandReceipt):
-            raise TypeError("receipt must be a CommandReceipt or None")
+        if self.receipt is not None:
+            from astrid.core.receipts.service import CommandReceipt
+
+            if not isinstance(self.receipt, CommandReceipt):
+                raise TypeError("receipt must be a CommandReceipt or None")
         if self.error is not None and not isinstance(self.error, ErrorObject):
             raise TypeError("error must be an ErrorObject or None")
 
@@ -244,6 +257,8 @@ class DomainResult(Generic[T]):
                 "domain result must have exactly the keys "
                 + ", ".join(ENVELOPE_KEYS)
             )
+        from astrid.core.receipts.service import CommandReceipt
+
         return cls(
             ok=value["ok"],
             data=value["data"],

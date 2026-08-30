@@ -60,57 +60,13 @@ from typing import Any
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.store.database import open_database
 
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
-
-
-class WriterError(RuntimeError):
-    """Base error for the dedicated single-writer service."""
-
-
-class WriterBusyError(WriterError):
-    """Raised when a write callback hit the SQLite busy timeout.
-
-    The configured ``busy_timeout`` bounds lock contention; when SQLite
-    still reports a locked database after that bound, this typed error is
-    raised to the submitting caller.
-    """
-
-
-class WriterShutdownError(WriterError):
-    """Raised when work is submitted after the writer has been closed."""
-
-
-class TransactionControlError(WriterError):
-    """Raised when a caller attempts to control transactions directly.
-
-    Transaction control (BEGIN IMMEDIATE / COMMIT / ROLLBACK / SAVEPOINT /
-    RELEASE) is owned by the kernel unit of work. The writer session
-    rejects such statements, and its private transaction methods raise
-    this error on invalid transitions (begin-within-transaction, or
-    commit/rollback with no active transaction).
-    """
-
-
-class WriterSidecarError(WriterError):
-    """Raised when the WAL sidecar was replaced beneath the live writer.
-
-    SQLite deletes ``-wal``/``-shm`` on the clean close of a writable
-    connection. When a *foreign* process (CLI, doctor, backup, external
-    tooling) opens the database read-write and closes cleanly while the
-    long-lived serve writer sits idle between transactions, that close
-    unlinks the very WAL file the writer connection has open. The writer
-    then keeps committing into the orphaned inode: every COMMIT reports
-    success, but no new reader can ever observe the rows — invisible
-    divergence until restart.
-
-    The writer therefore verifies the WAL's file identity before each
-    submitted callback and fails closed with this typed error once the
-    sidecar no longer backs its connection, converting the silent loss
-    into a visible failure. Restarting the process reattaches a fresh
-    writer to the current database files.
-    """
+from astrid.core.contracts.writer import (
+    TransactionControlError,
+    WriterBusyError,
+    WriterError,
+    WriterShutdownError,
+    WriterSidecarError,
+)
 
 
 # Statements that would seize or release transaction control. Any SQL

@@ -6,7 +6,7 @@ so they live below both packages while retaining the writer error hierarchy.
 
 from __future__ import annotations
 
-from astrid.core.store.writer import WriterError
+from astrid.core.contracts.writer import WriterError
 
 
 class RepositoryError(WriterError):

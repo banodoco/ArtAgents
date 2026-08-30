@@ -7,6 +7,8 @@ the kernel unit of work (m1 plan step 9).
 
 from __future__ import annotations
 
+import importlib
+
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     GENERATED_FIELD_NAMES,
@@ -19,12 +21,20 @@ from astrid.core.receipts.canonical import (
     request_hash,
     strip_generated_fields,
 )
-from astrid.core.receipts.service import (
-    ReceiptError,
-    ReceiptMismatchError,
-    ReceiptService,
-    ReceiptValidationError,
-)
+
+_SERVICE_EXPORTS = {
+    "ReceiptError",
+    "ReceiptMismatchError",
+    "ReceiptService",
+    "ReceiptValidationError",
+}
+
+
+def __getattr__(name: str):
+    """Load persistence-backed receipt services only when requested."""
+    if name in _SERVICE_EXPORTS:
+        return getattr(importlib.import_module("astrid.core.receipts.service"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "CanonicalizationError",

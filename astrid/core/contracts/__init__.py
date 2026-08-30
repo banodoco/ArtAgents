@@ -38,6 +38,13 @@ from .scoped_config import (
     ScopeRegistry,
     ScopeRequest,
 )
+from .writer import (
+    TransactionControlError,
+    WriterBusyError,
+    WriterError,
+    WriterShutdownError,
+    WriterSidecarError,
+)
 
 __all__ = [
     "ARTIFACT_TYPE_REGISTRY",
@@ -70,4 +77,9 @@ __all__ = [
     "ScopeRequest",
     "ScopedConfig",
     "wrap_degraded_error",
+    "TransactionControlError",
+    "WriterBusyError",
+    "WriterError",
+    "WriterShutdownError",
+    "WriterSidecarError",
 ]
