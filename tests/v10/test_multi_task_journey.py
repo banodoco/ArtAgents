@@ -898,6 +898,7 @@ def test_multi_task_journey_continuation_replay_and_mismatch(journey_env) -> Non
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="retired: local bridge journey is outside Stage1 runtime")
 class TestVibeComfyBindingJourney:
     SMOKE_WORKFLOW = {
         "1": {

@@ -27,7 +27,6 @@ from astrid.core.integrations.reigh.remotion_runtime import (
     remotion_runtime_status,
     resolve_remotion_runtime_tools,
 )
-from astrid.core.integrations.reigh.task_bridge import ReighTaskBridge
 from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
 from astrid.core.project.project import create_project
 from astrid.core.receipts import ReceiptService
@@ -669,9 +668,9 @@ def test_render_export_round_trip_materializes_mp4_media_id(tmp_path: Path) -> N
         assert managed.content_hash == output.params["content_hash"]
         assert managed.mime_type == "video/mp4"
         assert Path(managed.locations[0].locator).is_file()
-        detail = ReighTaskBridge(
-            writer=writer, registry=core_registry, projects_root=tmp_path
-        ).task_detail(slug="render-project", task_id=admitted.id)
-        assert detail["task"]["outputs"][0]["media_id"] == output.media_id
+        # The canonical task repository owns the lifecycle projection; the
+        # retired local bridge is not part of the render execution contract.
+        stored = tasks.show(writer, admitted.id)
+        assert stored.status == "succeeded"
     finally:
         writer.close()

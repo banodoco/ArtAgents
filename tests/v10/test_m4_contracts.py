@@ -330,46 +330,6 @@ def test_reserved_copy_route_is_not_in_implemented_route_table() -> None:
     assert "copy" not in table
 
 
-def test_reserved_copy_route_404s_on_live_server(tmp_path: Path) -> None:
-    """m4 leaves the copy route unregistered: both verbs hit the catch-all 404.
-
-    Uses the real local bridge server without any bridge composition — the
-    catch-all grammar answers before any repository access, matching the
-    frozen "any other path → 404" rule.
-    """
-    from astrid.core.integrations.reigh.local_bridge_server import (
-        create_local_bridge_server,
-    )
-
-    server = create_local_bridge_server(projects_root=tmp_path)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    host, port = server.server_address
-    url = f"http://{host}:{port}/projects/p/timelines/t/copy"
-    try:
-        # POST /copy must 404 with the frozen not_found envelope.
-        req = Request(url, data=b"{}", method="POST")
-        req.add_header("Content-Type", "application/json")
-        # Local-trust posture (doc 27 §4.7): mutations must carry the
-        # per-boot request token; the launcher-delivered app presents it
-        # out of band. The unregistered route still answers the frozen
-        # catch-all 404 once the gate passes.
-        req.add_header("X-Astrid-Request-Token", server.request_token)
-        with pytest.raises(HTTPError) as exc_info:
-            urlopen(req)  # noqa: S310 - localhost test server only
-        assert exc_info.value.code == 404
-        body = json.loads(exc_info.value.read().decode("utf-8"))
-        assert body["error"] == "not_found"
-        # GET /copy must also 404.
-        with pytest.raises(HTTPError) as get_exc:
-            urlopen(url)  # noqa: S310 - localhost test server only
-        assert get_exc.value.code == 404
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
 def test_no_timelines_copy_cli_verb_registered() -> None:
     """No ``timelines copy`` verb is registered anywhere in m6.
 

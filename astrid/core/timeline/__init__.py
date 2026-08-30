@@ -19,10 +19,6 @@ from .banodoco_composer import (
     save_registry,
     save_timeline,
 )
-from .asset_registry_edits import (  # noqa: F401
-    sync_asset_registry,
-)
-
 from .banodoco_schema import (
     _ASSET_ENTRY_ALLOWED,
     _CLIP_ALLOWED,
@@ -109,7 +105,6 @@ from .banodoco_schema import (
 __all__ = [
     "ARRANGEMENT_VERSION",
     "AnimationReference",
-    "sync_asset_registry",
     "AnimationReferenceList",
     "AnimationReferenceObject",
     "Arrangement",

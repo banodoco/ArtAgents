@@ -100,7 +100,6 @@ GA_ITEM_SELECTOR_MAP: dict[int, dict[str, Any]] = {
         "description": "bridge CAS and contention",
         "installed_selector": "installed-journey:ga-item-6",
         "source_selectors": (
-            "tests/integrations/reigh/test_local_bridge_server.py",
             "tests/v10/test_m7_bridge_contention.py",
         ),
         "evidence_class": "crash_contention",

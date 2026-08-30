@@ -468,9 +468,7 @@ def test_model_and_scope_import_graph_has_no_repair_or_mutation_api() -> None:
     forbidden = (
         "timeline.crud",
         "timeline.projection",
-        "timeline.asset_registry_edits",
         "timeline_storyboard",
-        "local_bridge",
     )
     assert not any(token in module for module in imported for token in forbidden)
 

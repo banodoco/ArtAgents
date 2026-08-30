@@ -6,7 +6,9 @@ from astrid.core.integrations.reigh.event_construction import (
     asset_registry_to_events,
     config_to_events,
 )
-from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+from astrid.core.timeline.events.schema import TimelineActor
+
+REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(type="human", id="reigh-local-editor")
 
 
 def test_config_to_events_builds_versioned_hash_linked_batch_with_projection() -> None:

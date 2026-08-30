@@ -695,7 +695,7 @@ _GC_SEED_COUNTER = 0
 
 def _derived_db_path(projects_root: Path) -> Path:
     """The standard composition database path under a projects root."""
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path
+    from astrid.core.foundation.project_paths import derive_database_path
 
     return derive_database_path(projects_root)
 

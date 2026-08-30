@@ -91,7 +91,6 @@ _FROZEN_REL_PATHS = (
     "astrid/core/timeline/events/schema/payloads/clip.py",
     "astrid/core/timeline/projection.py",
     "astrid/core/timeline/_shared.py",
-    "astrid/core/timeline/asset_registry_edits.py",
     "astrid/core/timeline/banodoco_schema.py",
 )
 

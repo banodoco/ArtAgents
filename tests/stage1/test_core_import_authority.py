@@ -171,3 +171,31 @@ def test_task_executor_import_does_not_load_legacy_project_runtime() -> None:
         check=True,
     )
     assert result.stdout.splitlines() == ["False", "False", "False"]
+
+
+def test_normal_gateway_sdk_host_backup_timeline_imports_exclude_retired_bridge() -> None:
+    """The deleted local bridge chain is unreachable from Stage1 surfaces."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; import astrid.sdk; "
+                "import astrid.core.gateway; "
+                "import astrid.core.execution.generic_host; "
+                "import astrid.core.backup; import astrid.core.timeline; "
+                "retired = ('bridge_service', 'local_bridge_server', "
+                "'task_bridge', 'local_bridge', 'orchestrator_runner', "
+                "'asset_registry_edits'); "
+                "print([name for name in sys.modules if any(token in name "
+                "for token in retired)])"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"

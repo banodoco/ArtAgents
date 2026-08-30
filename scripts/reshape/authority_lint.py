@@ -85,7 +85,6 @@ COMPOSITION_EXEMPTION = "astrid/core/gateway/dispatch.py"
 """The one documented kernel-to-pack composition exemption (serve root)."""
 
 SUPPORTED_ENTRY_PATHS = (
-    "astrid/core/integrations/reigh/bridge_service.py",
     "astrid/packs/timeline/bridge.py",
     "astrid/packs/__init__.py",
     COMPOSITION_EXEMPTION,
@@ -153,7 +152,6 @@ _PRODUCT_PATH_DIRS = (
 
 _PRODUCT_PATH_FILES = (
     "astrid/application.py",  # application composition
-    "astrid/core/integrations/reigh/bridge_service.py",  # bridge composition
 )
 
 # The m1-m6 legacy rendering/builtin capability packs remain in-tree

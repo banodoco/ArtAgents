@@ -24,7 +24,6 @@ from typing import Any
 
 import pytest
 
-from astrid.core.gateway import dispatch as dispatch_mod
 from astrid.core.integrations.reigh.boot_manifest import (
     BOOT_MANIFEST_FILENAME,
     BootManifestDrift,
@@ -48,28 +47,6 @@ REQUIRED_MANIFEST_FIELDS = {
     "registry_digest",
     "conformance_digest",
 }
-
-
-class _FakeServeServer:
-    """Stand-in for the bridge HTTP server so serve returns instead of blocking."""
-
-    server_address = ("127.0.0.1", 45678)
-
-    def shutdown(self) -> None:
-        pass
-
-    def server_close(self) -> None:
-        pass
-
-    def serve_forever(self) -> None:
-        pass
-
-
-def _patch_serve_server(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "astrid.core.integrations.reigh.local_bridge_server.create_local_bridge_server",
-        lambda **kwargs: _FakeServeServer(),
-    )
 
 
 def _mutated_specs() -> tuple:
@@ -110,78 +87,6 @@ def test_every_registered_capability_has_a_fixture_in_the_digest_scope() -> (
 
     scope = fixture_scope(SPECS)
     assert set(scope) == set(REGISTRY)
-
-
-# ---------------------------------------------------------------------------
-# Stamping + fail-closed startup through the real dispatch path
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
-def test_boot_manifest_stamped_at_composition_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    _patch_serve_server(monkeypatch)
-
-    code = dispatch_mod._dispatch_serve(
-        ["--projects-root", str(tmp_path), "--no-open-editor"]
-    )
-
-    assert code == 0
-    path = boot_manifest_path(tmp_path)
-    # Beside astrid.sqlite3 under .astrid/.
-    assert path == tmp_path / ".astrid" / BOOT_MANIFEST_FILENAME
-    stamped = json.loads(path.read_text(encoding="utf-8"))
-    assert REQUIRED_MANIFEST_FIELDS <= set(stamped)
-    assert set(stamped) <= REQUIRED_MANIFEST_FIELDS | {"wan2gp_sha"}
-    assert_secret_free(stamped)
-    # The stamp matches a live recomputation.
-    assert stamped == build_manifest(fixtures=SPECS)
-
-
-@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
-def test_startup_fails_closed_on_registry_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    stamp_boot_manifest(tmp_path, fixtures=SPECS)
-    drifted = dataclasses.replace(
-        REGISTRY["reigh.travel_orchestrator"], probe="always_available"
-    )
-    monkeypatch.setitem(REGISTRY, "reigh.travel_orchestrator", drifted)
-    _patch_serve_server(monkeypatch)
-
-    code = dispatch_mod._dispatch_serve(
-        ["--projects-root", str(tmp_path), "--no-open-editor"]
-    )
-
-    err = capsys.readouterr().err
-    assert code == 1
-    assert "serve failed" in err
-    assert "boot manifest disagrees" in err
-    assert "registry_digest" in err
-
-
-@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
-def test_startup_fails_closed_on_fixture_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    stamp_boot_manifest(tmp_path, fixtures=SPECS)
-    monkeypatch.setattr(
-        "astrid.packs.shots.conformance.capability_conformance_specs",
-        _mutated_specs,
-    )
-    _patch_serve_server(monkeypatch)
-
-    code = dispatch_mod._dispatch_serve(
-        ["--projects-root", str(tmp_path), "--no-open-editor"]
-    )
-
-    err = capsys.readouterr().err
-    assert code == 1
-    assert "serve failed" in err
-    assert "boot manifest disagrees" in err
-    assert "conformance_digest" in err or "registry_digest" in err
 
 
 def test_stale_stamp_refuses_even_with_untouched_sources(tmp_path: Path) -> None:

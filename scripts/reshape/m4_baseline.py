@@ -62,7 +62,6 @@ SELECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("writer_uow", ("tests/v10/test_writer_uow.py",)),
     ("timeline_repository", ("tests/v10/test_timeline_repository.py",)),
     ("media_pipeline", ("tests/v10/test_media_pipeline.py",)),
-    ("bridge_server", ("tests/integrations/reigh/test_local_bridge_server.py",)),
 )
 
 # Pinned Python dev-extra distributions the baseline must find installed.

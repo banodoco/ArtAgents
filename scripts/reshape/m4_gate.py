@@ -201,7 +201,6 @@ LANES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "bridge",
         (
-            "tests/integrations/reigh/test_local_bridge_server.py",
             "tests/integrations/reigh/test_repository_provider.py",
             "tests/v10/test_shared_service_authority.py",
         ),
