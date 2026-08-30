@@ -16,7 +16,7 @@ class _RemoteFamily:
         self._client = client
 
     def _typed(self, operation: str, *args: Any, key: str | None = None, **kwargs: Any) -> DomainResult[Any]:
-        reads = {"get_project", "list_projects", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "get_reference", "get_object", "head_object", "list_project_objects", "get_task", "get_run", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents"}
+        reads = {"get_project", "list_projects", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "list_project_shots", "get_reference", "list_project_references", "get_object", "head_object", "list_project_objects", "list_media_relations", "get_task", "list_project_tasks", "get_run", "list_project_runs", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents"}
         if key is None and operation not in reads:
             key = uuid.uuid4().hex
         try:
@@ -95,7 +95,36 @@ class RemoteMedia(_RemoteFamily):
         if not scoped.ok: return scoped
         result = self._typed("head_object", ref, key=idempotency_key)
         return DomainResult.success({"verified": True, "object_id": str(ref)}, idempotency_key=result.idempotency_key) if result.ok else result
-    def relate(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "media relations are not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
+    def relate(self, project, *, from_object_id=None, to_object_id=None, kind=None, metadata=None, relations=None, idempotency_key=None, **kwargs):
+        key = idempotency_key or uuid.uuid4().hex
+        if relations is not None:
+            created = []
+            for relation in relations:
+                source = relation.get("from_object_id", relation.get("from_media_id"))
+                target = relation.get("to_object_id", relation.get("to_media_id"))
+                result = self._typed("create_media_relation", project, source, target, relation["kind"], key=key, metadata=relation.get("metadata"), idempotency_key=key)
+                if not result.ok: return result
+                created.append(result.data)
+            return DomainResult.success(created, idempotency_key=key)
+        if kind is None:
+            return DomainResult.failure(ErrorObject("validation_error", "media relation kind is required", {}), idempotency_key=key)
+        return self._typed(
+            "create_media_relation",
+            project,
+            from_object_id,
+            to_object_id,
+            kind,
+            key=key,
+            metadata=metadata,
+            idempotency_key=key,
+        )
+
+    def list_relations(self, project, *, cursor=None, limit=50, **kwargs):
+        result = self._typed("list_media_relations", project, cursor=cursor, limit=limit)
+        if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
+
+    relations = list_relations
 
 
 class RemoteTasks(_RemoteFamily):
@@ -105,7 +134,10 @@ class RemoteTasks(_RemoteFamily):
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         if match is None: return DomainResult.failure(ErrorObject("not_found", "capability is not registered", {"capability_id": capability}), idempotency_key=key)
         return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec)
-    def list(self, project_id=None): return DomainResult.failure(ErrorObject("unavailable", "task listing is not exposed by workspace.v1", {}), idempotency_key="")
+    def list(self, project_id, *, cursor=None, limit=50, **kwargs):
+        result = self._typed("list_project_tasks", project_id, cursor=cursor, limit=limit)
+        if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
     def show(self, task_id, project=None): return self._typed("get_task", task_id)
     def cancel(self, project, task_id, *, idempotency_key=None): return self._typed("cancel_task", task_id, key=idempotency_key, idempotency_key=idempotency_key or uuid.uuid4().hex)
     def retry(self, project, task_id, *, idempotency_key=None): return self._typed("retry_task", task_id, key=idempotency_key, idempotency_key=idempotency_key or uuid.uuid4().hex)
@@ -113,7 +145,10 @@ class RemoteTasks(_RemoteFamily):
 
 
 class RemoteRuns(_RemoteFamily):
-    def list(self, project_id=None): return DomainResult.failure(ErrorObject("unavailable", "run listing is not exposed by workspace.v1", {}), idempotency_key="")
+    def list(self, project_id, *, cursor=None, limit=50, **kwargs):
+        result = self._typed("list_project_runs", project_id, cursor=cursor, limit=limit)
+        if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
     def show(self, project, run_id, **kwargs): return self._typed("get_run", run_id)
     def cancel(self, project, run_id, *, idempotency_key=None): return DomainResult.failure(ErrorObject("unavailable", "run cancellation is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
     def retry_failed(self, project, run_id, *, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "run retry is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
@@ -125,18 +160,61 @@ class RemoteReferences(_RemoteFamily):
         if timeline_id is None: return DomainResult.failure(ErrorObject("unavailable", "references require a timeline id in workspace.v1", {}), idempotency_key=kwargs.get("idempotency_key") or "")
         key = kwargs.pop("idempotency_key", None) or uuid.uuid4().hex
         return self._typed("create_reference", timeline_id, kwargs, key=key, idempotency_key=key)
-    def list(self, project, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "reference listing is not supported by the workspace contract", {}), idempotency_key="")
+    def list(self, project, *, cursor=None, limit=50, include_archived=False, **kwargs):
+        result = self._typed("list_project_references", project, cursor=cursor, limit=limit, include_archived=include_archived)
+        if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
     def show(self, project, ref): return self._typed("get_reference", ref)
-    def update(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "reference update is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
-    archive = update; unarchive = update; associate = update; set_primary = update; link = update
+    def _version(self, ref, expected_version):
+        if expected_version is not None: return int(expected_version)
+        current = self._client.get_reference(ref)
+        return int(current.get("version", 1))
+    def update(self, project, ref, *, expected_version=None, object_id=None, role=None, idempotency_key=None, **kwargs):
+        try: version = self._version(ref, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        return self._typed("update_reference", ref, key=idempotency_key, expected_version=version, object_id=object_id, role=role)
+    def archive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
+        try: version = self._version(ref, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("archive_reference", ref, key=key, expected_version=version, idempotency_key=key)
+    def unarchive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
+        try: version = self._version(ref, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("recover_reference", ref, key=key, expected_version=version, idempotency_key=key)
+    associate = update; link = update; set_primary = update
 
 
 class RemoteShots(_RemoteFamily):
-    def list(self, project, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "shot listing is not supported by workspace.v1", {}), idempotency_key="")
+    def list(self, project, *, cursor=None, limit=50, include_archived=False, **kwargs):
+        result = self._typed("list_project_shots", project, cursor=cursor, limit=limit, include_archived=include_archived)
+        if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
     def show(self, project, shot_id): return self._typed("get_shot", shot_id)
     def create(self, *, timeline_id=None, shot=None, idempotency_key=None, **kwargs):
         if timeline_id is None: return DomainResult.failure(ErrorObject("unavailable", "shots require a timeline id in workspace.v1", {}), idempotency_key=idempotency_key or "")
         return self._typed("create_shot", timeline_id, shot or kwargs, key=idempotency_key, idempotency_key=idempotency_key or uuid.uuid4().hex)
+    def _version(self, shot_id, expected_version):
+        if expected_version is not None: return int(expected_version)
+        current = self._client.get_shot(shot_id)
+        return int(current.get("version", 1))
+    def update(self, project, shot_id, *, expected_version=None, start_ms=None, duration_ms=None, reference_ids=None, idempotency_key=None, **kwargs):
+        try: version = self._version(shot_id, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        return self._typed("update_shot", shot_id, key=idempotency_key, expected_version=version, start_ms=start_ms, duration_ms=duration_ms, reference_ids=reference_ids)
+    def archive(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
+        try: version = self._version(shot_id, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("archive_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
+    def recover(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
+        try: version = self._version(shot_id, expected_version)
+        except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("recover_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
+
+    unarchive = recover
     def add_item(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "shot item mutation is not supported by workspace.v1", {}), idempotency_key=idempotency_key or "")
     remove_item = add_item; reorder = add_item
 

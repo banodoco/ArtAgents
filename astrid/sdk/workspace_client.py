@@ -194,11 +194,91 @@ class WorkspaceClient:
     def get_shot(self, shot_id: str) -> Any:
         return self._call_generated("get_shot", shot_id)
 
+    def list_project_shots(
+        self,
+        project_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+        include_archived: bool = False,
+    ) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_project_shots",
+            project_id,
+            cursor=cursor,
+            limit=limit,
+            include_archived=include_archived,
+        )
+        return {"items": list(items), "next_cursor": next_cursor}
+
+    def update_shot(
+        self,
+        shot_id: str,
+        *,
+        expected_version: int,
+        start_ms: int | None = None,
+        duration_ms: int | None = None,
+        reference_ids: list[str] | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "update_shot",
+            shot_id,
+            expected_version=expected_version,
+            start_ms=start_ms,
+            duration_ms=duration_ms,
+            reference_ids=reference_ids,
+        )
+
+    def archive_shot(self, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("archive_shot", shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def recover_shot(self, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("recover_shot", shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
     def create_reference(self, timeline_id: str, reference: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("create_reference", timeline_id, reference, idempotency_key=idempotency_key)
 
     def get_reference(self, reference_id: str) -> Any:
         return self._call_generated("get_reference", reference_id)
+
+    def list_project_references(
+        self,
+        project_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+        include_archived: bool = False,
+    ) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_project_references",
+            project_id,
+            cursor=cursor,
+            limit=limit,
+            include_archived=include_archived,
+        )
+        return {"items": list(items), "next_cursor": next_cursor}
+
+    def update_reference(
+        self,
+        reference_id: str,
+        *,
+        expected_version: int,
+        object_id: str | None = None,
+        role: str | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "update_reference",
+            reference_id,
+            expected_version=expected_version,
+            object_id=object_id,
+            role=role,
+        )
+
+    def archive_reference(self, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("archive_reference", reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def recover_reference(self, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("recover_reference", reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
 
     def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> Any:
         return self._call_generated("create_document", project_id, document_id, kind, content)
@@ -255,6 +335,32 @@ class WorkspaceClient:
         )
         return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": next_cursor}
 
+    def create_media_relation(
+        self,
+        project_id: str,
+        from_object_id: str,
+        to_object_id: str,
+        kind: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        idempotency_key: str,
+    ) -> Any:
+        return self._call_generated(
+            "create_media_relation",
+            project_id,
+            from_object_id,
+            to_object_id,
+            kind,
+            metadata=metadata,
+            idempotency_key=idempotency_key,
+        )
+
+    def list_media_relations(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_media_relations", project_id, cursor=cursor, limit=limit
+        )
+        return {"items": list(items), "next_cursor": next_cursor}
+
     def get_object(self, object_id: str) -> Any:
         return self._call_generated("get_object", object_id)
 
@@ -288,6 +394,12 @@ class WorkspaceClient:
     def get_task(self, task_id: str) -> Any:
         return self._call_generated("get_task", task_id)
 
+    def list_project_tasks(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_project_tasks", project_id, cursor=cursor, limit=limit
+        )
+        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": next_cursor}
+
     def cancel_task(self, task_id: str, *, idempotency_key: str) -> Any:
         return self._call_generated("cancel_task", task_id, idempotency_key=idempotency_key)
 
@@ -296,6 +408,12 @@ class WorkspaceClient:
 
     def get_run(self, run_id: str) -> Any:
         return self._call_generated("get_run", run_id)
+
+    def list_project_runs(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_project_runs", project_id, cursor=cursor, limit=limit
+        )
+        return {"items": list(items), "next_cursor": next_cursor}
 
     def list_events(self, *, aggregate_id: str | None = None) -> Any:
         items, cursor = self._call_generated("list_events", aggregate_id=aggregate_id)

@@ -59,7 +59,8 @@ def test_remote_reads_are_scoped_and_unsupported_operations_fail_honestly(tmp_pa
         assert listed.ok and any(item.get("digest") == imported.data["digest"] for item in listed.data)
         verified = client.media.verify("scoped", imported.data["digest"])
         assert verified.ok and verified.data["verified"] is True
-        assert not client.tasks.list("scoped").ok
+        tasks = client.tasks.list("scoped")
+        assert tasks.ok and tasks.data == []
         assert not client.timelines.save("scoped", "missing").ok
     finally:
         daemon.stop()
@@ -165,5 +166,47 @@ def test_remote_domains_use_generated_runtime_and_reopen(tmp_path, monkeypatch):
         assert reopened.projects.show("journey").ok
         assert reopened.timelines.show("journey", timeline_id).ok
         reopened.close()
+    finally:
+        daemon.stop()
+
+
+def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        client = AstridClient.open()
+        project = client.projects.create(slug="editor", name="Editor", idempotency_key="project").data
+        project_id = project["project_id"]
+        first_path, second_path = tmp_path / "first.bin", tmp_path / "second.bin"
+        first_path.write_bytes(b"first")
+        second_path.write_bytes(b"second")
+        first = client.media.import_file(project=project_id, path=first_path, idempotency_key="first").data
+        second = client.media.import_file(project=project_id, path=second_path, idempotency_key="second").data
+        relation = client.media.relate(
+            project_id,
+            from_object_id=first["object_id"],
+            to_object_id=second["object_id"],
+            kind="derived_from",
+            metadata={"source": "test"},
+            idempotency_key="relation",
+        )
+        assert relation.ok and client.media.list_relations(project_id).data[0]["kind"] == "derived_from"
+
+        timeline = client.timelines.create(project=project_id, slug="main", idempotency_key="timeline").data["timeline_id"]
+        shot = client.shots.create(timeline_id=timeline, shot={"shot_id": "shot", "start_ms": 0, "duration_ms": 100}, idempotency_key="shot").data
+        reference = client.references.create(timeline_id=timeline, reference_id="reference", object_id=first["object_id"], idempotency_key="reference").data
+        assert client.shots.list(project_id).data[0]["shot_id"] == shot["shot_id"]
+        assert client.references.list(project_id).data[0]["reference_id"] == reference["reference_id"]
+        assert client.shots.update(project_id, shot["shot_id"], start_ms=10).ok
+        assert client.shots.archive(project_id, shot["shot_id"], idempotency_key="shot-archive").ok
+        assert client.shots.recover(project_id, shot["shot_id"], idempotency_key="shot-recover").ok
+        assert client.references.update(project_id, reference["reference_id"], role="primary").ok
+        assert client.references.archive(project_id, reference["reference_id"], idempotency_key="reference-archive").ok
+        assert client.references.unarchive(project_id, reference["reference_id"], idempotency_key="reference-recover").ok
+
+        task = client.tasks.create(project_id=project_id, capability="render.basic", spec={"prompt": "editor"}, idempotency_key="task").data
+        assert client.tasks.list(project_id).data[0]["task_id"] == task["task_id"]
+        assert client.runs.list(project_id).data[0]["id"] == task["run_id"]
     finally:
         daemon.stop()
