@@ -569,6 +569,14 @@ def _manifest_preview_command(
 
     # Auto-forward only declared inputs, matching live command semantics and
     # avoiding accidental flags for SDK-only controls such as ``verbose``.
+    # Explicit-command executors may opt out when their entrypoint accepts a
+    # deliberately narrower CLI than the manifest's SDK input surface (for
+    # example ``reigh.open_in_reigh`` accepts ``--timeline`` from its command
+    # template but has no ``--assets`` flag).  Keep this in lockstep with the
+    # runtime runner's metadata.auto_forward_inputs contract.
+    metadata = definition.get("metadata", {})
+    if isinstance(metadata, Mapping) and metadata.get("auto_forward_inputs") is False:
+        return command
     raw_text = " ".join(str(part) for part in raw_argv)
     mapped_names = {
         str(item.get("input"))

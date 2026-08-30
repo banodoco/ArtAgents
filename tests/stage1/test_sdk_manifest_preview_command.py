@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from astrid.core.contracts.schema import Port
+from astrid.core.execution.executor.registry import load_default_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, build_executor_command
+from astrid.sdk import get_capability
 from astrid.sdk.invocation import _manifest_dry_run_result, _manifest_preview_command
 from astrid.sdk.results import InvocationResult
 
@@ -219,3 +223,48 @@ def test_pipeline_preview_forwards_declared_inputs_defaults_and_out() -> None:
         "--out",
         "/tmp/pipeline-preview",
     ]
+
+
+def test_preview_matches_runtime_for_manifest_auto_forward_opt_out() -> None:
+    """The manifest-only preview must honor the same opt-out as live dispatch.
+
+    ``reigh.open_in_reigh`` declares an SDK-only ``assets`` input, but its
+    command template intentionally routes only ``timeline``.  The preview
+    must not invent an unsupported ``--assets`` flag, and it must remain byte
+    for byte equivalent to the runtime command builder.
+    """
+    capability = get_capability(
+        "reigh.open_in_reigh",
+        kind="executor",
+        include_installed=False,
+    )
+    inputs = {"timeline": "/tmp/timeline.json", "assets": "/tmp/assets.json"}
+    raw_result, ok = _manifest_dry_run_result(
+        capability,
+        inputs=inputs,
+        outputs=None,
+        brief=None,
+        python_exec="/opt/python",
+        out="/tmp/open-in-reigh",
+    )
+
+    runtime_command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id=capability.id,
+            out=Path("/tmp/open-in-reigh"),
+            inputs=inputs,
+            python_exec="/opt/python",
+        ),
+        load_default_registry(include_installed=False),
+    )
+
+    assert ok is True
+    assert raw_result["command"] == list(runtime_command)
+    assert raw_result["command"] == [
+        "/opt/python",
+        "-m",
+        "astrid.packs.reigh.executors.open_in_reigh.run",
+        "--timeline",
+        "/tmp/timeline.json",
+    ]
+    assert "--assets" not in raw_result["command"]
