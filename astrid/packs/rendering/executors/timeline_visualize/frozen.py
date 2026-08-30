@@ -268,13 +268,20 @@ def _rehydrate_managed_pack(
     try:
         requested_label = None
         for row in rows:
-            label = row.get("name")
-            digest = str(row.get("digest", row.get("object_id", ""))).removeprefix("sha256:")
+            label = _runtime_output_field(row, "path", "name", "label")
+            digest = str(
+                _runtime_output_field(
+                    row, "digest", "content_hash", "sha256", "object_id"
+                )
+                or ""
+            ).removeprefix("sha256:")
             if label == "manifest_path":
                 requested_label = MANIFEST_NAME
                 label = MANIFEST_NAME
             elif isinstance(label, str) and label.endswith("/" + MANIFEST_NAME):
-                requested_label = label
+                requested_label = label.removeprefix("agent-view/")
+            if isinstance(label, str) and label.startswith("agent-view/"):
+                label = label[len("agent-view/") :]
             if not digest or not isinstance(label, str):
                 continue
             try:
@@ -1037,6 +1044,209 @@ def _verify_run_ownership(
     inputs = manifest.get("inputs")
     if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project_slug]:
         raise ContainmentError("manifest project identity disagrees with its owning run")
+    _verify_runtime_output_binding(
+        manifest_path,
+        manifest,
+        runtime_outputs=kernel_info.get("outputs"),
+    )
+
+
+def _runtime_event_value(event: Any, *keys: str) -> Any:
+    """Read an event field from either a generated DTO or a JSON mapping."""
+
+    if isinstance(event, Mapping):
+        for key in keys:
+            if key in event:
+                return event[key]
+        return None
+    for key in keys:
+        try:
+            return getattr(event, key)
+        except AttributeError:
+            continue
+    return None
+
+
+def _runtime_settled_outputs(runtime_client: Any, run_id: str, run_info: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+    """Return the output evidence from the exact run's terminal settlement.
+
+    Output ownership cannot be inferred from project/capability/timeline
+    identity alone: a copied pack under another completed run would otherwise
+    pass those checks.  Prefer the immutable output list on the run DTO, then
+    read the terminal settlement event for runtimes that expose outputs only
+    there.  The caller deliberately receives ``None`` when no evidence exists;
+    an absent evidence stream is not equivalent to an empty output set.
+    """
+
+    candidates: list[Any] = []
+    for container in (run_info, run_info.get("result"), run_info.get("metadata")):
+        if not isinstance(container, Mapping):
+            continue
+        for key in ("outputs", "output_objects"):
+            value = container.get(key)
+            if isinstance(value, list):
+                candidates = value
+                break
+        if candidates:
+            break
+    if candidates:
+        return [item for item in candidates if isinstance(item, Mapping)]
+
+    reader = getattr(runtime_client, "list_run_events", None)
+    if not callable(reader):
+        return None
+    try:
+        events = reader(run_id)
+    except Exception:
+        return None
+    if isinstance(events, Mapping):
+        events = events.get("items")
+    if not isinstance(events, (list, tuple)):
+        return None
+    # The event stream is ordered.  Use the last terminal settlement so a
+    # retry cannot make an older attempt's outputs appear to belong to the
+    # winning run.
+    for event in reversed(events):
+        kind = _runtime_event_value(event, "event_type", "kind", "type")
+        if kind not in {"task.completed", "completed", "task.settled"}:
+            continue
+        payload = _runtime_event_value(event, "payload", "data")
+        if not isinstance(payload, Mapping):
+            continue
+        result = payload.get("result")
+        if isinstance(result, Mapping) and isinstance(result.get("outputs"), list):
+            return [item for item in result["outputs"] if isinstance(item, Mapping)]
+        if isinstance(payload.get("outputs"), list):
+            return [item for item in payload["outputs"] if isinstance(item, Mapping)]
+        if isinstance(payload.get("objects"), list):
+            return [item for item in payload["objects"] if isinstance(item, Mapping)]
+    return None
+
+
+def _runtime_output_field(output: Mapping[str, Any], *keys: str) -> Any:
+    """Read an output field, including the repository's params envelope."""
+
+    for key in keys:
+        if key in output:
+            return output[key]
+    params = output.get("params")
+    if isinstance(params, Mapping):
+        for key in keys:
+            if key in params:
+                return params[key]
+    return None
+
+
+def _verify_runtime_output_binding(
+    manifest_path: Path,
+    manifest: Mapping[str, Any],
+    *,
+    runtime_outputs: Any,
+) -> None:
+    """Require the selected pack's exact files and digests in run evidence."""
+
+    if not isinstance(runtime_outputs, list) or not runtime_outputs:
+        raise ContainmentError(
+            "runtime settlement output evidence is unavailable; filesystem bytes are not authoritative"
+        )
+    declared = manifest.get("outputs")
+    if not isinstance(declared, list) or not declared:
+        raise FrozenIntegrityError("visualization manifest has no declared outputs")
+    expected: dict[str, tuple[str, int]] = {}
+    for index, raw in enumerate(declared):
+        if not isinstance(raw, Mapping):
+            raise FrozenIntegrityError(f"visualization manifest output {index} is malformed")
+        path = raw.get("path")
+        digest = raw.get("content_hash", raw.get("sha256"))
+        size = raw.get("bytes", raw.get("size"))
+        if not isinstance(path, str) or not path or not isinstance(digest, str):
+            raise FrozenIntegrityError(f"visualization manifest output {index} lacks identity")
+        digest = digest.removeprefix("sha256:")
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise FrozenIntegrityError(f"visualization manifest output {path!r} has an invalid digest")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise FrozenIntegrityError(f"visualization manifest output {path!r} has an invalid byte count")
+        if path in expected:
+            raise FrozenIntegrityError(f"visualization manifest output {path!r} is duplicated")
+        expected[path] = (digest, size)
+
+    # ``pack-hashes.json`` cannot list itself in the inner manifest, but it is
+    # still a settled concrete output.  Include it when the verified pack has
+    # one so copied packs cannot replace the integrity ledger under an
+    # otherwise matching manifest.
+    ledger_path = manifest_path.parent / PACK_HASHES_NAME
+    if ledger_path.is_file():
+        ledger_bytes = ledger_path.read_bytes()
+        expected[PACK_HASHES_NAME] = (
+            hashlib.sha256(ledger_bytes).hexdigest(),
+            len(ledger_bytes),
+        )
+
+    # Runtime output paths are commonly rooted at the run's ``agent-view``
+    # directory while the inner manifest is pack-relative.  Strip that one
+    # path-derived prefix before matching; basename fallback is allowed only
+    # when it is unambiguous, preserving fail-closed behavior for collisions.
+    try:
+        run_relative = manifest_path.resolve(strict=False).relative_to(
+            manifest_path.resolve(strict=False).parents[1]
+        )
+        pack_prefix = run_relative.parent.as_posix()
+    except (ValueError, IndexError):
+        pack_prefix = "agent-view"
+    by_basename: dict[str, list[str]] = {}
+    for path in expected:
+        by_basename.setdefault(PurePosixPath(path).name, []).append(path)
+
+    observed: dict[str, tuple[str, int | None]] = {}
+    for index, raw in enumerate(runtime_outputs):
+        if not isinstance(raw, Mapping):
+            raise ContainmentError(f"runtime settlement output {index} is malformed")
+        raw_path = _runtime_output_field(raw, "path", "name", "label")
+        digest = _runtime_output_field(raw, "digest", "content_hash", "sha256", "object_id")
+        size = _runtime_output_field(raw, "bytes", "size")
+        if not isinstance(raw_path, str) or not raw_path or not isinstance(digest, str):
+            raise ContainmentError("runtime settlement output evidence lacks path or digest")
+        normalized = raw_path.removeprefix("./")
+        if normalized == "manifest_path":
+            normalized = MANIFEST_NAME
+        if (
+            normalized.startswith("/")
+            or "\\" in normalized
+            or ".." in PurePosixPath(normalized).parts
+        ):
+            raise ContainmentError(f"runtime settlement output {raw_path!r} has an invalid path")
+        if normalized.startswith(pack_prefix + "/"):
+            normalized = normalized[len(pack_prefix) + 1 :]
+        if normalized not in expected:
+            basename_matches = by_basename.get(PurePosixPath(normalized).name, [])
+            if len(basename_matches) != 1:
+                raise ContainmentError(
+                    f"runtime settlement output {raw_path!r} is not in the selected visualization pack"
+                )
+            normalized = basename_matches[0]
+        digest = digest.removeprefix("sha256:")
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ContainmentError(f"runtime settlement output {raw_path!r} has an invalid digest")
+        if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+            raise ContainmentError(f"runtime settlement output {raw_path!r} has an invalid byte count")
+        if normalized in observed:
+            raise ContainmentError(f"runtime settlement output {normalized!r} is duplicated")
+        observed[normalized] = (digest, size)
+
+    if set(observed) != set(expected):
+        missing = sorted(set(expected) - set(observed))
+        extra = sorted(set(observed) - set(expected))
+        raise ContainmentError(
+            f"runtime settlement outputs do not exactly bind this visualization pack: missing={missing!r}, extra={extra!r}"
+        )
+    for path, (digest, size) in observed.items():
+        expected_digest, expected_size = expected[path]
+        if not hmac.compare_digest(digest, expected_digest) or (
+            size is not None and size != expected_size
+        ):
+            raise FrozenIntegrityError(
+                f"runtime settlement output evidence disagrees with visualization pack: {path}"
+            )
 
 
 def _kernel_frozen_run_info(
@@ -1054,6 +1264,13 @@ def _kernel_frozen_run_info(
             "capability": str(info.get("capability", info.get("capability_id"))) if info.get("capability", info.get("capability_id")) is not None else None,
             "timeline_ids": info.get("timeline_ids") or (info.get("metadata", {}) if isinstance(info.get("metadata"), dict) else {}).get("timeline_ids"),
         }
+        # Keep settlement evidence attached to the exact path-derived run id.
+        # It is intentionally omitted for narrow legacy test doubles that do
+        # not expose an event reader; real runtime ownership checks below then
+        # fail closed rather than accepting filesystem run.json as authority.
+        outputs = _runtime_settled_outputs(runtime_client, run_id, info)
+        if outputs is not None:
+            result["outputs"] = outputs
         run_project_id = info.get("project_id") or info.get("project")
         projects_reader = getattr(runtime_client, "list_projects", None)
         if callable(projects_reader):

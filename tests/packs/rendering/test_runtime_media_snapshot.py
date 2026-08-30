@@ -84,6 +84,25 @@ def test_runtime_media_snapshot_rejects_page_larger_than_requested_limit(
     assert runtime.calls == [("project-1", None, 50)]
 
 
+def test_runtime_media_snapshot_rejects_mapping_page_without_explicit_cursor(
+    monkeypatch,
+) -> None:
+    # An omitted cursor is not the terminal ``null`` marker.  In particular,
+    # a full first page must not be accepted as a complete snapshot.
+    first_page = [_row(number) for number in range(50)]
+
+    class MissingCursorRuntime(_PagedRuntime):
+        def list_project_objects(self, project_id: str, *, cursor=None, limit=50):
+            self.calls.append((project_id, cursor, limit))
+            return {"items": first_page}
+
+    runtime = MissingCursorRuntime({})
+    _patch_runtime(monkeypatch, runtime)
+
+    assert run_module._runtime_media_snapshot("demo") is None
+    assert runtime.calls == [("project-1", None, 50)]
+
+
 def test_runtime_media_snapshot_continues_after_empty_page(monkeypatch) -> None:
     runtime = _PagedRuntime(
         {

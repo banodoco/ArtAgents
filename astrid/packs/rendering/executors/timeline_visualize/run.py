@@ -130,6 +130,13 @@ def _runtime_media_page(result: Any) -> tuple[list[Any], str | None] | None:
     """Normalize the compatibility wrapper and generated-client page shapes."""
 
     if isinstance(result, Mapping):
+        # The generated workspace contract is an explicit page envelope.  A
+        # mapping that omits ``next_cursor`` is not a terminal page: treating
+        # the omission as ``None`` silently turns a truncated/old adapter into
+        # an apparently complete media snapshot (most dangerously when the
+        # first page happens to be exactly the requested 50 rows).
+        if "next_cursor" not in result:
+            return None
         items = result.get("items")
         next_cursor = result.get("next_cursor")
     elif isinstance(result, tuple) and len(result) == 2:

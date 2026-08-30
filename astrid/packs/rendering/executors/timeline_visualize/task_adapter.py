@@ -18,14 +18,14 @@ it runs the real read-only timeline renderer in-process:
    environment. No provider key, network, remote execution, GPU, or child
    process is involved.
 3. **Concrete files under the assigned staging root.** ``run_sdk`` writes
-   the deterministic evidence pack (``agent-view/`` with ``manifest.json``,
-   ``reading-guide.md``, ``structure.md``, and page ``.png``/``.svg`` files)
-   directly under the assigned staging directory.
+   the deterministic evidence pack (``agent-view/`` with its manifest,
+   ledgers, guides, and page ``.png``/``.svg`` files) directly under the
+   assigned staging directory.
 4. **Universal result manifest.** The adapter returns a valid manifest
-   whose outputs are exactly the concrete SVG/PNG/Markdown files plus the
-   pack's own ``manifest.json`` as the single primary ``result`` — byte
-   SHA-256 identity, unique ordinals, no directory identities. The kernel
-   service validates it strictly and prepares media descriptors from it.
+   whose outputs are exactly every concrete file in the pack, with the pack's
+   own ``manifest.json`` as the single primary ``result`` — byte SHA-256
+   identity, unique ordinals, no directory identities. The kernel service
+   validates it strictly and prepares media descriptors from it.
 
 Import direction is exact: the adapter imports only kernel *public* helpers
 (``astrid.core.pack.entrypoint``) and its own pack's ``run`` module; it
@@ -214,10 +214,11 @@ class TimelineVisualizeAdapter:
     ) -> Mapping[str, Any]:
         """Build the universal result manifest from the renderer's outputs.
 
-        Only concrete files participate: the pack's ``manifest.json`` is the
-        single primary ``result``, and every concrete SVG/PNG/Markdown file
-        under the pack root is a secondary ordered output — no directory
-        identities, no derived index JSON, exact byte SHA-256 digests.
+    Every concrete file participates: the pack's ``manifest.json`` is the
+    single primary ``result`` and every other file (including JSON ledgers and
+    ``pack-hashes.json``) is a secondary ordered output.  Settling the full
+    pack is required so a later frozen-view load can bind every byte to this
+    exact runtime run; no directory identities are emitted.
         """
         pack_root = Path(outputs_info["pack_root"]).resolve()
         try:
@@ -237,9 +238,7 @@ class TimelineVisualizeAdapter:
             rel = f"{rel_pack_posix}/{key}"
             if rel == primary_rel:
                 continue
-            suffix = Path(rel).suffix.lower()
-            if suffix in (".png", ".svg", ".md"):
-                selected.append(rel)
+            selected.append(rel)
         ordered = [primary_rel, *sorted(selected)]
 
         outputs: list[dict[str, Any]] = []

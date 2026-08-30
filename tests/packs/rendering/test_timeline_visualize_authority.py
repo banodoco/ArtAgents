@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 from pathlib import Path
+
+import pytest
 
 from astrid.packs.rendering.executors.timeline_visualize import frozen, select
 
@@ -81,3 +84,59 @@ def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
     monkeypatch.setattr(frozen, "_workspace_runtime_client", lambda: Runtime())
     info = frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused"))
     assert info["project_id"] != info["current_project_id"]
+
+
+def _owned_manifest(tmp_path: Path, run_id: str, payload: bytes) -> tuple[Path, dict]:
+    project = tmp_path / "demo"
+    path = project / "runs" / run_id / "agent-view" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    manifest = {
+        "inputs": {"timeline_source": ["demo"]},
+        "outputs": [{"path": "manifest.json", "content_hash": f"sha256:{digest}", "bytes": len(payload)}],
+    }
+    return path, manifest
+
+
+def test_frozen_ownership_binds_exact_settled_outputs_to_path_run(tmp_path, monkeypatch):
+    path, manifest = _owned_manifest(tmp_path, "run-b", b"run-a-pack")
+
+    # The copied A view is now under B, while B settled a different manifest.
+    # Project/capability/timeline identity alone must not authorize it.
+    monkeypatch.setattr(
+        frozen,
+        "_kernel_frozen_run_info",
+        lambda _slug, run_id, _root: {
+            "project_id": "project-1",
+            "current_project_id": "project-1",
+            "status": "completed",
+            "capability": "rendering.timeline_visualize",
+            "timeline_ids": ["timeline-1"],
+            "outputs": [{
+                "path": "agent-view/manifest.json",
+                "digest": hashlib.sha256(b"run-b-pack").hexdigest(),
+                "size": len(b"run-b-pack"),
+            }],
+        },
+    )
+    with pytest.raises(frozen.FrozenIntegrityError, match="manifest.json"):
+        frozen._verify_run_ownership(path, tmp_path / "demo", manifest, "timeline-1")
+
+
+def test_frozen_ownership_accepts_exact_settled_output_for_path_run(tmp_path, monkeypatch):
+    path, manifest = _owned_manifest(tmp_path, "run-b", b"run-b-pack")
+    digest = hashlib.sha256(b"run-b-pack").hexdigest()
+    monkeypatch.setattr(
+        frozen,
+        "_kernel_frozen_run_info",
+        lambda _slug, _run_id, _root: {
+            "project_id": "project-1",
+            "current_project_id": "project-1",
+            "status": "completed",
+            "capability": "rendering.timeline_visualize",
+            "timeline_ids": ["timeline-1"],
+            "outputs": [{"path": "agent-view/manifest.json", "digest": digest, "size": len(b"run-b-pack")}],
+        },
+    )
+    frozen._verify_run_ownership(path, tmp_path / "demo", manifest, "timeline-1")
