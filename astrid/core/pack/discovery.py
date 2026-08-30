@@ -109,7 +109,10 @@ def discover_pack_metadata(
     # because a registry was loaded; only an explicitly-authored manifest is
     # eligible for the local layer.
     local_pack_root = project_pack_root / "local"
-    if not any((local_pack_root / name).is_file() for name in ("pack.yaml", "pack.yml")):
+    if not any(
+        (local_pack_root / name).is_file()
+        for name in ("pack.yaml", "pack.yml", "pack.json")
+    ):
         local_pack_root = None
 
     discovered: list[DiscoveredPack] = []
