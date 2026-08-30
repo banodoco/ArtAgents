@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from scripts.reshape.installed_artifact import (
-    ArtifactIdentityError,
-    InstalledArtifactHarness,
     InstalledArtifactError,
+    InstalledArtifactHarness,
     LaneExecutionError,
     WheelSelectionError,
     build_once,
@@ -21,7 +19,6 @@ from scripts.reshape.installed_artifact import (
     scrub_environment,
     select_single_wheel,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -159,6 +156,36 @@ def test_scrubber_removes_account_cloud_provider_and_python_path_inputs(
     assert is_secret_env_name("OPENAI_API_KEY")
     assert is_secret_env_name("SUPABASE_URL")
     assert not is_secret_env_name("LANG")
+
+
+def test_scrubber_propagates_only_an_installed_timeline_schema_root(
+    harness: InstalledArtifactHarness,
+    tmp_path: Path,
+) -> None:
+    schema_root = tmp_path / "timeline-schema"
+    package_root = schema_root / "banodoco_timeline_schema"
+    package_root.mkdir(parents=True)
+    (package_root / "timeline.schema.json").write_text("{}", encoding="utf-8")
+    env = scrub_environment(
+        roots=harness.roots,
+        venv_dir=harness.venv_dir,
+        parent={
+            "PATH": os.environ.get("PATH", ""),
+            "ASTRID_TIMELINE_SCHEMA_PYTHONPATH": str(schema_root),
+            "PYTHONPATH": str(REPO_ROOT),
+        },
+    )
+    assert env["ASTRID_TIMELINE_SCHEMA_PYTHONPATH"] == str(schema_root.resolve())
+
+    invalid = scrub_environment(
+        roots=harness.roots,
+        venv_dir=harness.venv_dir,
+        parent={
+            "PATH": os.environ.get("PATH", ""),
+            "ASTRID_TIMELINE_SCHEMA_PYTHONPATH": str(tmp_path / "missing"),
+        },
+    )
+    assert "ASTRID_TIMELINE_SCHEMA_PYTHONPATH" not in invalid
 
 
 def test_identity_probe_rejects_a_checkout_import_without_mutating_workspace(

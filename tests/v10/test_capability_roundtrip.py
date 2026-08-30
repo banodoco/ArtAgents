@@ -131,6 +131,10 @@ def _normalize_and_rechain(log_path: Path) -> None:
 
 def _seed_timeline(projects_root: Path, slug: str) -> Path:
     """Copy the fixture read-only into a managed project and return the dir."""
+    pytest.importorskip(
+        "banodoco_timeline_schema",
+        reason="canonical timeline schema is required for the real render round-trip",
+    )
     from astrid.core.foundation.project_paths import project_dir
     from astrid.core.project.project import create_project
 

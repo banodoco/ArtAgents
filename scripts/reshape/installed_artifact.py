@@ -32,6 +32,7 @@ from typing import Any, Mapping, Sequence
 
 SCHEMA = "astrid.installed_artifact.v1"
 DEFAULT_DISTRIBUTION = "astrid"
+_TIMELINE_SCHEMA_ENV = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
 BUILD_LOCK = Path("requirements/build.lock")
 RUNTIME_LOCK = Path("requirements/runtime.lock")
 
@@ -280,6 +281,22 @@ def scrub_environment(
         for key, value in source.items()
         if key in safe and not is_secret_env_name(key)
     }
+    # The canonical timeline schema is an explicitly configured, optional
+    # external dependency.  Preserve only a validated absolute install root;
+    # never pass an arbitrary PYTHONPATH or an invalid value into the
+    # installed-artifact lane.  This keeps the lane hermetic while allowing a
+    # release worker that deliberately provisioned the schema to exercise the
+    # schema-bearing kernel tests.
+    schema_root_raw = str(source.get(_TIMELINE_SCHEMA_ENV, "")).strip()
+    if schema_root_raw:
+        schema_root = Path(schema_root_raw).expanduser()
+        package_root = schema_root / "banodoco_timeline_schema"
+        if (
+            schema_root.is_absolute()
+            and package_root.is_dir()
+            and (package_root / "timeline.schema.json").is_file()
+        ):
+            env[_TIMELINE_SCHEMA_ENV] = str(schema_root.resolve())
     venv_path = Path(venv_dir).expanduser().resolve()
     bin_dir = venv_path / ("Scripts" if os.name == "nt" else "bin")
     existing_path = env.get("PATH", os.defpath)

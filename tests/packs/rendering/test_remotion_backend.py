@@ -75,6 +75,10 @@ def _write_fake_remotion_output(command: list[str]) -> Path:
 
 
 def _write_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    pytest.importorskip(
+        "banodoco_timeline_schema",
+        reason="canonical timeline schema is required for timeline renderer tests",
+    )
     timeline_path = tmp_path / "hype.timeline.json"
     assets_path = tmp_path / "hype.assets.json"
     timeline.save_timeline(

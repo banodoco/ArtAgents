@@ -82,10 +82,14 @@ def test_every_entry_has_exactly_one_binding_and_policy() -> None:
         try:
             check_available(entry)
         except CapabilityUnavailable as exc:
-            # Remotion is an optional capability closure.  A checkout without
-            # its ignored adapter packages must advertise that fact instead
-            # of making this structural registry test depend on local setup.
-            assert entry.probe == "remotion_ready"
+            # Adapter closures are optional.  A checkout without an ignored
+            # adapter tree must advertise that fact instead of making this
+            # structural registry test depend on local setup.
+            assert entry.probe in {
+                "remotion_ready",
+                "wgp_runtime",
+                "vibecomfy_runtime",
+            }
             assert "missing_prerequisites:" in str(exc)
             assert "astrid doctor setup" in str(exc)
 

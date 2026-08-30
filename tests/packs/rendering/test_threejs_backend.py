@@ -97,6 +97,10 @@ def _threejs_exec_env():
 
 
 def _write_timeline(tmp_path: Path, payload: dict) -> Path:
+    pytest.importorskip(
+        "banodoco_timeline_schema",
+        reason="canonical timeline schema is required for timeline renderer tests",
+    )
     path = tmp_path / "timeline.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path

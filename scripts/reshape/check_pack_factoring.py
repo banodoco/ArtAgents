@@ -75,6 +75,7 @@ import json
 import os
 import re
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -441,7 +442,19 @@ def _artifact_test_workspace(
 def _artifact_environment(*roots: Path) -> dict[str, str]:
     """Return a child environment whose only Astrid import roots are explicit."""
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(str(root) for root in roots)
+    # The artifact root must win for Astrid itself, while the lane runner
+    # still needs the test runner and declared third-party packages.  Make
+    # those dependency roots explicit because ``PYTHONNOUSERSITE`` below
+    # intentionally disables implicit user-site discovery (common on macOS,
+    # where pip installs PyYAML/pytest there).  No checkout path is added.
+    dependency_roots = [
+        Path(path).resolve()
+        for path in (*site.getsitepackages(), site.getusersitepackages())
+        if Path(path).is_dir()
+    ]
+    environment["PYTHONPATH"] = os.pathsep.join(
+        str(root) for root in (*roots, *dependency_roots)
+    )
     environment["PYTHONNOUSERSITE"] = "1"
     environment["ASTRID_INTERNAL_INVOCATION"] = "1"
     environment["ASTRID_NO_NUDGE"] = "1"

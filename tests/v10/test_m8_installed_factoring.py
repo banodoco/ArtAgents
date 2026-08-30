@@ -26,32 +26,51 @@ from scripts.reshape.check_pack_factoring import (
     unpack_wheel,
     verify_sketch_kernel_inventory,
 )
-from scripts.reshape.installed_artifact import build_once
+from scripts.reshape.installed_artifact import InstalledArtifactHarness, build_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="module")
-def packaged_wheel(
+def packaged_harness(
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Path]:
+) -> Iterator[InstalledArtifactHarness]:
     """Build exactly one wheel for every reduced-composition check."""
     workspace = tmp_path_factory.mktemp("m8-packaged-factoring")
-    harness = build_once(REPO_ROOT, workspace=workspace)
+    # The factoring lane executes the complete packaged kernel suite, which
+    # imports the declared runtime manifest parsers (PyYAML/jsonschema).  A
+    # bare ``--no-deps`` artifact is useful for the identity-only contract,
+    # but cannot prove this lane: install the hashed runtime lock into the
+    # same isolated venv so a host/user-site package can never satisfy it.
+    harness = build_once(
+        REPO_ROOT,
+        workspace=workspace,
+        install_dependencies=True,
+    )
     try:
-        yield harness.artifact.path
+        yield harness
     finally:
         harness.close()
+
+
+@pytest.fixture(scope="module")
+def packaged_wheel(packaged_harness: InstalledArtifactHarness) -> Path:
+    return packaged_harness.artifact.path
 
 
 @pytest.mark.timeout(600)
 def test_each_pack_can_be_removed_from_one_wheel_without_kernel_drift(
     packaged_wheel: Path,
+    packaged_harness: InstalledArtifactHarness,
     tmp_path: Path,
 ) -> None:
     """Prove all reduced packaged compositions and their complete kernel lane."""
     result = check_artifact_factoring(
         wheel=packaged_wheel,
+        # Factoring launches Python outside the source checkout.  Reuse the
+        # dependency-bearing interpreter built for this artifact so PyYAML and
+        # jsonschema come from the declared lock, not from the host process.
+        python=str(packaged_harness.python_executable),
         base_dir=tmp_path,
         kernel_timeout=180,
         catalog_timeout=30,
