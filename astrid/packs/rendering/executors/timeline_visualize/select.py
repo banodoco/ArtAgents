@@ -80,10 +80,10 @@ from __future__ import annotations
 import importlib
 import json
 import re
-import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 from astrid.packs.rendering.executors.timeline_visualize.ids import (
     parse_qualified_ref,
@@ -198,6 +198,7 @@ def select_kernel_timelines(
     slug: str | None = None,
     all: bool = False,
     default: bool = False,
+    runtime_client: Any | None = None,
 ) -> tuple[list[KernelTimeline], list[str]]:
     """Resolve public kernel timeline rows without mutating the ledger.
 
@@ -207,106 +208,89 @@ def select_kernel_timelines(
     default vocabulary and defer materialization until an admitted run.
     """
 
-    database = Path(project_dir).resolve().parent / ".astrid" / "astrid.sqlite3"
-    if not database.is_file():
-        return [], []
     diagnostics: list[str] = []
+    if runtime_client is None:
+        try:
+            from astrid.sdk.workspace_client import WorkspaceClient, resolve_runtime_connection
+
+            endpoint, token = resolve_runtime_connection()
+            runtime_client = WorkspaceClient(endpoint, token)
+        except Exception as exc:
+            return [], [f"workspace runtime is unavailable: {exc}"]
     try:
-        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-    except sqlite3.Error:
-        return [], ["kernel timeline store is unavailable"]
-    try:
-        project = conn.execute(
-            "SELECT id, settings_json FROM projects WHERE slug = ?",
-            (project_slug,),
-        ).fetchone()
+        projects = runtime_client.list_projects()
+        project_rows = projects.get("items", []) if isinstance(projects, Mapping) else projects
+        project = next(
+            (row for row in project_rows if isinstance(row, Mapping) and row.get("slug") == project_slug),
+            None,
+        )
         if project is None:
             return [], [f"project {project_slug!r} has no kernel timeline rows"]
-        try:
-            settings = json.loads(str(project["settings_json"]))
-        except (TypeError, ValueError):
-            settings = {}
-        default_id = settings.get("default_timeline_id") if isinstance(settings, dict) else None
-        rows = conn.execute(
-            "SELECT t.id, t.name, t.document_json, t.asset_registry_json, s.head_seq, "
-            "json_extract(e.payload_json, '$.data.timeline_ulid') AS timeline_ulid, "
-            "json_extract(e.payload_json, '$.data.slug') AS slug, "
-            "state.kind AS state_kind, tail.event_id AS head_event_id, "
-            "json_extract(tail.payload_json, '$._integrity.event_hash') AS head_hash, "
-            "tail.created_at AS head_created_at "
-            "FROM timelines t JOIN event_streams s ON s.id = t.event_stream_id "
-            "LEFT JOIN events e ON e.stream_id = t.event_stream_id AND e.kind = 'timeline.created' "
-            "LEFT JOIN events state ON state.event_id = ("
-            "SELECT se.event_id FROM events se WHERE se.stream_id = t.event_stream_id "
-            "AND se.kind IN ('timeline.archived', 'timeline.unarchived') "
-            "ORDER BY se.seq DESC LIMIT 1) "
-            "LEFT JOIN events tail ON tail.stream_id = t.event_stream_id AND tail.seq = s.head_seq "
-            "WHERE t.project_id = ? ORDER BY slug, t.id",
-            (project["id"],),
-        ).fetchall()
-    except sqlite3.Error as exc:
-        return [], [f"kernel timeline read failed: {exc}"]
-    finally:
-        conn.close()
+        project_id = project.get("project_id") or project.get("id")
+        if not project_id:
+            return [], [f"project {project_slug!r} has no runtime identity"]
+        page = runtime_client.list_timelines(str(project_id))
+        rows = page.get("items", []) if isinstance(page, Mapping) else page
+    except Exception as exc:
+        return [], [f"workspace timeline read failed: {exc}"]
+
+    metadata = project.get("metadata", {}) if isinstance(project, Mapping) else {}
+    default_id = metadata.get("default_timeline_id") if isinstance(metadata, Mapping) else None
 
     timelines: list[KernelTimeline] = []
     archived_aliases: list[tuple[str, str, str]] = []
-    for row in rows:
-        if row["state_kind"] == "timeline.archived":
-            if (
-                isinstance(row["id"], str)
-                and isinstance(row["timeline_ulid"], str)
-                and isinstance(row["slug"], str)
-            ):
-                archived_aliases.append(
-                    (
-                        str(row["id"]),
-                        str(row["timeline_ulid"]),
-                        str(row["slug"]),
-                    )
-                )
+    for raw_row in rows or []:
+        if not isinstance(raw_row, Mapping):
+            diagnostics.append("runtime returned a malformed timeline row")
+            continue
+        row = dict(raw_row)
+        timeline_id = row.get("timeline_id", row.get("id"))
+        timeline_ulid = row.get("timeline_ulid", row.get("ulid"))
+        alias = row.get("slug", row.get("alias"))
+        state = row.get("state", row.get("status"))
+        if state in {"archived", "tombstoned"} or row.get("archived") is True:
+            if all(isinstance(item, str) for item in (timeline_id, timeline_ulid, alias)):
+                archived_aliases.append((str(timeline_id), str(timeline_ulid), str(alias)))
             continue
         try:
-            config = json.loads(str(row["document_json"]))
-            assets = json.loads(str(row["asset_registry_json"]))
+            config = row.get("config", row.get("document", row.get("document_json", {})))
+            assets = row.get("registry", row.get("asset_registry", row.get("asset_registry_json", {})))
+            if isinstance(config, str):
+                config = json.loads(config)
+            if isinstance(assets, str):
+                assets = json.loads(assets)
         except (TypeError, ValueError):
-            diagnostics.append(f"kernel timeline {row['id']!r} has invalid JSON")
+            diagnostics.append(f"kernel timeline {timeline_id!r} has invalid JSON")
             continue
         if not isinstance(config, dict) or not isinstance(assets, dict):
-            diagnostics.append(f"kernel timeline {row['id']!r} has invalid document shape")
+            diagnostics.append(f"kernel timeline {timeline_id!r} has invalid document shape")
             continue
         if isinstance(assets.get("assets"), dict):
             assets = assets["assets"]
-        managed_media = importlib.import_module("astrid.core.io.managed_media_resolver")
-        assets = managed_media.rebase_timeline_registry_managed_assets(
-            {"assets": assets},
-            projects_root=Path(project_dir).resolve().parent,
-            project_ref=project_slug,
-        ).get("assets", assets)
-        if not isinstance(row["timeline_ulid"], str) or not isinstance(row["slug"], str):
-            diagnostics.append(f"kernel timeline {row['id']!r} has missing alias metadata")
+        # Runtime rows carry canonical object ids already.  Legacy media
+        # rebasing is intentionally limited to the explicit filesystem path.
+        if not isinstance(timeline_ulid, str) or not isinstance(alias, str):
+            diagnostics.append(f"kernel timeline {timeline_id!r} has missing alias metadata")
             continue
-        if (
-            not isinstance(row["head_event_id"], str)
-            or not isinstance(row["head_hash"], str)
-            or not isinstance(row["head_created_at"], str)
-        ):
-            diagnostics.append(f"kernel timeline {row['id']!r} has no verifiable event tail")
+        head_event_id = row.get("head_event_id", row.get("event_head", row.get("event_id")))
+        head_hash = row.get("head_hash", row.get("event_hash", ""))
+        head_created_at = row.get("head_created_at", row.get("updated_at", row.get("created_at", "")))
+        if not isinstance(timeline_id, str) or not isinstance(head_event_id, str) or not isinstance(head_created_at, str):
+            diagnostics.append(f"kernel timeline {timeline_id!r} has no verifiable runtime head")
             continue
         timelines.append(
             KernelTimeline(
-                timeline_id=str(row["id"]),
-                timeline_ulid=str(row["timeline_ulid"]),
-                slug=str(row["slug"]),
-                name=str(row["name"]),
-                is_default=str(default_id) == str(row["id"]),
+                timeline_id=str(timeline_id),
+                timeline_ulid=str(timeline_ulid),
+                slug=str(alias),
+                name=str(row.get("name", alias)),
+                is_default=str(default_id) == str(timeline_id),
                 config=config,
                 registry={"assets": assets},
-                config_version=int(row["head_seq"]),
-                head_event_id=str(row["head_event_id"]),
-                head_hash=str(row["head_hash"]),
-                head_created_at=str(row["head_created_at"]),
+                config_version=int(row.get("config_version", row.get("version", 1))),
+                head_event_id=str(head_event_id),
+                head_hash=str(head_hash),
+                head_created_at=str(head_created_at),
             )
         )
     if slug is not None:

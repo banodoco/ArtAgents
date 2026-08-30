@@ -301,9 +301,9 @@ def test_import_graph_never_loads_repair_modules() -> None:
         for m in newly_loaded
     )
 
-    # AST-level import graph: select.py may import only the stdlib and the
-    # visualize pack's own ids module (for qualified-ref parsing) — never
-    # repair/mutation paths under astrid.core.
+    # AST-level import graph: select.py may import stdlib, the visualize
+    # pack's ids module, and generated-runtime discovery — never repair,
+    # mutation, or local-store authority under astrid.core.
     source = inspect.getsource(module)
     tree = ast_module.parse(source)
     imported: list[str] = []
@@ -316,12 +316,18 @@ def test_import_graph_never_loads_repair_modules() -> None:
     assert all(not name.startswith("astrid.core") for name in imported)
     assert all(
         name.startswith("astrid") is False
-        or name == "astrid.packs.rendering.executors.timeline_visualize.ids"
+        or name in {
+            "astrid.packs.rendering.executors.timeline_visualize.ids",
+            "astrid.sdk.workspace_client",
+        }
         for name in imported
     )
     assert all(
         name.split(".")[0] in sys.stdlib_module_names
-        or name == "astrid.packs.rendering.executors.timeline_visualize.ids"
+        or name in {
+            "astrid.packs.rendering.executors.timeline_visualize.ids",
+            "astrid.sdk.workspace_client",
+        }
         for name in imported
     )
 

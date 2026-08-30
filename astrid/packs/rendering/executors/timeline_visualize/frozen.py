@@ -15,14 +15,13 @@ import json
 import math
 import os
 import shutil
-import sqlite3
 import stat
 import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
@@ -207,59 +206,85 @@ def _rehydrate_managed_pack(
     """Reassemble a completed visualization pack from kernel-owned CAS files."""
 
     projects_root = project_root.parent
-    database = projects_root / ".astrid" / "astrid.sqlite3"
-    if not database.is_file():
+    runtime_client = _workspace_runtime_client()
+    if runtime_client is None:
         return None
-    conn: sqlite3.Connection | None = None
     try:
-        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        owner = conn.execute(
-            "SELECT t.id AS task_id, o.params_json AS output_params_json "
-            "FROM media_locations l "
-            "JOIN media m ON m.id = l.media_id "
-            "JOIN task_outputs o ON o.media_id = m.id "
-            "JOIN tasks t ON t.id = o.task_id "
-            "JOIN runs r ON r.id = t.run_id AND r.project_id = t.project_id "
-            "JOIN projects p ON p.id = t.project_id "
-            "WHERE l.realm = 'managed_local' AND l.locator = ? "
-            "AND p.slug = ? AND t.capability = 'rendering.timeline_visualize' "
-            "AND t.status = 'succeeded' AND r.status = 'succeeded' "
-            "AND o.role IN ('result', 'output') "
-            "AND (json_extract(o.params_json, '$.label') = 'manifest.json' "
-            "OR json_extract(o.params_json, '$.label') LIKE '%/manifest.json') "
-            "ORDER BY t.finished_at DESC, t.id DESC, o.ordinal ASC LIMIT 1",
-            (str(manifest_path), project_root.name),
-        ).fetchone()
-        if owner is None:
+        projects = runtime_client.list_projects()
+        project_rows = projects.get("items", []) if isinstance(projects, dict) else projects
+        project = next((item for item in project_rows if isinstance(item, Mapping) and item.get("slug") == project_root.name), None)
+        project_id = project.get("project_id") if isinstance(project, dict) else None
+        if not project_id:
             return None
-        rows = conn.execute(
-            "SELECT o.params_json, m.content_hash, l.locator FROM task_outputs o "
-            "JOIN media m ON m.id = o.media_id "
-            "JOIN media_locations l ON l.media_id = m.id AND l.realm = 'managed_local' "
-            "WHERE o.task_id = ? ORDER BY o.ordinal ASC",
-            (str(owner["task_id"]),),
-        ).fetchall()
-    except sqlite3.Error:
+        runs = runtime_client.list_project_runs(str(project_id))
+        run_rows = runs.get("items", []) if isinstance(runs, dict) else runs
+    except Exception:
         return None
-    finally:
-        if conn is not None:
-            conn.close()
+
+    # Runtime settlement events carry the immutable output object references.
+    # Resolve the owner by the durable project run path; the path itself is a
+    # navigation handle, never a source of output bytes.
+    owner: tuple[str, list[dict[str, Any]]] | None = None
+    resolved_manifest = Path(manifest_path).resolve(strict=False)
+    for raw_run in run_rows or []:
+        if not isinstance(raw_run, Mapping):
+            continue
+        run_id = str(raw_run.get("run_id", raw_run.get("id", "")))
+        if not run_id or str(raw_run.get("capability", raw_run.get("capability_id", ""))) != "rendering.timeline_visualize":
+            continue
+        if str(raw_run.get("status", raw_run.get("state", ""))) not in {"completed", "succeeded"}:
+            continue
+        try:
+            run_events = runtime_client.list_run_events(run_id)
+        except Exception:
+            continue
+        outputs: list[dict[str, Any]] = []
+        for event in run_events or []:
+            if not isinstance(event, Mapping) or event.get("event_type", event.get("kind")) not in {"task.completed", "completed", "task.settled"}:
+                continue
+            payload = event.get("payload", {})
+            result = payload.get("result", {}) if isinstance(payload, dict) else {}
+            values = result.get("outputs", []) if isinstance(result, dict) else []
+            if isinstance(values, list):
+                outputs.extend(item for item in values if isinstance(item, dict))
+        run_root = (project_root / "runs" / run_id).resolve(strict=False)
+        try:
+            relative = resolved_manifest.relative_to(run_root)
+        except ValueError:
+            continue
+        if relative.as_posix() not in {str(item.get("name", "")) for item in outputs} and not any(
+            str(item.get("name", "")).endswith(relative.name) for item in outputs
+        ):
+            continue
+        owner = (run_id, outputs)
+        break
+    if owner is None:
+        return None
+    _owner_run_id, rows = owner
 
     pack_root = Path(tempfile.mkdtemp(prefix="astrid-frozen-view-")).resolve()
     _register_rehydrated_pack(pack_root)
     atexit.register(_discard_rehydrated_root, pack_root)
     seen: set[str] = set()
-    managed_root = (projects_root / ".astrid" / "media" / "sha256").resolve()
     try:
-        owner_params = json.loads(str(owner["output_params_json"]))
-        requested_label = owner_params.get("label") if isinstance(owner_params, dict) else None
+        requested_label = None
         for row in rows:
-            params = json.loads(str(row["params_json"]))
-            label = params.get("label") if isinstance(params, dict) else None
-            digest = str(row["content_hash"])
-            source = Path(str(row["locator"])).resolve(strict=True)
-            expected_source = managed_root / digest[:2] / digest[2:4] / digest
+            label = row.get("name")
+            digest = str(row.get("digest", row.get("object_id", ""))).removeprefix("sha256:")
+            if label == "manifest_path":
+                requested_label = MANIFEST_NAME
+                label = MANIFEST_NAME
+            elif isinstance(label, str) and label.endswith("/" + MANIFEST_NAME):
+                requested_label = label
+            if not digest or not isinstance(label, str):
+                continue
+            try:
+                response = runtime_client.get_object("sha256:" + digest)
+                data = response if isinstance(response, bytes) else response.get("data") if isinstance(response, Mapping) else getattr(response, "data", None)
+                if not isinstance(data, bytes) or hashlib.sha256(data).hexdigest() != digest:
+                    raise FrozenIntegrityError("managed visualization output hash mismatch")
+            except Exception as exc:
+                raise FrozenIntegrityError("managed visualization output object is unavailable") from exc
             label_path = Path(label) if isinstance(label, str) else None
             if (
                 label_path is None
@@ -270,8 +295,6 @@ def _rehydrate_managed_pack(
                 or ".." in label_path.parts
                 or label_path.as_posix() != label
                 or label in seen
-                or source != expected_source
-                or hashlib.sha256(source.read_bytes()).hexdigest() != digest
             ):
                 raise ContainmentError("managed visualization output set is malformed")
             seen.add(label)
@@ -282,7 +305,7 @@ def _rehydrate_managed_pack(
             # A caller-visible frozen view must never share an inode with
             # managed CAS. An accidental write to the view must not mutate
             # the authoritative object.
-            shutil.copy2(source, destination)
+            destination.write_bytes(data)
     except FrozenViewError:
         _discard_rehydrated_root(pack_root)
         raise
@@ -1077,17 +1100,29 @@ def _kernel_frozen_run_info(
     project_slug: str, run_id: str, projects_root: Path
 ) -> dict[str, Any] | None:
     try:
-        from astrid.core.kernel.read import kernel_run_info
-
-        info = kernel_run_info(project_slug, run_id, projects_root=projects_root)
-        if info is None:
+        runtime_client = _workspace_runtime_client()
+        if runtime_client is None:
+            return None
+        info = runtime_client.get_run(run_id)
+        if not isinstance(info, dict):
             return None
         return {
-            "status": str(info["status"]),
-            "capability": str(info["capability"]) if info.get("capability") is not None else None,
-            "timeline_ids": info.get("timeline_ids"),
+            "status": str(info.get("status", info.get("state", ""))),
+            "capability": str(info.get("capability", info.get("capability_id"))) if info.get("capability", info.get("capability_id")) is not None else None,
+            "timeline_ids": info.get("timeline_ids") or (info.get("metadata", {}) if isinstance(info.get("metadata"), dict) else {}).get("timeline_ids"),
         }
-    except sqlite3.Error:
+    except Exception:
+        return None
+
+
+def _workspace_runtime_client() -> Any | None:
+    """Create the generated runtime client, without importing local authority."""
+    try:
+        from astrid.sdk.workspace_client import WorkspaceClient, resolve_runtime_connection
+
+        endpoint, token = resolve_runtime_connection()
+        return WorkspaceClient(endpoint, token)
+    except Exception:
         return None
 
 
