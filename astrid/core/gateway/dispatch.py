@@ -56,7 +56,7 @@ def _dispatch_media(args: list[str]) -> int:
 
 
 def _dispatch_doctor(args: list[str]) -> int:
-    """Read runtime health without opening local storage."""
+    """Read the runtime-owned integrity report without local storage."""
     import argparse
     import json
     import sys
@@ -69,11 +69,12 @@ def _dispatch_doctor(args: list[str]) -> int:
     parsed = parser.parse_args(args)
     from astrid.sdk.client import AstridClient
     from astrid.sdk.exceptions import ServiceUnavailableError
+    from astrid.sdk.workspace_client import WorkspaceClientError
 
     try:
         with AstridClient.open() as client:
-            report = client.health()
-    except ServiceUnavailableError as exc:
+            report = client.doctor()
+    except (ServiceUnavailableError, WorkspaceClientError) as exc:
         payload = {
             "ok": False,
             "state": "unavailable",
@@ -89,35 +90,93 @@ def _dispatch_doctor(args: list[str]) -> int:
     if parsed.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
-        state = report.get("doctor", {}).get("state", "ready") if isinstance(report, dict) else "ready"
+        state = report.get("state", "ready") if isinstance(report, dict) else "ready"
         print(f"Astrid doctor\nstate: {state}")
-    return 0
+        if isinstance(report, dict) and report.get("recovery_action"):
+            print(f"recovery action: {report['recovery_action']}")
+    return 0 if not isinstance(report, dict) or report.get("ok", False) else 1
 
 
 def _dispatch_backup(args: list[str]) -> int:
-    """Keep backup read-only at the product boundary until a runtime route exists."""
+    """Dispatch online backup, restore, export, and realm lifecycle routes."""
     import argparse
     import json
     import sys
 
-    if any(token in {"-h", "--help"} for token in args):
-        print("usage: astrid backup (runtime backup route unavailable)")
-        return 0
     parser = argparse.ArgumentParser(prog="astrid backup", add_help=False)
     parser.add_argument("--json", action="store_true")
-    parser.parse_known_args(args)
-    payload = {
-        "ok": False,
-        "state": "unavailable",
-        "next_action": "banodoco-local up --profile astrid",
-        "error": "backup is not available through the workspace runtime yet",
-    }
-    if "--json" in args:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(f"Astrid backup: {payload['error']}", file=sys.stderr)
-        print(f"next action: {payload['next_action']}", file=sys.stderr)
-    return 1
+    sub = parser.add_subparsers(dest="operation", required=False)
+    create = sub.add_parser("create", add_help=False)
+    create.add_argument("destination", nargs="?")
+    create.add_argument("--out", dest="out", default=None)
+    create.add_argument("--json", action="store_true")
+    restore = sub.add_parser("restore", add_help=False)
+    restore.add_argument("backup")
+    restore.add_argument("destination", nargs="?")
+    restore.add_argument("--destination", dest="destination_flag", default=None)
+    restore.add_argument("--projects-root", dest="projects_root", default=None)
+    restore.add_argument("--json", action="store_true")
+    export = sub.add_parser("export", add_help=False)
+    export.add_argument("--out", dest="out", default=None)
+    export.add_argument("--json", action="store_true")
+    tombstone = sub.add_parser("tombstone", add_help=False)
+    tombstone.add_argument("--reason", default=None)
+    tombstone.add_argument("--expected-version", type=int, default=None)
+    tombstone.add_argument("--json", action="store_true")
+    recover = sub.add_parser("recover", add_help=False)
+    recover.add_argument("--expected-version", type=int, default=None)
+    recover.add_argument("--json", action="store_true")
+    purge = sub.add_parser("purge", add_help=False)
+    purge.add_argument("confirmation")
+    purge.add_argument("--json", action="store_true")
+
+    if any(token in {"-h", "--help"} for token in args):
+        parser.print_help()
+        return 0
+    parsed = parser.parse_args(args)
+    json_mode = "--json" in args
+    if parsed.operation is None:
+        payload = {"ok": False, "state": "unavailable", "next_action": "banodoco-local up --profile astrid", "error": "backup operation is required"}
+        if json_mode:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"Astrid backup: {payload['error']}", file=sys.stderr)
+            print(f"next action: {payload['next_action']}", file=sys.stderr)
+        return 1
+    try:
+        from astrid.sdk.client import AstridClient
+        from astrid.sdk.exceptions import ServiceUnavailableError
+        from astrid.sdk.workspace_client import WorkspaceClientError
+
+        with AstridClient.open() as client:
+            if parsed.operation == "create":
+                destination = parsed.destination or parsed.out
+                if not destination: parser.error("backup create requires DESTINATION or --out")
+                result = client.create_backup(destination)
+            elif parsed.operation == "restore":
+                destination = parsed.destination_flag or parsed.destination or parsed.projects_root
+                if not destination: parser.error("backup restore requires DESTINATION or --destination")
+                result = client.restore_backup(parsed.backup, destination)
+            elif parsed.operation == "export":
+                result = client.export_realm()
+            elif parsed.operation == "tombstone":
+                result = client.tombstone_realm(reason=parsed.reason, expected_version=parsed.expected_version)
+            elif parsed.operation == "recover":
+                result = client.recover_realm(expected_version=parsed.expected_version)
+            else:
+                result = client.purge_realm(parsed.confirmation)
+    except ServiceUnavailableError as exc:
+        payload = {"ok": False, "state": "unavailable", "next_action": "banodoco-local up --profile astrid", "error": str(exc)}
+        print(json.dumps(payload, indent=2, sort_keys=True) if json_mode else f"Astrid backup: {payload['error']}\nnext action: {payload['next_action']}", file=None if json_mode else sys.stderr)
+        return 1
+    except WorkspaceClientError as exc:
+        payload = {"ok": False, "error": exc.code, "detail": exc.message, "details": exc.details}
+        print(json.dumps(payload, indent=2, sort_keys=True) if json_mode else f"Astrid backup: {exc.message}", file=None if json_mode else sys.stderr)
+        return 1
+
+    payload = {"ok": True, **(result if isinstance(result, dict) else dict(result))}
+    print(json.dumps(payload, indent=2, sort_keys=True) if json_mode else f"Astrid backup: {parsed.operation} complete")
+    return 0
 
 
 def _dispatch_product(args: list[str]) -> int:

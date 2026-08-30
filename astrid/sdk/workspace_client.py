@@ -102,6 +102,27 @@ class WorkspaceClient:
     def handshake(self, client_name: str, client_version: str, requested_scopes: list[str]) -> Any:
         return self._call_generated("handshake", client_name, client_version, requested_scopes)
 
+    def doctor(self) -> Any:
+        return self._call_generated("doctor")
+
+    def create_backup(self, destination: str) -> Any:
+        return self._call_generated("create_backup", destination)
+
+    def restore_backup(self, backup: str, destination: str) -> Any:
+        return self._call_generated("restore_backup", backup, destination)
+
+    def export_realm(self) -> Any:
+        return self._call_generated("export_realm")
+
+    def tombstone_realm(self, *, reason: str | None = None, expected_version: int | None = None) -> Any:
+        return self._call_generated("tombstone_realm", reason=reason, expected_version=expected_version)
+
+    def recover_realm(self, *, expected_version: int | None = None) -> Any:
+        return self._call_generated("recover_realm", expected_version=expected_version)
+
+    def purge_realm(self, confirmation: str) -> Any:
+        return self._call_generated("purge_realm", confirmation)
+
     def create_project(
         self,
         name: str,

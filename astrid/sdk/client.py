@@ -90,6 +90,27 @@ class AstridClient:
     def handshake(self, **kwargs: Any) -> Any:
         return self._remote.handshake(**kwargs)
 
+    def doctor(self) -> Any:
+        return self._remote.doctor()
+
+    def create_backup(self, destination: str) -> Any:
+        return self._remote.create_backup(destination)
+
+    def restore_backup(self, backup: str, destination: str) -> Any:
+        return self._remote.restore_backup(backup, destination)
+
+    def export_realm(self) -> Any:
+        return self._remote.export_realm()
+
+    def tombstone_realm(self, **kwargs: Any) -> Any:
+        return self._remote.tombstone_realm(**kwargs)
+
+    def recover_realm(self, **kwargs: Any) -> Any:
+        return self._remote.recover_realm(**kwargs)
+
+    def purge_realm(self, confirmation: str) -> Any:
+        return self._remote.purge_realm(confirmation)
+
     def health(self) -> Any:
         from astrid.sdk.exceptions import ServiceUnavailableError
         from astrid.sdk.workspace_client import WorkspaceClientError

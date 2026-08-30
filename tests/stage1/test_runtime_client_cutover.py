@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import sys
@@ -208,5 +209,37 @@ def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_pa
         task = client.tasks.create(project_id=project_id, capability="render.basic", spec={"prompt": "editor"}, idempotency_key="task").data
         assert client.tasks.list(project_id).data[0]["task_id"] == task["task_id"]
         assert client.runs.list(project_id).data[0]["id"] == task["run_id"]
+    finally:
+        daemon.stop()
+
+
+def test_operational_gateway_uses_typed_runtime_backup_and_lifecycle(tmp_path, monkeypatch, capsys):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        assert dispatch._dispatch_doctor(["--json"]) == 0
+        doctor = json.loads(capsys.readouterr().out)
+        assert doctor["ok"] is True
+        assert doctor["recovery_action"] == "No recovery action required."
+
+        backup_path = tmp_path / "backup"
+        assert dispatch._dispatch_backup(["create", str(backup_path), "--json"]) == 0
+        backup = json.loads(capsys.readouterr().out)
+        assert backup["ok"] is True and "manifest" in backup and "cas_manifest" in backup
+
+        client = AstridClient.open()
+        exported = client.export_realm()
+        assert exported["format_version"] == 1 and "realm" in exported
+        tombstoned = client.tombstone_realm(reason="acceptance")
+        assert tombstoned["state"] == "tombstoned" and tombstoned["reason"] == "acceptance"
+        recovered = client.recover_realm(expected_version=tombstoned["version"])
+        assert recovered["state"] == "active"
+
+        restored_path = tmp_path / "restored"
+        restored = client.restore_backup(str(backup_path), str(restored_path))
+        assert restored["destination"] == str(restored_path)
+        assert restored["verification"]["realm_id"] == backup["manifest"]["realm_id"]
+        client.close()
     finally:
         daemon.stop()

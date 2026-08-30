@@ -234,6 +234,13 @@ class RemoteAstridClient:
     def selected_project_ref(self, **kwargs): return None
     def health(self): return self._transport.health()
     def handshake(self, client_name="astrid", client_version="stage1", requested_scopes=None): return self._transport.handshake(client_name, client_version, requested_scopes or [])
+    def doctor(self): return self._transport.doctor()
+    def create_backup(self, destination): return self._transport.create_backup(destination)
+    def restore_backup(self, backup, destination): return self._transport.restore_backup(backup, destination)
+    def export_realm(self): return self._transport.export_realm()
+    def tombstone_realm(self, *, reason=None, expected_version=None): return self._transport.tombstone_realm(reason=reason, expected_version=expected_version)
+    def recover_realm(self, *, expected_version=None): return self._transport.recover_realm(expected_version=expected_version)
+    def purge_realm(self, confirmation): return self._transport.purge_realm(confirmation)
     def read_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)
     def subscribe_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)
     def invoke(self, *args, **kwargs):
