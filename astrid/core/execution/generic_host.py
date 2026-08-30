@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
@@ -105,6 +106,19 @@ class AdapterRegistry:
 
 def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert request values to the small JSON wire format used by workers."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
 
 
 def _preflight_unavailable_reason(record: "CapabilityRecord") -> str:
@@ -852,6 +866,103 @@ class GenericPackHost:
                 outputs[output.name] = str(candidate)
         return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
 
+    def invoke_capability(
+        self,
+        *,
+        capability_kind: str,
+        capability_id: str,
+        request: Mapping[str, Any],
+        attempt: str | Path,
+        cancelled=None,
+        definition: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Run one pack capability in a dedicated child process.
+
+        The host is deliberately the only process that launches pack runtime
+        code.  In particular, callers must not import an executor/orchestrator
+        runner and then merely set ``execution_mode``: that leaves mutable
+        Python state, monkeypatches, and ledger authority in the caller.  The
+        child receives a JSON request, marks itself as an internal invocation,
+        and writes a small process-like result beside the request.
+        """
+        if capability_kind not in {"executor", "orchestrator"}:
+            raise HostError(f"unsupported capability kind {capability_kind!r}")
+        attempt_path = Path(attempt).expanduser().resolve()
+        attempt_path.mkdir(parents=True, exist_ok=True)
+        request_path = attempt_path / ".astrid-capability-request.json"
+        result_path = attempt_path / ".astrid-capability-result.json"
+        payload = {
+            "capability_kind": capability_kind,
+            "capability_id": capability_id,
+            "request": _json_safe(request),
+            "definition": _json_safe(definition) if definition is not None else None,
+            "result_path": str(result_path),
+        }
+        request_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        env = os.environ.copy()
+        env[ASTRID_INTERNAL_INVOCATION] = "1"
+        # The attempt directory is the child cwd; retain this checkout (or
+        # installed package parent) on ``PYTHONPATH`` so ``python -m`` can
+        # resolve the host worker regardless of where staging lives.
+        package_parent = str(Path(__file__).resolve().parents[3])
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            package_parent
+            if not existing_pythonpath
+            else os.pathsep.join((package_parent, existing_pythonpath))
+        )
+        if self.pack_roots:
+            existing = [item for item in env.get("ASTRID_PACKS_PATH", "").split(os.pathsep) if item]
+            roots = [str(root) for root in (*self.pack_roots, *map(Path, existing))]
+            env["ASTRID_PACKS_PATH"] = os.pathsep.join(dict.fromkeys(roots))
+        process = subprocess.Popen(
+            [sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)],
+            cwd=str(attempt_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            while process.poll() is None:
+                if cancelled is not None and cancelled():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    raise HostCancelled(f"capability {capability_id!r} cancelled")
+                time.sleep(0.05)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                detail = (stderr or stdout).strip()
+                raise HostError(
+                    f"capability {capability_id!r} child exited {process.returncode}"
+                    + (f": {detail[-3500:]}" if detail else "")
+                )
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise HostError(
+                    f"capability {capability_id!r} child returned no result"
+                ) from exc
+            if not isinstance(result, Mapping):
+                raise HostError(f"capability {capability_id!r} child result is not an object")
+            if not result.get("ok", False):
+                raise HostError(str(result.get("error") or f"capability {capability_id!r} failed"))
+            return SimpleNamespace(
+                ok=True,
+                returncode=result.get("returncode"),
+                outputs=dict(result.get("outputs") or {}),
+                payload=dict(result.get("payload") or {}),
+                stdout=stdout,
+                stderr=stderr,
+            )
+        finally:
+            request_path.unlink(missing_ok=True)
+            result_path.unlink(missing_ok=True)
+
     def run_task(
         self,
         task: Mapping[str, Any],
@@ -930,19 +1041,27 @@ class GenericPackHost:
                 if record.definition.command is not None:
                     result = self._run_command_definition(record, inputs, output_root, root, cancelled=cancelled)
                 else:
-                    # The canonical runner is loaded only for executor
-                    # definitions that need it; GenericPackHost's process
-                    # boundary stays free of project-run/thread authority.
-                    from astrid.core.execution.executor.registry import ExecutorRegistry
-                    from astrid.core.execution.executor.runner import (
-                        ExecutorRunRequest,
-                        run_executor,
+                    # Dispatch through the process boundary.  The immutable
+                    # admitted definition is serialized for the child so a
+                    # registry reload cannot silently select a different pack.
+                    result = self.invoke_capability(
+                        capability_kind="executor",
+                        capability_id=capability_id,
+                        request={
+                            "out": str(output_root),
+                            "inputs": inputs,
+                            "project": task_data.get("project"),
+                            "project_was_auto_resolved": True,
+                            "python_exec": sys.executable,
+                            "run_id": task_id,
+                            "run_root": str(root),
+                            "execution_mode": "subprocess",
+                            "invocation": "runtime",
+                        },
+                        attempt=root,
+                        cancelled=cancelled,
+                        definition=record.definition.to_dict(),
                     )
-
-                    request = ExecutorRunRequest(executor_id=capability_id, out=output_root, inputs=inputs, project=task_data.get("project"), project_was_auto_resolved=True, python_exec=sys.executable, run_id=task_id, run_root=root, execution_mode="subprocess", invocation="runtime")
-                    # Dispatch against the immutable definition selected at
-                    # admission, rather than reloading a mutable global registry.
-                    result = run_executor(request, ExecutorRegistry([record.definition]))
             finally:
                 pump_stop.set()
                 if pump_thread is not None:

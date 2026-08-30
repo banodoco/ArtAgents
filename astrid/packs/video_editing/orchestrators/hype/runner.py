@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import pickle
 import traceback
 from pathlib import Path
 from typing import Any
@@ -193,13 +194,39 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
     log_path = logs_dir / f"{step.name}.log"
     with log_path.open("w", encoding="utf-8") as log_handle:
         if step.invoke is not None:
-            try:
-                output = step.invoke(args)
-                log_handle.write(f"{output}\n")
-                returncode = 0
-            except Exception:  # preserve the legacy step-loop return-code contract
-                traceback.print_exc(file=log_handle)
-                returncode = 1
+            # Callback-style steps are still pack runtime code.  Keep them
+            # behind the same process boundary as command steps; otherwise a
+            # built-in executor can mutate the parent runner's Python state
+            # despite its subprocess execution mode.
+            request_path = log_path.with_suffix(log_path.suffix + ".request")
+            request_path.write_bytes(
+                pickle.dumps(
+                    {
+                        "module": step.invoke.__module__,
+                        "function": step.invoke.__name__,
+                        "args": args,
+                    },
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            )
+            env = os.environ.copy()
+            env["ASTRID_INTERNAL_INVOCATION"] = "1"
+            process = subprocess.Popen(
+                [sys.executable, "-m", "astrid.packs.video_editing.orchestrators.hype.step_worker", str(request_path)],
+                cwd=str(args.out),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                log_handle.write(line)
+                if args.verbose:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            returncode = process.wait()
+            request_path.unlink(missing_ok=True)
         else:
             env = os.environ.copy()
             if getattr(args, "audit", None) is not None:

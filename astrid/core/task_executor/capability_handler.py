@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
+from contextlib import contextmanager, nullcontext
 from importlib import import_module
-from io import StringIO
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.audit.util import SECRET_VALUE_RE
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH, ASTRID_PROJECTS_ROOT
+from astrid.core.execution.generic_host import GenericPackHost, HostError
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.runtime.manifest import (
     discover_manifest_path,
@@ -135,13 +135,6 @@ class CapabilityTaskHandler:
         self._require_executor_version = require_executor_version
 
     def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
-        executor_runner = None
-        if self._kind == "executor":
-            # Runner imports include project-run compatibility code and are
-            # needed only for executor invocations, never for the task
-            # package import or orchestrator-only runtime.
-            from astrid.core.execution.executor import runner as executor_runner
-
         staging_dir = Path(staging_dir)
         out_dir = staging_dir / "out"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -188,6 +181,8 @@ class CapabilityTaskHandler:
                 project = spec.get("project")
             elif isinstance(spec.get("request"), Mapping):
                 project = spec.get("request", {}).get("project")
+        if project is None:
+            project = getattr(task, "project", None)
 
         extra_pack_roots = spec.get("extra_pack_roots", ()) if isinstance(spec, Mapping) else ()
         authority_context = (
@@ -205,7 +200,9 @@ class CapabilityTaskHandler:
             and self._require_executor_version
             and admitted_executor_version is None
         ):
-            raise executor_runner.ExecutorRunnerError(
+            from astrid.core.execution.executor.runner import ExecutorRunnerError
+
+            raise ExecutorRunnerError(
                 "cannot retry an executor task admitted before executor-version fencing; "
                 "submit a new invocation"
             )
@@ -233,86 +230,44 @@ class CapabilityTaskHandler:
             root_scope,
             authority_scope,
         ):
+            host_roots = [Path(__file__).resolve().parents[3] / "astrid" / "packs"]
+            host_roots.extend(
+                Path(root).expanduser().resolve()
+                for root in extra_pack_roots
+                if isinstance(root, (str, os.PathLike)) and str(root)
+            )
+            host = GenericPackHost(pack_roots=host_roots)
+            request_payload = {
+                "out": str(out_dir),
+                "project": project,
+                "inputs": dict(request_inputs),
+                "outputs": dict(request_outputs),
+                "brief": None,
+                "dry_run": False,
+                "check_binaries": False,
+                "python_exec": None,
+                "verbose": False,
+                "execution_mode": "subprocess",
+                "project_was_auto_resolved": True,
+                "invocation": self._invocation,
+                "projects_root": str(self._projects_root) if self._projects_root else None,
+                "run_root": str(staging_dir),
+                "run_id": getattr(task, "id", None),
+            }
             if self._kind == "executor":
-                req = executor_runner.ExecutorRunRequest(
-                    executor_id=self._capability_id,
-                    # Retries must be fenced to the kernel-owned staging
-                    # directory even for project-scoped requests.  The
-                    # original invocation may have written to its requested
-                    # output, but a retry cannot publish into that path until
-                    # the completion fence commits the staged artifact.
-                    # ``project_was_auto_resolved`` below keeps this internal
-                    # staging ``out`` from triggering the public
-                    # project/out validation.
-                    out=out_dir,
-                    project=project,
-                    inputs=dict(request_inputs),
-                    outputs=dict(request_outputs),
-                    brief=None,
-                    dry_run=False,
-                    check_binaries=False,
-                    python_exec=None,
-                    verbose=False,
-                    execution_mode="subprocess",
-                    project_was_auto_resolved=True,
-                    argv=(),
-                    invocation=self._invocation,
-                    projects_root=self._projects_root,
-                    run_root=staging_dir,
-                    expected_executor_version=(
-                        admitted_executor_version
-                    ),
+                request_payload["expected_executor_version"] = admitted_executor_version
+            try:
+                host.invoke_capability(
+                    capability_kind=self._kind,
+                    capability_id=self._capability_id,
+                    request=request_payload,
+                    attempt=staging_dir,
                 )
-                child_stdout = StringIO()
-                child_stderr = StringIO()
-                # Capability entrypoints retain a useful direct-CLI stdout
-                # contract (for example, printing a rendered path).  When
-                # invoked in-process, however, stdout belongs to the outer
-                # SDK/product CLI and must remain a single machine-readable
-                # envelope.  Capture both child streams at this boundary;
-                # artifacts are discovered from the staging contract below.
-                with redirect_stdout(child_stdout), redirect_stderr(child_stderr):
-                    result = executor_runner.run_executor(req, None)
-                ok = bool(getattr(result, "ok", False))
-                if not ok:
-                    msg = getattr(result, "payload", {}) or {}
-                    child_streams = []
-                    if child_stdout.getvalue().strip():
-                        child_streams.append(f"stdout: {child_stdout.getvalue().strip()}")
-                    if child_stderr.getvalue().strip():
-                        child_streams.append(f"stderr: {child_stderr.getvalue().strip()}")
-                    log_detail = "\n".join(
-                        part for part in (*child_streams, _failure_log_detail(out_dir)) if part
-                    )[:3500]
-                    if log_detail:
-                        msg = {**dict(msg), "child_logs": log_detail}
-                    raise RuntimeError(f"executor {self._capability_id!r} failed: {msg}")
-            else:
-                from astrid.core.execution.orchestrator.runner import (  # noqa: E402
-                    OrchestratorRunRequest,
-                    run_orchestrator,
-                )
-
-                req = OrchestratorRunRequest(
-                    orchestrator_id=self._capability_id,
-                    out=out_dir,
-                    project=project,
-                    inputs=dict(request_inputs),
-                    outputs=dict(request_outputs),
-                    brief=None,
-                    orchestrator_args=(),
-                    dry_run=False,
-                    python_exec=None,
-                    verbose=False,
-                    execution_mode="subprocess",
-                    project_was_auto_resolved=True,
-                    invocation=self._invocation,
-                    projects_root=self._projects_root,
-                )
-                result = run_orchestrator(req, None)
-                ok = bool(getattr(result, "ok", False))
-                if not ok:
-                    raise RuntimeError(f"orchestrator {self._capability_id!r} failed: {result}")
+            except HostError as exc:
+                detail = _failure_log_detail(out_dir)
+                if detail:
+                    raise RuntimeError(f"{exc}\n{detail}") from exc
+                raise RuntimeError(str(exc)) from exc
         manifest_path = discover_manifest_path(out_dir, fallback_root=staging_dir)
         if manifest_path is None:
             for cand in (

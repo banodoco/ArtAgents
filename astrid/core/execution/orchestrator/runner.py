@@ -6,6 +6,8 @@ import importlib
 import os
 import subprocess
 import sys
+import pickle
+import tempfile
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -250,6 +252,8 @@ def _run_python_orchestrator(orchestrator: OrchestratorDefinition, request: Orch
     runtime = orchestrator.runtime
     if not runtime.module or not runtime.function:
         raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} has an invalid Python runtime")
+    if request.execution_mode == "subprocess" and not request.dry_run:
+        return _run_python_orchestrator_subprocess(orchestrator, request)
     try:
         module = importlib.import_module(runtime.module)
     except Exception as exc:
@@ -264,6 +268,76 @@ def _run_python_orchestrator(orchestrator: OrchestratorDefinition, request: Orch
     except Exception as exc:
         raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} Python runtime failed: {exc}") from exc
     return _normalize_python_result(orchestrator, request, raw_result)
+
+
+def _run_python_orchestrator_subprocess(
+    orchestrator: OrchestratorDefinition,
+    request: OrchestratorRunRequest,
+) -> OrchestratorRunResult:
+    """Execute a Python runtime target outside the runner process."""
+    runtime = orchestrator.runtime
+    root = Path(request.run_root or tempfile.mkdtemp(prefix="astrid-orchestrator-"))
+    root.mkdir(parents=True, exist_ok=True)
+    request_path = root / ".astrid-python-orchestrator.request"
+    result_path = root / ".astrid-python-orchestrator.result"
+    request_path.write_bytes(
+        pickle.dumps(
+            {
+                "module": runtime.module,
+                "function": runtime.function,
+                "request": request,
+                "orchestrator": orchestrator,
+                "result_path": str(result_path),
+            },
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+    )
+    package_parent = str(Path(__file__).resolve().parents[4])
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = (
+        package_parent
+        if not existing_pythonpath
+        else os.pathsep.join((package_parent, existing_pythonpath))
+    )
+    env = build_child_subprocess_env(
+        parent=os.environ,
+        explicit_env={
+            "ASTRID_INTERNAL_INVOCATION": "1",
+            "PYTHONPATH": pythonpath,
+        },
+        passthrough=orchestrator.isolation.env_passthrough,
+        declared_passthrough=orchestrator.isolation.env_passthrough,
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "astrid.core.execution.python_runtime_worker", str(request_path)],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise OrchestratorRunnerError(
+                f"orchestrator {orchestrator.id!r} Python runtime failed in subprocess"
+                + (f": {detail[-3500:]}" if detail else "")
+            )
+        try:
+            raw_result = pickle.loads(result_path.read_bytes())
+        except (OSError, pickle.PickleError) as exc:
+            raise OrchestratorRunnerError(
+                f"orchestrator {orchestrator.id!r} subprocess returned no result"
+            ) from exc
+        return _normalize_python_result(orchestrator, request, raw_result)
+    finally:
+        request_path.unlink(missing_ok=True)
+        result_path.unlink(missing_ok=True)
+        if request.run_root in (None, ""):
+            try:
+                root.rmdir()
+            except OSError:
+                pass
 
 
 def _run_command_orchestrator(
