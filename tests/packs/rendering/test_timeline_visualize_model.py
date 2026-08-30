@@ -4,6 +4,8 @@ import ast
 import hashlib
 import json
 import shutil
+import subprocess
+import sys
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.timeline.snapshot import TimelineSnapshot, acquire_snapshot
+from astrid.core.io.media_import import managed_media_path
 from astrid.packs.rendering.executors.timeline_visualize.model import (
     ClipModel,
     IntervalFrames,
@@ -117,7 +120,6 @@ def test_build_model_desert_truth_and_integrity(
     assert model.transition_default_frames == 12
     assert model.snapshot_sns == snapshot.sns()
     assert model.registry_keys == frozenset(snapshot.registry["assets"])
-
     states = {key: value.state for key, value in model.media_integrity.items()}
     assert states == {
         "plant-frame-1": "verified_original",
@@ -132,6 +134,67 @@ def test_build_model_desert_truth_and_integrity(
     assert frame_four.authored.start == pytest.approx(11.4333)
     assert frame_four.authored.end == pytest.approx(13.8667)
     assert frame_four.frames.end_frame / model.fps == 332 / 24
+
+
+def test_managed_visualization_uses_admitted_runtime_media_snapshot(
+    tmp_path: Path,
+) -> None:
+    snapshot, project_root, _timeline_dir = _prepared_snapshot(tmp_path)
+    payload = b"runtime admitted visualization asset"
+    digest = hashlib.sha256(payload).hexdigest()
+    managed = managed_media_path(project_root.parent, digest)
+    managed.parent.mkdir(parents=True, exist_ok=True)
+    managed.write_bytes(payload)
+    registry = {
+        "assets": {
+            "managed": {
+                "file": str(managed),
+                "media_id": "object-1",
+                "content_sha256": digest,
+                "type": "image/png",
+            }
+        }
+    }
+    managed_snapshot = replace(
+        snapshot,
+        registry=registry,
+        registry_sha256=_digest(registry),
+        media_hashes={},
+    )
+    runtime_media = [
+        {
+            "object_id": "object-1",
+            "content_hash": f"sha256:{digest}",
+            "media_type": "image/png",
+        }
+    ]
+
+    denied = build_model(managed_snapshot, project_root=project_root)
+    admitted = build_model(
+        managed_snapshot,
+        project_root=project_root,
+        media_snapshot=runtime_media,
+    )
+
+    assert denied.media_integrity["managed"].state == "unsupported"
+    assert admitted.media_integrity["managed"].state == "verified_original"
+    assert admitted.media_integrity["managed"].path == str(managed.resolve())
+
+
+def test_visualization_resolution_import_is_local_authority_free() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import astrid.packs.rendering.executors.timeline_visualize.run; "
+            "print('sqlite3' in sys.modules); "
+            "print(any(name.startswith('astrid.core.repositories') for name in sys.modules))",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == ["False", "False"]
 
 
 def test_track_config_and_bottom_to_top_paint_indices(

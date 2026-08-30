@@ -409,6 +409,8 @@ def _resolve_media_hashes(
     registry: dict[str, Any],
     *,
     project_root: Path | None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Hash existing project sources or exact project-owned managed media.
 
@@ -464,6 +466,8 @@ def _resolve_media_hashes(
             raw_file,
             project_root=resolved_project_root,
             expected_sha256=expected if isinstance(expected, str) else None,
+            runtime_client=runtime_client,
+            media_snapshot=media_snapshot,
         )
         if candidate is None or not candidate.is_file():
             diagnostics.append(
@@ -564,6 +568,8 @@ def _build_snapshot(
     project_slug: str,
     project_root: Path | None,
     diagnostics: Sequence[str],
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> TimelineSnapshot:
     try:
         assembly = project_to_assembly(parsed_events)
@@ -579,6 +585,8 @@ def _build_snapshot(
     media_hashes, media_diagnostics = _resolve_media_hashes(
         registry,
         project_root=project_root,
+        runtime_client=runtime_client,
+        media_snapshot=media_snapshot,
     )
     last = parsed_events[-1] if parsed_events else None
     snapshot = TimelineSnapshot(
@@ -653,6 +661,8 @@ def acquire_snapshot(
     project_slug: str,
     project_root: Path | None = None,
     retries: int = 2,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> TimelineSnapshot:
     """Acquire one verified, stable event-sourced timeline snapshot.
 
@@ -703,6 +713,8 @@ def acquire_snapshot(
                 project_slug=project_slug,
                 project_root=normalized_project_root,
                 diagnostics=[*diagnostics, *head_diagnostics],
+                runtime_client=runtime_client,
+                media_snapshot=media_snapshot,
             )
         except SnapshotIntegrityError as exc:
             after = _event_file_fingerprint(events_path)

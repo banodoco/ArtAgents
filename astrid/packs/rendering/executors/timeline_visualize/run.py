@@ -108,6 +108,47 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
 _AUTHORITY_CONTEXT_ENV = "ASTRID_TIMELINE_VISUALIZE_AUTHORITY_CONTEXT"
 
 
+def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
+    """Read the project's admitted media facts from the workspace runtime.
+
+    Visualization runs in a child process and must not open the local kernel
+    database.  The returned rows are an attempt-local read snapshot: callers
+    pass them to the resolver, which still verifies project ownership, CAS
+    location, and bytes.  Runtime unavailability is deliberately represented
+    as ``None`` so ordinary project-source visualization remains usable while
+    managed CAS media fails closed.
+    """
+
+    try:
+        from astrid.sdk.workspace_client import WorkspaceClient, resolve_runtime_connection
+
+        endpoint, token = resolve_runtime_connection()
+        client = WorkspaceClient(endpoint, token)
+        projects = client.list_projects()
+        rows = projects.get("items", []) if isinstance(projects, Mapping) else projects
+        project = next(
+            (
+                row
+                for row in rows or []
+                if isinstance(row, Mapping) and row.get("slug") == project_slug
+            ),
+            None,
+        )
+        if not isinstance(project, Mapping):
+            return None
+        project_id = project.get("project_id") or project.get("id")
+        if not isinstance(project_id, str) or not project_id:
+            return None
+        result = client.list_project_objects(project_id)
+        if isinstance(result, Mapping):
+            result = result.get("items", [])
+        if not isinstance(result, (list, tuple)):
+            return None
+        return list(result)
+    except Exception:  # noqa: BLE001 - managed media reads fail closed
+        return None
+
+
 def _execution_authority_context() -> dict[str, Any] | None:
     raw = os.environ.get(_AUTHORITY_CONTEXT_ENV)
     if raw is None:
@@ -645,6 +686,7 @@ def _rendered_expected_hash(
     snapshot: Any,
     rendered_video: Path,
     project_root: Path,
+    media_snapshot: Any | None = None,
 ) -> str | None:
     """Expected sha256 for the supplied rendered output, or None.
 
@@ -657,7 +699,11 @@ def _rendered_expected_hash(
     """
 
     target = rendered_video.expanduser().resolve()
-    classified = classify_registry(snapshot.registry, project_root=project_root)
+    classified = classify_registry(
+        snapshot.registry,
+        project_root=project_root,
+        media_snapshot=media_snapshot,
+    )
     for asset_key in sorted(classified):
         integrity = classified[asset_key]
         if integrity.role != "rendered_sample" or not isinstance(integrity.path, str):
@@ -710,6 +756,7 @@ def _asset_filmstrips(
     project_root: Path,
     sample_root: Path,
     pages: tuple[LayoutPage, ...],
+    media_snapshot: Any | None = None,
 ) -> dict[str, list[Path]]:
     if mode == "off":
         return {}
@@ -719,7 +766,12 @@ def _asset_filmstrips(
         # the recorded provenance hash, then sample — never fall back to
         # source sampling.  Each page receives its own strip of at most
         # MAX_FRAMES_PER_PAGE frames.
-        expected = _rendered_expected_hash(snapshot, rendered_video, project_root)
+        expected = _rendered_expected_hash(
+            snapshot,
+            rendered_video,
+            project_root,
+            media_snapshot=media_snapshot,
+        )
         reason = verify_rendered_output(rendered_video, expected_sha256=expected)
         if reason is not None:
             raise ValueError(f"rendered filmstrip refused: {reason}")
@@ -733,7 +785,11 @@ def _asset_filmstrips(
                 expected_sha256=expected,
             )
         return filmstrips
-    classified = classify_registry(snapshot.registry, project_root=project_root)
+    classified = classify_registry(
+        snapshot.registry,
+        project_root=project_root,
+        media_snapshot=media_snapshot,
+    )
     raw_assets = (
         snapshot.registry.get("assets", {}) if isinstance(snapshot.registry, Mapping) else {}
     )
@@ -956,6 +1012,7 @@ def _materialize_view(
     transcript_segments: list[TranscriptSegment] | None = None,
     speech_occurrences: list[SpeechOccurrence] | None = None,
     transcript_asset_key: str | None = None,
+    media_snapshot: Any | None = None,
 ) -> PackLayout:
     pages = _pages_for(
         args,
@@ -984,6 +1041,7 @@ def _materialize_view(
             project_root=project_root,
             sample_root=Path(raw_sample_root),
             pages=pages,
+            media_snapshot=media_snapshot,
         )
         ground_truth = emit_ground_truth(
             model,
@@ -1236,6 +1294,7 @@ def _render_one(
     project_root: Path,
     pack_root: Path,
     execution_authority: Mapping[str, Any] | None = None,
+    media_snapshot: Any | None = None,
 ) -> PackLayout:
     if selected.timeline_dir is None:
         raise ValueError("cold visualization requires a managed timeline directory")
@@ -1244,6 +1303,7 @@ def _render_one(
         project_slug=args.project_slug,
         project_root=project_root,
         retries=2,
+        media_snapshot=media_snapshot,
     )
     if execution_authority is not None and execution_authority.get("mode") == "legacy_file":
         expected = next(
@@ -1282,7 +1342,11 @@ def _render_one(
     )
     if attachment is not None and attachment.integrity == "ok":
         snapshot = replace(snapshot, transcript_sha256=attachment.transcript_sha256)
-    model = build_model(snapshot, project_root=project_root)
+    model = build_model(
+        snapshot,
+        project_root=project_root,
+        media_snapshot=media_snapshot,
+    )
     transcript_segments: list[TranscriptSegment] = []
     speech_occurrences: list[SpeechOccurrence] = []
     transcript_asset_key: str | None = None
@@ -1335,6 +1399,7 @@ def _render_one(
         transcript_segments=transcript_segments,
         speech_occurrences=speech_occurrences,
         transcript_asset_key=transcript_asset_key,
+        media_snapshot=media_snapshot,
     )
 
 
@@ -1344,6 +1409,7 @@ def refresh_root(
     frozen: FrozenView,
     project_root: Path,
     pack_root: Path,
+    media_snapshot: Any | None = None,
 ) -> PackLayout:
     """The sole frozen-lineage transition to current managed timeline state."""
 
@@ -1359,6 +1425,7 @@ def refresh_root(
         project_slug=args.project_slug,
         project_root=project_root,
         retries=2,
+        media_snapshot=media_snapshot,
     )
     attachment, snapshot = _discover_snapshot_attachment(
         project_root=project_root,
@@ -1372,7 +1439,11 @@ def refresh_root(
         or snapshot.timeline_ulid != frozen.timeline_ulid
     ):
         raise ValueError("current managed timeline identity disagrees with the frozen lineage")
-    model = build_model(snapshot, project_root=project_root)
+    model = build_model(
+        snapshot,
+        project_root=project_root,
+        media_snapshot=media_snapshot,
+    )
     transcript_segments: list[TranscriptSegment] = []
     speech_occurrences: list[SpeechOccurrence] = []
     transcript_asset_key: str | None = None
@@ -1423,6 +1494,7 @@ def refresh_root(
         transcript_segments=transcript_segments,
         speech_occurrences=speech_occurrences,
         transcript_asset_key=transcript_asset_key,
+        media_snapshot=media_snapshot,
     )
 
 
@@ -1509,6 +1581,7 @@ def _execute_from_frozen(
         timeline_ids = [frozen.timeline_ulid]
         _mark_run_metadata(out_root, args.project_slug, timeline_ids)
         if args.refresh_root:
+            media_snapshot = _runtime_media_snapshot(args.project_slug)
             refresh_scope = resolve_focus(frozen, args.focus)
             if refresh_scope.kind != "timeline":
                 raise ValueError("--refresh-root focus must resolve to the frozen timeline")
@@ -1517,6 +1590,7 @@ def _execute_from_frozen(
                 frozen=frozen,
                 project_root=project_root,
                 pack_root=pack_root,
+                media_snapshot=media_snapshot,
             )
         else:
             model = model_from_frozen(frozen)
@@ -1582,6 +1656,11 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
     project_root = project_dir(args.project_slug).resolve()
     if not project_root.is_dir():
         raise ValueError(f"project not found: {args.project_slug}")
+    # The runtime is the only authority for managed media ownership.  Capture
+    # one project-scoped snapshot for every selected timeline in this run;
+    # local-source and offline migration callers remain unaffected when the
+    # runtime is unavailable.
+    media_snapshot = _runtime_media_snapshot(args.project_slug)
     out_root = args.out.expanduser().resolve()
     pack_root = out_root / "agent-view"
     execution_authority = _execution_authority_context()
@@ -1614,6 +1693,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             project_root=project_root,
             pack_root=pack_root,
             execution_authority=execution_authority,
+            media_snapshot=media_snapshot,
         )
         manifest_path = layout.manifest_path
         pages = list(layout.pages)
@@ -1627,6 +1707,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
                 project_root=project_root,
                 pack_root=pack_root / f"TL{index:02d}",
                 execution_authority=execution_authority,
+                media_snapshot=media_snapshot,
             )
             for index, row in enumerate(selected, start=1)
         ]

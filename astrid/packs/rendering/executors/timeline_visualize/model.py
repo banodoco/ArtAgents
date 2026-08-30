@@ -375,11 +375,18 @@ def _rootless_integrity(
 
 
 def _media_integrity(
-    registry: Mapping[str, Any], *, project_root: Path | None
+    registry: Mapping[str, Any], *, project_root: Path | None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> dict[str, AssetIntegrity]:
     if project_root is None:
         return _rootless_integrity(registry)
-    classified = classify_registry(dict(registry), project_root=Path(project_root))
+    classified = classify_registry(
+        dict(registry),
+        project_root=Path(project_root),
+        runtime_client=runtime_client,
+        media_snapshot=media_snapshot,
+    )
     return {key: classified[key] for key in sorted(classified)}
 
 
@@ -490,6 +497,8 @@ def build_model(
     snapshot: TimelineSnapshot,
     *,
     project_root: Path | None = None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> TimelineInspectionModel:
     """Normalize one frozen :class:`TimelineSnapshot` without writes.
 
@@ -611,7 +620,12 @@ def build_model(
         compositor_version=COMPOSITOR_VERSION,
         transition_default_frames=TRANSITION_FALLBACK_FRAMES,
         registry_keys=frozenset(registry_entries),
-        media_integrity=_media_integrity(snapshot.registry, project_root=project_root),
+        media_integrity=_media_integrity(
+            snapshot.registry,
+            project_root=project_root,
+            runtime_client=runtime_client,
+            media_snapshot=media_snapshot,
+        ),
         asset_aspects=_asset_aspects(snapshot.registry),
         snapshot_sns=snapshot.sns(),
         shots=(),
