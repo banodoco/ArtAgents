@@ -76,7 +76,6 @@ class RemoteMedia(_RemoteFamily):
     def list(self, project): return DomainResult.success([], idempotency_key="")
     def show(self, project, ref): return self._call("GET", f"/v1/objects/{_path(ref)}")
     def verify(self, *args, idempotency_key=None, **kwargs): return DomainResult.success({"verified": True}, idempotency_key=idempotency_key or "")
-    def relocate(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "media relocation is retired; ingest managed bytes instead", {}), idempotency_key=idempotency_key or "")
     def relate(self, *args, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "media relations are not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
 
 
@@ -131,6 +130,7 @@ class RemoteAstridClient:
         self.references = RemoteReferences(transport)
         self.shots = RemoteShots(transport)
     def selected_project_ref(self, **kwargs): return None
+    def health(self): return self._transport.request("GET", "/v1/health")
     def handshake(self, client_name="astrid", client_version="stage1", requested_scopes=None):
         return self._transport.request("POST", "/v1/handshake", body={"protocol": "workspace.v1", "client_name": client_name, "client_version": client_version, "requested_scopes": requested_scopes or []})
     def read_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)

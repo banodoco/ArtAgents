@@ -88,39 +88,6 @@ from .cli_search import (  # noqa: E402, F401
     _score_pack,
 )
 
-# ── install / update / uninstall / rollback handlers ─────────────────────
-# These are thin delegation wrappers that stay in the facade because they
-# call into astrid.core.pack.install and have no helper logic of their own.
-
-
-def _handle_install(args: argparse.Namespace) -> int:
-    """Handler for ``packs install``."""
-    from astrid.core.pack.install import _run_install_command
-
-    return _run_install_command(args)
-
-
-def _handle_update(args: argparse.Namespace) -> int:
-    """Handler for ``packs update``."""
-    from astrid.core.pack.install import _run_update_command
-
-    return _run_update_command(args)
-
-
-def _handle_uninstall(args: argparse.Namespace) -> int:
-    """Handler for ``packs uninstall``."""
-    from astrid.core.pack.install import _run_uninstall_command
-
-    return _run_uninstall_command(args)
-
-
-def _handle_rollback(args: argparse.Namespace) -> int:
-    """Handler for ``packs rollback``."""
-    from astrid.core.pack.install import _run_rollback_command
-
-    return _run_rollback_command(args)
-
-
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
@@ -185,15 +152,11 @@ __all__ = [
     "_format_status_row",
     "_group_packs_by_domain",
     "_handle_agent_index",
-    "_handle_install",
     "_handle_inspect",
     "_handle_list",
     "_handle_new",
-    "_handle_rollback",
     "_handle_search",
     "_handle_status",
-    "_handle_uninstall",
-    "_handle_update",
     "_handle_validate",
     "_inspect_discovered_pack",
     "_inspect_installed_pack",

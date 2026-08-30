@@ -48,14 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     from .cli import (  # noqa: PLC0415
         _handle_agent_index,
         _handle_inspect,
-        _handle_install,
         _handle_list,
         _handle_new,
-        _handle_rollback,
         _handle_search,
         _handle_status,
-        _handle_uninstall,
-        _handle_update,
         _handle_validate,
     )
 
@@ -160,83 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-hidden", action="store_true", help="Include hidden packs."
     )
     status_parser.set_defaults(handler=_handle_status)
-
-    # ── install ──
-    install_parser = subparsers.add_parser(
-        "install", help="Install a pack from a local directory or Git URL."
-    )
-    install_parser.add_argument(
-        "source", help="Path to the pack source directory or a Git URL."
-    )
-    install_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print trust summary without installing.",
-    )
-    install_parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt."
-    )
-    install_parser.add_argument(
-        "--trust",
-        action="store_true",
-        help="Acknowledge the pack trust summary for noninteractive installs.",
-    )
-    install_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite existing install (preserve old revision).",
-    )
-    install_parser.set_defaults(handler=_handle_install)
-
-    # ── update ──
-    update_parser = subparsers.add_parser(
-        "update", help="Update an installed pack from its source."
-    )
-    update_parser.add_argument("pack_id", help="Pack identifier to update.")
-    update_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print diff summary without updating.",
-    )
-    update_parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt."
-    )
-    update_parser.add_argument(
-        "--trust",
-        action="store_true",
-        help="Acknowledge the pack trust summary for noninteractive updates.",
-    )
-    update_parser.set_defaults(handler=_handle_update)
-
-    # ── uninstall ──
-    uninstall_parser = subparsers.add_parser(
-        "uninstall", help="Remove an installed pack."
-    )
-    uninstall_parser.add_argument("pack_id", help="Pack identifier to uninstall.")
-    uninstall_parser.add_argument(
-        "--keep-revisions",
-        action="store_true",
-        help="Keep revision directories on disk.",
-    )
-    uninstall_parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt."
-    )
-    uninstall_parser.set_defaults(handler=_handle_uninstall)
-
-    # ── rollback ──
-    rollback_parser = subparsers.add_parser(
-        "rollback", help="Rollback an installed pack to a previous revision."
-    )
-    rollback_parser.add_argument("pack_id", help="Pack identifier to rollback.")
-    rollback_parser.add_argument(
-        "--revision",
-        help="Specific revision directory name to activate. "
-        "If omitted, shows an interactive numbered list.",
-    )
-    rollback_parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt."
-    )
-    rollback_parser.set_defaults(handler=_handle_rollback)
 
     # ── agent-index ──
     agent_index_parser = subparsers.add_parser(

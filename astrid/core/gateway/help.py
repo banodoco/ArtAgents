@@ -32,7 +32,7 @@ def _packs_subcommand_list() -> str:
     except Exception:
         pass
     # Fallback: canonical list matching the packs CLI as of m5b.
-    return "agent-index,install,inspect,list,new,rollback,status,uninstall,update,validate"
+    return "agent-index,inspect,list,new,search,status,validate"
 
 
 def _print_entrypoint_help() -> None:
@@ -61,8 +61,7 @@ Timeline evidence:
 
 Operational families:
   python3 -m astrid doctor [--json]
-  python3 -m astrid backup create [--out PATH]
-  python3 -m astrid backup restore <BACKUP_PATH> [--force]
+  python3 -m astrid backup [--json]  # unavailable until a runtime route exists
 
 Nested mounts (manifest-owned):
   python3 -m astrid timelines shots ...
@@ -111,14 +110,14 @@ Family census (exactly seven families): {families}
 
 Product families:
   projects    [kernel] project create/list/show/update/select/current
-  media       [kernel] media import/list/show/verify/relocate/relate
+  media       [kernel] media import/list/show/verify/relate
   tasks       [kernel] task create/list/show/cancel/retry/events
   runs        [kernel] run list/show/cancel/retry-failed/events
   timelines   [pack: timeline] timeline create/list/show/save/archive/unarchive/history/diff/visualize/render
 
 Operational families:
-  doctor      [kernel] read-only database/filesystem diagnostics
-  backup      [kernel] create/restore SQLite + managed-media backups
+  doctor      [runtime] read-only runtime health diagnostics
+  backup      [runtime] backup is unavailable until a runtime route exists
 
 Nested mounts (manifest-owned):
   timelines shots       [pack: shots] project-level reusable shot list/create/show/add/remove/reorder
