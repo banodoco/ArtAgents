@@ -143,12 +143,48 @@ def _source_digest(root: Path) -> str:
     return _canonical_digest(entries)
 
 
+def _vcs_revision(root: Path) -> str:
+    """Return the checked-out revision for source-epoch invalidation."""
+    checkout = next((candidate for candidate in (root, *root.parents) if (candidate / ".git").exists()), None)
+    if checkout is None:
+        return "unversioned"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
+def _dependency_digest(definition: ExecutorDefinition, records: Mapping[str, "CapabilityRecord"]) -> str:
+    """Digest graph edges and declared package/runtime dependencies."""
+    dependencies = {
+        dependency: (records[dependency].capability_digest if dependency in records else "missing")
+        for dependency in sorted(definition.graph.depends_on)
+    }
+    metadata = definition.metadata
+    requirements = metadata.get("requirements", definition.isolation.requirements)
+    if isinstance(requirements, str):
+        requirements = [requirements]
+    return _canonical_digest({
+        "depends_on": dependencies,
+        "requirements": sorted(str(value) for value in (requirements or ())),
+        "requirements_source": str(metadata.get("requirements_source", "")),
+    })
+
+
 @dataclass(frozen=True)
 class CapabilityRecord:
     definition: ExecutorDefinition
     capability_digest: str
     source_digest: str
     source_root: Path
+    dependency_digest: str = ""
     manifest_path: Path | None = None
     preflight: Mapping[str, Any] = field(default_factory=dict)
     ready: bool = False
@@ -188,6 +224,7 @@ class CapabilityRecord:
             "outputs": [output.__dict__ for output in self.definition.outputs],
             "capability_digest": self.capability_digest,
             "source_digest": self.source_digest,
+            "dependency_digest": self.dependency_digest,
             "source_root": str(self.source_root),
             "manifest_path": str(self.manifest_path) if self.manifest_path else None,
             "resource_keys": list(self.resource_keys),
@@ -222,16 +259,25 @@ class RuntimeProtocolClient:
             ) from exc
         self.generated = WorkspaceClient(self.endpoint, self.credential)
 
-    def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None, capability_digests: Mapping[str, str] | None = None):
+    def health(self):
+        """Read protocol/schema/runtime epoch through the generated client."""
+        return self.generated.health()
+
+    def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None, capability_digests: Mapping[str, str] | None = None, dependency_digest: str | None = None, source_epoch: str | None = None, protocol_version: str = "workspace.v1", schema_digest: str | None = None, runtime_epoch: int | None = None, capability_states: Mapping[str, Mapping[str, str]] | None = None):
         payload = {
             "executor_id": executor_id,
             "capabilities": capabilities,
             "max_concurrency": max_concurrency,
             "resource_keys": resource_keys,
-            "protocol": "workspace.v1",
+            "protocol": protocol_version,
             "source_digest": source_digest,
+            "source_epoch": source_epoch,
+            "dependency_digest": dependency_digest,
+            "schema_digest": schema_digest,
+            "runtime_epoch": runtime_epoch,
             "capability_digests": dict(capability_digests or {}),
             "definition_digests": dict(capability_digests or {}),
+            "capability_states": {key: dict(value) for key, value in (capability_states or {}).items()},
         }
         try:
             return self.generated.register_executor(payload, idempotency_key=f"executor:{executor_id}")
@@ -352,9 +398,13 @@ class GenericPackHost:
         self.attempt_root = Path(attempt_root).expanduser().resolve() if attempt_root else None
         self.capabilities: dict[str, CapabilityRecord] = {}
         self._registered_digests: dict[str, str] = {}
+        self._registered_state: dict[str, dict[str, str]] = {}
+        self._registered_runtime_state: dict[str, Any] = {}
         self.capability_matrix_path = Path(capability_matrix).expanduser().resolve() if capability_matrix else self._default_matrix_path()
         self.ledger = load_capability_ledger(self.capability_matrix_path) if self.capability_matrix_path else {"capabilities": [], "sources": {}}
         self.matrix: dict[str, dict[str, Any]] = self._load_matrix(self.capability_matrix_path)
+        self.source_epoch = "uninitialized"
+        self.runtime_state: dict[str, Any] = {}
 
     def _default_matrix_path(self) -> Path | None:
         checkout = Path(__file__).resolve().parents[3]
@@ -414,7 +464,19 @@ class GenericPackHost:
                 if stale:
                     details.append("matrix entries not discovered: " + ", ".join(stale))
                 raise HostError("capability matrix does not exactly cover discovered corpus; " + "; ".join(details))
+        # Dependencies are digested after the full corpus is known so a graph
+        # or dependency source change invalidates the next registration.
+        records = {
+            key: CapabilityRecord(**{**record.__dict__, "dependency_digest": _dependency_digest(record.definition, records)})
+            for key, record in records.items()
+        }
         self.capabilities = records
+        root = self.pack_roots[0] if self.pack_roots else Path.cwd()
+        self.source_epoch = _canonical_digest({
+            "vcs_revision": _vcs_revision(root),
+            "source_digest": _canonical_digest({key: record.source_digest for key, record in records.items()}),
+            "matrix_digest": _canonical_digest(self.matrix),
+        })
         return tuple(records[key] for key in sorted(records))
 
     def preflight(self, capability_id: str | None = None) -> tuple[CapabilityRecord, ...]:
@@ -458,11 +520,36 @@ class GenericPackHost:
         if not self.capabilities:
             self.discover()
         self.preflight()
-        changed = [key for key, record in self.capabilities.items() if key in self._registered_digests and self._registered_digests[key] != record.capability_digest]
-        if changed and not deliberate:
-            raise HostError("capability digest changed; deliberate re-registration required: " + ", ".join(sorted(changed)))
+        state = {
+            key: {
+                "capability_digest": record.capability_digest,
+                "source_digest": record.source_digest,
+                "dependency_digest": record.dependency_digest,
+            }
+            for key, record in self.capabilities.items()
+        }
+        invalidations: list[str] = []
+        for key in sorted(set(state) & set(self._registered_state)):
+            for digest_name, label in (("capability_digest", "capability"), ("source_digest", "source"), ("dependency_digest", "dependency")):
+                if self._registered_state[key].get(digest_name) != state[key][digest_name]:
+                    invalidations.append(f"{label} digest changed: {key}")
+        runtime_state = self._runtime_compatibility()
+        self.runtime_state = runtime_state
+        if self._registered_runtime_state:
+            if self._registered_runtime_state.get("protocol") != runtime_state.get("protocol"):
+                invalidations.append("runtime protocol changed")
+            if self._registered_runtime_state.get("schema_digest") != runtime_state.get("schema_digest"):
+                invalidations.append("runtime schema digest changed")
+            if self._registered_runtime_state.get("runtime_epoch") != runtime_state.get("runtime_epoch"):
+                invalidations.append("runtime epoch changed")
+            if self._registered_runtime_state.get("source_epoch") != self.source_epoch:
+                invalidations.append("source epoch changed")
+        if invalidations and not deliberate:
+            raise HostError("registration invalidated; " + "; ".join(invalidations) + "; deliberate re-registration required")
         if self.client is None:
             self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
+            self._registered_state = state
+            self._registered_runtime_state = {**runtime_state, "source_epoch": self.source_epoch}
             return {"executor_id": self.executor_id, "capabilities": [r.manifest() for r in self.capabilities.values()], "ready": [r.id for r in self.capabilities.values() if r.ready]}
         # Publish capability admission metadata before advertising the executor.
         # A real runtime must be able to validate a task against the exact
@@ -496,12 +583,27 @@ class GenericPackHost:
                     self.client.register_capability(record.id, definition=record.definition.to_dict(), digest=record.capability_digest)
         all_keys = sorted({key for record in self.capabilities.values() for key in record.resource_keys})
         digests = {key: record.capability_digest for key, record in self.capabilities.items()}
+        dependency_digests = {key: record.dependency_digest for key, record in self.capabilities.items()}
+        capability_states = {
+            key: {
+                "capability_digest": record.capability_digest,
+                "source_digest": record.source_digest,
+                "dependency_digest": record.dependency_digest,
+            }
+            for key, record in self.capabilities.items()
+        }
         registration_kwargs = {
             "capabilities": sorted(self.capabilities),
             "max_concurrency": self.max_concurrency,
             "resource_keys": all_keys,
             "source_digest": _canonical_digest({key: record.source_digest for key, record in self.capabilities.items()}),
             "capability_digests": digests,
+            "dependency_digest": _canonical_digest(dependency_digests),
+            "source_epoch": self.source_epoch,
+            "protocol_version": runtime_state.get("protocol", "workspace.v1"),
+            "schema_digest": runtime_state.get("schema_digest"),
+            "runtime_epoch": runtime_state.get("runtime_epoch"),
+            "capability_states": capability_states,
         }
         try:
             registration = self.client.register_executor(self.executor_id, **registration_kwargs)
@@ -514,6 +616,8 @@ class GenericPackHost:
             for record in self.capabilities.values():
                 self.client.preflight_executor(record.id, checks=record.preflight, ready=record.ready)
         self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
+        self._registered_state = state
+        self._registered_runtime_state = {**runtime_state, "source_epoch": self.source_epoch}
         return {"registration": registration, "capabilities": [r.manifest() for r in self.capabilities.values()]}
 
     def refresh(self) -> tuple[CapabilityRecord, ...]:
@@ -522,9 +626,46 @@ class GenericPackHost:
         self.discover()
         changed = []
         for key, record in self.capabilities.items():
-            if key in old and old[key].capability_digest != record.capability_digest:
+            if key in old and (
+                old[key].capability_digest != record.capability_digest
+                or old[key].source_digest != record.source_digest
+                or old[key].dependency_digest != record.dependency_digest
+            ):
                 changed.append(key)
         return tuple(self.capabilities[key] for key in changed)
+
+    def _runtime_compatibility(self) -> dict[str, Any]:
+        """Read and validate protocol/schema/runtime epoch when available."""
+        expected_protocol = "workspace.v1"
+        expected_schema = None
+        try:
+            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
+            expected_schema = SCHEMA_DIGEST
+        except ImportError:
+            pass
+        health: Any = None
+        if self.client is not None and hasattr(self.client, "health"):
+            # RuntimeProtocolClient subclasses used by unit tests may omit the
+            # generated transport; those fakes retain matrix-only semantics.
+            if not isinstance(self.client, RuntimeProtocolClient) or hasattr(self.client, "generated"):
+                health = self.client.health()
+        if health is None:
+            return {"protocol": expected_protocol, "schema_digest": expected_schema, "runtime_epoch": None}
+        value = dict(health) if isinstance(health, Mapping) else {
+            "protocol": getattr(health, "protocol", None),
+            "schema_digest": getattr(health, "schema_digest", None),
+            "runtime_epoch": getattr(health, "runtime_epoch", None),
+        }
+        actual_protocol = str(value.get("protocol", ""))
+        actual_schema = str(value.get("schema_digest", ""))
+        mismatches = []
+        if actual_protocol != expected_protocol:
+            mismatches.append(f"protocol expected={expected_protocol} actual={actual_protocol or 'missing'}")
+        if expected_schema and actual_schema != expected_schema:
+            mismatches.append(f"schema_digest expected={expected_schema} actual={actual_schema or 'missing'}")
+        if mismatches:
+            raise HostError("runtime compatibility blocked: " + "; ".join(mismatches))
+        return {"protocol": actual_protocol, "schema_digest": actual_schema or expected_schema, "runtime_epoch": value.get("runtime_epoch")}
 
     def _materialize_inputs(self, spec: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
         values = dict(spec.get("inputs", {})) if isinstance(spec.get("inputs", {}), Mapping) else {}

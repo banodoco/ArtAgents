@@ -90,6 +90,93 @@ def test_discovery_digest_and_truthful_preflight(tmp_path):
     host.register(deliberate=True)
 
 
+def test_source_and_dependency_digests_invalidate_registration(tmp_path):
+    _write_manifest(tmp_path / "base")
+    child = tmp_path / "child"
+    child.mkdir()
+    (child / "executor.yaml").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "test.child",
+                "name": "Child",
+                "kind": "external",
+                "version": "1.0",
+                "graph": {"depends_on": ["test.echo"]},
+                "command": {"argv": ["{python_exec}", "-c", "pass"]},
+                "outputs": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    host = GenericPackHost(pack_roots=[tmp_path])
+    host.discover()
+    host.register()
+
+    # A runtime source file can change without changing the manifest digest.
+    (tmp_path / "base" / "runtime.py").write_text("changed", encoding="utf-8")
+    changed = host.refresh()
+    assert [record.id for record in changed] == ["test.echo"]
+    with pytest.raises(HostError, match="source digest changed: test.echo"):
+        host.register()
+    host.register(deliberate=True)
+
+    # A dependency manifest change invalidates its consumer's dependency
+    # digest as well as the dependency's own source/capability state.
+    (tmp_path / "base" / "executor.yaml").write_text(
+        (tmp_path / "base" / "executor.yaml").read_text(encoding="utf-8").replace('"1.0"', '"2.0"'),
+        encoding="utf-8",
+    )
+    changed = host.refresh()
+    assert {record.id for record in changed} == {"test.echo", "test.child"}
+    with pytest.raises(HostError, match="dependency digest changed: test.child"):
+        host.register()
+
+
+def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(tmp_path):
+    _write_manifest(tmp_path / "echo")
+
+    class EpochRuntime(FakeRuntime):
+        def __init__(self):
+            super().__init__()
+            self.epoch = 7
+
+        def health(self):
+            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
+
+            return {"protocol": "workspace.v1", "schema_digest": SCHEMA_DIGEST, "runtime_epoch": self.epoch}
+
+    runtime = EpochRuntime()
+    host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
+    host.discover()
+    host.register()
+    payload = runtime.registrations[0][1]
+    assert payload["protocol_version"] == "workspace.v1"
+    assert payload["runtime_epoch"] == 7
+    assert payload["source_epoch"] == host.source_epoch
+    assert payload["dependency_digest"]
+    assert payload["capability_states"]["test.echo"]["source_digest"]
+
+    runtime.epoch = 8
+    with pytest.raises(HostError, match="runtime epoch changed; deliberate re-registration required"):
+        host.register()
+
+
+def test_runtime_protocol_mismatch_blocks_registration_before_publish(tmp_path):
+    _write_manifest(tmp_path / "echo")
+
+    class IncompatibleRuntime(FakeRuntime):
+        def health(self):
+            return {"protocol": "workspace.v0", "schema_digest": "", "runtime_epoch": 1}
+
+    runtime = IncompatibleRuntime()
+    host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
+    host.discover()
+    with pytest.raises(HostError, match="runtime compatibility blocked: protocol expected=workspace.v1 actual=workspace.v0"):
+        host.register()
+    assert runtime.registrations == []
+
+
 def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):
     _write_manifest(tmp_path / "echo")
     runtime = FakeRuntime()
