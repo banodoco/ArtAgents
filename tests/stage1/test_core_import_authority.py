@@ -327,3 +327,67 @@ def test_explicit_banodoco_catalog_api_loads_optional_catalog_code() -> None:
         check=True,
     )
     assert result.stdout.splitlines() == ["False", "BanodocoCatalogConfig", "True"]
+
+
+def test_sdk_dry_run_is_manifest_only_and_does_not_load_runtime_authority(tmp_path: Path) -> None:
+    """SDK previews must not import runners or create project/run state."""
+
+    root = Path(__file__).resolve().parents[2]
+    preview_root = tmp_path / "preview-out"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; from pathlib import Path; "
+                f"out = Path({str(preview_root)!r}); "
+                "preview = astrid.invoke('understanding.understand', kind='executor', "
+                "include_installed=False, project='not-a-local-project', "
+                "inputs={'mode': 'audio', 'audio': 'clip.wav'}, out=out, dry_run=True); "
+                "legacy = ('astrid.core.execution.executor.runner', "
+                "'astrid.core.execution.orchestrator.runner', 'astrid.core.project.run', "
+                "'astrid.core.project.guidance'); "
+                "print(preview.ok); print(preview.raw_result['dry_run']); "
+                "print([name for name in sys.modules if any(name == item or "
+                "name.startswith(item + '.') for item in legacy)]); "
+                "print(out.exists())"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["True", "True", "[]", "False"]
+
+
+def test_sdk_orchestrator_dry_run_is_manifest_only(tmp_path: Path) -> None:
+    """Orchestrator previews use the same runtime-free admission boundary."""
+
+    root = Path(__file__).resolve().parents[2]
+    preview_root = tmp_path / "orchestrator-out"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; from pathlib import Path; "
+                f"out = Path({str(preview_root)!r}); "
+                "preview = astrid.invoke('video_editing.hype', kind='orchestrator', "
+                "include_installed=False, project='not-a-local-project', "
+                "inputs={'video': 'clip.mp4', 'brief': 'brief.md'}, out=out, dry_run=True); "
+                "legacy = ('astrid.core.execution.executor.runner', "
+                "'astrid.core.execution.orchestrator.runner', 'astrid.core.project.run', "
+                "'astrid.core.project.guidance'); "
+                "print(preview.ok); print(preview.raw_result['plan']['steps']); "
+                "print([name for name in sys.modules if any(name == item or "
+                "name.startswith(item + '.') for item in legacy)]); "
+                "print(out.exists())"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["True", "[]", "[]", "False"]

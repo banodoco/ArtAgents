@@ -756,28 +756,8 @@ class _FakeOrchestratorResult:
         }
 
 
-def test_invoke_executor_builds_request_and_normalizes_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_invoke_executor_returns_manifest_preview_without_runner(tmp_path: Path) -> None:
     astrid = _import_public_module()
-    sdk = importlib.import_module("astrid.sdk")
-    seen: dict[str, Any] = {}
-
-    def fake_run_executor(request: Any, registry: Any) -> _FakeExecutorResult:
-        seen["request"] = request
-        seen["registry"] = registry
-        return _FakeExecutorResult(
-            executor_id=request.executor_id,
-            kind="built_in",
-            command=("python", "-m", "astrid", "executors", "run", request.executor_id),
-            cwd=Path("/tmp/executor"),
-            env=MappingProxyType({"ASTRID_SAMPLE": "1"}),
-            payload=MappingProxyType({"artifact": tmp_path / "artifact.json"}),
-            returncode=0,
-            dry_run=request.dry_run,
-            error=astrid.ExecError(code="ok", type="none", message=""),
-        )
-
-    monkeypatch.setattr(sdk, "run_executor", fake_run_executor)
-
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
@@ -795,37 +775,15 @@ def test_invoke_executor_builds_request_and_normalizes_result(monkeypatch: pytes
         argv=("executors", "run", "editorial.arrange"),
     )
 
-    request = seen["request"]
-    assert request.executor_id == "editorial.arrange"
-    assert request.out == tmp_path
-    assert request.project == "demo-project"
-    assert request.inputs == {"brief": "demo"}
-    assert request.outputs == {"artifact": "artifact.json"}
-    assert request.brief == tmp_path / "brief.md"
-    assert request.dry_run is True
-    assert request.check_binaries is True
-    assert request.python_exec == sys.executable
-    assert request.verbose is True
-    assert request.execution_mode == "subprocess"
-    assert request.argv == ("executors", "run", "editorial.arrange")
-    assert seen["registry"] is not None
-
     assert result.capability_id == "editorial.arrange"
     assert result.capability_type == "executor"
     assert result.native_kind in {"built_in", "external"}
-    assert result.ok is False
-    assert result.error == {
-        "code": "ok",
-        "type": "none",
-        "message": "",
-        "recovery": "",
-        "sdk_error": "CapabilityInvocationError",
-        "sdk_category": "invocation",
-    }
+    assert result.ok is True
+    assert result.error is None
     assert result.manifest_path is None
-    assert result.raw_result["cwd"] == "/tmp/executor"
-    assert result.raw_result["payload"] == {"artifact": str(tmp_path / "artifact.json")}
-    assert result.raw_result["env"] == {"ASTRID_SAMPLE": "1"}
+    assert result.raw_result["dry_run"] is True
+    assert result.raw_result["payload"]["preview"]["kind"] == "manifest-ledger"
+    assert result.raw_result["payload"]["preview"]["inputs"]["brief"] == "demo"
     assert result.to_dict()["manifest_path"] is None
     json.dumps(result.to_dict())
 
@@ -928,21 +886,8 @@ def test_invoke_executor_ignores_domain_manifest_payload_paths(
     assert result.raw_result["payload"] == {"manifest_path": str(domain_manifest.resolve())}
 
 
-def test_invoke_orchestrator_builds_request_and_normalizes_result(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_invoke_orchestrator_returns_manifest_preview_without_runner(tmp_path: Path) -> None:
     astrid = _import_public_module()
-    sdk = importlib.import_module("astrid.sdk")
-    seen: dict[str, Any] = {}
-
-    def fake_run_orchestrator(request: Any, registry: Any) -> _FakeOrchestratorResult:
-        seen["request"] = request
-        seen["registry"] = registry
-        return _FakeOrchestratorResult()
-
-    monkeypatch.setattr(sdk, "run_orchestrator", fake_run_orchestrator)
-
     result = astrid.invoke(
         "video_editing.hype",
         kind="orchestrator",
@@ -959,29 +904,14 @@ def test_invoke_orchestrator_builds_request_and_normalizes_result(
         orchestrator_args=("--render",),
     )
 
-    request = seen["request"]
-    assert request.orchestrator_id == "video_editing.hype"
-    assert request.out == tmp_path
-    assert request.project == "demo-project"
-    assert request.inputs == {"video": "input.mp4"}
-    assert request.outputs == {"plan": "plan.json"}
-    assert request.brief == tmp_path / "brief.md"
-    assert request.orchestrator_args == ("--render",)
-    assert request.dry_run is True
-    assert request.python_exec == sys.executable
-    assert request.verbose is True
-    assert request.execution_mode == "subprocess"
-    assert seen["registry"] is not None
-
     assert result.capability_id == "video_editing.hype"
     assert result.capability_type == "orchestrator"
     assert result.native_kind in {"built_in", "external"}
     assert result.ok is True
     assert result.error is None
-    assert result.raw_result["outputs"] == {"plan": "ok"}
-    assert result.raw_result["planned_commands"] == [
-        ["python", "-m", "astrid", "orchestrators", "run", "video_editing.hype"]
-    ]
+    assert result.raw_result["dry_run"] is True
+    assert result.raw_result["plan"]["steps"] == []
+    assert result.raw_result["preview"]["kind"] == "manifest-ledger"
     json.dumps(result.to_dict())
 
 

@@ -9,13 +9,13 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import tempfile
 import warnings
 from collections.abc import Mapping
-from contextlib import contextmanager, redirect_stdout
-from io import StringIO
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from ._module import _sdk_module
 from .exceptions import (
     AstridSDKError,
     CapabilityInvocationError,
+    CapabilityMissingInputError,
     CapabilityValidationError,
     UnsupportedCapabilityError,
     _error_payload_from_internal_error,
@@ -266,6 +267,230 @@ def _normalize_executor_result(result: Any) -> dict[str, Any]:
 
 def _normalize_orchestrator_result(result: Any) -> dict[str, Any]:
     return _json_safe_mapping(result.to_dict())
+
+
+def _validate_manifest_preview_inputs(
+    capability: Any,
+    *,
+    inputs: Mapping[str, Any] | None,
+    orchestrator_args: tuple[str, ...],
+) -> dict[str, Any]:
+    """Validate only manifest-owned inputs for a read-only invocation preview.
+
+    Dry-run is deliberately a ledger/manifest operation.  It must not build a
+    runner request (which imports project/run helpers), inspect an output tree,
+    or resolve a local project.  Port requirements and declared orchestrator
+    inputs are still checked here so callers retain the useful typed failures
+    they receive from a live admission attempt.
+    """
+
+    values = dict(inputs or {})
+    ports = tuple(getattr(capability, "inputs", ()) or ())
+    missing = [
+        str(port.name)
+        for port in ports
+        if bool(getattr(port, "required", False))
+        and getattr(port, "default", None) is None
+        and values.get(port.name) in (None, "")
+    ]
+    if missing:
+        raise CapabilityMissingInputError(
+            f"{capability.capability_type} {capability.id!r} missing required input(s): "
+            f"{', '.join(missing)}"
+        )
+
+    if capability.capability_type == "executor":
+        metadata = capability.definition.get("metadata", {})
+        choices = metadata.get("input_choices") if isinstance(metadata, Mapping) else None
+        if isinstance(choices, Mapping):
+            for input_name, raw_options in choices.items():
+                if not isinstance(raw_options, (list, tuple)) or input_name not in values:
+                    continue
+                options = tuple(str(option) for option in raw_options)
+                if str(values[input_name]) not in options:
+                    rendered = ", ".join(options)
+                    raise CapabilityValidationError(
+                        f"invalid {input_name} {values[input_name]!r} for executor "
+                        f"{capability.id!r}; valid options: {rendered}; recovery: retry with "
+                        f"--{str(input_name).replace('_', '-')} <one of: {rendered}>"
+                    )
+        requirements = (
+            metadata.get("input_requirements_by_choice")
+            if isinstance(metadata, Mapping)
+            else None
+        )
+        if isinstance(requirements, Mapping):
+            for selector, choices_by_value in requirements.items():
+                selected = values.get(str(selector))
+                if selected is None or not isinstance(choices_by_value, Mapping):
+                    continue
+                required = choices_by_value.get(str(selected))
+                if not isinstance(required, (list, tuple)):
+                    continue
+                missing_choice = [
+                    str(name)
+                    for name in required
+                    if values.get(str(name)) in (None, "")
+                ]
+                if missing_choice:
+                    raise CapabilityMissingInputError(
+                        f"executor {capability.id!r} missing required input(s) for "
+                        f"{selector}={selected!r}: {', '.join(missing_choice)}"
+                    )
+    else:
+        declared = {str(port.name) for port in ports}
+        unknown = sorted(set(values) - declared)
+        if unknown:
+            declared_hint = ", ".join(sorted(declared)) or "none"
+            raise CapabilityValidationError(
+                f"orchestrator {capability.id!r} does not declare SDK input(s): "
+                f"{', '.join(unknown)}; declared inputs: {declared_hint}. recovery: pass the "
+                "runtime flags through orchestrator_args=(\"--flag\", \"value\") and retry"
+            )
+
+    return _json_safe_mapping(values)
+
+
+def _manifest_dry_run_result(
+    capability: Any,
+    *,
+    inputs: Mapping[str, Any] | None,
+    outputs: Mapping[str, Any] | None,
+    brief: Path | str | None,
+    python_exec: str | None,
+    orchestrator_args: tuple[str, ...],
+) -> tuple[dict[str, Any], bool]:
+    """Build the stable no-side-effect preview envelope from a capability DTO."""
+
+    validation_inputs = dict(inputs or {})
+    if brief is not None:
+        validation_inputs.setdefault("brief", brief)
+    preview_inputs = _validate_manifest_preview_inputs(
+        capability,
+        inputs=validation_inputs,
+        orchestrator_args=orchestrator_args,
+    )
+    if brief is not None:
+        preview_inputs.setdefault("brief", _json_safe(brief))
+    if python_exec is not None:
+        preview_inputs.setdefault("python_exec", python_exec)
+    preview = {
+        "kind": "manifest-ledger",
+        "capability_id": str(capability.id),
+        "inputs": preview_inputs,
+        "outputs": _json_safe_mapping(dict(outputs or {})),
+    }
+    command = _manifest_preview_command(
+        capability,
+        inputs=preview_inputs,
+        outputs=outputs,
+        brief=brief,
+        python_exec=python_exec,
+        orchestrator_args=orchestrator_args,
+    )
+    if capability.capability_type == "executor":
+        return {
+            "executor_id": capability.id,
+            "kind": capability.native_kind,
+            "command": command,
+            "cwd": None,
+            "env": {},
+            "payload": {"preview": preview},
+            "returncode": None,
+            "dry_run": True,
+            "skipped": False,
+            "skipped_reason": "",
+            "missing_binaries": [],
+            "error": None,
+            "ok": True,
+            "run_id": None,
+            "run_root": None,
+            "outputs": {},
+            "executor_version": None,
+        }, True
+
+    runtime = capability.definition.get("runtime", {})
+    runtime_kind = runtime.get("kind") if isinstance(runtime, Mapping) else None
+    return {
+        "orchestrator_id": capability.id,
+        "kind": capability.native_kind,
+        "runtime_kind": runtime_kind or "unknown",
+        "command": command,
+        "planned_commands": [command] if command else [],
+        "cwd": None,
+        "env": {},
+        "returncode": None,
+        "dry_run": True,
+        "outputs": {},
+        "errors": [],
+        "plan": {
+            "steps": [],
+            "summary": "manifest-ledger preview; execution deferred to the runtime",
+        },
+        "preview": preview,
+        "ok": True,
+    }, True
+
+
+def _manifest_preview_command(
+    capability: Any,
+    *,
+    inputs: Mapping[str, Any],
+    outputs: Mapping[str, Any] | None,
+    brief: Path | str | None,
+    python_exec: str | None,
+    orchestrator_args: tuple[str, ...],
+) -> list[str]:
+    """Expand a manifest command without importing a runner or touching disk.
+
+    This is intentionally a lightweight display-only expansion.  It does not
+    resolve output placeholders or infer pipeline steps; the runtime remains
+    the sole authority for executable command construction.
+    """
+
+    definition = capability.definition
+    if capability.capability_type == "executor":
+        raw_command = definition.get("command")
+        if not isinstance(raw_command, Mapping):
+            module = definition.get("metadata", {}).get("runtime_module")
+            return ["python", "-m", str(module)] if isinstance(module, str) and module else []
+    else:
+        runtime = definition.get("runtime")
+        raw_command = runtime.get("command") if isinstance(runtime, Mapping) else None
+    if not isinstance(raw_command, Mapping):
+        return []
+    raw_argv = raw_command.get("argv")
+    if not isinstance(raw_argv, (list, tuple)):
+        return []
+    values: dict[str, Any] = {str(key): value for key, value in inputs.items()}
+    values.setdefault("brief", brief)
+    values.setdefault("python_exec", python_exec or "python")
+    values.setdefault("verbose", "false")
+    values.update({"out": outputs.get("out")} if isinstance(outputs, Mapping) and "out" in outputs else {})
+    pattern = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+    command: list[str] = []
+    for raw_part in raw_argv:
+        if not isinstance(raw_part, str):
+            continue
+        if raw_part == "{orchestrator_args}":
+            command.extend(str(value) for value in orchestrator_args)
+            continue
+        command.append(
+            pattern.sub(
+                lambda match: str(values.get(match.group(1), match.group(0))),
+                raw_part,
+            )
+        )
+    # A few built-in dispatcher manifests intentionally keep their typed
+    # inputs in metadata rather than repeating every forwarded flag in the
+    # command template.  Include those values in the display preview without
+    # treating this list as an executable runtime command.
+    for name, value in values.items():
+        if name in {"python_exec", "verbose", "out"} or value in (None, ""):
+            continue
+        if f"{{{name}}}" not in " ".join(str(part) for part in raw_argv):
+            command.extend((f"--{name.replace('_', '-')}", str(value)))
+    return command
 
 
 def _validate_timeline_visualize_inputs(
@@ -1446,20 +1671,24 @@ def invoke(
     # checks for direct CLI callers, but SDK callers should get the same
     # actionable typed error at admission time.
     invocation_authority_context: dict[str, Any] | None = None
-    if capability.id == "rendering.timeline_visualize":
-        invocation_authority_context = _validate_timeline_visualize_inputs(
-            inputs,
-            project=project,
-            project_root=project_root,
-            out=out,
-        )
-    elif capability.id == "rendering.render":
-        inputs, invocation_authority_context = _prepare_managed_render_inputs(
-            inputs,
-            project=project,
-            project_root=project_root,
-            _client=_client,
-        )
+    # These are managed-authority checks, not manifest checks.  A dry-run is
+    # intentionally limited to the source ledger and therefore cannot inspect
+    # a project tree or materialize a render snapshot.
+    if not dry_run:
+        if capability.id == "rendering.timeline_visualize":
+            invocation_authority_context = _validate_timeline_visualize_inputs(
+                inputs,
+                project=project,
+                project_root=project_root,
+                out=out,
+            )
+        elif capability.id == "rendering.render":
+            inputs, invocation_authority_context = _prepare_managed_render_inputs(
+                inputs,
+                project=project,
+                project_root=project_root,
+                _client=_client,
+            )
 
     # Generation requests have a single read-only preflight for both dry-run
     # and live invocation.  This keeps generic ``sdk.invoke`` from accepting
@@ -1498,54 +1727,19 @@ def invoke(
                 python_executable=python_exec,
             )
 
-    # Ledger exemption: dry_run never admitted
+    # Ledger exemption: dry_run never admitted.  The preview is built from the
+    # already resolved manifest DTO and does not import either runner or any
+    # local project/run authority.
     if dry_run:
         try:
-            if capability.capability_type == "executor":
-                from astrid.core.execution.executor.runner import ExecutorRunRequest
-
-                executor_registry, _, _ = registries
-                request = ExecutorRunRequest(
-                    executor_id=capability.id,
-                    out=out,
-                    project=project,
-                    inputs=dict(inputs or {}),
-                    outputs=dict(outputs or {}),
-                    brief=brief,
-                    dry_run=True,
-                    check_binaries=check_binaries,
-                    python_exec=python_exec,
-                    verbose=verbose,
-                    execution_mode=execution_mode,
-                    argv=tuple(argv),
-                    invocation="sdk",
-                    projects_root=project_root,
-                )
-                with redirect_stdout(StringIO()):
-                    result = sdk_module.run_executor(request, executor_registry)
-                raw_result = _normalize_executor_result(result)
-            else:
-                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
-
-                _, orchestrator_registry, _ = registries
-                request = OrchestratorRunRequest(
-                    orchestrator_id=capability.id,
-                    out=out,
-                    project=project,
-                    inputs=dict(inputs or {}),
-                    outputs=dict(outputs or {}),
-                    brief=brief,
-                    orchestrator_args=tuple(orchestrator_args),
-                    dry_run=True,
-                    python_exec=python_exec,
-                    verbose=verbose,
-                    execution_mode=execution_mode,
-                    invocation="sdk",
-                    projects_root=project_root,
-                )
-                with redirect_stdout(StringIO()):
-                    result = sdk_module.run_orchestrator(request, orchestrator_registry)
-                raw_result = _normalize_orchestrator_result(result)
+            raw_result, preview_ok = _manifest_dry_run_result(
+                capability,
+                inputs=inputs,
+                outputs=outputs,
+                brief=brief,
+                python_exec=python_exec,
+                orchestrator_args=tuple(orchestrator_args),
+            )
         except AstridSDKError:
             raise
         except Exception as exc:
@@ -1555,21 +1749,16 @@ def invoke(
             raise CapabilityInvocationError(
                 f"failed to invoke {capability.capability_type} {capability.id!r}"
             ) from exc
-        internal_error = _internal_error_from_result(result)
-        error = (
-            _error_payload_from_internal_error(internal_error, json_safe=_json_safe)
-            if internal_error is not None
-            else None
-        )
-        manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
-        run_id_raw = raw_result.get("run_id")
-        run_root_raw = raw_result.get("run_root")
+        error = raw_result.get("error") if isinstance(raw_result.get("error"), Mapping) else None
+        manifest_path = None
+        run_id_raw = None
+        run_root_raw = None
         executor_version_raw = raw_result.get("executor_version")
         return InvocationResult(
             capability_id=capability.id,
             capability_type=capability.capability_type,
             native_kind=capability.native_kind,
-            ok=bool(getattr(result, "ok", False)),
+            ok=preview_ok,
             error=error,
             manifest_path=manifest_path,
             raw_result=raw_result,
@@ -1577,16 +1766,7 @@ def invoke(
             run_root=str(Path(run_root_raw).expanduser().resolve())
             if isinstance(run_root_raw, str) and run_root_raw
             else None,
-            outputs=_invocation_outputs(
-                raw_result,
-                manifest_path=manifest_path,
-                project_root=(
-                    (_resolve_projects_root(project_root, project) / project).resolve()
-                    if project is not None
-                    else None
-                ),
-                capability_id=capability.id,
-            ),
+            outputs={},
             executor_version=executor_version_raw
             if isinstance(executor_version_raw, str) and executor_version_raw
             else None,
