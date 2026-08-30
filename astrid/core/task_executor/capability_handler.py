@@ -1,8 +1,8 @@
-"""Generic capability TaskHandler — executor/orchestrator via in-process runner.
+"""Generic capability TaskHandler — executor/orchestrator via subprocess runner.
 
 One handler replaces every per-executor bespoke adapter. It builds the
-appropriate RunRequest for the declared kind, invokes the runner
-in-process under ASTRID_INTERNAL_INVOCATION=1, discovers concrete
+appropriate RunRequest for the declared kind, invokes the runner in a
+subprocess under ASTRID_INTERNAL_INVOCATION=1, discovers concrete
 outputs (preferring the capability's manifest.json else walking staging),
 and returns a universal result manifest for ExecutionService re-validation.
 """
@@ -211,7 +211,7 @@ class CapabilityTaskHandler:
             )
 
         # Generic single-task admission: no ghost fan-out. All capabilities
-        # (executor or orchestrator) execute via their real runner under
+        # (executor or orchestrator) execute via their subprocess runner under
         # ASTRID_INTERNAL_INVOCATION=1 (staging-only, kernel-owned ledger).
         root_scope = (
             _scoped_env(ASTRID_PROJECTS_ROOT, str(self._projects_root))
@@ -253,7 +253,7 @@ class CapabilityTaskHandler:
                     check_binaries=False,
                     python_exec=None,
                     verbose=False,
-                    execution_mode="in_process",
+                    execution_mode="subprocess",
                     project_was_auto_resolved=True,
                     argv=(),
                     invocation=self._invocation,
@@ -304,7 +304,7 @@ class CapabilityTaskHandler:
                     dry_run=False,
                     python_exec=None,
                     verbose=False,
-                    execution_mode="in_process",
+                    execution_mode="subprocess",
                     project_was_auto_resolved=True,
                     invocation=self._invocation,
                     projects_root=self._projects_root,

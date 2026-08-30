@@ -18,7 +18,10 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
 ) -> None:
     """A direct-CLI path print must not corrupt an SDK JSON envelope."""
 
+    observed: dict[str, str] = {}
+
     def fake_run(request, _registry):
+        observed["execution_mode"] = request.execution_mode
         output = Path(request.out) / "result.txt"
         output.write_text("durable artifact\n", encoding="utf-8")
         print(Path(request.out) / ".transient-staging" / "result.txt")
@@ -43,6 +46,7 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     assert captured.out == ""
     assert captured.err == ""
     assert [item["path"] for item in manifest["outputs"]] == ["out/result.txt"]
+    assert observed["execution_mode"] == "subprocess"
 
 
 def test_retried_legacy_executor_task_fails_closed_without_version(
