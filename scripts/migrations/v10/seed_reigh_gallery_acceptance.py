@@ -19,8 +19,8 @@ No SQLite row is ever written directly.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import sqlite3
 import struct
 import sys
 import tempfile
@@ -69,9 +69,14 @@ def _palette(index: int, variant: int) -> tuple[int, int, int]:
     )
 
 
-def _read_counts(root: Path) -> dict[str, Any]:
-    db = root / ".astrid" / "astrid.sqlite3"
-    if not db.is_file():
+def _read_counts(root: Path, client: Any | None = None) -> dict[str, Any]:
+    """Read acceptance counts through the workspace runtime.
+
+    ``root`` is retained as the caller-owned staging directory for API
+    compatibility; it is never opened as a local authority.
+    """
+    del root
+    if client is None:
         return {
             "project_present": False,
             "generations": 0,
@@ -79,45 +84,26 @@ def _read_counts(root: Path) -> dict[str, Any]:
             "timelines": 0,
             "pinned_shot_groups": 0,
         }
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    try:
-        row = conn.execute("SELECT id FROM projects WHERE slug = ?", (PROJECT_SLUG,)).fetchone()
-        if row is None:
-            return {
-                "project_present": False,
-                "generations": 0,
-                "variants": 0,
-                "timelines": 0,
-                "pinned_shot_groups": 0,
-            }
-        project_id = str(row[0])
-        generation_count = int(conn.execute(
-            "SELECT COUNT(*) FROM generations WHERE project_id=? AND deleted_at IS NULL",
-            (project_id,),
-        ).fetchone()[0])
-        variant_count = int(conn.execute(
-            "SELECT COUNT(*) FROM generation_variants v JOIN generations g ON g.id=v.generation_id "
-            "WHERE g.project_id=? AND g.deleted_at IS NULL",
-            (project_id,),
-        ).fetchone()[0])
-        timelines = conn.execute(
-            "SELECT document_json FROM timelines WHERE project_id=?",
-            (project_id,),
-        ).fetchall()
-        pinned = 0
-        for timeline in timelines:
-            config = json.loads(str(timeline[0]))
-            groups = config.get("pinnedShotGroups") if isinstance(config, dict) else None
-            pinned += len(groups) if isinstance(groups, list) else 0
-        return {
-            "project_present": True,
-            "generations": generation_count,
-            "variants": variant_count,
-            "timelines": len(timelines),
-            "pinned_shot_groups": pinned,
-        }
-    finally:
-        conn.close()
+    shown = client.projects.show(PROJECT_SLUG)
+    if not shown.ok or shown.data is None:
+        return {"project_present": False, "generations": 0, "variants": 0, "timelines": 0, "pinned_shot_groups": 0}
+    project_id = str(shown.data.get("id") or shown.data.get("project_id"))
+    generations = client.generations.list(project_id)
+    generation_rows = generations.data.get("items", []) if generations.ok and isinstance(generations.data, dict) else []
+    variants = 0
+    for generation in generation_rows:
+        generation_id = str(generation.get("id") or generation.get("generation_id"))
+        page = client.generations.variants(project_id, generation_id)
+        if page.ok and isinstance(page.data, dict):
+            variants += len(page.data.get("items", []))
+    timelines = client.timelines.list(project_id)
+    timeline_rows = timelines.data if timelines.ok and isinstance(timelines.data, list) else []
+    pinned = 0
+    for timeline in timeline_rows:
+        config = timeline.get("config") if isinstance(timeline, dict) else None
+        groups = config.get("pinnedShotGroups") if isinstance(config, dict) else None
+        pinned += len(groups) if isinstance(groups, list) else 0
+    return {"project_present": True, "generations": len(generation_rows), "variants": variants, "timelines": len(timeline_rows), "pinned_shot_groups": pinned}
 
 
 def _require_ok(result: Any, operation: str) -> dict[str, Any]:
@@ -136,20 +122,14 @@ def _ensure_music_acceptance_timeline(client: Any) -> bool:
     references that exact primary media row.
     """
 
-    from astrid.packs.shots.generation_repository import GenerationRepository
-
     shown = client.projects.show(MUSIC_PROJECT_SLUG)
     if not shown.ok or shown.data is None:
         return False
     project_id = str(shown.data["id"])
-    rows = GenerationRepository().list(
-        client.app.writer,
-        project_id,
-        type="image",
-        limit=10,
-    )
-    primary = next((row for row in rows if row.primary_media_id), None)
-    if primary is None or primary.primary_media_id is None:
+    listed = client.generations.list(project_id)
+    rows = listed.data.get("items", []) if listed.ok and isinstance(listed.data, dict) else []
+    primary = next((row for row in rows if row.get("metadata", {}).get("primary_media_id")), None)
+    if primary is None:
         return False
     _require_ok(
         client.timelines.create(
@@ -180,9 +160,9 @@ def _ensure_music_acceptance_timeline(client: Any) -> bool:
             registry={
                 "assets": {
                     "cover-image": {
-                        "media_id": primary.primary_media_id,
+                        "media_id": primary["metadata"]["primary_media_id"],
                         "type": "image/png",
-                        "generationId": primary.id,
+                        "generationId": primary.get("generation_id", primary.get("id")),
                     }
                 }
             },
@@ -194,120 +174,107 @@ def _ensure_music_acceptance_timeline(client: Any) -> bool:
     return True
 
 
-def _apply(root: Path) -> None:
-    from astrid.core.io.media_import import prepare_media_file
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.packs.shots.generation_repository import GenerationRepository
-    from astrid.sdk.client import AstridClient
+def _apply(root: Path, client: Any) -> None:
+    project = _require_ok(
+        client.projects.create(
+            slug=PROJECT_SLUG,
+            name=PROJECT_NAME,
+            settings={"fixture_kind": "reigh-gallery-acceptance-v1"},
+            idempotency_key="fixture:reigh-gallery:project:v1",
+        ),
+        "project create",
+    )
+    project_id = str(project.get("id") or project.get("project_id"))
+    client.tasks.register_capability(
+        "fixture.reigh_gallery_image",
+        "sha256:" + hashlib.sha256(b"fixture.reigh_gallery_image:v1").hexdigest(),
+        status="ready",
+        idempotency_key="fixture:reigh-gallery:capability:v1",
+    )
+    client.tasks.register_executor(
+        executor_id="reigh-acceptance-fixture",
+        capabilities=["fixture.reigh_gallery_image"],
+        idempotency_key="fixture:reigh-gallery:executor:v1",
+    )
+    primary_media: list[dict[str, str]] = []
 
-    with AstridClient.open(projects_root=root) as client:
-        project = _require_ok(
-            client.projects.create(
-                slug=PROJECT_SLUG,
-                name=PROJECT_NAME,
-                settings={"fixture_kind": "reigh-gallery-acceptance-v1"},
-                idempotency_key="fixture:reigh-gallery:project:v1",
-            ),
-            "project create",
-        )
-        project_id = str(project["id"])
-        primary_media: list[dict[str, str]] = []
+    staging_root = root / ".astrid" / "media" / ".staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="reigh-gallery-fixture-", dir=staging_root) as raw_staging:
+        staging = Path(raw_staging)
+        for index in range(GENERATION_COUNT):
+            key = f"fixture:reigh-gallery:generation:{index:02d}:v1"
+            task = _require_ok(
+                client.tasks.create(
+                    project_id=project_id,
+                    capability="fixture.reigh_gallery_image",
+                    spec={"fixture": "reigh-gallery-acceptance-v1", "prompt": f"Deterministic colour study {index + 1}"},
+                    input_manifest=[],
+                    idempotency_key=f"{key}:create",
+                ),
+                f"task {index} create",
+            )
+            task_id = str(task.get("id") or task.get("task_id"))
+            claim = _require_ok(
+                client.tasks.claim(
+                    executor_id="reigh-acceptance-fixture",
+                    capability_ids=["fixture.reigh_gallery_image"],
+                    idempotency_key=f"{key}:claim",
+                ),
+                f"task {index} claim",
+            )
+            if str(claim.get("task_id")) != task_id:
+                raise RuntimeError(f"task {index} claim selected an unexpected task")
 
-        staging_root = root / ".astrid" / "media" / ".staging"
-        staging_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="reigh-gallery-fixture-", dir=staging_root) as raw_staging:
-            staging = Path(raw_staging)
-            for index in range(GENERATION_COUNT):
-                key = f"fixture:reigh-gallery:generation:{index:02d}:v1"
-                task = _require_ok(
-                    client.tasks.create(
-                        project_id=project_id,
-                        capability="fixture.reigh_gallery_image",
-                        spec={
-                            "fixture": "reigh-gallery-acceptance-v1",
-                            "prompt": f"Deterministic colour study {index + 1}",
-                            "output_policy": {"create_generation": True},
-                        },
-                        input_manifest=[],
-                        available_at=STAMP,
-                        max_attempts=1,
-                        idempotency_key=f"{key}:create",
+            outputs: list[dict[str, Any]] = []
+            imported: list[dict[str, Any]] = []
+            for variant_index in range(VARIANTS_PER_GENERATION):
+                filename = f"study-{index + 1:02d}-variant-{variant_index + 1}.png"
+                path = staging / filename
+                path.write_bytes(_solid_png(320, 180, _palette(index, variant_index)))
+                media = _require_ok(
+                    client.media.import_file(project=project_id, path=path, idempotency_key=f"{key}:media:{variant_index}"),
+                    f"task {index} media {variant_index}",
+                )
+                imported.append(media)
+                outputs.append({"digest": media["digest"], "media_type": "image/png", "name": filename})
+
+            _require_ok(
+                client.tasks.settle(
+                    str(claim["attempt_id"]),
+                    lease_id=str(claim["lease_id"]),
+                    fence=int(claim["fence"]),
+                    outputs=outputs,
+                    idempotency_key=f"{key}:settle",
+                ),
+                f"task {index} settle",
+            )
+            generation_id = f"reigh-gallery-generation-{index + 1:02d}"
+            generation = _require_ok(
+                client.generations.create(
+                    project=project_id,
+                    generation_id=generation_id,
+                    type="image",
+                    source_task_id=task_id,
+                    metadata={"fixture": "reigh-gallery-acceptance-v1", "primary_media_id": imported[0]["object_id"]},
+                    idempotency_key=f"{key}:generation",
+                ),
+                f"generation {index} create",
+            )
+            generation_id = str(generation.get("generation_id") or generation.get("id"))
+            for variant_index, media in enumerate(imported):
+                _require_ok(
+                    client.generations.create_variant(
+                        generation_id,
+                        variant_id=f"{generation_id}-variant-{variant_index + 1}",
+                        object_id=media["object_id"],
+                        variant_type="original" if variant_index == 0 else "alternate",
+                        metadata={"fixture_variant": variant_index},
+                        idempotency_key=f"{key}:variant:{variant_index}",
                     ),
-                    f"task {index} create",
+                    f"generation {index} variant {variant_index}",
                 )
-                task_id = str(task["id"])
-
-                claim = UnitOfWork(client.app.writer).run(
-                    lambda u, key=key: client.app.tasks.claim(
-                        u,
-                        project_id=project_id,
-                        idempotency_key=f"{key}:claim",
-                        actor_kind="system",
-                        executor_id="reigh-acceptance-fixture",
-                        lease_seconds=3600,
-                        now=STAMP,
-                    )
-                )
-                if claim is None or claim.task.id != task_id:
-                    raise RuntimeError(f"task {index} claim selected an unexpected task")
-                started = UnitOfWork(client.app.writer).run(
-                    lambda u, key=key, claim=claim: client.app.tasks.start(
-                        u,
-                        project_id=project_id,
-                        task_id=task_id,
-                        attempt_id=claim.attempt.id,
-                        expected_status_version=claim.attempt.status_version,
-                        lease_id=claim.attempt.lease_id,
-                        idempotency_key=f"{key}:start",
-                        actor_kind="system",
-                        now=STAMP,
-                    )
-                )
-
-                outputs: list[dict[str, Any]] = []
-                for variant_index in range(VARIANTS_PER_GENERATION):
-                    filename = f"study-{index + 1:02d}-variant-{variant_index + 1}.png"
-                    path = staging / filename
-                    path.write_bytes(_solid_png(320, 180, _palette(index, variant_index)))
-                    outputs.append({
-                        "ordinal": variant_index,
-                        "is_primary": variant_index == 0,
-                        "role": "result" if variant_index == 0 else "artifact",
-                        "label": filename,
-                        "path": filename,
-                        "variant_type": "original" if variant_index == 0 else "alternate",
-                        "name": "Original" if variant_index == 0 else "Alternate colour",
-                        "variant_params": {"fixture_variant": variant_index},
-                        "prepared": prepare_media_file(path, root=staging),
-                    })
-
-                completed = UnitOfWork(client.app.writer).run(
-                    lambda u, key=key, claim=claim, started=started, outputs=outputs: client.app.tasks.complete(
-                        u,
-                        project_id=project_id,
-                        task_id=task_id,
-                        attempt_id=claim.attempt.id,
-                        lease_id=claim.attempt.lease_id,
-                        expected_status_version=started.status_version,
-                        idempotency_key=f"{key}:complete",
-                        outputs=outputs,
-                        media_repo=client.app.media,
-                        generation_repo=GenerationRepository(),
-                        generation_request={
-                            "type": "image",
-                            "params": {
-                                "fixture": "reigh-gallery-acceptance-v1",
-                                "prompt": f"Deterministic colour study {index + 1}",
-                            },
-                        },
-                        actor_kind="system",
-                        now=STAMP,
-                    )
-                )
-                primary = next(output for output in completed.outputs if output.is_primary)
-                if primary.media_id is None:
-                    raise RuntimeError(f"task {index} primary output has no media id")
-                primary_media.append({"id": str(primary.media_id), "type": "image/png"})
+            primary_media.append({"id": imported[0]["object_id"], "type": "image/png"})
 
         clips: list[dict[str, Any]] = []
         registry_assets: dict[str, dict[str, str]] = {}
@@ -356,16 +323,23 @@ def _apply(root: Path) -> None:
 
 
 def seed_reigh_gallery_acceptance(root: Path, *, apply: bool = False) -> dict[str, Any]:
-    before = _read_counts(root)
-    if apply:
-        _apply(root)
-    after = _read_counts(root)
     expected = {
         "generations": GENERATION_COUNT,
         "variants": GENERATION_COUNT * VARIANTS_PER_GENERATION,
         "timelines": 1,
         "pinned_shot_groups": SHOT_COUNT,
     }
+    if apply:
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as client:
+            before = _read_counts(root, client)
+            if not before.get("project_present") or any(before.get(key) != value for key, value in expected.items()):
+                _apply(root, client)
+            after = _read_counts(root, client)
+    else:
+        before = _read_counts(root)
+        after = _read_counts(root)
     ok = all(after[key] == value for key, value in expected.items()) if apply else True
     return {
         "ok": ok,

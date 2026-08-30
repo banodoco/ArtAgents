@@ -40,10 +40,44 @@ class RemoteProjects(_RemoteFamily):
 class RemoteTimelines(_RemoteFamily):
     def create(self, *, project, slug=None, name=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
-        return self._typed("create_timeline", project, slug or name or "timeline", key=key, idempotency_key=key)
-    def list(self, project, **kwargs): return self._typed("list_timelines", project)
-    def show(self, project, ref): return self._typed("get_timeline", ref)
+        config = kwargs.pop("config", {"tracks": [], "clips": []})
+        registry = kwargs.pop("registry", {"assets": {}})
+        timeline_id = kwargs.pop("timeline_id", uuid.uuid4().hex)
+        if callable(getattr(self._client, "create_timeline_document", None)):
+            return self._typed(
+                "create_timeline_document",
+                project,
+                timeline_id,
+                key=key,
+                config=config,
+                registry=registry,
+                slug=slug or name or "timeline",
+                name=name or slug or "Timeline",
+                idempotency_key=key,
+            )
+        return self._typed("create_timeline", project, timeline_id, key=key, idempotency_key=key)
+    def list(self, project, **kwargs):
+        result = self._typed("list_timelines", project)
+        if result.ok and isinstance(result.data, dict):
+            return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
+        return result
+    def show(self, project, ref):
+        result = self._typed("get_timeline", ref)
+        if result.ok:
+            return result
+        listed = self.list(project)
+        if listed.ok:
+            match = next((row for row in listed.data or [] if isinstance(row, dict) and row.get("slug") == ref), None)
+            if match and match.get("timeline_id"):
+                return self._typed("get_timeline", str(match["timeline_id"]))
+        return result
     def save(self, project, ref, *, expected_version=1, shots=None, references=None, idempotency_key=None, **kwargs):
+        config = kwargs.pop("config", None)
+        registry = kwargs.pop("registry", None)
+        if config is not None or registry is not None:
+            current = self._client.get_document(project, f"timeline:{ref}")
+            content = dict(current.content) if hasattr(current, "content") and isinstance(current.content, dict) else {}
+            return self._typed("update_timeline_document", project, ref, expected_version=expected_version, config=config or content.get("config", {}), registry=registry or content.get("registry", {}), slug=kwargs.pop("slug", None), name=kwargs.pop("name", None))
         return self._typed("update_timeline", ref, key=idempotency_key, expected_version=expected_version, shots=shots, references=references)
     def history(self, project, ref, *, cursor=None, limit=50, **kwargs):
         result = self._typed("list_timeline_history", ref, cursor=cursor, limit=limit)
@@ -128,12 +162,23 @@ class RemoteMedia(_RemoteFamily):
 
 
 class RemoteTasks(_RemoteFamily):
+    def register_executor(self, *, executor_id: str, capabilities: list[str], idempotency_key: str, **kwargs):
+        return self._typed("register_executor", {"executor_id": executor_id, "capabilities": capabilities, **kwargs}, key=idempotency_key, idempotency_key=idempotency_key)
+    def register_capability(self, capability_id: str, definition_digest: str, *, idempotency_key=None, **kwargs):
+        return self._typed("register_capability", capability_id, definition_digest, key=idempotency_key, idempotency_key=idempotency_key, **kwargs)
     def create(self, *, project_id=None, capability, spec, input_manifest=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
         try: match = next((item for item in self._client.list_capabilities() if item.get("capability_id") == capability), None)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         if match is None: return DomainResult.failure(ErrorObject("not_found", "capability is not registered", {"capability_id": capability}), idempotency_key=key)
         return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec)
+    def claim(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str):
+        return self._typed("claim_task", key=idempotency_key, executor_id=executor_id, capability_ids=capability_ids, idempotency_key=idempotency_key)
+    def settle(self, attempt_id: str, *, lease_id: str, fence: int, outputs: list[dict], idempotency_key: str, effect: dict | None = None):
+        settlement = {"lease_id": lease_id, "fence": fence, "outputs": outputs}
+        if effect is not None:
+            settlement["effect"] = effect
+        return self._typed("settle_attempt", attempt_id, settlement, key=idempotency_key, idempotency_key=idempotency_key)
     def list(self, project_id, *, cursor=None, limit=50, **kwargs):
         result = self._typed("list_project_tasks", project_id, cursor=cursor, limit=limit)
         if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
@@ -220,9 +265,13 @@ class RemoteShots(_RemoteFamily):
 
 
 class RemoteGenerations(_RemoteFamily):
+    def create(self, *, project: str, generation_id: str, metadata=None, type="image", source_task_id=None, idempotency_key=None):
+        return self._typed("create_generation", project, generation_id, key=idempotency_key, metadata=metadata or {}, type=type, source_task_id=source_task_id)
     def list(self, project): return self._typed("list_generations", project)
     def show(self, project, generation_id): return self._typed("get_generation", generation_id)
     def variants(self, project, generation_id): return self._typed("list_variants", generation_id)
+    def create_variant(self, generation_id: str, *, variant_id: str, object_id: str | None = None, variant_type="original", metadata=None, idempotency_key=None):
+        return self._typed("create_variant", generation_id, variant_id, key=idempotency_key, object_id=object_id, variant_type=variant_type, metadata=metadata or {})
 
 
 class RemoteAstridClient:

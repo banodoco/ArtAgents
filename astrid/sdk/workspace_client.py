@@ -167,6 +167,12 @@ class WorkspaceClient:
     def create_timeline(self, project_id: str, timeline_id: str, *, idempotency_key: str) -> Any:
         return self._call_generated("create_timeline", project_id, timeline_id, idempotency_key=idempotency_key)
 
+    def create_timeline_document(self, project_id: str, timeline_id: str, *, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str, name: str, idempotency_key: str) -> Any:
+        return self._call_generated("create_timeline_document", project_id, timeline_id, config=config, registry=registry, slug=slug, name=name, idempotency_key=idempotency_key)
+
+    def update_timeline_document(self, project_id: str, timeline_id: str, *, expected_version: int, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str | None = None, name: str | None = None) -> Any:
+        return self._call_generated("update_timeline_document", project_id, timeline_id, expected_version=expected_version, config=config, registry=registry, slug=slug, name=name)
+
     def list_timelines(self, project_id: str) -> Any:
         items, cursor = self._call_generated("list_timelines", project_id)
         return {"items": list(items), "next_cursor": cursor}
@@ -457,8 +463,20 @@ class WorkspaceClient:
     def create_generation(self, project_id: str, generation_id: str, **kwargs: Any) -> Any:
         return self._call_generated("create_generation", project_id, generation_id, **kwargs)
 
+    def create_variant(self, generation_id: str, variant_id: str, **kwargs: Any) -> Any:
+        return self._call_generated("create_variant", generation_id, variant_id, **kwargs)
+
     def list_capabilities(self) -> Any:
         return [asdict(item) if is_dataclass(item) else item for item in self._call_generated("list_capabilities")]
 
     def register_capability(self, *args: Any, **kwargs: Any) -> Any:
         return self._call_generated("register_capability", *args, **kwargs)
+
+    def claim_task(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str) -> Any:
+        return self._call_generated("claim_task", executor_id=executor_id, capability_ids=capability_ids, idempotency_key=idempotency_key)
+
+    def register_executor(self, executor: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("register_executor", executor, idempotency_key=idempotency_key)
+
+    def settle_attempt(self, attempt_id: str, settlement: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("settle_attempt", attempt_id, settlement, idempotency_key=idempotency_key)
