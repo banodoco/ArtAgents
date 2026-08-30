@@ -314,6 +314,30 @@ class RuntimeProtocolClient:
             idempotency_key=f"capability:{capability_id}:{digest}",
         )
 
+    def withdraw_capability(self, capability_id: str, *, digest: str, reason: str):
+        """Withdraw a capability that disappeared from the source checkout.
+
+        Newer runtimes may expose an explicit withdrawal operation.  Older
+        workspace.v1 runtimes only expose capability registration, so mark the
+        stale row unavailable there; this closes the readiness hole without
+        inventing a second runtime protocol route.
+        """
+        withdraw = getattr(self.generated, "withdraw_capability", None)
+        if callable(withdraw):
+            return withdraw(
+                capability_id,
+                reason=reason,
+                idempotency_key=f"capability-withdraw:{capability_id}:{digest}",
+            )
+        return self.generated.register_capability(
+            capability_id,
+            digest,
+            required_resource_keys=[],
+            status="unavailable",
+            unavailable_reason=reason,
+            idempotency_key=f"capability-withdraw:{capability_id}:{digest}",
+        )
+
     def preflight_executor(self, executor_id: str, *, checks: Mapping[str, Any], ready: bool):
         return {"executor_id": executor_id, "checks": dict(checks), "ready": ready}
 
@@ -534,6 +558,8 @@ class GenericPackHost:
             for key, record in self.capabilities.items()
         }
         invalidations: list[str] = []
+        removed = sorted(set(self._registered_state) - set(state))
+        invalidations.extend(f"capability removed: {key}" for key in removed)
         for key in sorted(set(state) & set(self._registered_state)):
             for digest_name, label in (("capability_digest", "capability"), ("source_digest", "source"), ("dependency_digest", "dependency")):
                 if self._registered_state[key].get(digest_name) != state[key][digest_name]:
@@ -555,7 +581,9 @@ class GenericPackHost:
             self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
             self._registered_state = state
             self._registered_runtime_state = {**runtime_state, "source_epoch": self.source_epoch}
-            return {"executor_id": self.executor_id, "capabilities": [r.manifest() for r in self.capabilities.values()], "ready": [r.id for r in self.capabilities.values() if r.ready]}
+            return {"executor_id": self.executor_id, "capabilities": [r.manifest() for r in self.capabilities.values()], "ready": [r.id for r in self.capabilities.values() if r.ready], "withdrawn_capabilities": removed}
+        if removed:
+            self._withdraw_removed_capabilities(removed)
         # Publish capability admission metadata before advertising the executor.
         # A real runtime must be able to validate a task against the exact
         # definition digest/source-derived readiness before it can claim work.
@@ -623,13 +651,43 @@ class GenericPackHost:
         self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
         self._registered_state = state
         self._registered_runtime_state = {**runtime_state, "source_epoch": self.source_epoch}
-        return {"registration": registration, "capabilities": [r.manifest() for r in self.capabilities.values()]}
+        return {"registration": registration, "capabilities": [r.manifest() for r in self.capabilities.values()], "withdrawn_capabilities": removed}
+
+    def _withdraw_removed_capabilities(self, capability_ids: list[str]) -> None:
+        """Make removed capabilities unavailable before publishing new state."""
+        for capability_id in capability_ids:
+            prior = self._registered_state[capability_id]
+            reason = "capability removed from source checkout"
+            withdraw = getattr(self.client, "withdraw_capability", None)
+            if callable(withdraw):
+                withdraw(
+                    capability_id,
+                    digest=prior.get("capability_digest", ""),
+                    reason=reason,
+                )
+                continue
+            # Preserve compatibility with simple runtime fakes and older
+            # clients which have registration but no explicit withdrawal seam.
+            register = getattr(self.client, "register_capability", None)
+            if callable(register):
+                register(
+                    capability_id,
+                    definition={},
+                    digest=prior.get("capability_digest", ""),
+                    status="unavailable",
+                    unavailable_reason=reason,
+                )
+                continue
+            raise HostError(
+                f"runtime cannot withdraw removed capability: {capability_id}"
+            )
 
     def refresh(self) -> tuple[CapabilityRecord, ...]:
         """Re-scan source and report digest changes; callers must register again."""
         old = self.capabilities
         self.discover()
-        changed = []
+        removed = set(old) - set(self.capabilities)
+        changed = sorted(removed)
         for key, record in self.capabilities.items():
             if key in old and (
                 old[key].capability_digest != record.capability_digest
@@ -637,7 +695,7 @@ class GenericPackHost:
                 or old[key].dependency_digest != record.dependency_digest
             ):
                 changed.append(key)
-        return tuple(self.capabilities[key] for key in changed)
+        return tuple(old[key] if key in removed else self.capabilities[key] for key in changed)
 
     def _runtime_compatibility(self) -> dict[str, Any]:
         """Read and validate protocol/schema/runtime epoch when available."""

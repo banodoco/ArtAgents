@@ -48,11 +48,11 @@ class FakeRuntime:
         self.failures.append((task_id, lease_token, error, kwargs))
 
 
-def _write_manifest(root: Path, *, version: str = "1.0") -> Path:
+def _write_manifest(root: Path, *, version: str = "1.0", capability_id: str = "test.echo") -> Path:
     root.mkdir(parents=True)
     manifest = {
         "schema_version": 1,
-        "id": "test.echo",
+        "id": capability_id,
         "name": "Echo",
         "kind": "external",
         "version": version,
@@ -131,6 +131,37 @@ def test_source_and_dependency_digests_invalidate_registration(tmp_path):
     assert {record.id for record in changed} == {"test.echo", "test.child"}
     with pytest.raises(HostError, match="dependency digest changed: test.child"):
         host.register()
+
+
+def test_removed_capability_invalidates_and_is_withdrawn_on_deliberate_reregistration(tmp_path):
+    _write_manifest(tmp_path / "base", capability_id="test.base")
+    _write_manifest(tmp_path / "removed")
+
+    class WithdrawalRuntime(FakeRuntime):
+        def __init__(self):
+            super().__init__()
+            self.withdrawals = []
+
+        def withdraw_capability(self, capability_id, *, digest, reason):
+            self.withdrawals.append((capability_id, digest, reason))
+
+    runtime = WithdrawalRuntime()
+    host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
+    host.discover()
+    host.register()
+    removed_digest = host.capabilities["test.echo"].capability_digest
+
+    (tmp_path / "removed" / "executor.yaml").unlink()
+    assert [record.id for record in host.refresh()] == ["test.echo"]
+    with pytest.raises(HostError, match="capability removed: test.echo"):
+        host.register()
+
+    result = host.register(deliberate=True)
+    assert result["withdrawn_capabilities"] == ["test.echo"]
+    assert runtime.withdrawals == [
+        ("test.echo", removed_digest, "capability removed from source checkout")
+    ]
+    assert runtime.registrations[-1][1]["capabilities"] == ["test.base"]
 
 
 def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(tmp_path):
