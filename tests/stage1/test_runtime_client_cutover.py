@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-convergence"
+RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-control2"
 sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
@@ -132,3 +132,38 @@ def test_doctor_and_backup_never_open_local_storage(capsys, monkeypatch, tmp_pat
     assert "banodoco-local up --profile astrid" in capsys.readouterr().out
     assert dispatch._dispatch_backup(["--json"]) == 1
     assert "banodoco-local up --profile astrid" in capsys.readouterr().out
+
+
+def test_remote_domains_use_generated_runtime_and_reopen(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        client = AstridClient.open()
+        project = client.projects.create(slug="journey", name="Journey", idempotency_key="journey-project")
+        assert project.ok
+        timeline = client.timelines.create(project="journey", slug="main", idempotency_key="journey-timeline")
+        assert timeline.ok
+        timeline_id = timeline.data["timeline_id"]
+        saved = client.timelines.save("journey", timeline_id, expected_version=1, shots=[{"shot_id": "s1", "start_ms": 0, "duration_ms": 100}])
+        assert saved.ok and saved.data["version"] == 2
+        task = client.tasks.create(project_id="journey", capability="render.basic", spec={}, idempotency_key="journey-task")
+        assert task.ok
+        assert client.tasks.show(task.data["task_id"], project="journey").ok
+        assert client.tasks.events(task.data["task_id"]).ok
+        invoked = client.invoke("render.basic", idempotency_key="journey-invoke")
+        rendered = client.render("render.basic", idempotency_key="journey-render")
+        assert invoked.ok and rendered.ok
+        run = client.runs.show("journey", task.data["run_id"])
+        assert run.ok
+        assert client.runs.events("journey", task.data["run_id"]).ok
+        client.close()
+        daemon.stop()
+        daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+        monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+        reopened = AstridClient.open()
+        assert reopened.projects.show("journey").ok
+        assert reopened.timelines.show("journey", timeline_id).ok
+        reopened.close()
+    finally:
+        daemon.stop()

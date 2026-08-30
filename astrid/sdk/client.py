@@ -83,6 +83,10 @@ class AstridClient:
     def shots(self) -> Any:
         return self._remote.shots
 
+    @property
+    def generations(self) -> Any:
+        return self._remote.generations
+
     def handshake(self, **kwargs: Any) -> Any:
         return self._remote.handshake(**kwargs)
 
