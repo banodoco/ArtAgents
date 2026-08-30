@@ -1,0 +1,46 @@
+{
+  "timeline": {
+    "theme": "2rp",
+    "tracks": [
+      {"id": "probe", "kind": "visual", "label": "Font probe"}
+    ],
+    "theme_overrides": {
+      "visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}
+    },
+    "clips": [
+      {
+        "id": "local-font-glyph-probe",
+        "at": 0,
+        "track": "probe",
+        "clipType": "text",
+        "hold": 1,
+        "text": {
+          "content": "Astrid 2RP — Aa 0123",
+          "fontFamily": "'Sixtyfour', 'Sixtyfour Variable', monospace",
+          "fontSize": 96,
+          "bold": true,
+          "align": "center"
+        }
+      }
+    ]
+  },
+  "assets": {"assets": {}},
+  "theme": {
+    "id": "2rp",
+    "visual": {
+      "color": {"fg": "#ffffff", "bg": "#000000", "accent": "#fde68a"},
+      "type": {
+        "families": {
+          "heading": "'Sixtyfour', 'Sixtyfour Variable', monospace",
+          "body": "'Inter', system-ui, -apple-system, Helvetica, Arial, sans-serif",
+          "mono": "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
+        },
+        "size": {"base": 56, "small": 32, "large": 128},
+        "weight": {"normal": 300, "bold": 500},
+        "lineHeight": 1.1
+      },
+      "motion": {"fadeMs": 500},
+      "canvas": {"width": 1920, "height": 1080, "fps": 30}
+    }
+  }
+}

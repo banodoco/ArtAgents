@@ -7,14 +7,11 @@ import {
 import { createElement, useEffect, useState, type ReactElement } from "react";
 
 /**
- * Fonts that are currently approved and shipped with this checkout.
- *
- * Sixtyfour is intentionally not listed until a redistributable local face
- * and its provenance are reviewed. The 2RP theme still names it, so the
- * Stage 1 offline-render capability must remain blocked until that decision
- * is made; it must never fall back to a hosted Google-font request.
+ * Every font named by the 2RP theme is shipped locally. Keep this list in
+ * lockstep with public/fonts/FONT_PROVENANCE.md and never add a hosted source.
  */
 export const LOCAL_FONT_FACES = [
+  { family: "Sixtyfour", file: "fonts/Sixtyfour.woff2", weight: 400 },
   { family: "Inter", file: "fonts/Inter-Regular.woff2", weight: 400 },
   { family: "Inter", file: "fonts/Inter-Bold.woff2", weight: 700 },
   {
@@ -28,6 +25,10 @@ export const LOCAL_FONT_FACES = [
     weight: 700,
   },
 ] as const;
+
+// A representative probe makes the browser load the actual glyph path used
+// by the render instead of merely resolving a family name.
+export const LOCAL_FONT_GLYPH_PROBE = "Astrid 2RP — Aa 0123";
 
 export const getLocalFontFaceCss = (): string =>
   LOCAL_FONT_FACES.map(
@@ -57,13 +58,19 @@ export const FontProvider = (): ReactElement => {
 
         await Promise.all(
           LOCAL_FONT_FACES.map(({ family, weight }) =>
-            document.fonts.load(`${weight} 16px "${family}"`, "Astrid"),
+            document.fonts.load(
+              `${weight} 16px "${family}"`,
+              LOCAL_FONT_GLYPH_PROBE,
+            ),
           ),
         );
 
         const missing = LOCAL_FONT_FACES.filter(
           ({ family, weight }) =>
-            !document.fonts.check(`${weight} 16px "${family}"`, "Astrid"),
+            !document.fonts.check(
+              `${weight} 16px "${family}"`,
+              LOCAL_FONT_GLYPH_PROBE,
+            ),
         );
         if (missing.length > 0) {
           throw new Error(
