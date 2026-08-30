@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
+from importlib import import_module
 from io import StringIO
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -19,11 +20,23 @@ from typing import Any, Iterator, Mapping
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.audit.util import SECRET_VALUE_RE
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH, ASTRID_PROJECTS_ROOT
-from astrid.core.execution.executor import runner as executor_runner
 from astrid.core.io.media_import import prepare_media_file
-from astrid.core.project.run import discover_manifest_path, load_manifest_output_artifacts
+from astrid.core.runtime.manifest import (
+    discover_manifest_path,
+    load_manifest_output_artifacts,
+)
 
 _TIMELINE_VISUALIZE_AUTHORITY_ENV = "ASTRID_TIMELINE_VISUALIZE_AUTHORITY_CONTEXT"
+
+
+def __getattr__(name: str):
+    """Preserve the test/extension hook without an eager runner import."""
+
+    if name == "executor_runner":
+        module = import_module("astrid.core.execution.executor.runner")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _failure_log_detail(out_dir: Path) -> str:
@@ -122,6 +135,13 @@ class CapabilityTaskHandler:
         self._require_executor_version = require_executor_version
 
     def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
+        executor_runner = None
+        if self._kind == "executor":
+            # Runner imports include project-run compatibility code and are
+            # needed only for executor invocations, never for the task
+            # package import or orchestrator-only runtime.
+            from astrid.core.execution.executor import runner as executor_runner
+
         staging_dir = Path(staging_dir)
         out_dir = staging_dir / "out"
         out_dir.mkdir(parents=True, exist_ok=True)

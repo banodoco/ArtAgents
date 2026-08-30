@@ -22,7 +22,6 @@ The public surface is re-exported from :mod:`astrid.core.task_executor`.
 
 from __future__ import annotations
 
-from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
 from astrid.core.task_executor.service import (
     STAGING_TXN_ID_KEY,
     ExecutionResult,
@@ -35,6 +34,17 @@ from astrid.core.task_executor.service import (
     register_task_handler,
     resolve_task_handler,
 )
+
+
+def __getattr__(name: str):
+    """Load the pack-facing handler only when that compatibility export is used."""
+
+    if name == "CapabilityTaskHandler":
+        from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
+
+        globals()[name] = CapabilityTaskHandler
+        return CapabilityTaskHandler
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "STAGING_TXN_ID_KEY",

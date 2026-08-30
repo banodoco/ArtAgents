@@ -148,3 +148,26 @@ def test_generic_host_import_does_not_load_execution_storage_authority() -> None
         check=True,
     )
     assert result.stdout.splitlines() == ["False", "False"]
+
+
+def test_task_executor_import_does_not_load_legacy_project_runtime() -> None:
+    """Importing the kernel task boundary must not pull project-run/thread code."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid.core.task_executor.service; "
+                "print('astrid.core.project.run' in sys.modules); "
+                "print(any(name.startswith('astrid.core.threads') for name in sys.modules)); "
+                "print('astrid.core.execution.executor.runner' in sys.modules)"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["False", "False", "False"]

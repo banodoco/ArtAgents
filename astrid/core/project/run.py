@@ -19,6 +19,10 @@ from astrid.core.env_vars import (
 )
 from astrid.core.foundation import project_paths as paths
 from astrid.core.ids import generate_lowercase_ulid as generate_run_id
+from astrid.core.runtime.manifest import (
+    discover_manifest_path,
+    load_manifest_output_artifacts,
+)
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.util.time import utc_now_seconds
 
@@ -670,28 +674,6 @@ def mirror_hype_artifacts(
     return mirrored
 
 
-def discover_manifest_path(
-    out_root: str | Path | None,
-    *,
-    fallback_root: str | Path | None = None,
-) -> Path | None:
-    roots: list[Path] = []
-    for raw in (out_root, fallback_root):
-        if raw in (None, ""):
-            continue
-        candidate = Path(raw).expanduser().resolve()
-        if candidate not in roots:
-            roots.append(candidate)
-    for candidate_root in roots:
-        for manifest_path in (
-            candidate_root / "manifest.json",
-            candidate_root / "agent-view" / "manifest.json",
-        ):
-            if manifest_path.is_file():
-                return manifest_path
-    return None
-
-
 def _read_manifest_cost_usd(manifest_path: str | Path) -> float | None:
     """Read a numeric ``cost_usd`` from a generation manifest, if present."""
     try:
@@ -702,24 +684,6 @@ def _read_manifest_cost_usd(manifest_path: str | Path) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     return None
-
-
-def load_manifest_output_artifacts(manifest_path: str | Path) -> list[dict[str, Any]]:
-    try:
-        manifest = read_json(manifest_path)
-    except Exception:
-        return []
-    outputs = manifest.get("outputs")
-    if not isinstance(outputs, list):
-        return []
-    normalized: list[dict[str, Any]] = []
-    for item in outputs:
-        if not isinstance(item, Mapping):
-            continue
-        artifact = dict(item)
-        artifact["source"] = "manifest"
-        normalized.append(artifact)
-    return normalized
 
 
 def discover_hype_artifact_root(
