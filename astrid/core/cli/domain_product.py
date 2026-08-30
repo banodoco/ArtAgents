@@ -351,7 +351,25 @@ def run_product_family(
         raise ProductRegistryError(
             f"family parser module {module.__name__!r} has no build_parser()"
         )
-    parser = build_parser(client)
+    parser_kwargs: dict[str, Any] = {}
+    if family == "media":
+        references_module_name = modules.get("references")
+        if not references_module_name:
+            raise ProductRegistryError(
+                "media requires the manifest-owned references parser"
+            )
+        references_module = (
+            references_module_name
+            if not isinstance(references_module_name, str)
+            else importlib.import_module(references_module_name)
+        )
+        reference_commands = getattr(references_module, "COMMANDS", None)
+        if reference_commands is None:
+            raise ProductRegistryError(
+                "references parser module has no COMMANDS declaration"
+            )
+        parser_kwargs["reference_commands"] = reference_commands
+    parser = build_parser(client, **parser_kwargs)
     parsed = parser.parse_args(list(args))
     handler = getattr(parsed, "handler", None)
     if handler is None:

@@ -48,13 +48,11 @@ envelope.
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from astrid.core.cli.domain_output import print_result
-from astrid.core.cli.domain_product import FAMILY_PARSER_MODULES
 from astrid.core.cli.registration import CommandSpec, register_product_commands
 
 __all__ = ["COMMANDS", "build_parser"]
@@ -387,7 +385,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
 )
 
 
-def build_parser(client: Any) -> argparse.ArgumentParser:
+def build_parser(
+    client: Any,
+    *,
+    reference_commands: Sequence[CommandSpec] = (),
+) -> argparse.ArgumentParser:
     """Build the ``media`` product-family parser stamped with *client*.
 
     Exactly the six verbs above are registered, plus the manifest-declared
@@ -395,15 +397,10 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     embedded from the references product parser. There is no top-level
     references family.
     """
-    # Resolve the manifest-owned nested parser through the static product
-    # registry. The core media adapter must not import a concrete pack
-    # implementation directly.
-    references_cli = importlib.import_module(FAMILY_PARSER_MODULES["references"])
-
     def _configure_references(subparser: argparse.ArgumentParser) -> None:
         nested = subparser.add_subparsers(dest="reference_command", required=True)
         register_product_commands(
-            nested, references_cli.COMMANDS, family="references", client=client
+            nested, reference_commands, family="references", client=client
         )
 
     parser = argparse.ArgumentParser(
@@ -414,18 +411,18 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    register_product_commands(
-        subparsers,
-        (
-            *COMMANDS,
+    commands: tuple[CommandSpec, ...] = COMMANDS
+    if reference_commands:
+        commands = (
+            *commands,
             CommandSpec(
                 "references",
                 help="Nested reference create/update/archive/associate/link/"
                 "set-primary/list/show (manifest-owned mount).",
                 configure=_configure_references,
             ),
-        ),
-        family=_FAMILY,
-        client=client,
+        )
+    register_product_commands(
+        subparsers, commands, family=_FAMILY, client=client
     )
     return parser

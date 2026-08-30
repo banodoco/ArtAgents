@@ -420,6 +420,7 @@ def _subparser_choices(parser: argparse.ArgumentParser) -> set[str]:
 
 def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
     from astrid.core.cli.domain_media import COMMANDS, build_parser
+    from astrid.packs.references.cli import COMMANDS as REFERENCE_COMMANDS
 
     assert tuple(spec.name for spec in COMMANDS) == (
         "import",
@@ -430,7 +431,9 @@ def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
         "relate",
     )
     assert all(spec.aliases == () for spec in COMMANDS)
-    parser = build_parser(_FakeClient())
+    parser = build_parser(
+        _FakeClient(), reference_commands=REFERENCE_COMMANDS
+    )
     assert parser.prog == "astrid media"
     assert _subparser_choices(parser) == {
         "import",
@@ -791,8 +794,11 @@ def test_media_unknown_verb_is_a_usage_error() -> None:
 )
 def test_media_help_is_executable(argv: list[str]) -> None:
     from astrid.core.cli.domain_media import build_parser
+    from astrid.packs.references.cli import COMMANDS as REFERENCE_COMMANDS
 
-    parser = build_parser(_FakeClient())
+    parser = build_parser(
+        _FakeClient(), reference_commands=REFERENCE_COMMANDS
+    )
     with pytest.raises(SystemExit) as excinfo:
         parser.parse_args(argv)
     assert excinfo.value.code == 0
@@ -1279,8 +1285,11 @@ def test_references_set_primary_rejects_missing_media_reference() -> None:
 )
 def test_media_references_help_is_executable(argv: list[str]) -> None:
     from astrid.core.cli.domain_media import build_parser
+    from astrid.packs.references.cli import COMMANDS as REFERENCE_COMMANDS
 
-    parser = build_parser(_FakeClient())
+    parser = build_parser(
+        _FakeClient(), reference_commands=REFERENCE_COMMANDS
+    )
     with pytest.raises(SystemExit) as excinfo:
         parser.parse_args(argv)
     assert excinfo.value.code == 0
