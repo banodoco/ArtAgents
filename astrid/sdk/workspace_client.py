@@ -60,7 +60,13 @@ def resolve_runtime_connection() -> tuple[str, str]:
 
 
 class WorkspaceClient:
-    """Generated-client transport with the adapter's historical request seam."""
+    """Small typed facade over the runtime's generated workspace client.
+
+    This class deliberately contains no HTTP protocol code.  It only discovers
+    the generated package, maps Astrid's compatibility names (``settings``
+    and ``project``) onto the generated operation signatures, and translates
+    generated exceptions into Astrid's stable error type.
+    """
 
     def __init__(self, endpoint: str, token: str):
         try:
@@ -74,30 +80,10 @@ class WorkspaceClient:
         self.endpoint, self.token = endpoint.rstrip("/"), token
         self._generated = GeneratedWorkspaceClient(self.endpoint, token)
 
-    def request(self, method: str, path: str, *, body: Any = None, headers: Mapping[str, str] | None = None, expected: tuple[int, ...] = (200,)) -> Any:
-        raw = body if isinstance(body, bytes) else (json.dumps(body, separators=(",", ":")).encode() if body is not None else None)
-        request_headers = dict(headers or {})
-        if body is not None and not isinstance(body, bytes):
-            request_headers.setdefault("Content-Type", "application/json")
-        try:
-            status, response_headers, response_body = self._generated._request(
-                method, path, body=raw, headers=request_headers, expected=expected
-            )
-        except Exception as exc:
-            code = str(getattr(exc, "code", "transport_error"))
-            message = str(getattr(exc, "message", exc))
-            details = getattr(exc, "details", {})
-            raise WorkspaceClientError(int(getattr(exc, "status", 0)), code, message, details) from exc
-        if method == "HEAD" or not response_body:
-            return {"status": status, "headers": dict(response_headers), "body": response_body}
-        if str(response_headers.get("Content-Type", "")).startswith("application/json"):
-            return json.loads(response_body.decode())
-        return {"status": status, "headers": dict(response_headers), "body": response_body}
-
-    def _call_generated(self, name: str, *args: Any, **kwargs: Any) -> Any:
+    def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""
         try:
-            value = getattr(self._generated, name)(*args, **kwargs)
+            value = getattr(self._generated, operation)(*args, **kwargs)
         except Exception as exc:  # generated ApiError has stable fields
             raise WorkspaceClientError(
                 int(getattr(exc, "status", 0)),
@@ -107,8 +93,48 @@ class WorkspaceClient:
             ) from exc
         return asdict(value) if is_dataclass(value) else value
 
-    def create_project(self, name: str, *, idempotency_key: str) -> Any:
-        return self._call_generated("create_project", name, idempotency_key=idempotency_key)
+    # The following methods are intentionally explicit.  They form the
+    # product adapter's typed vocabulary and keep generated operation names and
+    # compatibility aliases in one place.
+    def health(self) -> Any:
+        return self._call_generated("health")
+
+    def handshake(self, client_name: str, client_version: str, requested_scopes: list[str]) -> Any:
+        return self._call_generated("handshake", client_name, client_version, requested_scopes)
+
+    def create_project(
+        self,
+        name: str,
+        *,
+        idempotency_key: str,
+        slug: str | None = None,
+        settings: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Any:
+        if metadata is None:
+            metadata = settings
+        return self._call_generated(
+            "create_project", name, idempotency_key=idempotency_key, slug=slug, metadata=metadata
+        )
+
+    def update_project(
+        self,
+        project_id: str,
+        *,
+        expected_version: int | None = None,
+        name: str | None = None,
+        settings: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Any:
+        if metadata is None:
+            metadata = settings
+        return self._call_generated(
+            "update_project",
+            project_id,
+            expected_version=expected_version,
+            name=name,
+            metadata=metadata,
+        )
 
     def list_projects(self) -> Any:
         items, cursor = self._call_generated("list_projects")
@@ -127,6 +153,38 @@ class WorkspaceClient:
     def get_timeline(self, timeline_id: str) -> Any:
         return self._call_generated("get_timeline", timeline_id)
 
+    def list_timeline_history(self, timeline_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_timeline_history", timeline_id, cursor=cursor, limit=limit
+        )
+        return {"items": list(items), "next_cursor": next_cursor}
+
+    def diff_timeline(self, timeline_id: str, *, from_version: int, to_version: int) -> Any:
+        return self._call_generated(
+            "diff_timeline", timeline_id, from_version=from_version, to_version=to_version
+        )
+
+    def archive_timeline(self, timeline_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated(
+            "archive_timeline", timeline_id, expected_version=expected_version, idempotency_key=idempotency_key
+        )
+
+    def recover_timeline(
+        self,
+        timeline_id: str,
+        *,
+        expected_version: int,
+        version: int,
+        idempotency_key: str,
+    ) -> Any:
+        return self._call_generated(
+            "recover_timeline",
+            timeline_id,
+            expected_version=expected_version,
+            version=version,
+            idempotency_key=idempotency_key,
+        )
+
     def update_timeline(self, timeline_id: str, *, expected_version: int, shots=None, references=None) -> Any:
         return self._call_generated("update_timeline", timeline_id, expected_version=expected_version, shots=shots, references=references)
 
@@ -142,8 +200,60 @@ class WorkspaceClient:
     def get_reference(self, reference_id: str) -> Any:
         return self._call_generated("get_reference", reference_id)
 
+    def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> Any:
+        return self._call_generated("create_document", project_id, document_id, kind, content)
+
+    def list_documents(self, project_id: str) -> Any:
+        items, cursor = self._call_generated("list_documents", project_id)
+        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+
+    def get_document(self, project_id: str, document_id: str) -> Any:
+        return self._call_generated("get_document", project_id, document_id)
+
+    def update_document(
+        self,
+        project_id: str,
+        document_id: str,
+        *,
+        expected_version: int,
+        content: Any = None,
+        kind: str | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "update_document",
+            project_id,
+            document_id,
+            expected_version=expected_version,
+            content=content,
+            kind=kind,
+        )
+
     def ingest_object(self, data: bytes, *, media_type: str, idempotency_key: str, filename: str | None = None) -> Any:
         return self._call_generated("ingest_object", data, media_type=media_type, idempotency_key=idempotency_key, filename=filename)
+
+    def ingest_project_object(
+        self,
+        project_id: str,
+        data: bytes,
+        *,
+        media_type: str,
+        idempotency_key: str,
+        filename: str | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "ingest_project_object",
+            project_id,
+            data,
+            media_type=media_type,
+            idempotency_key=idempotency_key,
+            filename=filename,
+        )
+
+    def list_project_objects(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        items, next_cursor = self._call_generated(
+            "list_project_objects", project_id, cursor=cursor, limit=limit
+        )
+        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": next_cursor}
 
     def get_object(self, object_id: str) -> Any:
         return self._call_generated("get_object", object_id)
@@ -151,8 +261,29 @@ class WorkspaceClient:
     def head_object(self, object_id: str) -> Any:
         return self._call_generated("head_object", object_id)
 
-    def admit_task(self, **kwargs: Any) -> Any:
-        return self._call_generated("admit_task", **kwargs)
+    def admit_task(
+        self,
+        *,
+        capability_id: str,
+        capability_digest: str,
+        input_object_ids: list[str],
+        idempotency_key: str,
+        schema_version: str = "1",
+        settlement_effect: Mapping[str, Any] | None = None,
+        project_id: str | None = None,
+        spec: Mapping[str, Any] | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "admit_task",
+            capability_id=capability_id,
+            capability_digest=capability_digest,
+            input_object_ids=input_object_ids,
+            idempotency_key=idempotency_key,
+            schema_version=schema_version,
+            settlement_effect=settlement_effect,
+            project_id=project_id,
+            spec=spec,
+        )
 
     def get_task(self, task_id: str) -> Any:
         return self._call_generated("get_task", task_id)
