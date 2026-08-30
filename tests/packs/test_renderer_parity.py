@@ -114,6 +114,27 @@ def _require_ffmpeg() -> None:
     assert shutil.which("ffprobe") is not None, "ffmpeg is installed but ffprobe is missing"
 
 
+def _require_remotion_environment() -> None:
+    """Skip real Remotion cases when the provisioned app is absent.
+
+    Renderer support is intentionally honest about this dependency and returns
+    ``supported=False``; a parity test must report the same unavailable
+    environment rather than turn it into a misleading renderer failure.
+    """
+    if not (REMOTION / "node_modules").is_dir():
+        pytest.skip("remotion/node_modules absent; real Remotion parity skipped")
+    required = (
+        "@banodoco/timeline-composition",
+        "@banodoco/timeline-schema",
+        "@banodoco/timeline-theme-2rp",
+    )
+    missing = [name for name in required if not (REMOTION / "node_modules" / name).is_dir()]
+    if missing:
+        pytest.skip("Remotion packages absent: " + ", ".join(missing))
+    if shutil.which("node") is None or shutil.which("npx") is None:
+        pytest.skip("node/npx absent; real Remotion parity skipped")
+
+
 @pytest.fixture(scope="session")
 def parity_media(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Stage semantic JSON and generate the only binary test inputs."""
@@ -393,6 +414,7 @@ def test_real_remotion_renders_each_semantic_variant(
     tmp_path: Path,
     remotion_static_assets: None,
 ) -> None:
+    _require_remotion_environment()
     expected_output = tmp_path / f"{fixture}-rendering-remotion.mp4"
     try:
         output, sidecar = _render(
@@ -493,6 +515,7 @@ def test_real_mixed_hybrid_uses_transition_windows(
     tmp_path: Path,
     remotion_static_assets: None,
 ) -> None:
+    _require_remotion_environment()
     expected_output = tmp_path / "transition-windows-hybrid.mp4"
     try:
         output, sidecar = _render(
