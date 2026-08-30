@@ -51,8 +51,8 @@ class RemoteTimelines(_RemoteFamily):
                 key=key,
                 config=config,
                 registry=registry,
-                slug=slug or name or "timeline",
-                name=name or slug or "Timeline",
+                slug=slug,
+                name=name,
                 idempotency_key=key,
             )
         return self._typed("create_timeline", project, timeline_id, key=key, idempotency_key=key)

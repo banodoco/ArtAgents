@@ -53,13 +53,31 @@ def test_managed_visualization_readers_have_no_local_store_authority():
 
 def test_frozen_run_info_uses_generated_runtime_client(monkeypatch):
     class Runtime:
+        def list_projects(self):
+            return {"items": [{"project_id": "project-1", "slug": "demo"}]}
+
         def get_run(self, run_id):
             assert run_id == "run-1"
-            return {"status": "completed", "capability": "rendering.timeline_visualize", "timeline_ids": ["timeline-1"]}
+            return {"project_id": "project-1", "status": "completed", "capability": "rendering.timeline_visualize", "timeline_ids": ["timeline-1"]}
 
     monkeypatch.setattr(frozen, "_workspace_runtime_client", lambda: Runtime())
     assert frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused")) == {
         "status": "completed",
         "capability": "rendering.timeline_visualize",
         "timeline_ids": ["timeline-1"],
+        "project_id": "project-1",
+        "current_project_id": "project-1",
     }
+
+
+def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
+    class Runtime:
+        def list_projects(self):
+            return {"items": [{"project_id": "project-current", "slug": "demo"}]}
+
+        def get_run(self, run_id):
+            return {"project_id": "project-other", "status": "completed", "capability": "rendering.timeline_visualize"}
+
+    monkeypatch.setattr(frozen, "_workspace_runtime_client", lambda: Runtime())
+    info = frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused"))
+    assert info["project_id"] != info["current_project_id"]

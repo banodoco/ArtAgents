@@ -1021,6 +1021,10 @@ def _verify_run_ownership(
     kernel_info = _kernel_frozen_run_info(project_slug, run_id, project_root.parent)
     if kernel_info is None:
         raise ContainmentError("runtime run ownership is unavailable; filesystem run.json is not authoritative")
+    run_project_id = kernel_info.get("project_id")
+    current_project_id = kernel_info.get("current_project_id")
+    if not run_project_id or not current_project_id or str(run_project_id) != str(current_project_id):
+        raise ContainmentError("kernel run does not belong to the current project")
     if kernel_info.get("status") not in ("succeeded", "completed"):
         raise ContainmentError(
             "kernel run does not own this timeline visualization pack (not completed)"
@@ -1045,11 +1049,21 @@ def _kernel_frozen_run_info(
         info = runtime_client.get_run(run_id)
         if not isinstance(info, dict):
             return None
-        return {
+        result = {
             "status": str(info.get("status", info.get("state", ""))),
             "capability": str(info.get("capability", info.get("capability_id"))) if info.get("capability", info.get("capability_id")) is not None else None,
             "timeline_ids": info.get("timeline_ids") or (info.get("metadata", {}) if isinstance(info.get("metadata"), dict) else {}).get("timeline_ids"),
         }
+        run_project_id = info.get("project_id") or info.get("project")
+        projects_reader = getattr(runtime_client, "list_projects", None)
+        if callable(projects_reader):
+            projects = projects_reader()
+            rows = projects.get("items", []) if isinstance(projects, dict) else projects
+            current = next((item for item in rows or [] if isinstance(item, Mapping) and item.get("slug") == project_slug), None)
+            current_project_id = current.get("project_id") or current.get("id") if isinstance(current, Mapping) else None
+            result["project_id"] = run_project_id
+            result["current_project_id"] = current_project_id
+        return result
     except Exception:
         return None
 

@@ -125,7 +125,7 @@ def _ensure_music_acceptance_timeline(client: Any) -> bool:
     shown = client.projects.show(MUSIC_PROJECT_SLUG)
     if not shown.ok or shown.data is None:
         return False
-    project_id = str(shown.data["id"])
+    project_id = str(shown.data.get("id") or shown.data.get("project_id"))
     listed = client.generations.list(project_id)
     rows = listed.data.get("items", []) if listed.ok and isinstance(listed.data, dict) else []
     primary = next((row for row in rows if row.get("metadata", {}).get("primary_media_id")), None)
@@ -198,33 +198,41 @@ def _apply(root: Path, client: Any) -> None:
     )
     primary_media: list[dict[str, str]] = []
 
+    task_result = client.tasks.list(project_id)
+    task_rows = task_result.data if task_result.ok and isinstance(task_result.data, list) else []
+    tasks_by_key = {str(row.get("idempotency_key")): row for row in task_rows if isinstance(row, dict)}
+    generation_result = client.generations.list(project_id)
+    generation_rows = generation_result.data.get("items", []) if generation_result.ok and isinstance(generation_result.data, dict) else []
+    generations_by_id = {str(row.get("generation_id") or row.get("id")): row for row in generation_rows if isinstance(row, dict)}
+
     staging_root = root / ".astrid" / "media" / ".staging"
     staging_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="reigh-gallery-fixture-", dir=staging_root) as raw_staging:
         staging = Path(raw_staging)
         for index in range(GENERATION_COUNT):
             key = f"fixture:reigh-gallery:generation:{index:02d}:v1"
-            task = _require_ok(
-                client.tasks.create(
-                    project_id=project_id,
-                    capability="fixture.reigh_gallery_image",
-                    spec={"fixture": "reigh-gallery-acceptance-v1", "prompt": f"Deterministic colour study {index + 1}"},
-                    input_manifest=[],
-                    idempotency_key=f"{key}:create",
-                ),
-                f"task {index} create",
-            )
+            task_key = f"{key}:create"
+            task = tasks_by_key.get(task_key)
+            if task is None:
+                task = _require_ok(
+                    client.tasks.create(
+                        project_id=project_id,
+                        capability="fixture.reigh_gallery_image",
+                        spec={"fixture": "reigh-gallery-acceptance-v1", "prompt": f"Deterministic colour study {index + 1}"},
+                        input_manifest=[],
+                        idempotency_key=task_key,
+                    ),
+                    f"task {index} create",
+                )
+                tasks_by_key[task_key] = task
             task_id = str(task.get("id") or task.get("task_id"))
-            claim = _require_ok(
-                client.tasks.claim(
-                    executor_id="reigh-acceptance-fixture",
-                    capability_ids=["fixture.reigh_gallery_image"],
-                    idempotency_key=f"{key}:claim",
-                ),
-                f"task {index} claim",
-            )
-            if str(claim.get("task_id")) != task_id:
-                raise RuntimeError(f"task {index} claim selected an unexpected task")
+            state = str(task.get("state", "queued"))
+            if state in {"running", "ready"}:
+                raise RuntimeError(f"task {index} is already {state}; rerun after its active attempt settles")
+            if state in {"failed", "cancelled"}:
+                task = _require_ok(client.tasks.retry(project_id, task_id, idempotency_key=f"{key}:retry"), f"task {index} retry")
+                tasks_by_key[task_key] = task
+                state = str(task.get("state", "queued"))
 
             outputs: list[dict[str, Any]] = []
             imported: list[dict[str, Any]] = []
@@ -239,41 +247,60 @@ def _apply(root: Path, client: Any) -> None:
                 imported.append(media)
                 outputs.append({"digest": media["digest"], "media_type": "image/png", "name": filename})
 
-            _require_ok(
-                client.tasks.settle(
-                    str(claim["attempt_id"]),
-                    lease_id=str(claim["lease_id"]),
-                    fence=int(claim["fence"]),
-                    outputs=outputs,
-                    idempotency_key=f"{key}:settle",
-                ),
-                f"task {index} settle",
-            )
-            generation_id = f"reigh-gallery-generation-{index + 1:02d}"
-            generation = _require_ok(
-                client.generations.create(
-                    project=project_id,
-                    generation_id=generation_id,
-                    type="image",
-                    source_task_id=task_id,
-                    metadata={"fixture": "reigh-gallery-acceptance-v1", "primary_media_id": imported[0]["object_id"]},
-                    idempotency_key=f"{key}:generation",
-                ),
-                f"generation {index} create",
-            )
-            generation_id = str(generation.get("generation_id") or generation.get("id"))
-            for variant_index, media in enumerate(imported):
-                _require_ok(
-                    client.generations.create_variant(
-                        generation_id,
-                        variant_id=f"{generation_id}-variant-{variant_index + 1}",
-                        object_id=media["object_id"],
-                        variant_type="original" if variant_index == 0 else "alternate",
-                        metadata={"fixture_variant": variant_index},
-                        idempotency_key=f"{key}:variant:{variant_index}",
+            if state not in {"succeeded", "completed"}:
+                claim = _require_ok(
+                    client.tasks.claim(
+                        executor_id="reigh-acceptance-fixture",
+                        capability_ids=["fixture.reigh_gallery_image"],
+                        idempotency_key=f"{key}:claim",
                     ),
-                    f"generation {index} variant {variant_index}",
+                    f"task {index} claim",
                 )
+                if str(claim.get("task_id")) != task_id:
+                    raise RuntimeError(f"task {index} claim selected an unexpected task")
+                _require_ok(
+                    client.tasks.settle(
+                        str(claim["attempt_id"]),
+                        lease_id=str(claim["lease_id"]),
+                        fence=int(claim["fence"]),
+                        outputs=outputs,
+                        idempotency_key=f"{key}:settle",
+                    ),
+                    f"task {index} settle",
+                )
+            generation_id = f"reigh-gallery-generation-{index + 1:02d}"
+            generation = generations_by_id.get(generation_id)
+            if generation is None:
+                generation = _require_ok(
+                    client.generations.create(
+                        project=project_id,
+                        generation_id=generation_id,
+                        type="image",
+                        source_task_id=task_id,
+                        metadata={"fixture": "reigh-gallery-acceptance-v1", "primary_media_id": imported[0]["object_id"]},
+                        idempotency_key=f"{key}:generation",
+                    ),
+                    f"generation {index} create",
+                )
+                generations_by_id[generation_id] = generation
+            generation_id = str(generation.get("generation_id") or generation.get("id"))
+            existing_variants = client.generations.variants(project_id, generation_id)
+            variant_rows = existing_variants.data.get("items", []) if existing_variants.ok and isinstance(existing_variants.data, dict) else []
+            variants_by_id = {str(row.get("variant_id") or row.get("id")): row for row in variant_rows if isinstance(row, dict)}
+            for variant_index, media in enumerate(imported):
+                variant_id = f"{generation_id}-variant-{variant_index + 1}"
+                if variant_id not in variants_by_id:
+                    _require_ok(
+                        client.generations.create_variant(
+                            generation_id,
+                            variant_id=variant_id,
+                            object_id=media["object_id"],
+                            variant_type="original" if variant_index == 0 else "alternate",
+                            metadata={"fixture_variant": variant_index},
+                            idempotency_key=f"{key}:variant:{variant_index}",
+                        ),
+                        f"generation {index} variant {variant_index}",
+                    )
             primary_media.append({"id": imported[0]["object_id"], "type": "image/png"})
 
         clips: list[dict[str, Any]] = []
