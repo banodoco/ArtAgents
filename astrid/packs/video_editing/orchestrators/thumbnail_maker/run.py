@@ -19,7 +19,7 @@ from typing import Any, Callable, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import reject_project_with_out
 from astrid.packs.training.executors.asset_cache import run as asset_cache
@@ -504,7 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             valid_options=sorted(step_commands),
             recovery_command="choose one of the valid subcommands listed above",
         )
-    # Kernel admission with projects_root threading (no second ledger)
+    # Runtime admission; the local path below is only an ephemeral pack workspace.
     try:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--project")
@@ -515,12 +515,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
             kernel_ctx = admit_orchestrator_project_run(
                 project=parsed.project,
                 tool_id="video_editing.thumbnail_maker",
                 argv=["thumbnail_maker", *effective_argv],
-                projects_root=projects_root,
             )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 

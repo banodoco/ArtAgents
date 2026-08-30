@@ -1,23 +1,22 @@
-"""Shared kernel admission helper for pack orchestrators (B2.3).
+"""Runtime task admission helpers for pack orchestrators.
 
-Self-managing orchestrators previously called ``prepare_project_run``
-directly (second ledger). This shim routes through the kernel admission
-path — creating a real kernel run+task via ``RunRepository.create`` when
-the kernel database is available, otherwise falling back to a
-projects_root-staged directory. Never writes authoritative run.json.
-
-Admission is create-only; driving the hard-chain to terminal status is
-the caller's responsibility (harness/orchestrator).
+Pack code may still need a private output workspace while it builds its plan
+and step artifacts.  That workspace is presentation material only.  Durable
+run/task identity and execution authority belong to the workspace runtime,
+which is reached through the generated client exposed by ``AstridClient``.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.receipts.service import ReceiptMismatchError
+from astrid.core.project.run import ProjectRunError
 
 
 @dataclass(frozen=True)
@@ -27,105 +26,85 @@ class KernelAdmissionContext:
     project_slug: str
 
 
+def _runtime_failure(result: Any) -> ProjectRunError:
+    error = getattr(result, "error", None)
+    message = str(getattr(error, "message", "workspace runtime rejected task admission"))
+    return ProjectRunError(message)
+
+
+def _workspace_root(project: str, tool_id: str) -> Path:
+    safe_project = re.sub(r"[^A-Za-z0-9_.-]+", "-", project).strip("-") or "project"
+    safe_tool = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_id).strip("-") or "orchestrator"
+    return Path(tempfile.mkdtemp(prefix=f"astrid-{safe_project}-{safe_tool}-"))
+
+
 def admit_orchestrator_project_run(
     *,
     project: str,
     tool_id: str,
     argv: list[str],
     projects_root: str | Path | None = None,
+    _client: Any | None = None,
 ) -> KernelAdmissionContext:
-    """Admit via kernel — projects_root threaded, no authoritative run.json write.
+    """Admit an orchestrator task through the workspace runtime.
 
-    Create-only: admits 1 run + 1 task via ``RunRepository`` (single-task
-    generic fan-out; N only if capability manifest declares children).
-    Returns the reconciled kernel ``run_id`` on idempotent replay (no orphan
-    ULID). Raises ``ReceiptMismatchError`` on idempotency-key reuse with a
-    different request hash; does not swallow it. Drive (claim/start/complete)
-    is the caller's responsibility.
+    ``projects_root`` is retained as a source-compatible, intentionally
+    ignored argument.  It must never select a local database or project tree.
+    ``run_root`` is an ephemeral pack workspace for derived plan/step output;
+    the runtime response supplies the durable run and task identifiers.
     """
-    from astrid.application import compose_standard_application
-    from astrid.core.foundation.project_paths import resolve_projects_root
-    from astrid.core.ids import generate_lowercase_ulid
-    from astrid.core.project.run import ProjectRunError
-    from astrid.core.repositories.projects import (
-        ProjectNotFoundError,
-        ProjectSlugConflictError,
-    )
-    from astrid.core.repositories.tasks import compute_spec_hash
-    from astrid.core.store.uow import UnitOfWork
+    del projects_root
+    if not isinstance(project, str) or not project.strip():
+        raise ProjectRunError("project is required for runtime admission")
+    if not isinstance(tool_id, str) or not tool_id.strip():
+        raise ProjectRunError("tool id is required for runtime admission")
 
-    root = resolve_projects_root(projects_root)
-
-    # Idempotency key derived from tool+argv only (no run_id) so replay is stable.
-    spec_payload: dict[str, Any] = {"tool_id": tool_id, "argv": list(argv)}
-    application = None
-    try:
-        idempotency_key = compute_spec_hash(spec_payload, [])
-        application = compose_standard_application(root)
-        writer = application.writer
-        runs = application.runs
-        projects = application.projects
-
-        try:
-            project_id = projects.resolve(writer, project)
-        except ProjectNotFoundError:
-            generated_id = generate_lowercase_ulid()
-            try:
-                created = UnitOfWork(writer).run(
-                    lambda u: projects.create(
-                        u,
-                        slug=project,
-                        name=project,
-                        settings={},
-                        idempotency_key=f"proj:{project}",
-                        project_id=generated_id,
-                    )
-                )
-                project_id = created.id
-            except ProjectSlugConflictError:
-                project_id = projects.resolve(writer, project)
-
-        deterministic_run_id = hashlib.sha256(
-            f"run:{idempotency_key}".encode()
-        ).hexdigest()[:26]
-        deterministic_task_id = hashlib.sha256(
-            f"task:{idempotency_key}:0".encode()
-        ).hexdigest()[:26]
-        children: list[dict[str, Any]] = [
-            {
-                "capability": tool_id,
-                "spec": {
-                    "tool_id": tool_id,
-                    "argv": list(argv),
-                    "project": project,
-                },
-                "input_manifest": [],
-                "task_id": deterministic_task_id,
-                "dependencies": [],
-            }
-        ]
-        fanout = UnitOfWork(writer).run(
-            lambda u: runs.create(
-                u,
-                project_id=project_id,
-                children=children,
-                idempotency_key=idempotency_key,
-                kind="orchestrator",
-                title=tool_id,
-                input={"tool_id": tool_id, "argv": list(argv)},
-                run_id=deterministic_run_id,
-            )
+    spec: dict[str, Any] = {
+        "tool_id": tool_id,
+        "argv": list(argv),
+        "project": project,
+    }
+    idempotency_key = hashlib.sha256(
+        json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
         )
-        run_id = str(fanout.run_id)
-        run_root = root / project / "runs" / run_id
-        run_root.mkdir(parents=True, exist_ok=True)
-        return KernelAdmissionContext(run_id=run_id, run_root=run_root, project_slug=project)
-    except (ProjectRunError, ReceiptMismatchError):
-        raise
-    except Exception as exc:  # noqa: BLE001 - translate composition boundary
-        raise ProjectRunError(
-            f"kernel run unavailable for project {project!r}: {exc}"
-        ) from exc
-    finally:
-        if application is not None:
-            application.close()
+    ).hexdigest()
+
+    if _client is None:
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as owned_client:
+            return admit_orchestrator_project_run(
+                project=project,
+                tool_id=tool_id,
+                argv=argv,
+                _client=owned_client,
+            )
+
+    tasks = getattr(_client, "tasks", None)
+    create = getattr(tasks, "create", None)
+    if not callable(create):
+        raise ProjectRunError("workspace runtime client does not expose task admission")
+    result = create(
+        project_id=project,
+        capability=tool_id,
+        spec=spec,
+        input_manifest=[],
+        idempotency_key=idempotency_key,
+    )
+    if hasattr(result, "ok"):
+        if not result.ok:
+            raise _runtime_failure(result)
+        data = result.data
+    else:
+        data = result
+    if not isinstance(data, dict):
+        raise ProjectRunError("workspace runtime returned an invalid task resource")
+    run_id = str(data.get("run_id") or "")
+    if not run_id:
+        raise ProjectRunError("workspace runtime returned an admission without a run id")
+    return KernelAdmissionContext(
+        run_id=run_id,
+        run_root=_workspace_root(project, tool_id),
+        project_slug=project,
+    )

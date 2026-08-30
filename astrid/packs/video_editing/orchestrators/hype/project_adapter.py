@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import (
     ProjectRunError,
@@ -31,7 +30,8 @@ def _project_slug_for_gate(argv: list[str]) -> str | None:
 def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     """Prepare a project run context when ``--project`` is present.
 
-    Kernel shim (B2.3): projects_root threaded, no authoritative run.json second ledger.
+    Runtime admission creates durable task/run identity; the returned path is
+    an ephemeral workspace for derived pack artifacts.
     Returns ``(context, effective_argv)`` where *context* is the kernel
     admission context or ``None`` when no ``--project`` was requested.
     """
@@ -45,12 +45,10 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     if not parsed.project:
         return None, argv
     reject_project_with_out(parsed.project, parsed.out)
-    projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
     context = admit_orchestrator_project_run(
         project=parsed.project,
         tool_id="video_editing.hype",
         argv=["hype", *argv],
-        projects_root=projects_root,
     )
     return context, [*argv, "--out", str(context.run_root)]
 

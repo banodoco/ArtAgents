@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.media import ffprobe_duration_seconds
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import reject_project_with_out
@@ -581,7 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             recovery_command="use one of: ados-sunday-template, search-transcript, find-holding-screens, render",
         )
 
-    # Orchestrator path — kernel admission with projects_root threading
+    # Orchestrator path — runtime admission with an ephemeral pack workspace.
     try:
         pre_parser = argparse.ArgumentParser(add_help=False)
         pre_parser.add_argument("--project")
@@ -592,13 +592,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            # Thread projects_root: explicit CLI value, else env/default via helper
-            projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
             kernel_ctx = admit_orchestrator_project_run(
                 project=parsed.project,
                 tool_id="video_editing.event_talks",
                 argv=["event_talks", *effective_argv],
-                projects_root=projects_root,
             )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
