@@ -20,12 +20,13 @@ import tempfile
 import threading
 import time
 from types import SimpleNamespace
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.execution.capability_ledger import load_capability_ledger
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.execution.process_group import (
     group_exists as _owned_group_exists,
     popen_owned_group,
@@ -197,6 +198,62 @@ def _preflight_unavailable_reason(record: "CapabilityRecord") -> str:
     return str(record.matrix.get("evidence_reason") or "capability preflight is not ready")
 
 
+def _hivemind_source_preflight(record: "CapabilityRecord") -> dict[str, Any] | None:
+    """Require Hivemind to come from a clean, revision-pinned checkout.
+
+    Hivemind is an optional external provider pack.  Its public read key must
+    not turn an arbitrary dirty install into an advertised capability.  Other
+    external packs retain their own manifest/readiness semantics.
+    """
+    if str(record.definition.metadata.get("source_pack") or "") != "hivemind":
+        return None
+    raw_root = record.definition.metadata.get("pack_root")
+    pack_root = Path(str(raw_root)).expanduser().resolve() if raw_root else None
+    if pack_root is None or not pack_root.is_dir():
+        return {"ok": False, "reason": "hivemind source root is unavailable"}
+    checkout = next((candidate for candidate in (pack_root, *pack_root.parents) if (candidate / ".git").exists()), None)
+    if checkout is None:
+        # An installed revision may carry source provenance in its install
+        # record.  Accept only when that record points at a real, clean Git
+        # checkout; a copied revision without provenance is unavailable.
+        install_record = pack_root / ".astrid" / "install.json"
+        if not install_record.is_file():
+            return {"ok": False, "reason": "hivemind source is not pinned to a Git checkout"}
+        try:
+            payload = json.loads(install_record.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"ok": False, "reason": "hivemind install provenance is unreadable"}
+        source_path = payload.get("source_path") if isinstance(payload, Mapping) else None
+        if not source_path:
+            return {"ok": False, "reason": "hivemind install has no pinned source path"}
+        source_candidate = Path(str(source_path)).expanduser().resolve()
+        checkout = next((candidate for candidate in (source_candidate, *source_candidate.parents) if (candidate / ".git").exists()), None)
+    if checkout is None:
+        return {"ok": False, "reason": "hivemind source is not pinned to a Git checkout"}
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(checkout), "status", "--porcelain=v1"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        revision = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return {"ok": False, "reason": "hivemind source pin could not be verified"}
+    if status.stdout.strip():
+        return {"ok": False, "reason": "hivemind source checkout is dirty"}
+    if not revision:
+        return {"ok": False, "reason": "hivemind source checkout has no pinned revision"}
+    return {"ok": True, "checkout": str(checkout), "revision": revision}
+
+
 def _source_digest(root: Path) -> str:
     """Hash the complete executor source tree without retaining a source path in a task."""
     entries: list[tuple[str, str]] = []
@@ -242,6 +299,44 @@ def _dependency_digest(definition: ExecutorDefinition, records: Mapping[str, "Ca
         "requirements": sorted(str(value) for value in (requirements or ())),
         "requirements_source": str(metadata.get("requirements_source", "")),
     })
+
+
+def _pack_root_for_executor(executor_root: Path) -> Path | None:
+    """Find the manifest-owned pack root for a folder executor.
+
+    The generic host discovers folder executors directly rather than importing
+    the pack registry.  External pack metadata (especially the import root
+    used by ``python -m`` commands) therefore has to be attached here.
+    """
+    for candidate in (executor_root, *executor_root.parents):
+        if (candidate / "pack.yaml").is_file():
+            return candidate.resolve()
+    return None
+
+
+def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path) -> "ExecutorDefinition":
+    """Attach the source-pack identity used by the normal executor registry."""
+    pack_root = _pack_root_for_executor(executor_root)
+    if pack_root is None:
+        return definition
+    metadata = dict(definition.metadata)
+    metadata.setdefault("source", "pack")
+    # Installed revisions are commonly nested as ``pack-id/revisions/<sha>``;
+    # the directory name is then not the import/package id.  Read the
+    # manifest-owned id so the child receives the correct parent on
+    # ``PYTHONPATH`` (and never infer identity from a revision directory).
+    pack_id = pack_root.name
+    try:
+        from astrid.core.pack.loader import _load_manifest_payload
+
+        payload = _load_manifest_payload(pack_root / "pack.yaml")
+        if isinstance(payload, Mapping) and payload.get("id"):
+            pack_id = str(payload["id"])
+    except (ImportError, OSError, TypeError, ValueError):
+        pass
+    metadata.setdefault("source_pack", pack_id)
+    metadata.setdefault("pack_root", str(pack_root))
+    return replace(definition, metadata=metadata)
 
 
 @dataclass(frozen=True)
@@ -547,6 +642,7 @@ class GenericPackHost:
                     # A broken optional manifest is unavailable, but does not hide
                     # neighboring packs.  The manifest report records the reason.
                     continue
+                definition = _attach_pack_metadata(definition, executor_root)
                 manifest = next((executor_root / name for name in ("executor.yaml", "executor.yml", "executor.json") if (executor_root / name).is_file()), None)
                 matrix_entry = self.matrix.get(definition.id, {})
                 record = CapabilityRecord(definition=definition, capability_digest=_canonical_digest(definition.to_dict()), source_digest=_source_digest(executor_root), source_root=executor_root, manifest_path=manifest, matrix=matrix_entry)
@@ -662,6 +758,9 @@ class GenericPackHost:
                 checks["network"] = {"ok": False, "reason": "adapter_requires_network"}
             else:
                 checks["network"] = {"ok": True}
+            pack_source = _hivemind_source_preflight(record)
+            if pack_source is not None:
+                checks["pack_source"] = pack_source
             ready = all(value is True or (isinstance(value, dict) and value.get("ok") is True) for value in checks.values())
             updated[record.id] = CapabilityRecord(**{**record.__dict__, "preflight": checks, "ready": ready})
         self.capabilities = updated
@@ -948,12 +1047,40 @@ class GenericPackHost:
             for item in items:
                 if input_arg.flag:
                     argv.extend((input_arg.flag, str(item)))
-        env = os.environ.copy()
+        # Start from the canonical child environment: only safe process
+        # variables and manifest-declared provider configuration cross the
+        # boundary.  In particular, an unrelated ambient API key must never
+        # leak into a provider subprocess.
+        package_parent = str(Path(__file__).resolve().parents[3])
+        env = build_child_subprocess_env(
+            explicit_env={
+                "PYTHONPATH": package_parent,
+                ASTRID_INTERNAL_INVOCATION: "1",
+                **{str(key): str(value) for key, value in command.env.items()},
+            },
+            passthrough=record.definition.isolation.env_passthrough,
+            declared_passthrough=record.definition.isolation.env_passthrough,
+        )
         # Pack runtime modules reserve their direct module entry points for
         # the canonical runner.  GenericPackHost is that runner's process
         # boundary, so mark the child invocation just as executor_runner does.
-        env[ASTRID_INTERNAL_INVOCATION] = "1"
-        env.update({str(key): str(value) for key, value in command.env.items()})
+        # An external pack's ``python -m`` command executes directly in this
+        # host path (command manifests do not go through the registry runner).
+        # Carry the pinned pack parent explicitly so the child can import the
+        # admitted module without falling back to ambient site-packages.
+        source_pack = str(record.definition.metadata.get("source_pack") or "")
+        pack_root_raw = record.definition.metadata.get("pack_root")
+        if source_pack and isinstance(pack_root_raw, str) and pack_root_raw:
+            pack_root = Path(pack_root_raw).expanduser().resolve()
+            builtin_root = (Path(__file__).resolve().parents[3] / "astrid" / "packs" / source_pack).resolve()
+            if pack_root != builtin_root:
+                pack_parent = str(pack_root.parent)
+                existing_pythonpath = env.get("PYTHONPATH")
+                env["PYTHONPATH"] = (
+                    pack_parent
+                    if not existing_pythonpath
+                    else os.pathsep.join((pack_parent, existing_pythonpath))
+                )
         cwd = _confined_cwd(
             command.cwd,
             attempt=attempt,

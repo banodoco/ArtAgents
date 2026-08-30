@@ -58,3 +58,25 @@ def test_beta_reference_family_preflight_is_truthful_on_this_machine():
     assert local.adapter.family == "local_generation"
     if not local.ready:
         assert local.preflight["packages"]["missing"]
+
+
+def test_provider_ledger_rows_are_networked_and_credential_dispositions_match():
+    """B9.4: provider declarations cannot silently become offline executors."""
+    host = GenericPackHost(pack_roots=[Path("astrid/packs")])
+    records = host.discover()
+    provider_rows = [record for record in records if record.adapter.family == "provider"]
+    assert provider_rows
+
+    by_credential = {
+        str(row["credential"]): set(row["capabilities"])
+        for row in host.ledger["sources"]["providers"]
+    }
+    for record in provider_rows:
+        assert record.definition.isolation.network is True
+        required_env = record.matrix.get("required_env") or ()
+        for credential in required_env:
+            assert record.id in by_credential[str(credential)]
+        # A source manifest's provider metadata and the frozen matrix must
+        # agree on the family; this catches a provider accidentally advertised
+        # as a CPU/local capability after a manifest edit.
+        assert record.matrix["adapter_family"] == "provider"
