@@ -42,6 +42,15 @@ def _json_safe(value: Any) -> Any:
         return _json_safe(to_dict())
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        # Sets are accepted by a few repeatable SDK inputs for parity with
+        # the CLI, but their iteration order is hash-seed dependent.  Emit a
+        # sorted JSON array so result.to_dict() is both serializable and
+        # stable across fresh Python processes.
+        return [
+            _json_safe(item)
+            for item in sorted(value, key=lambda item: (type(item).__name__, str(item)))
+        ]
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     if is_dataclass(value):

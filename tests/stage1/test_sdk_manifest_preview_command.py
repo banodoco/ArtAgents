@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from astrid.core.contracts.schema import Port
 from astrid.sdk.invocation import _manifest_dry_run_result, _manifest_preview_command
+from astrid.sdk.results import InvocationResult
 
 
 def _capability(*, command: dict | None, inputs: tuple[Port, ...], metadata: dict | None = None):
@@ -76,6 +78,81 @@ def test_preview_repeats_repeatable_input_args() -> None:
     )
 
     assert command == ["python", "-m", "visualize", "--format", "png", "--format", "svg"]
+
+
+def test_preview_canonicalizes_set_inputs_and_result_is_json_safe() -> None:
+    capability = _capability(
+        command={
+            "argv": ["python", "-m", "visualize"],
+            "input_args": [
+                {"input": "timeline_source", "flag": "--timeline-source", "repeatable": True},
+                {"input": "formats", "flag": "--format", "repeatable": True},
+            ],
+        },
+        inputs=(
+            Port("timeline_source", type="path", required=False),
+            Port("formats", type="string", required=False),
+        ),
+    )
+    inputs = {
+        "timeline_source": {"timelines/z.jsonl", "timelines/a.jsonl"},
+        "formats": {"svg", "png", "md"},
+    }
+
+    command = _manifest_preview_command(
+        capability,
+        inputs=inputs,
+        outputs=None,
+        brief=None,
+        python_exec=None,
+        out=None,
+    )
+    assert command == [
+        "python",
+        "-m",
+        "visualize",
+        "--timeline-source",
+        "timelines/a.jsonl",
+        "--timeline-source",
+        "timelines/z.jsonl",
+        "--format",
+        "md",
+        "--format",
+        "png",
+        "--format",
+        "svg",
+    ]
+
+    raw_result, ok = _manifest_dry_run_result(
+        capability,
+        inputs=inputs,
+        outputs={"selected": {"svg", "png"}},
+        brief=None,
+        python_exec=None,
+    )
+    assert ok is True
+    result = InvocationResult(
+        capability_id=capability.id,
+        capability_type="executor",
+        native_kind=capability.native_kind,
+        ok=ok,
+        raw_result=raw_result,
+    )
+    payload = result.to_dict()
+    assert payload["raw_result"]["payload"]["preview"]["inputs"]["formats"] == [
+        "md",
+        "png",
+        "svg",
+    ]
+    assert payload["raw_result"]["payload"]["preview"]["inputs"]["timeline_source"] == [
+        "timelines/a.jsonl",
+        "timelines/z.jsonl",
+    ]
+    assert payload["raw_result"]["payload"]["preview"]["outputs"]["selected"] == [
+        "png",
+        "svg",
+    ]
+    json.dumps(payload)
 
 
 def test_preview_store_true_boolean_omits_false_and_value() -> None:

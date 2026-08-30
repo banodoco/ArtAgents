@@ -592,16 +592,21 @@ def _manifest_preview_command(
 
 
 def _manifest_input_items(value: Any) -> tuple[Any, ...]:
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple)):
         return tuple(value)
+    if isinstance(value, (set, frozenset)):
+        # Repeatable inputs may arrive as sets from SDK callers.  Preserve
+        # list/tuple order, but canonicalize set order for stable previews
+        # across Python processes with different hash seeds.
+        return tuple(sorted(value, key=lambda item: (type(item).__name__, str(item))))
     return (value,)
 
 
 def _manifest_stringify(value: Any) -> str:
     if isinstance(value, Path):
         return str(value)
-    if isinstance(value, (list, tuple)):
-        return ",".join(str(item) for item in value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return ",".join(str(item) for item in _manifest_input_items(value))
     return str(value)
 
 
