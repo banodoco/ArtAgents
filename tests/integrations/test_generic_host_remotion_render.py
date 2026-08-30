@@ -232,6 +232,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
             executor_id="generic-remotion-host",
             capability_ids=[record.id],
             idempotency_key="generic-remotion-claim",
+            runtime_epoch=generated.health().runtime_epoch,
         )
         assert claim is not None and claim["task_id"] == task.task_id
 

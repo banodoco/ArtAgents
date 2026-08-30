@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.execution.generic_host import GenericPackHost
+from astrid.core.execution.generic_host import HostError
 
 
 def test_external_pack_command_imports_from_its_admitted_pack_root(
@@ -155,3 +156,96 @@ def test_hivemind_without_clean_pinned_source_is_optional_unavailable(tmp_path: 
     assert host.capabilities[record.id].ready is False
     assert host.capabilities[record.id].preflight["pack_source"]["ok"] is False
     assert "not pinned" in host.capabilities[record.id].preflight["pack_source"]["reason"]
+
+
+@pytest.mark.parametrize("provider_env", ["FAL_KEY", "GIPHY_API_KEY", "OPENAI_API_KEY"])
+def test_provider_credentials_are_manifest_scoped_and_redacted(tmp_path: Path, provider_env: str) -> None:
+    """FAL/GIPHY/OpenAI-shaped provider children see only declared secrets."""
+    pack_root = tmp_path / "credential_provider"
+    executor_root = pack_root / "executors" / "echo"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: credential_provider\nname: Credential Provider\n"
+        "version: 1.0\ncontent:\n  executors: executors\n", encoding="utf-8"
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "credential_provider.echo", "name": "Credential Echo",
+        "kind": "external", "version": "1.0",
+        "command": {"argv": [
+            "{python_exec}", "-c",
+            "import os,sys; print(os.getenv('%s'), os.getenv('FAL_KEY'), os.getenv('OPENAI_API_KEY'), file=sys.stderr); raise SystemExit(2)" % provider_env,
+        ]},
+        "outputs": [],
+        "isolation": {"mode": "subprocess", "network": True, "secrets_required": [provider_env]},
+        "metadata": {"adapter_family": "provider"},
+    }), encoding="utf-8")
+    credential_source = {"FAL_KEY": "fal-ambient-secret", "GIPHY_API_KEY": "giphy-ambient-secret", "OPENAI_API_KEY": "openai-ambient-secret"}
+    credential_source[provider_env] = "declared-fixture-secret"
+    host = GenericPackHost(
+        pack_roots=[pack_root], attempt_root=tmp_path / "attempt",
+        credential_source=credential_source,
+    )
+    record = host.discover()[0]
+    host.preflight()
+    assert host.capabilities[record.id].ready
+    with pytest.raises(HostError) as caught:
+        host.run_task({"task": {"id": "credential-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+    assert "declared-fixture-secret" not in str(caught.value)
+    assert "ambient-secret" not in str(caught.value)
+    assert "<redacted>" in str(caught.value)
+
+
+def test_provider_network_policy_records_hermetic_dns_tcp_and_denies_redirect(
+    tmp_path: Path,
+) -> None:
+    """A local provider fixture proves bounded network enforcement/observability."""
+    class ProviderHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler API
+            self.send_response(302 if self.path == "/" else 200)
+            if self.path == "/":
+                self.send_header("Location", "http://127.0.0.1:%d/redirected" % server.server_port)
+            self.end_headers()
+            self.wfile.write(b"fixture")
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ProviderHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        pack_root = tmp_path / "network_provider"
+        executor_root = pack_root / "executors" / "fetch"
+        executor_root.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            "schema_version: 1\nid: network_provider\nname: Network Provider\n"
+            "version: 1.0\ncontent:\n  executors: executors\n", encoding="utf-8"
+        )
+        url = "http://127.0.0.1:%d/" % server.server_port
+        (executor_root / "executor.yaml").write_text(json.dumps({
+            "schema_version": 1, "id": "network_provider.fetch", "name": "Network Fetch",
+            "kind": "external", "version": "1.0",
+            "command": {"argv": [
+                "{python_exec}", "-c",
+                "from pathlib import Path; from urllib.request import urlopen; Path('{out}/body').write_bytes(urlopen('%s').read())" % url,
+            ]},
+            "outputs": [{"name": "body", "type": "file", "path_template": "{out}/body"}],
+            "isolation": {"mode": "subprocess", "network": True},
+            "metadata": {"adapter_family": "provider", "network_policy": {
+                "allowed_protocols": ["dns", "tcp"],
+                "allowed_destinations": ["127.0.0.1:%d" % server.server_port],
+                "allow_redirects": False,
+            }},
+        }), encoding="utf-8")
+        host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+        record = host.discover()[0]
+        host.preflight()
+        with pytest.raises(HostError, match="network policy denied redirect"):
+            host.run_task({"task": {"id": "network-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
+        assert {event["kind"] for event in evidence["events"]} >= {"dns", "tcp", "redirect"}
+        assert any(event["kind"] == "redirect" and not event["allowed"] for event in evidence["events"])
+        assert evidence["limitations"]
+    finally:
+        server.shutdown()
+        server.server_close()

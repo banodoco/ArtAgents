@@ -189,6 +189,7 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
             executor_id="provider-fixture-host",
             capability_ids=[record.id],
             idempotency_key="provider-fixture-claim-blocked",
+            runtime_epoch=generated.health().runtime_epoch,
         )
         assert blocked is not None and blocked["waiting_reason"] == "capability_unavailable"
         assert generated.get_task(task.task_id).state == "queued"

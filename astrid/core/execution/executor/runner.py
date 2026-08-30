@@ -1156,21 +1156,40 @@ def _command_subprocess_env(
 ) -> dict[str, str]:
     external_pack_env = _external_pack_pythonpath_env(executor, command_env)
     project_env = _project_subprocess_env(request)
+    scoped_env = _emit_scoped_config_env(executor, request)
+    declared_secret_env = tuple(dict.fromkeys(
+        str(name) for name in (
+            *(executor.isolation.secrets_required or ()),
+            *(executor.metadata.get("secrets_required") or ()),
+            *(executor.metadata.get("required_env") or ()),
+            *(executor.metadata.get("env") or ()),
+        )
+    ))
+    explicit_env = {
+        **command_env,
+        **external_pack_env,
+        **project_env,
+        "ASTRID_INTERNAL_INVOCATION": "1",
+    }
+    # Scoped credential resolution is the only allowed source for secret
+    # values.  Pass them through the dedicated in-memory secret channel rather
+    # than the ordinary explicit environment map.
+    secret_values = {
+        key: value for key, value in scoped_env.items() if key in declared_secret_env
+    }
+    for key in secret_values:
+        explicit_env.pop(key, None)
     return build_child_subprocess_env(
         # Project routing attached to the admitted request is authoritative.
         # Overlay it onto the parent invariants as well as the explicit child
         # environment so an unrelated ambient ASTRID_PROJECTS_ROOT cannot
         # redirect execution after the request has been bound.
         parent={**os.environ, **project_env},
-        explicit_env={
-            **command_env,
-            **external_pack_env,
-            **project_env,
-            **_emit_scoped_config_env(executor, request),  # scoped-config emit
-            "ASTRID_INTERNAL_INVOCATION": "1",
-        },
+        explicit_env=explicit_env,
         passthrough=executor.isolation.env_passthrough,
         declared_passthrough=executor.isolation.env_passthrough,
+        secret_values=secret_values,
+        declared_secrets=declared_secret_env,
     )
 
 

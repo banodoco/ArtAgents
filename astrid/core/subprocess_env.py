@@ -97,7 +97,7 @@ _ASTRID_PROPAGATED_ENV = frozenset(
 )
 
 _SECRET_NAME_RE = re.compile(
-    r"(^|_)(API[_-]?KEY|AUTH|CREDENTIAL|PASSWORD|SECRET|TOKEN)($|_)", re.IGNORECASE
+    r"(^|_)(API[_-]?KEY|KEY|AUTH|CREDENTIAL|PASSWORD|SECRET|TOKEN)($|_)", re.IGNORECASE
 )
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -113,6 +113,8 @@ def build_child_subprocess_env(
     explicit_env: Mapping[str, str] | None = None,
     passthrough: Iterable[str] = (),
     declared_passthrough: Iterable[str] = (),
+    secret_values: Mapping[str, str] | None = None,
+    declared_secrets: Iterable[str] = (),
 ) -> dict[str, str]:
     """Return the safe environment for an Astrid child process.
 
@@ -129,6 +131,12 @@ def build_child_subprocess_env(
     if undeclared:
         names = ", ".join(sorted(undeclared))
         raise SubprocessEnvPolicyError(f"env passthrough requested without declaration: {names}")
+    secret_names = _normalize_secret_names(declared_secrets, "declared_secrets")
+    supplied_secrets = {str(key): str(value) for key, value in (secret_values or {}).items()}
+    undeclared_secrets = set(supplied_secrets) - secret_names
+    if undeclared_secrets:
+        names = ", ".join(sorted(undeclared_secrets))
+        raise SubprocessEnvPolicyError(f"secret env supplied without declaration: {names}")
 
     env: dict[str, str] = {}
     for key, value in base_env.items():
@@ -137,7 +145,14 @@ def build_child_subprocess_env(
                 env[key] = str(value)
 
     for key, value in (explicit_env or {}).items():
+        if _is_secret_name(str(key)) and str(key) not in secret_names:
+            raise SubprocessEnvPolicyError(f"secret env {key!r} must be supplied through secret_values")
         env[str(key)] = str(value)
+
+    # Values are copied only into the in-memory Popen environment; callers
+    # must clear their mapping after process creation/cancellation.
+    for key, value in supplied_secrets.items():
+        env[key] = value
 
     env.pop(ASTRID_ACTOR, None)
     for key in sorted(_ASTRID_PROPAGATED_ENV):
@@ -156,6 +171,17 @@ def _normalize_names(values: Iterable[str], label: str) -> set[str]:
             raise SubprocessEnvPolicyError(f"{label} entry {value!r} is not a valid environment variable name")
         if _is_secret_name(value):
             raise SubprocessEnvPolicyError(f"{label} entry {value!r} looks secret-like")
+        names.add(value)
+    return names
+
+
+def _normalize_secret_names(values: Iterable[str], label: str) -> set[str]:
+    names: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value or not _ENV_NAME_RE.fullmatch(value):
+            raise SubprocessEnvPolicyError(f"{label} entries must be valid environment variable names")
+        if not _is_secret_name(value):
+            raise SubprocessEnvPolicyError(f"{label} entry {value!r} is not secret-like")
         names.add(value)
     return names
 

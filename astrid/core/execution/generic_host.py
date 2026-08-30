@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
+from urllib.parse import urlsplit
 
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.execution.capability_ledger import load_capability_ledger
@@ -196,6 +197,45 @@ def _preflight_unavailable_reason(record: "CapabilityRecord") -> str:
     if failures:
         return ";".join(failures)
     return str(record.matrix.get("evidence_reason") or "capability preflight is not ready")
+
+
+def _required_secret_names(record: "CapabilityRecord") -> tuple[str, ...]:
+    """Return the manifest/matrix credential names admitted to one child.
+
+    This is deliberately the one source of truth for both readiness and
+    process injection.  In particular, an ambient ``OPENAI_API_KEY`` cannot
+    cross the boundary merely because the parent happens to have one.
+    """
+    declared_env = record.definition.metadata.get(
+        "required_env",
+        record.definition.metadata.get(
+            "required_credentials", record.definition.metadata.get("env", ())
+        ),
+    )
+    if isinstance(declared_env, str):
+        declared_env = (declared_env,)
+    return tuple(dict.fromkeys(
+        str(name)
+        for name in (
+            *(record.matrix.get("required_env") or ()),
+            *(record.definition.isolation.secrets_required or ()),
+            *(record.definition.metadata.get("secrets_required") or ()),
+            *(declared_env or ()),
+        )
+        if str(name)
+    ))
+
+
+def _network_policy(record: "CapabilityRecord") -> dict[str, Any] | None:
+    """Read the optional bounded network policy from the manifest/matrix."""
+    raw = record.definition.metadata.get("network_policy")
+    if raw is None:
+        raw = record.matrix.get("network_policy")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise HostError(f"network_policy for {record.id!r} must be an object")
+    return {str(key): value for key, value in raw.items()}
 
 
 def _hivemind_source_preflight(record: "CapabilityRecord") -> dict[str, Any] | None:
@@ -632,7 +672,7 @@ class RuntimeProtocolClient:
 class GenericPackHost:
     """Discover, register, preflight, and execute pack capabilities."""
 
-    def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None, capability_matrix: str | Path | None = None):
+    def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None, capability_matrix: str | Path | None = None, credential_source: Mapping[str, str] | None = None):
         self.pack_roots = tuple(Path(root).expanduser().resolve() for root in pack_roots)
         self.client = client
         self.executor_id = executor_id
@@ -643,6 +683,9 @@ class GenericPackHost:
         self._registered_state: dict[str, dict[str, str]] = {}
         self._registered_runtime_state: dict[str, Any] = {}
         self.capability_matrix_path = Path(capability_matrix).expanduser().resolve() if capability_matrix else self._default_matrix_path()
+        # Keep the mapping live when the default is os.environ so test/runtime
+        # credential rotation is observed without snapshotting secret values.
+        self.credential_source = os.environ if credential_source is None else credential_source
         self.ledger = load_capability_ledger(self.capability_matrix_path) if self.capability_matrix_path else {"capabilities": [], "sources": {}}
         self.matrix: dict[str, dict[str, Any]] = self._load_matrix(self.capability_matrix_path)
         self.source_epoch = "uninitialized"
@@ -800,17 +843,8 @@ class GenericPackHost:
                 checks["binaries"] = {"ok": False, "missing": missing}
             else:
                 checks["binaries"] = {"ok": True}
-            declared_env = record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
-            required_env = tuple(dict.fromkeys(
-                str(name)
-                for name in (
-                    *(record.matrix.get("required_env") or ()),
-                    *(record.definition.isolation.secrets_required or ()),
-                    *(record.definition.metadata.get("secrets_required") or ()),
-                    *(declared_env or ()),
-                )
-            ))
-            missing_env = [name for name in required_env if not os.environ.get(name)]
+            required_env = _required_secret_names(record)
+            missing_env = [name for name in required_env if not self.credential_source.get(name)]
             checks["credentials"] = {"ok": not missing_env, "missing": missing_env}
             required_packages = record.matrix.get("required_packages") or record.definition.metadata.get("required_packages", adapter.required_packages)
             missing_packages = [package for package in (required_packages or ()) if importlib.util.find_spec(str(package)) is None]
@@ -1064,6 +1098,79 @@ class GenericPackHost:
             })
         return outputs
 
+    def _child_environment(
+        self,
+        record: CapabilityRecord,
+        attempt: Path,
+        *,
+        explicit_env: Mapping[str, str] | None = None,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Build a redacted, manifest-scoped child environment.
+
+        The second return value is the temporary secret map held by the host;
+        callers clear it in their ``finally`` block.  No credential is placed
+        in request JSON, evidence, or diagnostics.
+        """
+        declared = _required_secret_names(record)
+        secrets = {name: str(self.credential_source[name]) for name in declared if self.credential_source.get(name)}
+        explicit = dict(explicit_env or {})
+        # A manifest may set ordinary fixed environment values, but secret
+        # values are always sourced by the host and never trusted from YAML.
+        for name in tuple(explicit):
+            if name in declared:
+                explicit.pop(name, None)
+            elif name.upper().endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")):
+                raise HostError(f"undeclared secret environment variable {name!r}")
+        env = build_child_subprocess_env(
+            explicit_env=explicit,
+            passthrough=record.definition.isolation.env_passthrough,
+            declared_passthrough=record.definition.isolation.env_passthrough,
+            secret_values=secrets,
+            declared_secrets=declared,
+        )
+        policy = _network_policy(record)
+        if policy is not None:
+            hook_root = attempt / ".astrid-network-hook"
+            hook_root.mkdir(parents=True, exist_ok=True)
+            (hook_root / "sitecustomize.py").write_text(
+                "from astrid.core.execution.network_policy import install_from_environment\ninstall_from_environment()\n",
+                encoding="utf-8",
+            )
+            evidence_path = attempt / "network-evidence.json"
+            env["ASTRID_NETWORK_POLICY"] = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+            env["ASTRID_NETWORK_EVIDENCE"] = str(evidence_path)
+            env["PYTHONPATH"] = str(hook_root) + os.pathsep + env.get("PYTHONPATH", "")
+            proxy = policy.get("proxy")
+            if isinstance(proxy, str) and proxy:
+                parsed_proxy = urlsplit(proxy)
+                if parsed_proxy.username or parsed_proxy.password:
+                    raise HostError("network policy proxy URL must not contain credentials")
+                # Ambient proxy settings are not inherited; only an admitted
+                # manifest proxy may be used by the child.
+                for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                    env[key] = proxy
+                no_proxy = policy.get("no_proxy")
+                if no_proxy:
+                    env["NO_PROXY"] = str(no_proxy)
+        return env, secrets
+
+    @staticmethod
+    def _scrub_secret_text(value: str, secrets: Mapping[str, str]) -> str:
+        result = str(value)
+        for secret in secrets.values():
+            if secret:
+                result = result.replace(secret, "<redacted>")
+        return result
+
+    @staticmethod
+    def _network_evidence(attempt: Path) -> Mapping[str, Any] | None:
+        path = attempt / "network-evidence.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, Mapping) else None
+
     def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Publish staged outputs and return settlement-safe object refs."""
         uploaded: list[dict[str, Any]] = []
@@ -1124,14 +1231,14 @@ class GenericPackHost:
         # boundary.  In particular, an unrelated ambient API key must never
         # leak into a provider subprocess.
         package_parent = str(Path(__file__).resolve().parents[3])
-        env = build_child_subprocess_env(
+        env, secrets = self._child_environment(
+            record,
+            attempt,
             explicit_env={
                 "PYTHONPATH": package_parent,
                 ASTRID_INTERNAL_INVOCATION: "1",
                 **{str(key): str(value) for key, value in command.env.items()},
             },
-            passthrough=record.definition.isolation.env_passthrough,
-            declared_passthrough=record.definition.isolation.env_passthrough,
         )
         # Pack runtime modules reserve their direct module entry points for
         # the canonical runner.  GenericPackHost is that runner's process
@@ -1175,7 +1282,8 @@ class GenericPackHost:
                 time.sleep(0.05)
             stdout, stderr = process.communicate()
             if process.returncode != 0:
-                raise HostError(f"capability {record.id!r} exited {process.returncode}: {(stderr or stdout).strip()}")
+                detail = self._scrub_secret_text((stderr or stdout).strip(), secrets)
+                raise HostError(f"capability {record.id!r} exited {process.returncode}: {detail}")
             outputs = {}
             for output in record.definition.outputs:
                 template = output.path_template or output.placeholder
@@ -1188,9 +1296,11 @@ class GenericPackHost:
                 candidate = Path(path)
                 if candidate.is_file():
                     outputs[output.name] = str(candidate)
-            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest}})()
+            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}})()
         finally:
             _release_owned_group(process)
+            env.clear()
+            secrets.clear()
 
     def invoke_capability(
         self,
@@ -1202,6 +1312,7 @@ class GenericPackHost:
         cancelled=None,
         definition: Mapping[str, Any] | None = None,
         admission: Mapping[str, Any] | None = None,
+        child_env: Mapping[str, str] | None = None,
     ) -> Any:
         """Run one pack capability in a dedicated child process.
 
@@ -1249,7 +1360,9 @@ class GenericPackHost:
             "result_path": str(result_path),
         }
         request_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-        env = os.environ.copy()
+        env = dict(child_env or build_child_subprocess_env(
+            explicit_env={ASTRID_INTERNAL_INVOCATION: "1"},
+        ))
         env[ASTRID_INTERNAL_INVOCATION] = "1"
         # The attempt directory is the child cwd; retain this checkout (or
         # installed package parent) on ``PYTHONPATH`` so ``python -m`` can
@@ -1281,7 +1394,11 @@ class GenericPackHost:
                 time.sleep(0.05)
             stdout, stderr = process.communicate()
             if process.returncode != 0:
-                detail = (stderr or stdout).strip()
+                secret_values = {
+                    key: value for key, value in env.items()
+                    if key.upper().endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD"))
+                }
+                detail = self._scrub_secret_text((stderr or stdout).strip(), secret_values)
                 raise HostError(
                     f"capability {capability_id!r} child exited {process.returncode}"
                     + (f": {detail[-3500:]}" if detail else "")
@@ -1301,11 +1418,19 @@ class GenericPackHost:
                 returncode=result.get("returncode"),
                 outputs=dict(result.get("outputs") or {}),
                 payload=dict(result.get("payload") or {}),
-                stdout=stdout,
-                stderr=stderr,
+                stdout=self._scrub_secret_text(stdout, {
+                    key: value for key, value in env.items()
+                    if key.upper().endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD"))
+                }),
+                stderr=self._scrub_secret_text(stderr, {
+                    key: value for key, value in env.items()
+                    if key.upper().endswith(("_KEY", "_TOKEN", "_SECRET", "_PASSWORD"))
+                }),
+                process_id=process.pid,
             )
         finally:
             _release_owned_group(process)
+            env.clear()
             request_path.unlink(missing_ok=True)
             result_path.unlink(missing_ok=True)
 
@@ -1401,32 +1526,38 @@ class GenericPackHost:
                     # Dispatch through the process boundary.  The immutable
                     # admitted definition is serialized for the child so a
                     # registry reload cannot silently select a different pack.
-                    result = self.invoke_capability(
-                        capability_kind="executor",
-                        capability_id=capability_id,
-                        request={
-                            "out": str(output_root),
-                            "inputs": inputs,
-                            "project": task_data.get("project"),
-                            "project_was_auto_resolved": True,
-                            "python_exec": sys.executable,
-                            "run_id": task_id,
-                            "run_root": str(root),
-                            "execution_mode": "subprocess",
-                            "invocation": "runtime",
-                        },
-                        attempt=root,
-                        cancelled=cancelled,
-                        definition=record.definition.to_dict(),
-                        admission={
-                            "capability_digest": record.capability_digest,
-                            "source_digest": record.source_digest,
-                            "dependency_digest": record.dependency_digest,
-                            "version": record.definition.version,
-                            "source_root": str(record.source_root),
-                            "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
-                        },
-                    )
+                    worker_env, worker_secrets = self._child_environment(record, root)
+                    try:
+                        result = self.invoke_capability(
+                            capability_kind="executor",
+                            capability_id=capability_id,
+                            request={
+                                "out": str(output_root),
+                                "inputs": inputs,
+                                "project": task_data.get("project"),
+                                "project_was_auto_resolved": True,
+                                "python_exec": sys.executable,
+                                "run_id": task_id,
+                                "run_root": str(root),
+                                "execution_mode": "subprocess",
+                                "invocation": "runtime",
+                            },
+                            attempt=root,
+                            cancelled=cancelled,
+                            definition=record.definition.to_dict(),
+                            admission={
+                                "capability_digest": record.capability_digest,
+                                "source_digest": record.source_digest,
+                                "dependency_digest": record.dependency_digest,
+                                "version": record.definition.version,
+                                "source_root": str(record.source_root),
+                                "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+                            },
+                            child_env=worker_env,
+                        )
+                    finally:
+                        worker_env.clear()
+                        worker_secrets.clear()
             finally:
                 pump_stop.set()
                 if pump_thread is not None:
@@ -1439,6 +1570,17 @@ class GenericPackHost:
                     return {"task_id": task_id, "status": "cancelled", "cancelled": True}
             outputs = self._upload_outputs(self._typed_outputs(record, result, root))
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
+            network_evidence = self._network_evidence(root)
+            if network_evidence is not None:
+                payload["network_evidence"] = network_evidence
+            payload["process_evidence"] = {
+                "capability_id": capability_id,
+                "attempt_id": attempt_id,
+                "fence": fence,
+                "child_boundary": "subprocess",
+                "process_id": getattr(result, "process_id", None),
+                "returncode": getattr(result, "returncode", None),
+            }
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):
                 effect = effect[0] if effect else None
