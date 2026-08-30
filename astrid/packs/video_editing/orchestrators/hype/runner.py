@@ -253,6 +253,12 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                     protocol=pickle.HIGHEST_PROTOCOL,
                 )
             )
+            # Preserve whether this runner itself belongs to an admitted
+            # worker before adding the marker to the child environment.
+            # Tests and direct callers may need the isolated-session path;
+            # the marker we set below is for the callback worker's import
+            # guard and is not, by itself, evidence of an inherited session.
+            internal_worker = os.environ.get("ASTRID_INTERNAL_INVOCATION") == "1"
             env = os.environ.copy()
             env["ASTRID_INTERNAL_INVOCATION"] = "1"
             package_parent = str(Path(__file__).resolve().parents[5])
@@ -262,13 +268,20 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 if not existing_pythonpath
                 else os.pathsep.join((package_parent, existing_pythonpath))
             )
-            process = popen_owned_group(
+            # Direct callbacks get their own session so a timeout can clean
+            # up descendants even when the callback leader exits first.  A
+            # callback running inside an admitted GenericPackHost worker must
+            # inherit that worker's session: otherwise outer host
+            # cancellation cannot reach this detached callback process.
+            launcher = subprocess.Popen if internal_worker else popen_owned_group
+            process = launcher(
                 [sys.executable, "-m", "astrid.packs.video_editing.orchestrators.hype.step_worker", str(request_path)],
                 cwd=str(args.out),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 env=env,
+                **({"start_new_session": False} if internal_worker else {}),
             )
             assert process.stdout is not None
             lines: queue.Queue[str | None] = queue.Queue()
@@ -301,11 +314,20 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                     pass
                 if _callback_cancelled(args):
                     cancelled = True
-                    _terminate_process_group(process)
+                    if internal_worker:
+                        # The callback shares the admitted worker's session;
+                        # terminate only this process and descendants so the
+                        # worker remains able to report cancellation upstream.
+                        _terminate_owned_tree(process)
+                    else:
+                        _terminate_process_group(process)
                     break
                 if time.monotonic() >= deadline:
                     timed_out = True
-                    _terminate_process_group(process)
+                    if internal_worker:
+                        _terminate_owned_tree(process)
+                    else:
+                        _terminate_process_group(process)
                     break
                 time.sleep(0.02)
             returncode = process.wait()
@@ -326,7 +348,8 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
             elif cancelled:
                 log_handle.write("callback cancelled\n")
                 returncode = 143
-            _release_owned_group(process)
+            if not internal_worker:
+                _release_owned_group(process)
             request_path.unlink(missing_ok=True)
         else:
             env = os.environ.copy()

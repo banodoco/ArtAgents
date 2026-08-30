@@ -137,6 +137,7 @@ def test_callback_pipeline_step_does_not_invoke_parent_callback(
         raise AssertionError("parent pipeline callback was invoked")
 
     monkeypatch.setattr(module, "callback", parent_callback_must_not_run)
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     step = Step("callback", ("callback.txt",), lambda _args: [], invoke=callback)
     args = SimpleNamespace(out=tmp_path, verbose=False)
 
@@ -163,6 +164,7 @@ def test_callback_timeout_kills_child_process_group(tmp_path: Path, monkeypatch)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     step = Step("hung", (), lambda _args: [], invoke=module.callback)
     args = SimpleNamespace(out=tmp_path, verbose=False, callback_timeout=0.1)
 
@@ -204,10 +206,11 @@ def test_callback_timeout_kills_sigterm_resistant_descendant_after_leader_exit(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     step = Step("leader-exits", (), lambda _args: [], invoke=module.callback)
     # Leave enough startup time for the callback to spawn its child before
     # exercising the timeout path.
-    args = SimpleNamespace(out=tmp_path, verbose=False, callback_timeout=1.0)
+    args = SimpleNamespace(out=tmp_path, verbose=False, callback_timeout=3.0)
 
     assert run_step(step, [], args) == 124
     child_pid = int((tmp_path / "child.pid").read_text(encoding="utf-8"))
@@ -219,6 +222,64 @@ def test_callback_timeout_kills_sigterm_resistant_descendant_after_leader_exit(
         time.sleep(0.05)
     else:
         pytest.fail("SIGTERM-resistant callback descendant survived timeout")
+
+
+def test_internal_callback_cancellation_reaps_callback_and_descendants(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An admitted host can reach a callback and everything it spawned."""
+    module_path = tmp_path / "cancelled_callback.py"
+    callback_pid = tmp_path / "callback.pid"
+    child_pid = tmp_path / "child.pid"
+    child_code = (
+        "import os,signal,sys,time; from pathlib import Path; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "os.write(int(sys.argv[2]), b'1'); os.close(int(sys.argv[2])); time.sleep(30)"
+    )
+    module_path.write_text(
+        "import os,signal,subprocess,sys,time\n"
+        "from pathlib import Path\n"
+        f"CHILD_CODE = {child_code!r}\n"
+        "def callback(args):\n"
+        f"    Path({str(callback_pid)!r}).write_text(str(os.getpid()))\n"
+        "    ready_r, ready_w = os.pipe()\n"
+        f"    subprocess.Popen([sys.executable, '-c', CHILD_CODE, {str(child_pid)!r}, str(ready_w)], pass_fds=(ready_w,))\n"
+        "    os.close(ready_w)\n"
+        "    os.read(ready_r, 1)\n"
+        "    os.close(ready_r)\n"
+        "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "    while True:\n"
+        "        time.sleep(1)\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("cancelled_callback", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.setenv("ASTRID_INTERNAL_INVOCATION", "1")
+    started = time.monotonic()
+
+    def cancelled() -> bool:
+        return child_pid.exists() or time.monotonic() - started > 5.0
+
+    step = Step("cancelled-callback", (), lambda _args: [], invoke=module.callback)
+    args = SimpleNamespace(
+        out=tmp_path, verbose=False, callback_timeout=30.0, cancelled=cancelled
+    )
+    assert run_step(step, [], args) == 143
+    callback = int(callback_pid.read_text(encoding="utf-8"))
+    child = int(child_pid.read_text(encoding="utf-8"))
+    for pid in (callback, child):
+        for _ in range(40):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail(f"cancelled callback process survived: {pid}")
 
 
 def test_command_step_cancellation_does_not_create_detached_session(

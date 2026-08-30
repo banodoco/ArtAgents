@@ -266,6 +266,18 @@ def _tree_members(
     pending = [process.pid, *known]
     while pending:
         parent = pending.pop()
+        # A PID in ``known`` is only an identity, not a permanent process.
+        # Revalidate that identity before following its children.  Without
+        # this guard, a child that exits and whose PID is reused can make us
+        # adopt and signal an unrelated process tree hanging off the reused
+        # PID.  Missing parents are also a fail-closed boundary: retain
+        # already-known descendants for cleanup, but never discover new ones.
+        expected_birth = known.get(parent)
+        if expected_birth is None:
+            continue
+        current = snapshot.get(parent)
+        if current is None or current.birth != expected_birth:
+            continue
         for info in children.get(parent, ()):
             prior = known.get(info.pid)
             if prior is not None and prior != info.birth:

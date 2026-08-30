@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -290,6 +291,35 @@ def test_signal_revalidates_group_identity_immediately_before_killpg(monkeypatch
         monkeypatch.undo()
         process.kill()
         process.wait()
+
+
+def test_tree_cleanup_rejects_reused_child_before_adopting_descendants(monkeypatch):
+    """A reused child PID cannot pull an unrelated descendant into cleanup."""
+    process = SimpleNamespace(pid=100, _astrid_process_birth="root")
+    known: dict[int, str] = {}
+    initial = {
+        100: process_group._ProcessInfo(100, 1, 100, "root"),
+        200: process_group._ProcessInfo(200, 100, 100, "child-old"),
+    }
+    assert process_group._tree_members(process, known, initial) == {
+        100: "root",
+        200: "child-old",
+    }
+
+    # PID 200 is now a different process.  Its child 300 is unrelated and
+    # must not be adopted merely because the numeric parent PID matches.
+    reused = {
+        100: process_group._ProcessInfo(100, 1, 100, "root"),
+        200: process_group._ProcessInfo(200, 100, 100, "child-new"),
+        300: process_group._ProcessInfo(300, 200, 100, "unrelated"),
+    }
+    assert process_group._tree_members(process, known, reused) == {
+        100: "root",
+    }
+    signalled: list[int] = []
+    monkeypatch.setattr(os, "kill", lambda pid, _sig: signalled.append(pid))
+    process_group._signal_valid_tree_members(process, known, signal.SIGKILL, reused)
+    assert signalled == [100]
 
 
 def test_discovery_digest_and_truthful_preflight(tmp_path):
