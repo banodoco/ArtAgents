@@ -82,6 +82,22 @@ class AdapterRegistry:
     def families(cls) -> tuple[str, ...]:
         return tuple(sorted(cls._specs))
 
+    @classmethod
+    def from_matrix(cls, definition: ExecutorDefinition, entry: Mapping[str, Any] | None = None) -> AdapterSpec:
+        base = cls.resolve(definition)
+        entry = entry or {}
+        family = str(entry.get("adapter_family") or base.family)
+        if family not in cls._specs:
+            raise HostError(f"unknown adapter family {family!r} for {definition.id!r}")
+        builtin = cls._specs[family]
+        return AdapterSpec(
+            family,
+            tuple(entry.get("resource_keys") or builtin.resource_keys),
+            tuple(entry.get("required_binaries") or builtin.required_binaries),
+            tuple(entry.get("required_packages") or builtin.required_packages),
+            builtin.requires_network,
+        )
+
 
 def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
@@ -108,6 +124,7 @@ class CapabilityRecord:
     manifest_path: Path | None = None
     preflight: Mapping[str, Any] = field(default_factory=dict)
     ready: bool = False
+    matrix: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
@@ -120,7 +137,12 @@ class CapabilityRecord:
         if isinstance(values, str):
             values = (values,)
         declared = tuple(str(value) for value in (values or ()))
-        return tuple(dict.fromkeys((*AdapterRegistry.resolve(self.definition).resource_keys, *declared)))
+        adapter = AdapterRegistry.from_matrix(self.definition, self.matrix)
+        return tuple(dict.fromkeys((*adapter.resource_keys, *declared)))
+
+    @property
+    def adapter(self) -> AdapterSpec:
+        return AdapterRegistry.from_matrix(self.definition, self.matrix)
 
     @property
     def estimated_scratch_bytes(self) -> int:
@@ -143,7 +165,9 @@ class CapabilityRecord:
             "resource_keys": list(self.resource_keys),
             "estimated_scratch_bytes": self.estimated_scratch_bytes,
             "estimated_output_bytes": self.estimated_output_bytes,
-            "adapter_family": AdapterRegistry.resolve(self.definition).family,
+            "adapter_family": self.adapter.family,
+            "disposition": self.matrix.get("disposition", "unclassified"),
+            "evidence_reason": self.matrix.get("evidence_reason", ""),
             "preflight": dict(self.preflight),
             "ready": self.ready,
         }
@@ -226,7 +250,7 @@ class RuntimeProtocolClient:
 class GenericPackHost:
     """Discover, register, preflight, and execute pack capabilities."""
 
-    def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None):
+    def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None, capability_matrix: str | Path | None = None):
         self.pack_roots = tuple(Path(root).expanduser().resolve() for root in pack_roots)
         self.client = client
         self.executor_id = executor_id
@@ -234,6 +258,40 @@ class GenericPackHost:
         self.attempt_root = Path(attempt_root).expanduser().resolve() if attempt_root else None
         self.capabilities: dict[str, CapabilityRecord] = {}
         self._registered_digests: dict[str, str] = {}
+        self.capability_matrix_path = Path(capability_matrix).expanduser().resolve() if capability_matrix else self._default_matrix_path()
+        self.matrix: dict[str, dict[str, Any]] = self._load_matrix(self.capability_matrix_path)
+
+    def _default_matrix_path(self) -> Path | None:
+        checkout = Path(__file__).resolve().parents[3]
+        candidate = checkout / "config" / "astrid-beta-capabilities.json"
+        source_pack_root = checkout / "astrid" / "packs"
+        if candidate.is_file() and any(root == source_pack_root for root in self.pack_roots):
+            return candidate
+        return None
+
+    @staticmethod
+    def _load_matrix(path: Path | None) -> dict[str, dict[str, Any]]:
+        if path is None:
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HostError(f"cannot read capability matrix {path}: {exc}") from exc
+        if payload.get("schema_version") != 1 or not isinstance(payload.get("capabilities"), list):
+            raise HostError("capability matrix requires schema_version 1 and a capabilities list")
+        allowed = {"required", "optional", "unsupported", "retired"}
+        result = {}
+        for entry in payload["capabilities"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+                raise HostError("capability matrix entries require an id")
+            if entry.get("disposition") not in allowed:
+                raise HostError(f"invalid capability disposition for {entry.get('id')!r}")
+            if not entry.get("evidence_reason"):
+                raise HostError(f"capability matrix entry {entry['id']!r} needs evidence_reason")
+            if entry["id"] in result:
+                raise HostError(f"duplicate capability matrix entry {entry['id']!r}")
+            result[entry["id"]] = entry
+        return result
 
     def discover(self) -> tuple[CapabilityRecord, ...]:
         records: dict[str, CapabilityRecord] = {}
@@ -246,8 +304,21 @@ class GenericPackHost:
                     # neighboring packs.  The manifest report records the reason.
                     continue
                 manifest = next((executor_root / name for name in ("executor.yaml", "executor.yml", "executor.json") if (executor_root / name).is_file()), None)
-                record = CapabilityRecord(definition=definition, capability_digest=_canonical_digest(definition.to_dict()), source_digest=_source_digest(executor_root), source_root=executor_root, manifest_path=manifest)
+                matrix_entry = self.matrix.get(definition.id, {})
+                record = CapabilityRecord(definition=definition, capability_digest=_canonical_digest(definition.to_dict()), source_digest=_source_digest(executor_root), source_root=executor_root, manifest_path=manifest, matrix=matrix_entry)
                 records[record.id] = record
+        if self.matrix:
+            discovered = set(records)
+            expected = set(self.matrix)
+            missing = sorted(discovered - expected)
+            stale = sorted(expected - discovered)
+            if missing or stale:
+                details = []
+                if missing:
+                    details.append("missing matrix entries: " + ", ".join(missing))
+                if stale:
+                    details.append("matrix entries not discovered: " + ", ".join(stale))
+                raise HostError("capability matrix does not exactly cover discovered corpus; " + "; ".join(details))
         self.capabilities = records
         return tuple(records[key] for key in sorted(records))
 
@@ -256,16 +327,18 @@ class GenericPackHost:
         updated: dict[str, CapabilityRecord] = dict(self.capabilities)
         for record in selected:
             checks: dict[str, Any] = {"source": record.source_root.is_dir(), "definition": True}
-            adapter = AdapterRegistry.resolve(record.definition)
-            missing = list(dict.fromkeys((*check_executor_binaries(record.definition), *(binary for binary in adapter.required_binaries if shutil.which(binary) is None))))
+            adapter = record.adapter
+            matrix_binaries = tuple(str(binary) for binary in record.matrix.get("required_binaries", ()))
+            binary_requirements = tuple(dict.fromkeys((*record.definition.isolation.binaries, *matrix_binaries, *adapter.required_binaries)))
+            missing = list(dict.fromkeys(binary for binary in binary_requirements if shutil.which(binary) is None))
             if missing:
                 checks["binaries"] = {"ok": False, "missing": missing}
             else:
                 checks["binaries"] = {"ok": True}
-            required_env = record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
+            required_env = record.matrix.get("required_env") or record.definition.metadata.get("required_env", record.definition.metadata.get("required_credentials", record.definition.metadata.get("env", ())))
             missing_env = [str(name) for name in (required_env or ()) if not os.environ.get(str(name))]
             checks["credentials"] = {"ok": not missing_env, "missing": missing_env}
-            required_packages = record.definition.metadata.get("required_packages", adapter.required_packages)
+            required_packages = record.matrix.get("required_packages") or record.definition.metadata.get("required_packages", adapter.required_packages)
             missing_packages = [package for package in (required_packages or ()) if importlib.util.find_spec(str(package)) is None]
             checks["packages"] = {"ok": not missing_packages, "missing": missing_packages}
             if adapter.family == "render":
@@ -472,7 +545,7 @@ class GenericPackHost:
                 if current_task.get("status") == "cancelled":
                     return {"task_id": task_id, "status": "cancelled", "cancelled": True}
             outputs = self._typed_outputs(record, result, root)
-            payload = {"adapter_family": AdapterRegistry.resolve(record.definition).family, **(getattr(result, "payload", {}) or {})}
+            payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):
                 effect = effect[0] if effect else None
