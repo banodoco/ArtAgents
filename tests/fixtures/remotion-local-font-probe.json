@@ -9,15 +9,55 @@
     },
     "clips": [
       {
-        "id": "local-font-glyph-probe",
+        "id": "sixtyfour-glyph-probe",
         "at": 0,
         "track": "probe",
         "clipType": "text",
         "hold": 1,
+        "x": 120,
+        "y": 220,
+        "width": 1680,
+        "height": 180,
         "text": {
-          "content": "Astrid 2RP — Aa 0123",
+          "content": "Sixtyfour  Astrid 2RP — Aa 0123",
           "fontFamily": "'Sixtyfour', 'Sixtyfour Variable', monospace",
-          "fontSize": 96,
+          "fontSize": 82,
+          "bold": true,
+          "align": "center"
+        }
+      },
+      {
+        "id": "inter-glyph-probe",
+        "at": 0,
+        "track": "probe",
+        "clipType": "text",
+        "hold": 1,
+        "x": 120,
+        "y": 440,
+        "width": 1680,
+        "height": 180,
+        "text": {
+          "content": "Inter  Astrid 2RP — Aa 0123",
+          "fontFamily": "'Inter', system-ui, sans-serif",
+          "fontSize": 82,
+          "bold": true,
+          "align": "center"
+        }
+      },
+      {
+        "id": "jetbrains-mono-glyph-probe",
+        "at": 0,
+        "track": "probe",
+        "clipType": "text",
+        "hold": 1,
+        "x": 120,
+        "y": 660,
+        "width": 1680,
+        "height": 180,
+        "text": {
+          "content": "JetBrains Mono  Astrid 2RP — Aa 0123",
+          "fontFamily": "'JetBrains Mono', ui-monospace, monospace",
+          "fontSize": 82,
           "bold": true,
           "align": "center"
         }

@@ -74,11 +74,17 @@ def test_provenance_and_license_cover_every_theme_family() -> None:
     assert "Sixtyfour Project Authors" in license_text
 
 
-def test_offline_render_probe_covers_theme_families_and_glyphs() -> None:
+def test_committed_receipt_records_real_network_denial() -> None:
     probe = (ROOT / "tests" / "fixtures" / "remotion-local-font-probe.json").read_text(
         encoding="utf-8"
     )
+    receipt = (FONTS / "LOCAL_FONT_NETWORK_DENY.log").read_text(encoding="utf-8")
     for family in ("Sixtyfour", "Inter", "JetBrains Mono"):
         assert family in probe
     assert "Astrid 2RP — Aa 0123" in probe
     assert "fontFamily" in probe
+    assert "deny network-outbound" in receipt
+    assert "allow network-outbound (remote ip \"localhost:*\")" in receipt
+    assert "exit=0" in receipt
+    assert "hosted-font-request-lines=0" in receipt
+    assert "font-loader-completions=5" in receipt

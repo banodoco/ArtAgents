@@ -11,12 +11,13 @@ font evidence rather than an incidental source image.
 
 ## Checks
 
-- `python3 -m pytest -q tests/test_remotion_local_fonts.py` — PASS (3 tests).
+- `python3 -m pytest -q tests/test_remotion_local_fonts.py` — PASS (4 tests).
 - `npm run typecheck` — PASS.
 - `npm run bundle` — PASS.
-- `./node_modules/.bin/remotion render src/index.ts TimelineComposition /tmp/astrid-local-font-probe.mp4 --props ../tests/fixtures/remotion-local-font-probe.json --frames=0-29 --log=verbose` — PASS.
-- Render receipt: H.264/AAC, 1920×1080, 30 frames, 1.045333 seconds; output SHA-256 `e1696607180aa04079cc0c58b176e058986b960a7b55ece8d9f34cff60c884dd`.
-- Verbose render output recorded `Loading Astrid local fonts` cleared for all render tabs and emitted no hosted font request. The frame-15 visual probe rendered the expected Sixtyfour glyphs on a black canvas.
+- `sandbox-exec -p '(version 1) (allow default) (deny network-outbound) (allow network-outbound (remote ip "localhost:*"))' ./node_modules/.bin/remotion render src/index.ts TimelineComposition /tmp/astrid-local-font-offline.mp4 --props ../tests/fixtures/remotion-local-font-probe.json --frames=0-29 --log=verbose` — PASS (exit 0; committed network-denial receipt below).
+- Offline render receipt: H.264/AAC, 1920×1080, 30 frames, 1.045333 seconds; output SHA-256 `64af64f4d9076375eb1339fcb15cce5f6da6587c217d403c6e0119ad3c058f28`.
+- Frame-15 visual evidence SHA-256 `ef0b5418d465bdfaddfcf3765e7fe1bd225120d4b2f1c86d300d8453f722f05e` (Sixtyfour, Inter, and JetBrains Mono rows all visibly rendered).
+- Verbose output recorded five `Loading Astrid local fonts` completions and zero Google-font host markers. The full filtered receipt is `LOCAL_FONT_NETWORK_DENY.log`.
 
 ## Offline contract
 
