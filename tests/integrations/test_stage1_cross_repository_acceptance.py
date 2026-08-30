@@ -1,8 +1,7 @@
 """Small honest Stage 1 composition against the pinned runtime head.
 
 This test intentionally imports the sibling runtime at the exact checkout used
-for acceptance instead of the retired ``runtime-control2`` path used by older
-Astrid tests.
+for acceptance instead of relying on an ambient installed runtime package.
 """
 
 from __future__ import annotations

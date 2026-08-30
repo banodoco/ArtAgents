@@ -10,10 +10,10 @@ from pathlib import Path
 import pytest
 
 
-CONTROL2 = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-control2")
-if CONTROL2.is_dir():
-    sys.path.insert(0, str(CONTROL2 / "packages/python"))
-    sys.path.insert(0, str(CONTROL2))
+RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
+if RUNTIME.is_dir():
+    sys.path.insert(0, str(RUNTIME / "packages/python"))
+    sys.path.insert(0, str(RUNTIME))
 
 runtime_protocol = pytest.importorskip("runtime_protocol")
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402

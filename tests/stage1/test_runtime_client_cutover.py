@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-control2"
+RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
 sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 

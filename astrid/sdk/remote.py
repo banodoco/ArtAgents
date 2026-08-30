@@ -107,6 +107,12 @@ class RemoteMedia(_RemoteFamily):
         # The generated object API is realm-scoped; enforce project scope by
         # using the runtime's project object listing when available.
         result = self._call("GET", f"/v1/projects/{_path(project)}/objects")
+        if result.ok and isinstance(result.data, dict):
+            # Current runtime heads page project objects; older compatible
+            # heads returned the list directly. Keep the product envelope
+            # stable while accepting either generated response shape.
+            items = result.data.get("items", [])
+            result = DomainResult.success(items, idempotency_key=result.idempotency_key)
         if result.ok and isinstance(result.data, list):
             for item in result.data:
                 if isinstance(item, dict) and isinstance(item.get("digest"), str) and not item["digest"].startswith("sha256:"):
