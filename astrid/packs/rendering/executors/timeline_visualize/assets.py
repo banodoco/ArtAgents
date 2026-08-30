@@ -190,6 +190,8 @@ def verify_now(
     integrity: AssetIntegrity,
     *,
     project_root: Path,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> AssetIntegrity:
     """Re-verify the contained local path RIGHT NOW; return a fresh integrity.
 
@@ -227,6 +229,8 @@ def verify_now(
         raw_path,
         project_root=root,
         expected_sha256=integrity.expected_sha256,
+        runtime_client=runtime_client,
+        media_snapshot=media_snapshot,
     )
     if contained is None:
         return _fresh_integrity(

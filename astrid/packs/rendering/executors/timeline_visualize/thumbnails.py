@@ -49,7 +49,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from PIL import Image
 
@@ -338,6 +338,8 @@ def sample_filmstrip(
     media_type: str | None = None,
     integrity: AssetIntegrity | None = None,
     project_root: Path | str | None = None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
 ) -> list[Path]:
     """Sample one verified source into a deterministic filmstrip.
 
@@ -366,7 +368,12 @@ def sample_filmstrip(
         # TOCTOU guard: the guard must describe the bytes about to be read.
         # Runs BEFORE the existence check so a tampered/deleted file yields the
         # deterministic refusal reason instead of a bare FileNotFoundError.
-        fresh = verify_now(integrity, project_root=Path(project_root))
+        fresh = verify_now(
+            integrity,
+            project_root=Path(project_root),
+            runtime_client=runtime_client,
+            media_snapshot=media_snapshot,
+        )
         reason = guard_sampling(fresh)
         if reason is not None:
             raise RuntimeError(f"sampling refused: {reason}")

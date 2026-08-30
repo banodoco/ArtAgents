@@ -7,7 +7,7 @@ import hmac
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 ASTRID_GATEWAY_RESOLVED_PROJECT_ENV = "ASTRID_GATEWAY_RESOLVED_PROJECT"
 
@@ -144,8 +144,16 @@ def _validated_timeline_visualize_view_context(
         if not run_root.is_dir() or not manifest_path.is_relative_to(run_root):
             return None
         # Kernel-first ownership: prefer kernel run status; FS fallback for historical dirs.
-        kernel_info = _kernel_visualize_run_info(project_slug, run_id, projects_root)
+        kernel_info = _runtime_visualize_run_info(project_slug, run_id)
         if kernel_info is not None:
+            run_project_id = kernel_info.get("project_id")
+            current_project_id = kernel_info.get("current_project_id")
+            if (
+                run_project_id is not None
+                and current_project_id is not None
+                and str(run_project_id) != str(current_project_id)
+            ):
+                return None
             if kernel_info.get("status") not in ("succeeded", "completed"):
                 return None
             if kernel_info.get("tool_id") not in (None, "rendering.timeline_visualize"):
@@ -265,21 +273,51 @@ def _validated_timeline_visualize_view_context(
         manifest_path=manifest_path,
     )
 
-def _kernel_visualize_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
+def _runtime_visualize_run_info(project_slug: str, run_id: str) -> dict[str, Any] | None:
+    """Read visualization-run ownership from the generated runtime client.
+
+    The gateway's ``--from-view`` exception runs before a normal product
+    session exists, but it still must use the same runtime authority as the
+    executor.  In particular, this leaf must never open the local ledger merely
+    to validate a durable view manifest.
+    """
     try:
-        import sqlite3
+        from astrid.sdk.workspace_client import WorkspaceClient, resolve_runtime_connection
 
-        from astrid.core.kernel.read import kernel_run_info
-
-        info = kernel_run_info(project_slug, run_id, projects_root=projects_root)
-        if info is None:
+        endpoint, token = resolve_runtime_connection()
+        runtime = WorkspaceClient(endpoint, token)
+        info = runtime.get_run(run_id)
+        if not isinstance(info, Mapping):
             return None
+        capability = info.get("capability") or info.get("capability_id")
+        metadata = info.get("metadata")
+        timeline_ids = info.get("timeline_ids")
+        if timeline_ids is None and isinstance(metadata, Mapping):
+            timeline_ids = metadata.get("timeline_ids")
+        projects = runtime.list_projects()
+        rows = projects.get("items", []) if isinstance(projects, Mapping) else projects
+        current = next(
+            (
+                row
+                for row in rows or []
+                if isinstance(row, Mapping) and row.get("slug") == project_slug
+            ),
+            None,
+        )
+        run_project_id = info.get("project_id") or info.get("project")
         return {
-            "status": str(info["status"]),
-            "kind": str(info["kind"]) if info.get("kind") is not None else None,
+            "status": str(info.get("status", info.get("state", ""))),
+            "kind": str(info.get("kind")) if info.get("kind") is not None else None,
             "title": info.get("title"),
-            "capability": str(info["capability"]) if info.get("capability") is not None else None,
-            "tool_id": str(info["capability"]) if info.get("capability") is not None else None,
+            "capability": str(capability) if capability is not None else None,
+            "tool_id": str(capability) if capability is not None else None,
+            "timeline_ids": timeline_ids,
+            "project_id": run_project_id,
+            "current_project_id": (
+                current.get("project_id") or current.get("id")
+                if isinstance(current, Mapping)
+                else None
+            ),
         }
-    except sqlite3.Error:
+    except Exception:  # noqa: BLE001 - unavailable runtime fails closed
         return None

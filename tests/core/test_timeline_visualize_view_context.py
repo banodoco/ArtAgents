@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -83,7 +85,7 @@ def test_view_validation_discards_rehydrated_pack(
     monkeypatch.setattr(project_paths, "resolve_projects_root", lambda: projects_root)
     monkeypatch.setattr(
         view_contract,
-        "_kernel_visualize_run_info",
+        "_runtime_visualize_run_info",
         lambda *_args, **_kwargs: {
             "status": "succeeded",
             "tool_id": "rendering.timeline_visualize",
@@ -124,3 +126,19 @@ def test_view_validation_discards_rehydrated_pack(
 
     assert discarded == [pack_root]
     assert (result is None) is focus_failure
+
+
+def test_view_contract_uses_no_local_ledger_imports() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import astrid.core.contracts.timeline_visualize; "
+            "print('sqlite3' in sys.modules); "
+            "print(any(name.startswith('astrid.core.kernel') for name in sys.modules))",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == ["False", "False"]

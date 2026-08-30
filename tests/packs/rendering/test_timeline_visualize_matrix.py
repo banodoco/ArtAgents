@@ -25,6 +25,7 @@ import json
 import math
 import runpy
 import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from pathlib import Path
@@ -759,6 +760,101 @@ class TestMediaToctou:
         mutated_ref = by_key[mutated_key]["qualified_ref"].replace(".", "_")
         assert not list(filmstrip_dir.glob(f"*_{mutated_ref}_film_*.png"))
         assert any(path.name.endswith("_film_00.png") for path in filmstrip_dir.iterdir())
+
+    def test_runtime_admitted_managed_cas_asset_is_sampled_through_pipeline(
+        self, tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A child re-verification keeps the immutable runtime admission fence."""
+        project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-managed-filmstrip")
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            pytest.skip("ffmpeg not installed")
+        source_video = tmp_projects_root / "managed-filmstrip-source.mp4"
+        subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=64x36:rate=10:color=steelblue",
+                "-t",
+                "1",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(source_video),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        content = source_video.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        managed = project_root.parent / ".astrid" / "media" / "sha256" / digest[:2] / digest[2:4] / digest
+        managed.parent.mkdir(parents=True, exist_ok=True)
+        managed.write_bytes(content)
+
+        def _make_managed(assets: dict[str, Any]) -> None:
+            # Keep the existing clip's asset key so this exercises the actual
+            # layout -> classify -> verify_now -> sample_filmstrip path.
+            assets["plant-frame-1"] = {
+                "file": str(managed),
+                "media_id": "runtime-object-1",
+                "content_sha256": digest,
+                "type": "video/mp4",
+            }
+
+        _rewrite_registry_event(timeline_dir, _make_managed)
+        runtime_snapshot = [
+            {
+                "object_id": "runtime-object-1",
+                "content_hash": f"sha256:{digest}",
+                "media_type": "video/mp4",
+            }
+        ]
+        monkeypatch.setattr(
+            run_module,
+            "_runtime_media_snapshot",
+            lambda _project_slug: runtime_snapshot,
+        )
+
+        result = run_module.run_sdk(
+            [
+                "--project-slug",
+                "matrix-managed-filmstrip",
+                "--timeline-source",
+                str(timeline_dir),
+                "--layout",
+                "time-scaled",
+                "--format",
+                "md",
+                "--filmstrip",
+                "assets",
+                "--out",
+                str(tmp_projects_root / "out-managed-filmstrip"),
+            ]
+        )
+        assert result["returncode"] == 0, result.get("error")
+        pack_root = Path(result["outputs"]["pack_root"])
+        asset_index = _json(pack_root / "asset-index.json")
+        managed_ref = next(
+            item["qualified_ref"]
+            for item in asset_index["assets"]
+            if item["canonical_ref"]["authored_id"] == "plant-frame-1"
+        )
+        assert next(
+            item["integrity_state"]
+            for item in asset_index["assets"]
+            if item["canonical_ref"]["authored_id"] == "plant-frame-1"
+        ) == "verified_original"
+        filmstrip_dir = pack_root / "filmstrip"
+        frames = list(filmstrip_dir.glob(f"*_{managed_ref.replace('.', '_')}_film_*.png"))
+        assert frames, "runtime-admitted managed CAS video should produce filmstrip frames"
+        assert managed.is_file()
 
 
 def _rewrite_registry_event(timeline_dir: Path, mutate) -> None:

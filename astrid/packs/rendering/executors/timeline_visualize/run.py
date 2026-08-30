@@ -812,7 +812,11 @@ def _asset_filmstrips(
                 continue
             # TOCTOU guard: re-verify immediately before sampling so the bytes
             # Pillow/ffmpeg open are the bytes just verified.
-            fresh = verify_now(integrity, project_root=project_root)
+            fresh = verify_now(
+                integrity,
+                project_root=project_root,
+                media_snapshot=media_snapshot,
+            )
             if guard_sampling(fresh) is not None:
                 continue
             source = verified_source_path(fresh)
@@ -838,6 +842,7 @@ def _asset_filmstrips(
                 media_type=media_type,
                 integrity=fresh,
                 project_root=project_root,
+                media_snapshot=media_snapshot,
             )
     return filmstrips
 
@@ -1570,6 +1575,7 @@ def _execute_from_frozen(
     out_root: Path,
     pack_root: Path,
     execution_authority: Mapping[str, Any] | None,
+    media_snapshot: Any | None = None,
 ) -> dict[str, Any]:
     frozen = load_frozen_view(args.from_view, project_root=project_root)
     try:
@@ -1581,7 +1587,6 @@ def _execute_from_frozen(
         timeline_ids = [frozen.timeline_ulid]
         _mark_run_metadata(out_root, args.project_slug, timeline_ids)
         if args.refresh_root:
-            media_snapshot = _runtime_media_snapshot(args.project_slug)
             refresh_scope = resolve_focus(frozen, args.focus)
             if refresh_scope.kind != "timeline":
                 raise ValueError("--refresh-root focus must resolve to the frozen timeline")
@@ -1621,6 +1626,7 @@ def _execute_from_frozen(
                 transcript_segments=transcript_segments,
                 speech_occurrences=speech_occurrences,
                 transcript_asset_key=transcript_asset_key,
+                media_snapshot=media_snapshot,
             )
         manifest_path = layout.manifest_path
         outputs: dict[str, Any] = {
@@ -1674,6 +1680,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             out_root=out_root,
             pack_root=pack_root,
             execution_authority=execution_authority,
+            media_snapshot=media_snapshot,
         )
 
     kernel_materialization_root = out_root / ".kernel-timelines"
