@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.execution import process_group
 from astrid.core.execution.generic_host import (
     AdapterRegistry,
     GenericPackHost,
@@ -168,15 +170,16 @@ def test_cancellation_reaps_sigterm_resistant_descendant_after_leader_exit(tmp_p
     _write_manifest(root)
     manifest = json.loads((root / "executor.yaml").read_text(encoding="utf-8"))
     child_code = (
-        "import os,signal,time; from pathlib import Path; "
+        "import os,signal,sys,time; from pathlib import Path; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
         "Path('{out}/child.pid').write_text(str(os.getpid())); "
+        "os.write(int(sys.argv[1]), b'1'); os.close(int(sys.argv[1])); "
         "time.sleep(30)"
     )
     leader_code = (
-        "import signal,subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
+        "import os,signal,subprocess,sys,time; "
         "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
+        f"ready_r,ready_w=os.pipe(); subprocess.Popen([sys.executable,'-c',{child_code!r},str(ready_w)], pass_fds=(ready_w,)); os.close(ready_w); os.read(ready_r,1); os.close(ready_r); "
         "time.sleep(30)"
     )
     # Keeping the child in the inherited process group is intentional: the
@@ -216,11 +219,12 @@ def test_cancellation_reaps_descendant_spawned_by_sigterm_handler(tmp_path):
     child_code = (
         "import os,signal,sys,time; from pathlib import Path; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        "Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "os.write(int(sys.argv[2]), b'1'); os.close(int(sys.argv[2])); time.sleep(30)"
     )
     leader_code = (
-        "import signal,subprocess,sys,time\n"
-        f"def late(*_):\n    subprocess.Popen([sys.executable,'-c',{child_code!r},'{str(root / 'child.pid')}'])\n"
+        "import os,signal,subprocess,sys,time\n"
+        f"def late(*_):\n    ready_r,ready_w=os.pipe(); subprocess.Popen([sys.executable,'-c',{child_code!r},'{str(root / 'child.pid')}',str(ready_w)], pass_fds=(ready_w,)); os.close(ready_w); os.read(ready_r,1); os.close(ready_r)\n"
         "signal.signal(signal.SIGTERM, late)\n"
         "time.sleep(30)\n"
     )
@@ -261,6 +265,31 @@ def test_cleanup_does_not_signal_a_reused_group_after_leader_exit(monkeypatch):
 
     monkeypatch.setattr(os, "killpg", unexpected_killpg)
     _terminate_process_group(process)
+
+
+def test_signal_revalidates_group_identity_immediately_before_killpg(monkeypatch):
+    """A PGID census change in the final signal window fails closed."""
+    process = process_group.popen_owned_group([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        initial = process_group._process_snapshot()
+        leader = initial[process.pid]
+        reused = dict(initial)
+        reused[process.pid] = process_group._ProcessInfo(
+            process.pid,
+            leader.ppid,
+            leader.pgid,
+            leader.birth + " (reused)",
+        )
+        snapshots = iter((initial, reused))
+        monkeypatch.setattr(process_group, "_process_snapshot", lambda: next(snapshots))
+        monkeypatch.setattr(os, "killpg", lambda *_args: pytest.fail("reused group was signalled"))
+        monkeypatch.setattr(os, "kill", lambda *_args: pytest.fail("reused member was signalled"))
+
+        process_group.signal_group(process, signal.SIGTERM)
+    finally:
+        monkeypatch.undo()
+        process.kill()
+        process.wait()
 
 
 def test_discovery_digest_and_truthful_preflight(tmp_path):

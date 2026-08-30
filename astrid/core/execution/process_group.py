@@ -130,13 +130,24 @@ def group_exists(process: subprocess.Popen) -> bool:
 
 def signal_group(process: subprocess.Popen, sig: int) -> None:
     """Signal an owned group only while its leader identity is validated."""
-    snapshot = _process_snapshot()
     known: dict[int, str] = {}
+    snapshot = _process_snapshot()
     members, owned = _group_members_owned(process, known, snapshot)
     if not owned:
         return
     leader = snapshot.get(_group_id(process))
     if process.poll() is None and leader is not None and hasattr(os, "killpg"):
+        # Re-read the census immediately before signalling.  The first
+        # snapshot establishes ownership, while this one closes the small
+        # PID/PGID reuse window between census and killpg.
+        latest = _process_snapshot()
+        latest_leader = latest.get(_group_id(process))
+        if (
+            latest_leader is None
+            or latest_leader.birth != leader.birth
+            or process.poll() is not None
+        ):
+            return
         try:
             os.killpg(_group_id(process), sig)
             return
@@ -159,10 +170,34 @@ def terminate_group(process: subprocess.Popen, *, grace_seconds: float = 1.0) ->
 
     leader = initial.get(_group_id(process))
     if process.poll() is None and leader is not None and hasattr(os, "killpg"):
+        # Revalidate the original leader immediately before killpg; an exited
+        # leader's numeric PGID may already belong to another process group.
+        latest = _process_snapshot()
+        signal_snapshot = latest
+        latest_leader = latest.get(_group_id(process))
+        if (
+            latest_leader is None
+            or latest_leader.birth != leader.birth
+            or process.poll() is not None
+        ):
+            latest_leader = None
+        if latest_leader is None:
+            members, owned = _group_members_owned(process, known, latest)
+            if not owned:
+                members = {}
+        else:
+            members = {
+                info.pid: info.birth
+                for info in latest.values()
+                if info.pgid == _group_id(process)
+            }
         try:
-            os.killpg(_group_id(process), signal.SIGTERM)
+            if latest_leader is not None:
+                os.killpg(_group_id(process), signal.SIGTERM)
         except (ProcessLookupError, PermissionError, OSError):
             pass
+        if members:
+            _signal_valid_group_members(process, members, signal.SIGTERM, signal_snapshot)
     elif members:
         _signal_valid_group_members(process, members, signal.SIGTERM, initial)
 

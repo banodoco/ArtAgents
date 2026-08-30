@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import importlib.util
 import sys
 import time
 from pathlib import Path
@@ -180,16 +180,21 @@ def test_callback_timeout_kills_sigterm_resistant_descendant_after_leader_exit(
     child_code = (
         "import os,signal,sys,time; from pathlib import Path; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        "Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "os.write(int(sys.argv[2]), b'1'); os.close(int(sys.argv[2])); time.sleep(30)"
     )
     module_path.write_text(
-        "import signal,subprocess,sys,time\n"
+        "import os,signal,subprocess,sys,time\n"
         "from pathlib import Path\n"
         f"CHILD_CODE = {child_code!r}\n"
         "def callback(args):\n"
         "    child_pid = Path(args.out, 'child.pid')\n"
-        "    subprocess.Popen([sys.executable, '-c', CHILD_CODE, str(child_pid)])\n"
         "    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "    ready_r, ready_w = os.pipe()\n"
+        "    subprocess.Popen([sys.executable, '-c', CHILD_CODE, str(child_pid), str(ready_w)], pass_fds=(ready_w,))\n"
+        "    os.close(ready_w)\n"
+        "    os.read(ready_r, 1)\n"
+        "    os.close(ready_r)\n"
         "    while True:\n"
         "        time.sleep(1)\n",
         encoding="utf-8",
@@ -257,14 +262,15 @@ def test_internal_command_cancellation_reaps_sigterm_spawned_descendant(
     child_code = (
         "import os,signal,sys,time; from pathlib import Path; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        "Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "os.write(int(sys.argv[2]), b'1'); os.close(int(sys.argv[2])); time.sleep(30)"
     )
     command = [
         sys.executable,
         "-c",
         (
-            "import signal,subprocess,sys,time\n"
-            f"def late(*_):\n    subprocess.Popen([sys.executable,'-c',{child_code!r},'{str(child_pid)}'])\n"
+            "import os,signal,subprocess,sys,time\n"
+            f"def late(*_):\n    ready_r, ready_w = os.pipe(); subprocess.Popen([sys.executable,'-c',{child_code!r},'{str(child_pid)}',str(ready_w)], pass_fds=(ready_w,)); os.close(ready_w); os.read(ready_r,1); os.close(ready_r)\n"
             "signal.signal(signal.SIGTERM, late)\n"
             "time.sleep(30)\n"
         ),
