@@ -989,17 +989,10 @@ class ManagedWriteWiredProductionPathTest(unittest.TestCase):
             self.assertEqual(stream_type, f"stream:{name}")
             self.assertIn(name, closed)
 
-    def test_refine_managed_emit_commits_kernel_receipt_and_projection(self):
-        import sqlite3
+    def test_refine_managed_emit_keeps_kernel_runtime_owned(self):
         from types import SimpleNamespace
 
-        from astrid.application import compose_standard_application
         from astrid.packs.editorial.executors.refine import run as refine_run
-        from astrid.packs.timeline.repository import (
-            TIMELINE_CONFIG_REPLACED_EVENT_KIND,
-            TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
-            TIMELINE_STREAM_TYPE,
-        )
 
         tmp_root = Path(tempfile.mkdtemp(prefix="mgt-wired-", dir=ROOT))
         self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
@@ -1018,22 +1011,6 @@ class ManagedWriteWiredProductionPathTest(unittest.TestCase):
         fs_create_project("wired-proj")
         fs_create_timeline("wired-proj", "wired-tl")
 
-        # Kernel side: create project + timeline, then release the owner lock
-        # so the production emit can compose its own application.
-        app = compose_standard_application(projects_root=str(tmp_root))
-        created_project = app.projects_service.create(slug="wired-proj", name="Wired")
-        self.assertIsNotNone(created_project.data, created_project.error)
-        created = app.timelines_service.create(
-            project="wired-proj",
-            slug="wired-tl",
-            name="Wired Timeline",
-            idempotency_key="wired-tl-create",
-        )
-        self.assertIsNotNone(created.data, created.error)
-        timeline_id = created.data["timeline_id"]
-        project_id = app.projects.resolve(app.writer, "wired-proj")
-        app.close()
-
         config = {
             "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
             "clips": [
@@ -1049,51 +1026,18 @@ class ManagedWriteWiredProductionPathTest(unittest.TestCase):
         args = SimpleNamespace(project="wired-proj", timeline_slug="wired-tl")
         version = refine_run._emit_refine_managed_events(args, config)
         # Eventlog head advanced by the append (the fresh container had no
-        # bootstrap event; the kernel stream separately counts its create).
+        # bootstrap event). The kernel timeline is runtime-owned and is not
+        # discovered or opened by this pack process.
         self.assertGreaterEqual(version, 1)
 
-        # Kernel receipts/events/projection reflect the wired write.
-        verify_app = compose_standard_application(projects_root=str(tmp_root))
-        try:
-            with verify_app.writer.read_only_connection() as conn:
-                conn.row_factory = sqlite3.Row
-                receipt = conn.execute(
-                    "SELECT * FROM command_receipts WHERE project_id = ? "
-                    "AND idempotency_key = ?",
-                    (
-                        project_id,
-                        f"timeline.replace_config:{timeline_id}:1",
-                    ),
-                ).fetchone()
-                self.assertIsNotNone(receipt, "kernel replace_config receipt missing")
-                self.assertEqual(
-                    receipt["command_kind"], TIMELINE_REPLACE_CONFIG_COMMAND_KIND
-                )
-                self.assertEqual(receipt["resulting_stream_seq"], 2)
-                kernel_event = conn.execute(
-                    "SELECT * FROM events WHERE stream_id = ? AND kind = ?",
-                    (
-                        f"{timeline_id}:{TIMELINE_STREAM_TYPE}",
-                        TIMELINE_CONFIG_REPLACED_EVENT_KIND,
-                    ),
-                ).fetchone()
-            self.assertIsNotNone(kernel_event)
-            self.assertEqual(kernel_event["seq"], 2)
-            shown = verify_app.timelines_service.show("wired-proj", "wired-tl")
-            self.assertIsNotNone(shown.data, shown.error)
-            self.assertEqual(shown.data["config_version"], 2)
-            self.assertEqual(shown.data["config"]["clips"][0]["id"], "clip-1")
+        # The eventlog side was appended and re-projected too.
+        from astrid.core.timeline.paths import find_timeline_by_slug
 
-            # The eventlog side was appended and re-projected too.
-            from astrid.core.timeline.paths import find_timeline_by_slug
-
-            found = find_timeline_by_slug("wired-proj", "wired-tl")
-            self.assertIsNotNone(found)
-            _ulid, tdir = found
-            assembly = json.loads((tdir / "assembly.json").read_text())
-            self.assertTrue(assembly, "eventlog projection should be regenerated")
-        finally:
-            verify_app.close()
+        found = find_timeline_by_slug("wired-proj", "wired-tl")
+        self.assertIsNotNone(found)
+        _ulid, tdir = found
+        assembly = json.loads((tdir / "assembly.json").read_text())
+        self.assertTrue(assembly, "eventlog projection should be regenerated")
 
 
 if __name__ == "__main__":
