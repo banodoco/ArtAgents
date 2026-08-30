@@ -35,6 +35,7 @@ DEFAULT_DISTRIBUTION = "astrid"
 _TIMELINE_SCHEMA_ENV = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
 BUILD_LOCK = Path("requirements/build.lock")
 RUNTIME_LOCK = Path("requirements/runtime.lock")
+PROOF_LOCK = Path("requirements/proof.lock")
 
 
 class InstalledArtifactError(RuntimeError):
@@ -55,6 +56,47 @@ class LaneExecutionError(InstalledArtifactError):
     def __init__(self, message: str, record: LaneRecord) -> None:
         super().__init__(message)
         self.record = record
+
+
+@dataclass(frozen=True, slots=True)
+class LockedEnvironment:
+    """A disposable interpreter provisioned exclusively from a hashed lock."""
+
+    workspace: Path
+    venv_dir: Path
+    python_executable: Path
+    lock_path: Path
+    owned_workspace: bool
+
+    def environment(self) -> dict[str, str]:
+        """Return the dependency-only child environment for proof probes."""
+        bin_dir = self.venv_dir / ("Scripts" if os.name == "nt" else "bin")
+        home = self.workspace / "home"
+        temp = self.workspace / "tmp"
+        home.mkdir(parents=True, exist_ok=True)
+        temp.mkdir(parents=True, exist_ok=True)
+        return {
+            "PATH": os.pathsep.join((str(bin_dir), os.defpath)),
+            "HOME": str(home),
+            "TMPDIR": str(temp),
+            "TMP": str(temp),
+            "TEMP": str(temp),
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "VIRTUAL_ENV": str(self.venv_dir),
+        }
+
+    def close(self) -> None:
+        """Remove only an auto-created provisioning workspace."""
+        if self.owned_workspace:
+            shutil.rmtree(self.workspace, ignore_errors=True)
+
+    def __enter__(self) -> LockedEnvironment:
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        self.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -509,6 +551,7 @@ class InstalledArtifactHarness:
         workspace: str | Path | None = None,
         python_executable: str | Path | None = None,
         install_dependencies: bool = False,
+        dependency_lock: str | Path = RUNTIME_LOCK,
     ) -> InstalledArtifactHarness:
         """Build, install, and identity-check one wheel.
 
@@ -540,9 +583,14 @@ class InstalledArtifactHarness:
             dist_dir.mkdir(parents=True, exist_ok=True)
             build_lock = source_snapshot / BUILD_LOCK
             runtime_lock = source_snapshot / RUNTIME_LOCK
+            dependency_lock_path = source_snapshot / dependency_lock
             for lock in (build_lock, runtime_lock):
                 if not lock.is_file():
                     raise InstalledArtifactError(f"required hashed lock is missing: {lock}")
+            if not dependency_lock_path.is_file():
+                raise InstalledArtifactError(
+                    f"requested dependency lock is missing: {dependency_lock_path}"
+                )
 
             build_venv_result = subprocess.run(
                 [
@@ -656,7 +704,7 @@ class InstalledArtifactHarness:
                         *install_base,
                         "--require-hashes",
                         "-r",
-                        str(runtime_lock),
+                        str(dependency_lock_path),
                     ],
                     cwd=workspace_path,
                     env=install_env,
@@ -986,12 +1034,120 @@ class InstalledArtifactHarness:
             shutil.rmtree(self.workspace, ignore_errors=True)
 
 
+def provision_locked_environment(
+    repo_root: str | Path,
+    *,
+    workspace: str | Path | None = None,
+    python_executable: str | Path | None = None,
+    lock_path: str | Path = PROOF_LOCK,
+) -> LockedEnvironment:
+    """Provision a proof interpreter from one repository-owned hash lock.
+
+    The returned interpreter is suitable for both source-copy and installed
+    artifact lanes.  Provisioning is the only operation allowed to resolve
+    packages; proof subprocesses run with a scrubbed environment, disabled
+    user-site discovery, and no checkout path except the lane's explicit
+    ``PYTHONPATH``.
+    """
+    root = Path(repo_root).expanduser().resolve()
+    lock = (root / lock_path).resolve() if not Path(lock_path).is_absolute() else Path(lock_path).resolve()
+    if not lock.is_file():
+        raise InstalledArtifactError(f"required hashed proof lock is missing: {lock}")
+    owned = workspace is None
+    if workspace is None:
+        workspace_path = Path(tempfile.mkdtemp(prefix="astrid-proof-environment-")).resolve()
+    else:
+        workspace_path = Path(workspace).expanduser().resolve()
+        if _relative_to(workspace_path, root):
+            raise InstalledArtifactError(
+                f"isolated proof workspace must be outside the checkout: {workspace_path}"
+            )
+        workspace_path.mkdir(parents=True, exist_ok=True)
+    venv_dir = workspace_path / "venv"
+    try:
+        venv_result = subprocess.run(
+            [str(python_executable or sys.executable), "-m", "venv", str(venv_dir)],
+            cwd=workspace_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if venv_result.returncode != 0:
+            raise InstalledArtifactError(
+                "isolated proof venv creation failed:\n"
+                + _redact_output(venv_result.stdout + venv_result.stderr)
+            )
+        child_python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if not child_python.is_file():
+            raise InstalledArtifactError(f"proof venv Python executable is missing: {child_python}")
+        install_root = workspace_path / "pip"
+        install_env = {
+            "PATH": os.environ.get("PATH", os.defpath),
+            "HOME": str(install_root / "home"),
+            "TMPDIR": str(install_root / "tmp"),
+            "TMP": str(install_root / "tmp"),
+            "TEMP": str(install_root / "tmp"),
+            "PYTHONNOUSERSITE": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        }
+        Path(install_env["HOME"]).mkdir(parents=True, exist_ok=True)
+        Path(install_env["TMPDIR"]).mkdir(parents=True, exist_ok=True)
+        install = subprocess.run(
+            [
+                str(child_python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                "--require-hashes",
+                "-r",
+                str(lock),
+            ],
+            cwd=workspace_path,
+            env=install_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if install.returncode != 0:
+            raise InstalledArtifactError(
+                "hashed proof dependency installation failed:\n"
+                + _redact_output(install.stdout + install.stderr)
+            )
+        check = subprocess.run(
+            [str(child_python), "-m", "pip", "check"],
+            cwd=workspace_path,
+            env=install_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if check.returncode != 0:
+            raise InstalledArtifactError(
+                "locked proof environment failed pip check:\n"
+                + _redact_output(check.stdout + check.stderr)
+            )
+        return LockedEnvironment(
+            workspace=workspace_path,
+            venv_dir=venv_dir,
+            python_executable=child_python,
+            lock_path=lock,
+            owned_workspace=owned,
+        )
+    except Exception:
+        if owned:
+            shutil.rmtree(workspace_path, ignore_errors=True)
+        raise
+
+
 def build_once(
     repo_root: str | Path,
     *,
     workspace: str | Path | None = None,
     python_executable: str | Path | None = None,
     install_dependencies: bool = False,
+    dependency_lock: str | Path = RUNTIME_LOCK,
 ) -> InstalledArtifactHarness:
     """Convenience entry point for the shared build-once harness."""
     return InstalledArtifactHarness.build(
@@ -999,6 +1155,7 @@ def build_once(
         workspace=workspace,
         python_executable=python_executable,
         install_dependencies=install_dependencies,
+        dependency_lock=dependency_lock,
     )
 
 
@@ -1016,6 +1173,7 @@ __all__ = [
     "InstalledArtifactHarness",
     "InstalledIdentity",
     "IsolatedRoots",
+    "LockedEnvironment",
     "LaneExecutionError",
     "LaneRecord",
     "SCHEMA",
@@ -1027,4 +1185,5 @@ __all__ = [
     "scrub_environment",
     "select_single_wheel",
     "sha256_file",
+    "provision_locked_environment",
 ]

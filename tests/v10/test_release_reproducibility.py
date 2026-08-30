@@ -31,9 +31,11 @@ def test_repository_dependency_locks_are_hashed_exact_and_cover_metadata() -> No
     assert set(report["locks"]) == {
         "requirements/build.lock",
         "requirements/runtime.lock",
+        "requirements/proof.lock",
     }
     assert report["locks"]["requirements/build.lock"]["packages"] >= 6
     assert report["locks"]["requirements/runtime.lock"]["packages"] >= 60
+    assert report["locks"]["requirements/proof.lock"]["packages"] >= 70
     assert all(
         len(lock["sha256"]) == 64 for lock in report["locks"].values()
     )

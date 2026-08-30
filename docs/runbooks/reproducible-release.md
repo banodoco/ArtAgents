@@ -1,8 +1,8 @@
 # Reproducible release inputs
 
 Astrid keeps publishable dependency ranges in `pyproject.toml`, but the release
-gate never resolves those ranges directly. Release builds and installed-wheel
-smokes use two universal, SHA-256-verified locks:
+gate never resolves those ranges directly. Release builds, installed-wheel
+smokes, and factoring proofs use three universal, SHA-256-verified locks:
 
 - `requirements/build.lock` pins the PEP 517 builder, backend, wheel writer,
   and their transitive dependencies. The canonical wheel is built with
@@ -11,12 +11,17 @@ smokes use two universal, SHA-256-verified locks:
   transitive dependency for the supported CPython 3.11/3.12 Linux/macOS
   matrix. The wheel is then installed with `--no-deps --no-index`, followed by
   `pip check`, so wheel metadata cannot trigger a second resolution.
+- `requirements/proof.lock` pins the runtime closure plus the test runner and
+  timeout plugin used by source-copy and installed-wheel factorability proofs.
+  Those proofs provision a disposable interpreter from this lock; they never
+  use host or user-site packages.
 
 Refresh and validate the locks deliberately:
 
 ```sh
 make lock-build
 make lock-runtime
+make lock-proof
 make lock-validate
 ```
 

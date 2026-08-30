@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATHS = (
     Path("requirements/build.lock"),
     Path("requirements/runtime.lock"),
+    Path("requirements/proof.lock"),
 )
 HASH_RE = re.compile(r"--hash=sha256:[0-9a-f]{64}(?:\s|$)")
 PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^ ;\\]+)")
@@ -87,6 +88,7 @@ def validate_dependency_locks(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         report["path"] = relative
     build_pins = reports[str(LOCK_PATHS[0])]["pins"]
     runtime_pins = reports[str(LOCK_PATHS[1])]["pins"]
+    proof_pins = reports[str(LOCK_PATHS[2])]["pins"]
 
     build_requirements = pyproject["build-system"]["requires"]
     for requirement in build_requirements:
@@ -106,6 +108,11 @@ def validate_dependency_locks(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         if name_match is None or _normalise(name_match.group(1)) not in runtime_pins:
             raise ReproducibilityError(
                 f"runtime lock does not cover direct dependency: {requirement!r}"
+            )
+    for name in ("pytest", "pytest-timeout", "pyyaml", "jsonschema"):
+        if name not in proof_pins:
+            raise ReproducibilityError(
+                f"proof lock does not cover required factoring dependency: {name}"
             )
     for report in reports.values():
         report.pop("pins")

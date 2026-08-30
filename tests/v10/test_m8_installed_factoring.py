@@ -30,7 +30,11 @@ from scripts.reshape.check_pack_factoring import (
     unpack_wheel,
     verify_sketch_kernel_inventory,
 )
-from scripts.reshape.installed_artifact import InstalledArtifactHarness, build_once
+from scripts.reshape.installed_artifact import (
+    PROOF_LOCK,
+    InstalledArtifactHarness,
+    build_once,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,6 +54,7 @@ def packaged_harness(
         REPO_ROOT,
         workspace=workspace,
         install_dependencies=True,
+        dependency_lock=PROOF_LOCK,
     )
     try:
         yield harness
@@ -72,8 +77,9 @@ def test_each_pack_can_be_removed_from_one_wheel_without_kernel_drift(
     result = check_artifact_factoring(
         wheel=packaged_wheel,
         # Factoring launches Python outside the source checkout.  Reuse the
-        # dependency-bearing interpreter built for this artifact so PyYAML and
-        # jsonschema come from the declared lock, not from the host process.
+        # dependency-bearing interpreter built for this artifact so PyYAML,
+        # jsonschema, and pytest come from the declared proof lock, not the
+        # host process.
         python=str(packaged_harness.python_executable),
         base_dir=tmp_path,
         kernel_timeout=180,

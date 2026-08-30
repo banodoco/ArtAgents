@@ -22,8 +22,11 @@ inventory binding is enforced.
 
 from __future__ import annotations
 
+import json
 import shutil
+import subprocess
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
@@ -39,6 +42,10 @@ from scripts.reshape.check_pack_factoring import (
     build_temp_source_copy,
     check_removal,
 )
+from scripts.reshape.installed_artifact import (
+    LockedEnvironment,
+    provision_locked_environment,
+)
 
 LANE_TIMEOUT = 90
 """Generous per-lane pytest bound; the measured lane wall time is ~32s."""
@@ -49,15 +56,35 @@ LANE_TIMEOUT = 90
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(scope="module")
+def proof_environment(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[LockedEnvironment]:
+    """Use one repository-owned, hash-locked interpreter for every lane."""
+    environment = provision_locked_environment(
+        REPO_ROOT,
+        workspace=tmp_path_factory.mktemp("astrid-source-factoring-proof"),
+    )
+    try:
+        yield environment
+    finally:
+        environment.close()
+
+
 @pytest.mark.parametrize("removed_pack", DOMAIN_PACKS)
 def test_removing_each_domain_pack_keeps_kernel_lane_and_catalog_green(
     removed_pack: str,
+    proof_environment: LockedEnvironment,
 ) -> None:
     """Removing timeline/shots/references one at a time from a temporary
     source composition and the explicit registration tuple leaves the
     complete enumerated kernel lane green and the remaining manifest-derived
     catalog verified."""
-    result = check_removal(removed_pack, lane_timeout=LANE_TIMEOUT)
+    result = check_removal(
+        removed_pack,
+        python=str(proof_environment.python_executable),
+        lane_timeout=LANE_TIMEOUT,
+    )
     assert result.ok, (
         f"kernel lane failed after removing {removed_pack} "
         f"(exit {result.lane_returncode})\n"
@@ -72,6 +99,47 @@ def test_removing_each_domain_pack_keeps_kernel_lane_and_catalog_green(
     expected_count = len(CORE_TABLES) + len(remaining_tables)
     assert f"tables={expected_count}" in result.catalog_output
     assert f"packs={sorted(remaining)}" in result.catalog_output
+
+
+def test_source_factoring_proof_resolves_dependencies_inside_lock_venv(
+    proof_environment: LockedEnvironment,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The source lane cannot borrow YAML/schema/pytest from host paths."""
+    hostile_site = tmp_path / "host-site"
+    hostile_site.mkdir()
+    for module in ("yaml", "jsonschema", "pytest"):
+        (hostile_site / f"{module}.py").write_text(
+            f"raise AssertionError('host {module} used')\n", encoding="utf-8"
+        )
+    user_base = tmp_path / "user-base"
+    monkeypatch.setenv("PYTHONPATH", str(hostile_site))
+    monkeypatch.setenv("PYTHONUSERBASE", str(user_base))
+    probe = subprocess.run(
+        [
+            str(proof_environment.python_executable),
+            "-I",
+            "-c",
+            (
+                "import json, jsonschema, pytest, yaml; "
+                "print(json.dumps({'yaml': yaml.__file__, "
+                "'jsonschema': jsonschema.__file__, 'pytest': pytest.__file__}))"
+            ),
+        ],
+        cwd=tmp_path,
+        env=proof_environment.environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    origins = json.loads(probe.stdout)
+    venv_root = proof_environment.venv_dir.resolve()
+    for origin in origins.values():
+        resolved = Path(origin).resolve()
+        assert resolved.is_relative_to(venv_root), resolved
+        assert not resolved.is_relative_to(hostile_site)
 
 
 # ---------------------------------------------------------------------------

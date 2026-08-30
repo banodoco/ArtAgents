@@ -8,7 +8,7 @@
 
 PY ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
-.PHONY: help check ci preflight structure doctor ruff mypy cycles remotion-install remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
+.PHONY: help check ci preflight structure doctor ruff mypy cycles remotion-install remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-proof lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -18,7 +18,7 @@ help:
 	@echo "make m4-gate - m4 Step 33: 13 focused lanes + authority lint + drift rejection + feasibility admission (fails closed)"
 	@echo "make m7-gate - m7 GA evidence: admitted selectors 1-10 + provisional/retained dispositions (fails closed)"
 	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
-	@echo "make lock-runtime / lock-build - refresh universal SHA-256 dependency locks with uv"
+	@echo "make lock-runtime / lock-build / lock-proof - refresh universal SHA-256 dependency locks with uv"
 	@echo "make lock-validate - validate exact pins, hashes, and direct dependency coverage"
 	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-install | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
 	@echo "make preflight - verify Python, Node, ffmpeg, and locked Remotion prerequisites"
@@ -85,6 +85,9 @@ lock-build:
 
 lock-runtime:
 	uv pip compile pyproject.toml --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-runtime' --output-file requirements/runtime.lock
+
+lock-proof:
+	uv pip compile requirements/proof.in --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-proof' --output-file requirements/proof.lock
 
 lock-validate:
 	@$(PY) -c "from scripts.reshape.release_reproducibility import validate_dependency_locks; validate_dependency_locks(); print('✓ hashed dependency locks')"

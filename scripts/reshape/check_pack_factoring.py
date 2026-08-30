@@ -697,14 +697,21 @@ def check_artifact_removal(
     catalog_timeout: int = 30,
 ) -> ArtifactRemovalResult:
     """Remove one pack from a wheel root and run every packaged check."""
-    reduced_root = build_temp_artifact_copy(
-        wheel,
-        removed_pack,
-        base_dir=base_dir,
-        artifact_root=artifact_root,
-    )
-    work = reduced_root.parent
+    proof_environment = None
+    if python is None:
+        from scripts.reshape.installed_artifact import provision_locked_environment
+
+        proof_environment = provision_locked_environment(REPO_ROOT)
+        python = str(proof_environment.python_executable)
+    work: Path | None = None
     try:
+        reduced_root = build_temp_artifact_copy(
+            wheel,
+            removed_pack,
+            base_dir=base_dir,
+            artifact_root=artifact_root,
+        )
+        work = reduced_root.parent
         catalog_output = verify_artifact_composition(
             reduced_root,
             removed_pack,
@@ -725,8 +732,10 @@ def check_artifact_removal(
             kernel_error=kernel.stderr,
         )
     finally:
-        if not keep_temp:
+        if work is not None and not keep_temp:
             shutil.rmtree(work, ignore_errors=True)
+        if proof_environment is not None:
+            proof_environment.close()
 
 
 def check_artifact_factoring(
@@ -757,6 +766,12 @@ def check_artifact_factoring(
             f"unknown domain pack(s) {sorted(unknown)!r}; expected one of {DOMAIN_PACKS}"
         )
 
+    proof_environment = None
+    if python is None:
+        from scripts.reshape.installed_artifact import provision_locked_environment
+
+        proof_environment = provision_locked_environment(REPO_ROOT)
+        python = str(proof_environment.python_executable)
     base_work = Path(tempfile.mkdtemp(prefix="astrid-artifact-base-", dir=base_dir))
     base_root = base_work / "artifact"
     try:
@@ -797,6 +812,8 @@ def check_artifact_factoring(
     finally:
         if not keep_temp:
             shutil.rmtree(base_work, ignore_errors=True)
+        if proof_environment is not None:
+            proof_environment.close()
 
 
 _CATALOG_SNIPPET = r"""
@@ -1025,9 +1042,20 @@ def check_removal(
         raise ValueError(
             f"unknown domain pack {removed_pack!r}; expected one of {DOMAIN_PACKS}"
         )
-    interpreter = python or sys.executable
-    work = build_temp_source_copy(removed_pack, base_dir=base_dir)
+    # A direct CLI/API caller may not have Astrid's optional dependencies in
+    # its host interpreter. Provision the proof interpreter explicitly from
+    # the repository lock instead of falling back to user-site packages.
+    proof_environment = None
+    if python is None:
+        from scripts.reshape.installed_artifact import provision_locked_environment
+
+        proof_environment = provision_locked_environment(REPO_ROOT)
+        interpreter = str(proof_environment.python_executable)
+    else:
+        interpreter = python
+    work: Path | None = None
     try:
+        work = build_temp_source_copy(removed_pack, base_dir=base_dir)
         catalog_output = verify_remaining_catalog(
             work, interpreter, removed_pack, timeout=catalog_timeout
         )
@@ -1040,8 +1068,10 @@ def check_removal(
             lane_error=lane.stderr,
         )
     finally:
-        if not keep_temp:
+        if work is not None and not keep_temp:
             shutil.rmtree(work, ignore_errors=True)
+        if proof_environment is not None:
+            proof_environment.close()
 
 
 def _print_lane_tail(result: RemovalCheckResult) -> None:
