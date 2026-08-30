@@ -18,7 +18,6 @@ if CONTROL2.is_dir():
 runtime_protocol = pytest.importorskip("runtime_protocol")
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
-from runtime_protocol.service import RuntimeService  # noqa: E402
 
 from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolClient  # noqa: E402
 
@@ -34,7 +33,9 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         json.dumps(
             {
                 "schema_version": 1,
-                "id": "testing.echo",
+                # control2 seeds this neutral fixture capability on every
+                # realm; the command body is the testing.echo actor.
+                "id": "render.basic",
                 "name": "Testing Echo",
                 "kind": "external",
                 "version": "1.0",
@@ -59,20 +60,10 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    # control2 currently exposes capability registration on the daemon but
-    # not through its generated client.  Seed the fixture before ownership is
-    # acquired, then exercise every worker operation through generated APIs.
+    # Use the daemon's seeded neutral fixture capability.  Capability
+    # registration is intentionally not reimplemented through raw HTTP here.
     probe = GenericPackHost(pack_roots=[pack])
     record = probe.discover()[0]
-    service = RuntimeService(tmp_path / "realm")
-    service.register_capability(
-        {
-            "capability_id": record.id,
-            "definition_digest": "sha256:" + record.capability_digest,
-            "required_resource_keys": list(record.resource_keys),
-        }
-    )
-    service.close()
 
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     try:
@@ -89,7 +80,7 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
 
         task = generated.admit_task(
             capability_id=record.id,
-            capability_digest="sha256:" + record.capability_digest,
+            capability_digest="sha256:" + hashlib.sha256(record.id.encode()).hexdigest(),
             input_object_ids=[],
             idempotency_key="echo-task",
         )
@@ -107,4 +98,3 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         assert restarted.get_object(output_digest).data == b"hello"
     finally:
         daemon.stop()
-
