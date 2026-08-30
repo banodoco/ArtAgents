@@ -13,25 +13,20 @@ import importlib.util
 import json
 import os
 import shutil
-import sys
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from astrid.core.execution.executor.runner import (
-    ExecutorRunRequest,
-    check_executor_binaries,
-    run_executor,
-)
-from astrid.core.execution.executor.registry import ExecutorRegistry
-from astrid.core.execution.executor.schema import ExecutorDefinition, ExecutorValidationError
-from astrid.core.execution.executor.folder import discover_folder_executor_roots, load_folder_executor
-from astrid.core.execution.capability_ledger import load_capability_ledger
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
+from astrid.core.execution.capability_ledger import load_capability_ledger
+
+if TYPE_CHECKING:
+    from astrid.core.execution.executor.schema import ExecutorDefinition
 
 
 class HostError(RuntimeError):
@@ -440,12 +435,21 @@ class GenericPackHost:
         return result
 
     def discover(self) -> tuple[CapabilityRecord, ...]:
+        # Folder/schema modules are runtime discovery dependencies.  Keeping
+        # them behind the discovery operation prevents their timeline/project
+        # compatibility imports from leaking into the host process boundary.
+        from astrid.core.execution.executor.folder import (
+            discover_folder_executor_roots,
+            load_folder_executor,
+        )
+        from astrid.core.execution.executor.schema import ExecutorValidationError
+
         records: dict[str, CapabilityRecord] = {}
         for root in self.pack_roots:
             for executor_root in discover_folder_executor_roots(root):
                 try:
                     definition = load_folder_executor(executor_root)
-                except (ExecutorValidationError, OSError, ValueError) as exc:
+                except (ExecutorValidationError, OSError, ValueError):
                     # A broken optional manifest is unavailable, but does not hide
                     # neighboring packs.  The manifest report records the reason.
                     continue
@@ -868,6 +872,15 @@ class GenericPackHost:
                 if record.definition.command is not None:
                     result = self._run_command_definition(record, inputs, output_root, root, cancelled=cancelled)
                 else:
+                    # The canonical runner is loaded only for executor
+                    # definitions that need it; GenericPackHost's process
+                    # boundary stays free of project-run/thread authority.
+                    from astrid.core.execution.executor.registry import ExecutorRegistry
+                    from astrid.core.execution.executor.runner import (
+                        ExecutorRunRequest,
+                        run_executor,
+                    )
+
                     request = ExecutorRunRequest(executor_id=capability_id, out=output_root, inputs=inputs, project=task_data.get("project"), project_was_auto_resolved=True, python_exec=sys.executable, run_id=task_id, run_root=root, execution_mode="subprocess", invocation="runtime")
                     # Dispatch against the immutable definition selected at
                     # admission, rather than reloading a mutable global registry.

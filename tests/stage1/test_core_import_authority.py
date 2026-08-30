@@ -122,3 +122,29 @@ def test_reigh_binding_resolution_is_lazy_and_explicit() -> None:
         check=True,
     )
     assert result.stdout.splitlines() == ["True", "False"]
+
+
+def test_generic_host_import_does_not_load_execution_storage_authority() -> None:
+    """The pack host loads runner dependencies only when executing a definition."""
+
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid.core.execution.generic_host; "
+                "print('sqlite3' in sys.modules); "
+                "print(any(name.startswith('astrid.core.store') or "
+                "name.startswith('astrid.core.repositories') or "
+                "name.startswith('astrid.core.threads') or "
+                "name.startswith('astrid.core.project.run') "
+                "for name in sys.modules))"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["False", "False"]
