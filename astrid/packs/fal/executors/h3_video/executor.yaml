@@ -93,6 +93,7 @@
   "isolation": {
     "mode": "subprocess",
     "network": true,
+    "secrets_required": ["FAL_KEY"],
     "requirements": ["PyYAML>=6,<7"]
   },
   "cache": {"mode": "none"},
