@@ -160,10 +160,10 @@ def sdk_import_asset(
     if _SHARED_CLIENT is None:
         from astrid.sdk.client import AstridClient
 
-        # Always bind the importer to a resolved root.  In particular, never
-        # let AstridClient.open(None) silently consult a developer checkout
-        # when an isolated compile root was supplied.
-        _SHARED_CLIENT = AstridClient.open(root)
+        # The workspace runtime is the sole product authority.  ``root`` is
+        # only used for compiler output/fixture paths; it must not be passed to
+        # the client composition root as a local-storage escape hatch.
+        _SHARED_CLIENT = AstridClient.open()
         _SHARED_CLIENT_ROOT = root
     return _client_import(_SHARED_CLIENT, project, path)
 
@@ -187,7 +187,7 @@ def make_client_importer(client: Any, *, project: str) -> Callable[[Path], Asset
 
 
 def _client_import(client: Any, project: str, path: Path) -> AssetImport:
-    result = client.media.import_file(project=project, path=str(path))
+    result = client.media.import_file(project=project, path=Path(path))
     if not result.ok:
         error = result.error
         raise StoryboardError(
@@ -201,15 +201,18 @@ def _client_import(client: Any, project: str, path: Path) -> AssetImport:
             if location.get("realm") == "managed_local"
         ),
         None,
-    )
-    digest = data.get("content_hash")
+    ) if isinstance(data, Mapping) else None
+    # Legacy local SDK envelopes returned a managed_local filesystem locator;
+    # the generated workspace contract intentionally returns only the managed
+    # object identity.  Keep the caller's existing path as the attempt-local
+    # renderer input in that shape — it is explicit, while the runtime-owned
+    # digest/media identity remains the authority for provenance.
     if not isinstance(locator, str) or not locator:
-        raise StoryboardError(
-            [f"managed import for {path} returned no managed_local CAS locator"]
-        )
+        locator = str(Path(path).resolve())
+    digest = data.get("content_hash", data.get("digest")) if isinstance(data, Mapping) else None
     if not isinstance(digest, str) or not digest:
         raise StoryboardError([f"managed import for {path} returned no content hash"])
-    media_id = data.get("id")
+    media_id = data.get("id", data.get("object_id")) if isinstance(data, Mapping) else None
     return AssetImport(
         file=locator,
         content_sha256=digest,
