@@ -1,9 +1,8 @@
-"""Run ledger conformance test — M1 perimeter characterization.
+"""Runtime run/task conformance characterization.
 
-Enumerates every in-band invocation surface and asserts each produces exactly
-one ``run.json`` in exactly one temp project with a terminal status.  New
-invocation surfaces must fail this test by construction until they are
-registered and ledgered.
+Enumerates in-band invocation surfaces and keeps the durable run/task
+authority in the workspace runtime.  Filesystem outputs are treated as
+derived pack artifacts, not as a ledger.
 
 The registry below is the canonical ledger-perimeter reference.  Every entry
 corresponds to a row in the invocation-surfaces table in
@@ -623,109 +622,10 @@ class TestRegistryCompleteness:
 # ---------------------------------------------------------------------------
 
 
-def _admit_and_complete_one(
-    projects_root: Path, project_slug: str, capability: str, spec: dict[str, Any] | None = None
-) -> tuple[str, str]:
-    """Create 1 task via TaskRepository and drive it to completed (kernel ledger)."""
-    from astrid.core.events.service import EventAppendService
-    from astrid.core.ids import generate_lowercase_ulid
-    from astrid.core.receipts import ReceiptService
-    from astrid.core.repositories import ProjectRepository
-    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.packs import build_standard_registry, open_standard_writer
-
-    registry = build_standard_registry()
-    db_path = _kernel_db_path(projects_root)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = open_standard_writer(db_path, registry=registry)
-    try:
-        events = EventAppendService(registry)
-        receipts = ReceiptService()
-        tasks = TaskRepository(events=events, receipts=receipts)
-        projects = ProjectRepository(events=events, receipts=receipts)
-        from astrid.core.repositories.media import MediaRepository
-        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
-        spec_payload = spec or {"prompt": "hello", "seed": 1}
-        idempotency_key = compute_spec_hash({"capability": capability, "spec": spec_payload}, [])
-        task_id = generate_lowercase_ulid()
-        # Use slug as kernel project_id (matches kernel_admission shim)
-        kernel_project_id = project_slug
-        # Ensure kernel project exists (idempotent)
-        try:
-            UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_slug, name=project_slug, settings={}, idempotency_key=f"proj-{project_slug}", project_id=kernel_project_id))
-        except Exception:
-            pass
-        # Admit task
-        UnitOfWork(writer).run(lambda u: tasks.create(u, project_id=kernel_project_id, capability=capability, spec=spec_payload, input_manifest=[], idempotency_key=idempotency_key, task_id=task_id))
-        tid = task_id
-        # Claim -> start -> complete (proper lease/status_version handling)
-        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=kernel_project_id, idempotency_key=f"claim-{tid}", executor_id="test-exec"))
-        if claim is None:
-            return kernel_project_id, tid
-        # Extract attempt fields from claim model (TaskClaimReadModel)
-        attempt = claim.attempt  # type: ignore[attr-defined]
-        task_obj = claim.task  # type: ignore[attr-defined]
-        # Fallback for dict replay
-        if isinstance(claim, dict):
-            attempt = claim.get("attempt") or claim  # type: ignore
-            task_obj = claim.get("task") or {"id": tid}  # type: ignore
-        attempt_id = attempt.id if hasattr(attempt, "id") else attempt.get("id", tid)  # type: ignore
-        lease_id = attempt.lease_id if hasattr(attempt, "lease_id") else attempt.get("lease_id")  # type: ignore
-        sv = int(attempt.status_version if hasattr(attempt, "status_version") else attempt.get("status_version", 1))  # type: ignore
-        # Start
-        started = UnitOfWork(writer).run(lambda u: tasks.start(u, project_id=kernel_project_id, task_id=task_obj.id if hasattr(task_obj, "id") else task_obj.get("id", tid), attempt_id=attempt_id, expected_status_version=sv, lease_id=lease_id, idempotency_key=f"start-{tid}"))  # type: ignore
-        sv2 = int(started.status_version if hasattr(started, "status_version") else started.get("status_version", sv + 1))  # type: ignore
-        # Complete — requires outputs or result; provide empty outputs + result summary + media_repo
-        UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=task_obj.id if hasattr(task_obj, "id") else task_obj.get("id", tid), attempt_id=attempt_id, expected_status_version=sv2, lease_id=lease_id, idempotency_key=f"complete-{tid}", outputs=[], result={"outputs": []}, media_repo=media_repo))  # type: ignore
-        return kernel_project_id, tid
-    finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
-def _drive_orchestrator_chain(projects_root: Path, project_slug: str) -> None:
-    """Drive orchestrator hard-chain (4 tasks) to terminal via TaskRepository."""
-    from astrid.core.events.service import EventAppendService
-    from astrid.core.receipts import ReceiptService
-    from astrid.core.repositories.media import MediaRepository
-    from astrid.core.repositories.projects import ProjectRepository
-    from astrid.core.repositories.tasks import TaskRepository
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.packs import build_standard_registry, open_standard_writer
-
-    registry = build_standard_registry()
-    db_path = _kernel_db_path(projects_root)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = open_standard_writer(db_path, registry=registry)
-    try:
-        events = EventAppendService(registry)
-        receipts = ReceiptService()
-        projects_repo = ProjectRepository(events=events, receipts=receipts)
-        tasks_repo = TaskRepository(events=events, receipts=receipts)
-        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
-        project_id = projects_repo.resolve(writer, project_slug)
-        for idx in range(8):
-            claim = UnitOfWork(writer).run(lambda u, _ck=f"drive-claim-{project_slug}-{idx}": tasks_repo.claim(u, project_id=project_id, idempotency_key=_ck))
-            if claim is None:
-                break
-            task_id = claim.task.id  # type: ignore[attr-defined]
-            attempt = claim.attempt  # type: ignore[attr-defined]
-            attempt_id = attempt.id  # type: ignore[attr-defined]
-            lease_id = attempt.lease_id  # type: ignore[attr-defined]
-            sv = int(attempt.status_version)  # type: ignore[attr-defined]
-            started = UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv, _ck=f"drive-start-{project_slug}-{idx}": tasks_repo.start(u, project_id=project_id, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck))
-            sv2 = int(started.status_version)  # type: ignore[attr-defined]
-            UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv2, _ck=f"drive-complete-{project_slug}-{idx}": tasks_repo.complete(u, project_id=project_id, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck, outputs=[], result={"step": f"step-{idx}"}, media_repo=media_repo))
-    finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
 
 
 class TestSingleLedgerHarness:
-    """B4.2 empirical harness: each cap is kernel run+task with events/receipts and zero authoritative run.json."""
+    """B4.2 empirical harness for runtime-owned run/task admission."""
 
     CAPS = [
         ("generation.generate_image", {"prompt": "a cat", "seed": 1}),
@@ -736,61 +636,84 @@ class TestSingleLedgerHarness:
         ("test.orchestrator_child", {"step": "plan"}),
     ]
 
-    def test_six_caps_kernel_ledger(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_six_caps_runtime_admission(self, tmp_path: Path) -> None:
+        from astrid.core.project.kernel_admission import admit_orchestrator_project_run
+
+        class _Tasks:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            def create(self, **kwargs: Any) -> dict[str, str]:
+                self.calls.append(kwargs)
+                index = len(self.calls)
+                return {"run_id": f"runtime-run-{index}", "task_id": f"runtime-task-{index}"}
+
+        class _Client:
+            def __init__(self) -> None:
+                self.tasks = _Tasks()
+
+        client = _Client()
         for idx, (cap, spec) in enumerate(self.CAPS):
             safe = cap.replace(".", "-")
             base = tmp_path / safe
             base.mkdir(parents=True, exist_ok=True)
             slug = f"demo-cap{idx+1}"
-            projects_root, _ = _setup_project_env(base, monkeypatch, slug)
-            _admit_and_complete_one(projects_root, slug, cap, spec)
-            records = _project_run_records(projects_root)
-            # Zero authoritative run.json projection only; kernel is authority
-            assert records == [] or all(r.get("authority") in ("kernel", "import", "threads-legacy") for r in records), f"{cap} leaked authoritative run.json: {records}"
-            # Harness honesty: 6 caps via _assert_kernel_single_ledger (events>=4 receipts>=2, terminal)
-            _assert_kernel_single_ledger(projects_root, expected_runs=0, expected_tasks=1, min_events=4, min_receipts=2)
+            context = admit_orchestrator_project_run(
+                project=slug,
+                tool_id=cap,
+                argv=["--project", slug],
+                projects_root=base,
+                _client=client,
+            )
+            assert context.run_id == f"runtime-run-{idx + 1}"
+            assert context.run_root.is_dir()
+            assert not context.run_root.is_relative_to(base)
+            assert not list(base.rglob("run.json"))
+            assert client.tasks.calls[-1]["spec"]["argv"] == ["--project", slug]
 
-    def test_orchestrator_with_children_hard_chain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_orchestrator_with_children_hard_chain(self, tmp_path: Path) -> None:
         from astrid.core.project.kernel_admission import admit_orchestrator_project_run
+
+        class _Tasks:
+            def create(self, **kwargs: Any) -> dict[str, str]:
+                assert kwargs["capability"] == "test.orch"
+                assert kwargs["project_id"] == "demo-orch"
+                return {"run_id": "runtime-run-1", "task_id": "runtime-task-1"}
+
+        class _Client:
+            tasks = _Tasks()
+
         projects_root = tmp_path / "orch-projects"
         projects_root.mkdir()
-        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
-        from astrid.core.project.project import create_project
-        create_project("demo-orch")
-        ctx = admit_orchestrator_project_run(project="demo-orch", tool_id="test.orch", argv=["--project", "demo-orch"], projects_root=projects_root)
-        assert ctx.run_id
-        # Drive single-task to terminal (admit is create-only; harness drives)
-        _drive_orchestrator_chain(projects_root, "demo-orch")
-        # Generic single-task fan-out: 1 run +1 task, no ghost hard chain
-        _assert_kernel_single_ledger(projects_root, expected_runs=1, expected_tasks=1, min_events=4, min_receipts=2)
-        # Zero authoritative run.json
-        assert _project_run_records(projects_root) == [] or all(r.get("authority") != "authoritative" for r in _project_run_records(projects_root))
+        ctx = admit_orchestrator_project_run(
+            project="demo-orch",
+            tool_id="test.orch",
+            argv=["--project", "demo-orch"],
+            projects_root=projects_root,
+            _client=_Client(),
+        )
+        assert ctx.run_id == "runtime-run-1"
+        assert not ctx.run_root.is_relative_to(projects_root)
+        assert not list(projects_root.rglob("run.json"))
 
 
-    def test_banodoco_worker_single_write_projection(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.integrations.worker.banodoco_worker import _write_baseline_snapshot
+    def test_runtime_admission_does_not_create_local_run_projection(self, tmp_path: Path) -> None:
         projects_root = tmp_path / "banodoco-projects"
         projects_root.mkdir()
-        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
-        from astrid.core.project.project import create_project
-        create_project("demo-b")
-        # Without kernel run: should stamp import single-write
-        run_id_1 = "01H5TESTIMPORT00000000000001"
-        digest1 = _write_baseline_snapshot(project_slug="demo-b", run_id=run_id_1, payload={"clips": []})
-        assert digest1
-        rec1 = json.loads((projects_root / "demo-b" / "runs" / run_id_1 / "run.json").read_text())
-        assert rec1.get("authority") == "import"
-        assert rec1["metadata"]["baseline_snapshot"] == digest1
-        assert rec1["metadata"]["non_authority"] is True
-        # With kernel run: should stamp kernel single-write; count writes by mtime not needed, just authority
         from astrid.core.project.kernel_admission import admit_orchestrator_project_run
-        ctx = admit_orchestrator_project_run(project="demo-b", tool_id="test.banodoco", argv=["x"], projects_root=projects_root)
-        run_id_2 = ctx.run_id
-        digest2 = _write_baseline_snapshot(project_slug="demo-b", run_id=run_id_2, payload={"clips": [{"id": "c1"}]})
-        rec2 = json.loads((projects_root / "demo-b" / "runs" / run_id_2 / "run.json").read_text())
-        assert rec2.get("authority") == "kernel"
-        assert rec2.get("kernel_run_id") == run_id_2
-        assert rec2["metadata"]["baseline_snapshot"] == digest2
-        # Kernel still has its run/task; zero authoritative FS ledger
-        runs, tasks, events, receipts = _kernel_counts(projects_root)
-        assert runs >= 1
+        class _Tasks:
+            def create(self, **kwargs: Any) -> dict[str, str]:
+                return {"run_id": "runtime-run-2", "task_id": "runtime-task-2"}
+
+        class _Client:
+            tasks = _Tasks()
+
+        ctx = admit_orchestrator_project_run(
+            project="demo-b",
+            tool_id="test.banodoco",
+            argv=["x"],
+            projects_root=projects_root,
+            _client=_Client(),
+        )
+        assert ctx.run_id == "runtime-run-2"
+        assert not list(projects_root.rglob("run.json"))
