@@ -21,11 +21,6 @@
       "name": "__main__.py",
       "classification": "cli_entrypoint",
       "notes": "Executable package gateway; delegates to astrid.core.gateway.main()."
-    },
-    {
-      "name": "application.py",
-      "classification": "cli_entrypoint",
-      "notes": "Application entry shim for the family gateway."
     }
   ],
   "top_level_directories": [

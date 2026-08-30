@@ -1,10 +1,8 @@
-"""Run the deploy doctor against a disposable, initialized CI data root.
+"""Run the deploy doctor through the workspace runtime.
 
-The normal ``astrid doctor`` command reports an absent projects root or
-database as an explicit first-run ``uninitialized`` state.  The Makefile's
-pre-CI target needs a ready store with all checks exercised, so this helper
-owns a temporary root, initializes it through the public projects CLI, and
-then runs the unchanged read-only doctor against that exact root.
+Stage1 removed Astrid's local project/database authority.  The Makefile
+doctor target therefore delegates directly to the runtime-backed public
+doctor command and never creates or inspects a disposable local store.
 """
 
 from __future__ import annotations
@@ -12,8 +10,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
 
 
 def _run(command: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -37,51 +33,10 @@ def _report_failure(
 
 
 def main() -> int:
-    python = sys.executable
-    env = os.environ.copy()
-
-    # TemporaryDirectory guarantees cleanup even when create or doctor fails.
-    # The ambient ASTRID_PROJECTS_ROOT is deliberately replaced for the
-    # initialization command; doctor receives the same root explicitly below.
-    with tempfile.TemporaryDirectory(prefix="astrid-make-doctor-") as root:
-        ci_env = {**env, "ASTRID_PROJECTS_ROOT": root}
-        create = _run(
-            [
-                python,
-                "-m",
-                "astrid",
-                "projects",
-                "create",
-                "ci-doctor",
-                "--name",
-                "CI Doctor",
-                "--idempotency-key",
-                "make-ci-doctor-v1",
-                "--json",
-            ],
-            env=ci_env,
-        )
-        if create.returncode != 0:
-            _report_failure("project initialization", create)
-            return create.returncode
-
-        doctor = _run(
-            [
-                python,
-                "-m",
-                "astrid",
-                "doctor",
-                "--json",
-                "--projects-root",
-                str(Path(root)),
-            ],
-            env=ci_env,
-        )
-        if doctor.returncode != 0:
-            _report_failure("health check", doctor)
-            return doctor.returncode
-
-    return 0
+    result = _run([sys.executable, "-m", "astrid", "doctor", "--json"], env=os.environ.copy())
+    if result.returncode != 0:
+        _report_failure("health check", result)
+    return result.returncode
 
 
 if __name__ == "__main__":

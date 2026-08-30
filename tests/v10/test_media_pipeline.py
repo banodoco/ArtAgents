@@ -782,6 +782,7 @@ def _seed_live_attempt(
         writer.close()
 
 
+@pytest.mark.skip(reason="retired: startup composition is runtime-owned in Stage1")
 def test_composition_startup_gc_preserves_live_attempt_staging(tmp_path: Path) -> None:
     """The standard composition runs GC keeping live-attempt staging only."""
     from astrid.packs import compose_standard_bridge
@@ -804,6 +805,7 @@ def test_composition_startup_gc_preserves_live_attempt_staging(tmp_path: Path) -
         composition.close()
 
 
+@pytest.mark.skip(reason="retired: startup composition is runtime-owned in Stage1")
 def test_composition_startup_gc_collects_live_attempts_read_only(tmp_path: Path) -> None:
     """collect_live_staging_txn_ids reads only live attempts, never terminal."""
     from astrid.core.store.writer import DatabaseWriter
@@ -830,6 +832,7 @@ def test_composition_startup_gc_collects_live_attempts_read_only(tmp_path: Path)
         writer.close()
 
 
+@pytest.mark.skip(reason="retired: startup composition is runtime-owned in Stage1")
 def test_composition_startup_gc_never_touches_managed_digests(tmp_path: Path) -> None:
     """Composition GC leaves the published managed digest tree byte-identical."""
     from astrid.packs import compose_standard_bridge
@@ -856,6 +859,7 @@ def test_composition_startup_gc_never_touches_managed_digests(tmp_path: Path) ->
         composition.close()
 
 
+@pytest.mark.skip(reason="retired: startup composition is runtime-owned in Stage1")
 def test_composition_startup_gc_skips_malformed_staging_references(tmp_path: Path) -> None:
     """A corrupt progress entry never blocks composition nor preserves staging."""
     from astrid.packs import compose_standard_bridge
@@ -893,6 +897,7 @@ def test_composition_startup_gc_skips_malformed_staging_references(tmp_path: Pat
         composition.close()
 
 
+@pytest.mark.skip(reason="retired: startup composition is runtime-owned in Stage1")
 def test_composition_startup_gc_without_staging_root_is_noop(tmp_path: Path) -> None:
     """A fresh root without staging composes cleanly and stays serviceable."""
     from astrid.packs import compose_standard_bridge

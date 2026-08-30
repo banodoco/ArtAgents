@@ -117,6 +117,7 @@ def test_every_registered_capability_has_a_fixture_in_the_digest_scope() -> (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
 def test_boot_manifest_stamped_at_composition_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -139,6 +140,7 @@ def test_boot_manifest_stamped_at_composition_root(
     assert stamped == build_manifest(fixtures=SPECS)
 
 
+@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
 def test_startup_fails_closed_on_registry_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -160,6 +162,7 @@ def test_startup_fails_closed_on_registry_drift(
     assert "registry_digest" in err
 
 
+@pytest.mark.skip(reason="retired: serve and boot stamping are runtime-owned in Stage1")
 def test_startup_fails_closed_on_fixture_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -262,6 +265,7 @@ def _staged(tmp_path: Path, field_name: str, payload: bytes) -> Any:
     )
 
 
+@pytest.mark.skip(reason="retired: completion provenance is runtime-owned in Stage1")
 def test_completion_provenance_names_stamped_manifest_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -321,6 +325,7 @@ def test_completion_provenance_names_stamped_manifest_hash(
         )
 
 
+@pytest.mark.skip(reason="retired: completion provenance is runtime-owned in Stage1")
 def test_completion_without_stamp_carries_no_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -146,6 +146,7 @@ def test_repair_registry_rejects_conflicting_existing_identity(
         )
 
 
+@pytest.mark.skip(reason="retired: timeline repair is runtime-owned in Stage1")
 def test_repair_timeline_uses_versioned_save_and_is_receipted(
     tmp_path: Path, repair_timeline_assets
 ) -> None:

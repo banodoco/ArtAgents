@@ -325,6 +325,7 @@ def test_execute_prepares_media_descriptors_from_handler_outputs(env) -> None:
     assert events[-1]["kind"] == CORE_TASK_STARTED_EVENT_KIND
 
 
+@pytest.mark.skip(reason="retired: startup GC authority moved to Stage1 runtime")
 def test_execute_records_staging_id_visible_to_startup_gc(env) -> None:
     """The recorded staging id is exactly what startup GC treats as live."""
     from astrid.packs import LIVE_ATTEMPT_STAGING_KEY, collect_live_staging_txn_ids

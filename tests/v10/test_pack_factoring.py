@@ -114,8 +114,8 @@ def test_temp_copy_removes_source_and_registration_deterministically(
             'STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "references", "runaway")'
             in init_text
         )
-        # timeline imports survive a shots-only removal.
-        assert "from astrid.packs.timeline.repository import TimelineRepository" in init_text
+        # The checkout-only registry has no domain imports to retain.
+        assert "astrid.packs.timeline" not in init_text
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

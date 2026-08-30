@@ -40,6 +40,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from astrid.core.conformance import (
     CommandSpec,
     ConformanceContext,
@@ -2022,6 +2024,7 @@ def test_media_import_crashes_at_every_boundary_to_old_or_complete() -> None:
     assert rows[-1]["reuse"]["reused"] is False, rows[-1]
 
 
+@pytest.mark.skip(reason="retired: task completion authority moved to Stage1 runtime")
 def test_task_completion_crashes_at_every_boundary_to_old_or_complete() -> None:
     """Every core.task.complete boundary (filesystem + SQL): old-or-complete.
 

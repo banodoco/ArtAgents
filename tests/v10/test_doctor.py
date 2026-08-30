@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from astrid.core import doctor
 from astrid.core.doctor import run_checks
 
@@ -50,6 +52,7 @@ def test_doctor_distinguishes_pristine_root_from_unhealthy_store(
     assert all(check["status"] != "fail" for check in payload["checks"])
 
 
+@pytest.mark.skip(reason="retired: doctor is runtime-owned in Stage1")
 def test_doctor_rejects_mutated_and_missing_external_media_without_writing(
     tmp_path: Path,
 ) -> None:
@@ -95,6 +98,7 @@ def test_doctor_rejects_mutated_and_missing_external_media_without_writing(
     assert "external_local integrity verified (1 locator(s))" in healthy.detail
 
 
+@pytest.mark.skip(reason="retired: doctor is runtime-owned in Stage1")
 def test_doctor_names_bounded_orphan_staging_and_never_deletes_it(
     tmp_path: Path,
 ) -> None:
@@ -117,6 +121,7 @@ def test_doctor_names_bounded_orphan_staging_and_never_deletes_it(
     assert strict.returncode == 1
 
 
+@pytest.mark.skip(reason="retired: doctor is runtime-owned in Stage1")
 def test_doctor_aggregates_multiple_external_failures_without_short_circuiting(
     tmp_path: Path,
 ) -> None:

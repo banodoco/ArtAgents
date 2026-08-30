@@ -131,6 +131,16 @@ def test_manifest_and_registry_lanes_share_the_registry_file() -> None:
     assert by_name["registry"].selectors == ("tests/v10/test_registry.py",)
 
 
+def test_bridge_and_provider_lanes_use_runtime_boundary_contracts() -> None:
+    by_name = {lane.name: lane for lane in LANES}
+    assert by_name["bridge"].selectors == (
+        "tests/stage1/test_runtime_client_cutover.py",
+    )
+    assert by_name["provider"].selectors == (
+        "tests/stage1/test_kernel_admission_runtime.py",
+    )
+
+
 def test_catalog_and_migration_lanes_share_the_migration_file() -> None:
     by_name = {lane.name: lane for lane in LANES}
     expected = ("tests/v10/test_catalog_migrations.py",)

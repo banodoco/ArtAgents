@@ -33,7 +33,6 @@ INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
     "__init__.py",
     "__main__.py",
-    "application.py",
 }
 TOP_LEVEL_ASTRID_DIRS = {
     "core",

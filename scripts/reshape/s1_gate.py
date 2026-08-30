@@ -83,8 +83,11 @@ LANES: tuple[Lane, ...] = (
         "lint",
         ("tests/v10/test_authority_lint.py", "tests/test_structure_contracts.py"),
     ),
-    Lane("bridge", ("tests/integrations/reigh/test_local_bridge_server.py",)),
-    Lane("provider", ("tests/integrations/reigh/test_repository_provider.py",)),
+    # The local bridge/provider suites were retired with the Stage1 authority
+    # cutover.  Keep the two evidence lanes, but point them at the focused
+    # runtime-boundary contracts that replaced those local surfaces.
+    Lane("bridge", ("tests/stage1/test_runtime_client_cutover.py",)),
+    Lane("provider", ("tests/stage1/test_kernel_admission_runtime.py",)),
 )
 
 

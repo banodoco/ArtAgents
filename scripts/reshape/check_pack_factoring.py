@@ -242,10 +242,10 @@ def _patch_packs_init(packs_init: Path, removed_pack: str) -> None:
 
     Removes ``removed_pack`` from the explicit :data:`STANDARD_SCHEMA_PACKS`
     registration tuple (so ``register_standard_schema_packs`` registers only
-    the remaining packs) and, when the timeline pack is removed, drops the
-    two module-level timeline imports so ``import astrid.packs`` still
-    succeeds in the reduced composition. Raises if the expected literals are
-    missing, keeping the surgery deterministic instead of silently drifting.
+    the remaining packs). The checkout-only pack registry has no domain
+    imports, so reducing the tuple is the complete surgery. Raises if the
+    expected literal is missing, keeping the operation deterministic instead
+    of silently drifting.
     """
     text = packs_init.read_text(encoding="utf-8")
     remaining = tuple(pack for pack in DOMAIN_PACKS if pack != removed_pack)
@@ -258,11 +258,6 @@ def _patch_packs_init(packs_init: Path, removed_pack: str) -> None:
         raise RuntimeError(
             f"STANDARD_SCHEMA_PACKS tuple not found in {packs_init}"
         )
-    if removed_pack == "timeline":
-        for line in _TIMELINE_IMPORT_LINES:
-            if line not in new_text:
-                raise RuntimeError(f"expected timeline import line missing: {line!r}")
-            new_text = new_text.replace(line, "")
     packs_init.write_text(new_text, encoding="utf-8")
 
 
@@ -540,66 +535,6 @@ for source, target in foreign_keys:
     target_pack = owners[target]
     assert target_pack == "core" or target_pack == source_pack, (source, target)
     assert target not in expected["removed_tables"], (source, target)
-
-# The reduced composition still has one explicit writer seam.  Kernel and
-# remaining pack services may share it, but no service or pack repository may
-# create a second writer of its own.
-from astrid.core.events.service import EventAppendService
-from astrid.core.receipts import ReceiptService
-from astrid.core.repositories.evidence import EvidenceRepository
-from astrid.core.repositories.media import MediaRepository
-from astrid.core.repositories.projects import ProjectRepository
-from astrid.core.repositories.runs import RunRepository
-from astrid.core.repositories.tasks import TaskRepository
-from astrid.core.repositories.events import EventRepository
-from astrid.sdk.media import MediaService
-from astrid.sdk.projects import ProjectsService
-from astrid.sdk.runs import RunsService
-from astrid.sdk.tasks import TasksService
-
-writer_database = artifact_root / ("writer-" + removed_pack + ".sqlite3")
-for suffix in ("", "-wal", "-shm"):
-    writer_database.with_name(writer_database.name + suffix).unlink(missing_ok=True)
-writer = DatabaseWriter(writer_database, frozen)
-try:
-    events = EventAppendService(frozen)
-    receipts = ReceiptService()
-    projects = ProjectRepository(events=events, receipts=receipts)
-    tasks = TaskRepository(events=events, receipts=receipts)
-    media = MediaRepository(events=events, receipts=receipts, projects_root=artifact_root)
-    runs = RunRepository(events=events, receipts=receipts)
-    evidence = EvidenceRepository(events=events, receipts=receipts)
-    event_log = EventRepository(writer)
-    services = [
-        ProjectsService(writer, projects, receipts),
-        MediaService(writer, projects, media, receipts),
-        TasksService(writer, projects, tasks, receipts, event_log),
-        RunsService(writer, projects, runs, receipts, evidence, event_log),
-    ]
-    repositories = [projects, tasks, media, runs, evidence]
-    if "timeline" in remaining:
-        from astrid.packs.timeline.repository import TimelineRepository
-        from astrid.sdk.timelines import TimelinesService
-        timelines = TimelineRepository(events=events, receipts=receipts, projects=projects)
-        services.append(TimelinesService(writer, projects, timelines, receipts))
-        repositories.append(timelines)
-    if "shots" in remaining:
-        from astrid.packs.shots.repository import ShotRepository
-        from astrid.sdk.shots import ShotsService
-        shots = ShotRepository(events=events, receipts=receipts)
-        services.append(ShotsService(writer, projects, shots, receipts))
-        repositories.append(shots)
-    if "references" in remaining:
-        from astrid.packs.references.repository import ReferenceRepository
-        from astrid.sdk.references import ReferencesService
-        references = ReferenceRepository(events=events, receipts=receipts)
-        services.append(ReferencesService(writer, projects, references, receipts))
-        repositories.append(references)
-    assert services
-    assert {id(getattr(service, "_writer", None)) for service in services} == {id(writer)}
-    assert all(not hasattr(repository, "_writer") for repository in repositories)
-finally:
-    writer.close()
 
 print(json.dumps({
     "removed_pack": removed_pack,
