@@ -305,7 +305,7 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="in_process",
+            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:
@@ -415,7 +415,7 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="in_process",
+            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:
@@ -526,7 +526,7 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="in_process",
+            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:

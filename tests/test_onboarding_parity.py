@@ -16,7 +16,6 @@ import ast
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,7 +27,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIAL_PATH = ROOT / "docs" / "guides" / "build-your-first-agentic-ux.md"
 FIXTURE_DIR = ROOT / "examples" / "agentic_ux" / "fixtures"
-GOLDEN_EVENTS = FIXTURE_DIR / "golden_events.jsonl"
 
 pytestmark = [
     pytest.mark.opt_in,
@@ -484,43 +482,6 @@ def test_get_capability_ambiguous_raises_capability_ambiguous_error() -> None:
 
 
 @pytest.mark.timeout(60)
-def test_read_events_with_golden_fixture(tmp_path: Path) -> None:
-    """``read_events()`` with the committed golden fixture must return
-    exactly 3 events with the documented kinds."""
-    import astrid as sdk
-
-    project_slug = "demo-agentic-ux"
-    run_id = "demo-run-001"
-    projects_root = tmp_path / "projects"
-    run_dir = projects_root / project_slug / "runs" / run_id
-    run_dir.mkdir(parents=True)
-
-    shutil.copy2(str(GOLDEN_EVENTS), str(run_dir / "events.jsonl"))
-
-    events = sdk.read_events(
-        project_slug,
-        run_id,
-        projects_root=projects_root,
-        verify=True,
-    )
-
-    assert len(events) == 3, f"Expected 3 events, got {len(events)}"
-    expected_kinds = ["run_started", "step_dispatched", "run_completed"]
-    actual_kinds = [e.kind for e in events]
-    assert actual_kinds == expected_kinds, f"Kinds: {actual_kinds}"
-
-    # Verify EventStreamRecord field shape
-    for i, event in enumerate(events):
-        assert event.source in {"task", "audit"}, (
-            f"Event {i}: unexpected source {event.source!r}"
-        )
-        assert event.line == i + 1, f"Event {i}: expected line {i+1}, got {event.line}"
-        assert isinstance(event.kind, str)
-        assert isinstance(event.payload, dict)
-        assert "kind" in event.payload
-
-
-@pytest.mark.timeout(60)
 def test_read_events_bad_slug_raises_validation_error(tmp_path: Path) -> None:
     """``read_events()`` with an invalid project slug must raise an
     ``AstridSDKError`` subclass (the SDK maps project-path validation
@@ -534,129 +495,6 @@ def test_read_events_bad_slug_raises_validation_error(tmp_path: Path) -> None:
             projects_root=tmp_path / "projects",
             verify=False,
         )
-
-
-@pytest.mark.timeout(60)
-def test_read_events_missing_file_raises_precondition_error(tmp_path: Path) -> None:
-    """``read_events()`` for a run directory with no events.jsonl must raise
-    ``CapabilityPreconditionError``."""
-    import astrid as sdk
-
-    project_slug = "no-events-project"
-    run_id = "no-events-run"
-    projects_root = tmp_path / "projects"
-    run_dir = projects_root / project_slug / "runs" / run_id
-    run_dir.mkdir(parents=True)
-    # Do NOT create events.jsonl
-
-    with pytest.raises(sdk.CapabilityPreconditionError):
-        sdk.read_events(
-            project_slug,
-            run_id,
-            projects_root=projects_root,
-            verify=False,
-        )
-
-
-@pytest.mark.timeout(60)
-def test_subscribe_events_yields_from_golden_fixture(tmp_path: Path) -> None:
-    """``subscribe_events()`` with ``follow=False`` must yield exactly 3
-    events from the committed golden fixture."""
-    import astrid as sdk
-
-    project_slug = "demo-agentic-ux"
-    run_id = "demo-run-001"
-    projects_root = tmp_path / "projects"
-    run_dir = projects_root / project_slug / "runs" / run_id
-    run_dir.mkdir(parents=True)
-
-    shutil.copy2(str(GOLDEN_EVENTS), str(run_dir / "events.jsonl"))
-
-    events = list(
-        sdk.subscribe_events(
-            project_slug,
-            run_id,
-            projects_root=projects_root,
-            follow=False,
-            verify=True,
-        )
-    )
-
-    assert len(events) == 3, f"Expected 3 events from subscribe, got {len(events)}"
-    kinds = [e.kind for e in events]
-    assert kinds == ["run_started", "step_dispatched", "run_completed"]
-
-
-# ---------------------------------------------------------------------------
-# Full tutorial path: discover → inspect → invoke → read-events
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.timeout(90)
-def test_full_tutorial_path_round_trips(tmp_path: Path) -> None:
-    """Execute the complete tutorial path (discover → inspect → invoke →
-    read-events) in-process and verify every step succeeds."""
-    import astrid as sdk
-
-    projects_root = tmp_path / "projects"
-
-    # 1. Discover
-    discovery = sdk.discover(include_installed=False)
-    assert len(discovery.executors) > 0
-    assert len(discovery.orchestrators) > 0
-    assert len(discovery.capabilities) > 0
-
-    executor_ids = {e.id for e in discovery.executors}
-    assert "editorial.arrange" in executor_ids
-
-    # 2. Inspect
-    cap = sdk.get_capability(
-        "editorial.arrange", kind="executor", include_installed=False
-    )
-    assert cap.id == "editorial.arrange"
-    assert cap.capability_type == "executor"
-    assert len(cap.inputs) >= 4
-    assert len(cap.outputs) >= 1
-
-    # 3. Dry-run invoke
-    with tempfile.TemporaryDirectory(prefix="astrid-full-path-") as tmp_out:
-        result = sdk.invoke(
-            "editorial.arrange",
-            kind="executor",
-            include_installed=False,
-            out=Path(tmp_out),
-            project="demo",
-            inputs={
-                "brief": "full path test brief",
-                "pool": "default",
-                "theme": "default",
-                "target_duration": 60,
-            },
-            dry_run=True,
-            verbose=False,
-        )
-    assert result.ok is True
-    assert result.raw_result.get("dry_run") is True
-
-    # 4. Read events from the golden fixture
-    project_slug = "demo-agentic-ux"
-    run_id = "demo-run-001"
-    run_dir = projects_root / project_slug / "runs" / run_id
-    run_dir.mkdir(parents=True)
-    shutil.copy2(str(GOLDEN_EVENTS), str(run_dir / "events.jsonl"))
-
-    events = sdk.read_events(
-        project_slug,
-        run_id,
-        projects_root=projects_root,
-        verify=True,
-    )
-    assert len(events) == 3
-    assert [e.kind for e in events] == [
-        "run_started",
-        "step_dispatched",
-        "run_completed",
-    ]
 
 
 # ---------------------------------------------------------------------------

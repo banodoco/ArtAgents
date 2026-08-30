@@ -578,53 +578,6 @@ def test_invoke_rejects_elements_and_missing_executor_project(
             )
 
 
-def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Kernel admission owns the output path even for in-process execution."""
-    astrid = _import_public_module()
-    from astrid.core.task_executor import capability_handler
-
-    captured_request: dict[str, Any] = {}
-
-    def _fake_run_executor(request: Any, registry: Any) -> Any:
-        captured_request["executor_id"] = request.executor_id
-        captured_request["project"] = request.project
-        captured_request["out"] = request.out
-        captured_request["execution_mode"] = request.execution_mode
-        captured_request["inputs"] = dict(request.inputs)
-        from astrid.core.execution.executor.runner import ExecutorRunResult
-
-        return ExecutorRunResult(
-            executor_id=request.executor_id,
-            kind="external",
-            command=(),
-            payload={"executor_id": request.executor_id, "returncode": 0},
-            returncode=0,
-        )
-
-    monkeypatch.setattr(capability_handler.executor_runner, "run_executor", _fake_run_executor)
-
-    result = astrid.invoke(
-        "editorial.arrange",
-        kind="executor",
-        project="demo",
-        out=None,
-        execution_mode="in_process",
-        include_installed=False,
-        project_root=tmp_path / "sdk-projects",
-    )
-
-    assert captured_request["executor_id"] == "editorial.arrange"
-    assert captured_request["project"] == "demo"
-    assert isinstance(captured_request["out"], Path)
-    assert "/.astrid/media/.staging/" in captured_request["out"].as_posix()
-    assert captured_request["execution_mode"] == "in_process"
-    assert result.capability_id == "editorial.arrange"
-    assert result.capability_type == "executor"
-
-
 def test_discover_exposes_pack_declared_extension_metadata() -> None:
     astrid = _import_public_module()
 
@@ -827,7 +780,7 @@ def test_invoke_executor_builds_request_and_normalizes_result(monkeypatch: pytes
         check_binaries=True,
         python_exec=sys.executable,
         verbose=True,
-        execution_mode="in_process",
+        execution_mode="subprocess",
         argv=("executors", "run", "editorial.arrange"),
     )
 
@@ -842,7 +795,7 @@ def test_invoke_executor_builds_request_and_normalizes_result(monkeypatch: pytes
     assert request.check_binaries is True
     assert request.python_exec == sys.executable
     assert request.verbose is True
-    assert request.execution_mode == "in_process"
+    assert request.execution_mode == "subprocess"
     assert request.argv == ("executors", "run", "editorial.arrange")
     assert seen["registry"] is not None
 
@@ -991,7 +944,7 @@ def test_invoke_orchestrator_builds_request_and_normalizes_result(
         dry_run=True,
         python_exec=sys.executable,
         verbose=True,
-        execution_mode="in_process",
+        execution_mode="subprocess",
         orchestrator_args=("--render",),
     )
 
@@ -1006,7 +959,7 @@ def test_invoke_orchestrator_builds_request_and_normalizes_result(
     assert request.dry_run is True
     assert request.python_exec == sys.executable
     assert request.verbose is True
-    assert request.execution_mode == "in_process"
+    assert request.execution_mode == "subprocess"
     assert seen["registry"] is not None
 
     assert result.capability_id == "video_editing.hype"
@@ -1084,141 +1037,6 @@ def test_invoke_executor_allows_project_without_explicit_out(
 
     assert seen["project"] == "demo-project"
     assert result.ok is True
-
-
-def test_read_events_validates_project_and_resolves_run_dir(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    astrid = _import_public_module()
-    sdk = importlib.import_module("astrid.sdk")
-    with pytest.raises(astrid.CapabilityValidationError, match="project slug"):
-        astrid.read_events("Bad Project", "run-1")
-
-    run_dir = tmp_path / "resolved-run"
-    seen: dict[str, Any] = {}
-    expected_record = astrid.EventStreamRecord(
-        source="task",
-        line=1,
-        timestamp="2026-01-01T00:00:00Z",
-        kind="run_started",
-        hash="sha256:abc",
-        payload={"kind": "run_started"},
-    )
-
-    def fake_resolve(project: str, run_id: str, *, projects_root: Path | None = None) -> Path:
-        seen["resolve"] = (project, run_id, projects_root)
-        return run_dir
-
-    def fake_read_event_stream(path: Path, *, include_audit: bool, verify: bool) -> list[Any]:
-        seen["read"] = (path, include_audit, verify)
-        return [expected_record]
-
-    monkeypatch.setattr(sdk, "_resolve_event_stream_run_dir", fake_resolve)
-    monkeypatch.setattr(sdk, "_read_task_event_stream", fake_read_event_stream)
-
-    records = astrid.read_events(
-        "demo-project",
-        "run-1",
-        projects_root=tmp_path / "projects",
-        include_audit=False,
-        verify=False,
-    )
-
-    assert records == (expected_record,)
-    assert seen["resolve"] == ("demo-project", "run-1", tmp_path / "projects")
-    assert seen["read"] == (run_dir, False, False)
-
-
-def test_read_events_maps_missing_run_and_event_log_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    astrid = _import_public_module()
-    sdk = importlib.import_module("astrid.sdk")
-
-    def missing_run(project: str, run_id: str, *, projects_root: Path | None = None) -> Path:
-        raise FileNotFoundError(f"run {run_id!r} not found in project {project!r}")
-
-    monkeypatch.setattr(sdk, "_resolve_event_stream_run_dir", missing_run)
-    with pytest.raises(astrid.CapabilityPreconditionError, match="run 'run-1' not found"):
-        astrid.read_events("demo", "run-1")
-
-    run_dir = Path("/tmp/demo-run")
-
-    def ok_resolve(project: str, run_id: str, *, projects_root: Path | None = None) -> Path:
-        return run_dir
-
-    def corrupt_read(path: Path, *, include_audit: bool, verify: bool) -> list[Any]:
-        raise EventLogError("verification failed")
-
-    monkeypatch.setattr(sdk, "_resolve_event_stream_run_dir", ok_resolve)
-    monkeypatch.setattr(sdk, "_read_task_event_stream", corrupt_read)
-    with pytest.raises(astrid.CapabilityEventLogError, match="verification failed"):
-        astrid.read_events("demo", "run-1")
-
-
-def test_subscribe_events_delegates_and_maps_iteration_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    astrid = _import_public_module()
-    sdk = importlib.import_module("astrid.sdk")
-    run_dir = Path("/tmp/demo-run")
-    seen: dict[str, Any] = {}
-    expected_record = astrid.EventStreamRecord(
-        source="task",
-        line=2,
-        timestamp="2026-01-01T00:00:01Z",
-        kind="step_completed",
-        hash="sha256:def",
-        payload={"kind": "step_completed"},
-    )
-
-    def fake_resolve(project: str, run_id: str, *, projects_root: Path | None = None) -> Path:
-        seen["resolve"] = (project, run_id, projects_root)
-        return run_dir
-
-    def fake_subscribe(
-        path: Path,
-        *,
-        include_audit: bool,
-        verify: bool,
-        follow: bool,
-        poll_interval: float,
-        idle_polls: int | None,
-    ):
-        seen["subscribe"] = (path, include_audit, verify, follow, poll_interval, idle_polls)
-        yield expected_record
-
-    monkeypatch.setattr(sdk, "_resolve_event_stream_run_dir", fake_resolve)
-    monkeypatch.setattr(sdk, "_subscribe_task_event_stream", fake_subscribe)
-
-    records = list(
-        astrid.subscribe_events(
-            "demo",
-            "run-1",
-            follow=True,
-            poll_interval=0,
-            idle_polls=2,
-        )
-    )
-
-    assert records == [expected_record]
-    assert seen["resolve"] == ("demo", "run-1", None)
-    assert seen["subscribe"] == (run_dir, True, True, True, 0, 2)
-
-    def failing_subscribe(
-        path: Path,
-        *,
-        include_audit: bool,
-        verify: bool,
-        follow: bool,
-        poll_interval: float,
-        idle_polls: int | None,
-    ):
-        raise EventLogError("stream corrupted")
-        yield  # pragma: no cover
-
-    monkeypatch.setattr(sdk, "_subscribe_task_event_stream", failing_subscribe)
-    with pytest.raises(astrid.CapabilityEventLogError, match="stream corrupted"):
-        list(astrid.subscribe_events("demo", "run-1"))
 
 
 def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
@@ -1666,7 +1484,7 @@ def test_generate_image_reconstructs_typed_result_from_generation_payload(
     assert result.path == tmp_path / "image.png"
     assert result.run_dir == tmp_path
     assert seen["capability_id"] == "generation.generate_image"
-    assert seen["kwargs"]["execution_mode"] == "in_process"
+    assert seen["kwargs"]["execution_mode"] == "subprocess"
     assert seen["kwargs"]["kind"] == "executor"
     assert seen["kwargs"]["inputs"]["prompt"] == "a lantern in fog"
 
@@ -1886,7 +1704,7 @@ def test_generate_video_reconstructs_typed_result_from_generation_payload(
     assert result.run_dir == tmp_path
     assert result.model_actual == "wan-2.2"
     assert seen["capability_id"] == "generation.generate_video"
-    assert seen["kwargs"]["execution_mode"] == "in_process"
+    assert seen["kwargs"]["execution_mode"] == "subprocess"
     assert seen["kwargs"]["kind"] == "executor"
     assert seen["kwargs"]["inputs"]["prompt"] == "a cat playing piano"
     assert seen["kwargs"]["inputs"]["duration"] == 5

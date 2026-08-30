@@ -81,6 +81,7 @@ _PRIVATE_EXPORTS = {
     "_infer_image_mode": ("generation", "_infer_image_mode"),
     "_infer_video_mode": ("generation", "_infer_video_mode"),
     "_load_model_registry": ("generation", "_load_model_registry"),
+    "_registry_load_kwargs": ("discovery", "_registry_load_kwargs"),
     "_resolve_execution": ("generation", "_resolve_execution"),
     "_resolve_event_stream_run_dir": ("events", "_resolve_event_stream_run_dir"),
     "_read_task_event_stream": ("events", "_read_task_event_stream"),
