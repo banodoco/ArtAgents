@@ -169,3 +169,47 @@ def test_callback_timeout_kills_child_process_group(tmp_path: Path, monkeypatch)
     assert run_step(step, [], args) == 124
     assert time.monotonic() - started < 3
     assert "timed out" in (tmp_path / "logs" / "hung.log").read_text(encoding="utf-8")
+
+
+def test_callback_timeout_kills_sigterm_resistant_descendant_after_leader_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A callback leader exiting on TERM must not leak its stubborn child."""
+    module_path = tmp_path / "leader_exits_callback.py"
+    child_code = (
+        "import os,signal,sys,time; from pathlib import Path; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    module_path.write_text(
+        "import signal,subprocess,sys,time\n"
+        "from pathlib import Path\n"
+        f"CHILD_CODE = {child_code!r}\n"
+        "def callback(args):\n"
+        "    child_pid = Path(args.out, 'child.pid')\n"
+        "    subprocess.Popen([sys.executable, '-c', CHILD_CODE, str(child_pid)])\n"
+        "    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "    while True:\n"
+        "        time.sleep(1)\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("leader_exits_callback", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    step = Step("leader-exits", (), lambda _args: [], invoke=module.callback)
+    # Leave enough startup time for the callback to spawn its child before
+    # exercising the timeout path.
+    args = SimpleNamespace(out=tmp_path, verbose=False, callback_timeout=1.0)
+
+    assert run_step(step, [], args) == 124
+    child_pid = int((tmp_path / "child.pid").read_text(encoding="utf-8"))
+    for _ in range(40):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("SIGTERM-resistant callback descendant survived timeout")

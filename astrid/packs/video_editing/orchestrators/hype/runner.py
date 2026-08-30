@@ -193,18 +193,65 @@ def print_log_tail(step_name: str, log_path: Path) -> None:
     )
 
 
-def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 1.0) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
-        process.terminate()
-    try:
-        process.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
+def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
+    """Signal the owned child session, falling back to the direct child."""
+    if hasattr(os, "killpg"):
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            process.kill()
+            # The child starts a fresh session, making its pid the process
+            # group id.  Signal the group even if the leader already exited;
+            # a descendant may still be keeping that group alive.
+            os.killpg(process.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except (PermissionError, OSError):
+            pass
+    if process.poll() is None:
+        try:
+            process.send_signal(sig)
+        except OSError:
+            pass
+
+
+def _process_group_exists(process: subprocess.Popen) -> bool:
+    """Return whether any member of the owned session is still alive."""
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return process.poll() is None
+        return True
+    return process.poll() is None
+
+
+def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 1.0) -> None:
+    """Terminate the complete child session and reap its direct child.
+
+    A callback can handle SIGTERM by exiting immediately while one of its
+    descendants ignores SIGTERM.  Waiting only for the callback leader would
+    then leak that descendant.  Group liveness is checked independently and
+    the remaining group is escalated to SIGKILL before the leader is reaped.
+    """
+    _signal_process_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    while _process_group_exists(process) and time.monotonic() < deadline:
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+
+    if _process_group_exists(process):
+        _signal_process_group(process, signal.SIGKILL)
+        kill_deadline = time.monotonic() + max(1.0, grace_seconds)
+        while _process_group_exists(process) and time.monotonic() < kill_deadline:
+            _signal_process_group(process, signal.SIGKILL)
+            time.sleep(0.01)
+
+    try:
+        process.wait(timeout=max(1.0, grace_seconds))
+    except subprocess.TimeoutExpired:
+        _signal_process_group(process, signal.SIGKILL)
         process.wait()
 
 

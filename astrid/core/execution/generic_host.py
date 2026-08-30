@@ -122,25 +122,71 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 2.0) -> None:
-    """Terminate a child session and all descendants, then reap the leader."""
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except (OSError, ProcessLookupError):
+def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
+    """Signal the session created for *process*, with a portable fallback."""
+    if hasattr(os, "killpg"):
         try:
-            process.terminate()
+            # ``start_new_session=True`` makes the child pid the process-group
+            # id.  Do this even after the leader exits: descendants can keep
+            # the group alive while the direct child has already been reaped.
+            os.killpg(process.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except (PermissionError, OSError):
+            pass
+    if process.poll() is None:
+        try:
+            process.send_signal(sig)
         except OSError:
             pass
-    try:
-        process.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
+
+
+def _process_group_exists(process: subprocess.Popen) -> bool:
+    """Check for any remaining member, including a leader that already exited."""
+    if hasattr(os, "killpg"):
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            try:
-                process.kill()
-            except OSError:
-                pass
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return process.poll() is None
+        return True
+    return process.poll() is None
+
+
+def _terminate_process_group(process: subprocess.Popen, *, grace_seconds: float = 2.0) -> None:
+    """Terminate the complete child session and reap the direct child.
+
+    The leader is allowed to exit cleanly on SIGTERM, so waiting only on
+    ``process.wait()`` is insufficient: a SIGTERM-resistant descendant could
+    otherwise survive after the leader has gone away.  Observe the process
+    group independently, escalate the still-live group to SIGKILL, then reap
+    the leader.  Descendants are not our children and therefore cannot be
+    ``waitpid``-reaped here; killing the owned session is the relevant
+    containment guarantee.
+    """
+    _signal_process_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    while _process_group_exists(process) and time.monotonic() < deadline:
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+
+    if _process_group_exists(process):
+        _signal_process_group(process, signal.SIGKILL)
+        kill_deadline = time.monotonic() + max(1.0, grace_seconds)
+        while _process_group_exists(process) and time.monotonic() < kill_deadline:
+            # Repeat SIGKILL while the group is being reaped.  This handles a
+            # leader that exited during the grace window but left a stubborn
+            # descendant holding the session open.
+            _signal_process_group(process, signal.SIGKILL)
+            time.sleep(0.01)
+
+    try:
+        process.wait(timeout=max(1.0, grace_seconds))
+    except subprocess.TimeoutExpired:
+        _signal_process_group(process, signal.SIGKILL)
         process.wait()
 
 
