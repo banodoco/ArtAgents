@@ -14,7 +14,7 @@ import stat
 import tempfile
 import warnings
 from collections.abc import Mapping
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -64,53 +64,34 @@ def dispatch_retried_task(
     attempt: Any,
     idempotency_key: str,
     registry: FrozenSchemaPackRegistry | None = None,
+    runtime: Any | None = None,
+    executor_id: str = "astrid-sdk-retry",
+    capability_ids: list[str] | None = None,
 ) -> tuple[Any, Any]:
-    """Execute one newly retried kernel attempt through the public path.
+    """Bridge a legacy retry callback to the neutral runtime claim seam.
 
-    Retry admission deliberately remains a small repository transaction. The
-    service then dispatches the same immutable capability/spec through the
-    normal handler, execution, and media-completion fences. This is kept here
-    so task and run retry surfaces cannot drift into two subtly different
-    worker implementations. Callers must invoke this only for a fresh retry
-    receipt; exact receipt replays are read-only and must not dispatch again.
+    Retry admission is owned by the task/run repositories.  Execution belongs
+    to a runtime worker, which claims queued work and settles the fenced
+    attempt through the runtime protocol.  This compatibility entry point is
+    intentionally inert for the old local-service callers; they already
+    created the retry attempt and must return its admission result without
+    opening a second writer or running a capability in-process.
+
+    A caller that has an explicit runtime client may pass it to perform the
+    canonical claim operation.  The SDK itself does not construct one here:
+    product clients obtain it through :class:`AstridClient` and workers own
+    execution/settlement.  The remaining legacy parameters are accepted only
+    to keep old injected call sites source-compatible.
     """
-    from astrid.core.kernel.read import schema_registry_context
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
-
-    spec = dict(getattr(task, "spec", {}) or {})
-    capability_kind = str(spec.get("kind") or "executor")
-    handler = CapabilityTaskHandler(
-        capability_kind=capability_kind,
-        capability_id=str(task.capability),
-        projects_root=projects_root,
-        invocation="sdk",
-        require_executor_version=True,
+    del writer, task_repo, media_repo, projects_root, task, attempt, registry
+    if runtime is None:
+        return None, None
+    claim = runtime.claim_next(
+        executor_id=executor_id,
+        capability_ids=list(capability_ids or []),
+        idempotency_key=f"{idempotency_key}:claim",
     )
-    service = ExecutionService(projects_root=projects_root, task_repo=task_repo)
-    with schema_registry_context(registry) if registry is not None else nullcontext():
-        execution = service.execute(
-            UnitOfWork(writer),
-            project_id=str(task.project_id),
-            task_id=str(task.id),
-            attempt_id=str(attempt.id),
-            lease_id=str(attempt.lease_id),
-            expected_status_version=int(attempt.status_version),
-            idempotency_key=f"{idempotency_key}:exec",
-            handler=handler,
-        )
-    completion = None
-    if execution.outcome == "prepared" and execution.prepared is not None:
-        with schema_registry_context(registry) if registry is not None else nullcontext():
-            completion = service.complete(
-                UnitOfWork(writer),
-                prepared=execution.prepared,
-                media_repo=media_repo,
-                idempotency_key=f"{idempotency_key}:complete",
-            )
-        if completion.outcome == "completed":
-            service.cleanup_staging(execution.prepared.staging_dir)
-    return execution, completion
+    return claim, None
 
 
 def discover(

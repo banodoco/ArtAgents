@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from astrid.sdk import invocation
@@ -91,3 +92,67 @@ def test_kernel_invoke_opens_runtime_without_project_root(monkeypatch) -> None:
     )
 
     assert calls == [((), {})]
+
+
+def test_retried_task_dispatch_has_no_local_execution_authority() -> None:
+    """Retry callbacks never reopen the local writer or execute a pack."""
+    source = Path(invocation.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "dispatch_retried_task"
+    )
+    names = {
+        node.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Name)
+    }
+    assert not {"UnitOfWork", "ExecutionService", "CapabilityTaskHandler"} & names
+
+
+def test_retried_task_dispatch_uses_explicit_runtime_claim_client() -> None:
+    class _Runtime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def claim_next(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"attempt_id": "attempt-1", "task_id": "task-1"}
+
+    runtime = _Runtime()
+    claim, completion = invocation.dispatch_retried_task(
+        writer=object(),
+        task_repo=object(),
+        media_repo=object(),
+        projects_root=Path("/never/opened"),
+        task=object(),
+        attempt=object(),
+        idempotency_key="retry-1",
+        runtime=runtime,
+        executor_id="worker-1",
+        capability_ids=["render.basic"],
+    )
+
+    assert claim == {"attempt_id": "attempt-1", "task_id": "task-1"}
+    assert completion is None
+    assert runtime.calls == [
+        {
+            "executor_id": "worker-1",
+            "capability_ids": ["render.basic"],
+            "idempotency_key": "retry-1:claim",
+        }
+    ]
+
+
+def test_retried_task_dispatch_is_inert_without_runtime_client() -> None:
+    assert invocation.dispatch_retried_task(
+        writer=object(),
+        task_repo=object(),
+        media_repo=object(),
+        projects_root=Path("/never/opened"),
+        task=object(),
+        attempt=object(),
+        idempotency_key="retry-1",
+    ) == (None, None)
