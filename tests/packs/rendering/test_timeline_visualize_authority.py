@@ -140,3 +140,45 @@ def test_frozen_ownership_accepts_exact_settled_output_for_path_run(tmp_path, mo
         },
     )
     frozen._verify_run_ownership(path, tmp_path / "demo", manifest, "timeline-1")
+
+
+def test_frozen_ownership_rejects_settled_output_without_exact_size(tmp_path, monkeypatch):
+    path, manifest = _owned_manifest(tmp_path, "run-b", b"run-b-pack")
+    digest = hashlib.sha256(b"run-b-pack").hexdigest()
+    monkeypatch.setattr(
+        frozen,
+        "_kernel_frozen_run_info",
+        lambda _slug, _run_id, _root: {
+            "project_id": "project-1",
+            "current_project_id": "project-1",
+            "status": "completed",
+            "capability": "rendering.timeline_visualize",
+            "timeline_ids": ["timeline-1"],
+            "outputs": [{"path": "agent-view/manifest.json", "digest": digest}],
+        },
+    )
+    with pytest.raises(frozen.ContainmentError, match="byte count"):
+        frozen._verify_run_ownership(path, tmp_path / "demo", manifest, "timeline-1")
+
+
+def test_frozen_ownership_rejects_basename_collision_in_settled_path(tmp_path, monkeypatch):
+    path, manifest = _owned_manifest(tmp_path, "run-b", b"run-b-pack")
+    digest = hashlib.sha256(b"run-b-pack").hexdigest()
+    monkeypatch.setattr(
+        frozen,
+        "_kernel_frozen_run_info",
+        lambda _slug, _run_id, _root: {
+            "project_id": "project-1",
+            "current_project_id": "project-1",
+            "status": "completed",
+            "capability": "rendering.timeline_visualize",
+            "timeline_ids": ["timeline-1"],
+            "outputs": [{
+                "path": "agent-view/other/manifest.json",
+                "digest": digest,
+                "size": len(b"run-b-pack"),
+            }],
+        },
+    )
+    with pytest.raises(frozen.ContainmentError, match="selected visualization pack"):
+        frozen._verify_run_ownership(path, tmp_path / "demo", manifest, "timeline-1")

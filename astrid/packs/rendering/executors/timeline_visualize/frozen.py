@@ -1184,8 +1184,9 @@ def _verify_runtime_output_binding(
 
     # Runtime output paths are commonly rooted at the run's ``agent-view``
     # directory while the inner manifest is pack-relative.  Strip that one
-    # path-derived prefix before matching; basename fallback is allowed only
-    # when it is unambiguous, preserving fail-closed behavior for collisions.
+    # path-derived prefix before matching.  The resulting path must be an
+    # exact manifest-relative path: a basename match would let
+    # ``other/manifest.json`` masquerade as this pack's ``manifest.json``.
     try:
         run_relative = manifest_path.resolve(strict=False).relative_to(
             manifest_path.resolve(strict=False).parents[1]
@@ -1193,11 +1194,7 @@ def _verify_runtime_output_binding(
         pack_prefix = run_relative.parent.as_posix()
     except (ValueError, IndexError):
         pack_prefix = "agent-view"
-    by_basename: dict[str, list[str]] = {}
-    for path in expected:
-        by_basename.setdefault(PurePosixPath(path).name, []).append(path)
-
-    observed: dict[str, tuple[str, int | None]] = {}
+    observed: dict[str, tuple[str, int]] = {}
     for index, raw in enumerate(runtime_outputs):
         if not isinstance(raw, Mapping):
             raise ContainmentError(f"runtime settlement output {index} is malformed")
@@ -1218,16 +1215,13 @@ def _verify_runtime_output_binding(
         if normalized.startswith(pack_prefix + "/"):
             normalized = normalized[len(pack_prefix) + 1 :]
         if normalized not in expected:
-            basename_matches = by_basename.get(PurePosixPath(normalized).name, [])
-            if len(basename_matches) != 1:
-                raise ContainmentError(
-                    f"runtime settlement output {raw_path!r} is not in the selected visualization pack"
-                )
-            normalized = basename_matches[0]
+            raise ContainmentError(
+                f"runtime settlement output {raw_path!r} is not in the selected visualization pack"
+            )
         digest = digest.removeprefix("sha256:")
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ContainmentError(f"runtime settlement output {raw_path!r} has an invalid digest")
-        if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise ContainmentError(f"runtime settlement output {raw_path!r} has an invalid byte count")
         if normalized in observed:
             raise ContainmentError(f"runtime settlement output {normalized!r} is duplicated")
@@ -1241,9 +1235,7 @@ def _verify_runtime_output_binding(
         )
     for path, (digest, size) in observed.items():
         expected_digest, expected_size = expected[path]
-        if not hmac.compare_digest(digest, expected_digest) or (
-            size is not None and size != expected_size
-        ):
+        if not hmac.compare_digest(digest, expected_digest) or size != expected_size:
             raise FrozenIntegrityError(
                 f"runtime settlement output evidence disagrees with visualization pack: {path}"
             )
