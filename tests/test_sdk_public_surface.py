@@ -149,6 +149,18 @@ def test_generate_facade_is_lazy_public_surface() -> None:
         assert "astrid.sdk" in sys.modules
         assert type(facade).__name__ == "GenerationFacade"
     finally:
+        # The fresh facade import can load SDK submodules that were not in the
+        # original snapshot (notably ``astrid.sdk.generation``).  Drop every
+        # such fresh module before restoring the snapshot; otherwise the old
+        # package object resolves a fresh child module and splits exception
+        # class identity for the remaining tests in this process.
+        for module_name in [
+            name
+            for name in sys.modules
+            if (name == "astrid.sdk" or name.startswith("astrid.sdk."))
+            and name not in popped
+        ]:
+            sys.modules.pop(module_name, None)
         # Restore the purged modules (overwriting the test's fresh
         # re-imports) so every module imported before this test keeps its
         # class identity — otherwise a later product-CLI dispatch in this
