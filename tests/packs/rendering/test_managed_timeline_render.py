@@ -23,6 +23,132 @@ from astrid.sdk.exceptions import CapabilityValidationError
 from astrid.sdk.invocation import _prepare_managed_render_inputs, _render_profile_guidance
 
 
+def _result(data: object = None, *, ok: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(ok=ok, data=data, error=None if ok else {"message": "not found"})
+
+
+class _MemoryRuntime:
+    """Generated-client-shaped runtime double; no local storage authority."""
+
+    def __init__(self) -> None:
+        self.projects_by_slug: dict[str, dict] = {}
+        self.timeline_rows: dict[str, dict] = {}
+        self.shot_rows: dict[str, dict] = {}
+        self.runs: list[dict] = []
+        self._timeline_number = 0
+
+        self.projects = SimpleNamespace(create=self._create_project, show=self._show_project)
+        self.timelines_api = SimpleNamespace(
+            create=self._create_timeline,
+            show=self._show_timeline,
+            list=self._list_timelines,
+            save=self._save_timeline,
+            archive=self._archive_timeline,
+        )
+        self.timelines = self.timelines_api
+        self.shots_api = SimpleNamespace(create=self._create_shot, show=self._show_shot)
+        self.shots = self.shots_api
+        self.runs = SimpleNamespace(list=lambda _project: _result([]))
+        self.tasks = SimpleNamespace(create=self._create_task)
+
+    def _create_project(self, *, slug: str, name: str, **_kwargs: object) -> SimpleNamespace:
+        project = self.projects_by_slug.setdefault(
+            slug,
+            {"id": f"project-{slug}", "project_id": f"project-{slug}", "slug": slug, "name": name},
+        )
+        return _result(project)
+
+    def _show_project(self, ref: str) -> SimpleNamespace:
+        project = self.projects_by_slug.get(ref)
+        if project is None:
+            project = next((item for item in self.projects_by_slug.values() if item["id"] == ref), None)
+        return _result(project, ok=project is not None)
+
+    def _create_timeline(self, *, project: str, slug: str | None = None, name: str | None = None,
+                         config: dict | None = None, registry: dict | None = None, **_kwargs: object) -> SimpleNamespace:
+        self._timeline_number += 1
+        project_row = self.projects_by_slug.get(project) or {"id": project, "slug": project}
+        timeline_id = f"timeline-{self._timeline_number}"
+        timeline = {
+            "timeline_id": timeline_id,
+            "timeline_ulid": f"01J000000000000000000000{self._timeline_number:02d}",
+            "project_id": project_row["id"],
+            "project_slug": project_row["slug"],
+            "slug": slug or name or "timeline",
+            "name": name or slug or "Timeline",
+            "config_version": 1,
+            "config": dict(config or {"tracks": [], "clips": []}),
+            "registry": dict(registry or {"assets": {}}),
+            "archived_at": None,
+        }
+        self.timeline_rows[timeline_id] = timeline
+        return _result(timeline)
+
+    def _find_timeline(self, ref: str) -> dict | None:
+        return next((item for item in self.timeline_rows.values() if ref in (item["timeline_id"], item["timeline_ulid"], item["slug"])), None)
+
+    def _show_timeline(self, _project: str, ref: str) -> SimpleNamespace:
+        timeline = self._find_timeline(ref)
+        return _result(timeline, ok=timeline is not None)
+
+    def _list_timelines(self, _project: str, **_kwargs: object) -> SimpleNamespace:
+        return _result(list(self.timeline_rows.values()))
+
+    def _save_timeline(self, _project: str, ref: str, *, expected_version: int = 1,
+                       config: dict | None = None, registry: dict | None = None, **_kwargs: object) -> SimpleNamespace:
+        timeline = self._find_timeline(ref)
+        if timeline is None or timeline["config_version"] != expected_version:
+            return _result(None, ok=False)
+        timeline["config_version"] += 1
+        if config is not None:
+            timeline["config"] = dict(config)
+        if registry is not None:
+            timeline["registry"] = dict(registry)
+        return _result(timeline)
+
+    def _archive_timeline(self, _project: str, ref: str, **_kwargs: object) -> SimpleNamespace:
+        timeline = self._find_timeline(ref)
+        if timeline is None:
+            return _result(None, ok=False)
+        timeline["archived_at"] = "archived"
+        return _result(timeline)
+
+    def _create_shot(self, *, project: str, name: str, **_kwargs: object) -> SimpleNamespace:
+        shot = {"id": f"shot-{len(self.shot_rows) + 1}", "shot_id": f"shot-{len(self.shot_rows) + 1}", "project_id": project, "name": name}
+        self.shot_rows[shot["id"]] = shot
+        return _result(shot)
+
+    def _show_shot(self, _project: str, ref: str) -> SimpleNamespace:
+        shot = self.shot_rows.get(ref)
+        return _result(shot, ok=shot is not None)
+
+    def _create_task(self, *, project_id: str, capability: str, idempotency_key: str, **_kwargs: object) -> SimpleNamespace:
+        task_id = f"task-{idempotency_key[:8]}"
+        data = {"task_id": task_id, "run_id": f"run-{idempotency_key[:8]}", "attempt_id": f"attempt-{idempotency_key[:8]}", "capability_id": capability}
+        return _result(data)
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> "_MemoryRuntime":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+@pytest.fixture(autouse=True)
+def _runtime_client(monkeypatch: pytest.MonkeyPatch) -> _MemoryRuntime:
+    runtime = _MemoryRuntime()
+
+    def _open(cls, *args: object, **kwargs: object) -> _MemoryRuntime:
+        assert not args and not kwargs
+        return runtime
+
+    monkeypatch.setattr(AstridClient, "open", classmethod(_open))
+    return runtime
+
+
 def test_managed_snapshot_uses_runtime_client_without_local_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -77,7 +203,7 @@ def test_managed_snapshot_uses_runtime_client_without_local_root(
 
 
 def _managed_timeline(projects: Path) -> dict:
-    with AstridClient.open(projects_root=projects) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
@@ -110,7 +236,7 @@ def _explicit_remotion_profile() -> dict:
 
 
 def _alpha_timeline(projects: Path, *, slug: str = "alpha") -> dict:
-    with AstridClient.open(projects_root=projects) as client:
+    with AstridClient.open() as client:
         if not (projects / "demo" / "project.json").is_file():
             assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
@@ -160,7 +286,7 @@ def test_managed_render_snapshot_rejects_stale_and_archived_before_admission(
     tmp_path: Path,
 ) -> None:
     _managed_timeline(tmp_path)
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         saved = client.timelines.save(
             "demo",
             "main",
@@ -175,7 +301,7 @@ def test_managed_render_snapshot_rejects_stale_and_archived_before_admission(
             tmp_path, project_ref="demo", timeline_ref="main", expected_version=1
         )
 
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         archived = client.timelines.archive("demo", "main")
         assert archived.ok
     with pytest.raises(ValueError, match="is archived"):
@@ -209,7 +335,7 @@ def test_render_requires_exactly_one_explicit_input_mode(tmp_path: Path) -> None
 def test_managed_render_rejects_incomplete_output_before_materialization(
     tmp_path: Path,
 ) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
@@ -238,7 +364,7 @@ def test_managed_render_rejects_incomplete_output_before_materialization(
 
 
 def test_managed_render_preflight_rejects_missing_registry_asset(tmp_path: Path) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
@@ -272,7 +398,7 @@ def test_managed_render_preflight_rejects_missing_registry_asset(tmp_path: Path)
         validate_managed_render_snapshot(snapshot)
 
 
-def test_failed_exact_replay_preserves_actionable_handler_error(
+def test_remote_admission_does_not_execute_a_local_handler(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,16 +421,15 @@ def test_failed_exact_replay_preserves_actionable_handler_error(
     first = invoke_result("rendering.render", **kwargs)
     replay = invoke_result("rendering.render", **kwargs)
 
-    assert first.ok is False
-    assert replay.ok is False
+    # The product client now stops at generated-runtime admission. Execution
+    # belongs to the runtime worker; this local handler must never be called.
+    assert first.ok is True
+    assert replay.ok is True
     assert first.kernel_run_id == replay.kernel_run_id
     assert first.kernel_task_id == replay.kernel_task_id
     assert first.kernel_attempt_id == replay.kernel_attempt_id
-    assert first.error is not None
-    assert replay.error is not None
-    assert first.error["message"] == "actionable renderer failure"
-    assert replay.error["message"] == "actionable renderer failure"
-    assert replay.error["sdk_category"] == "runtime"
+    assert first.error is None
+    assert replay.error is None
 
 
 def test_nested_render_profile_reports_missing_and_unknown_before_materialization(
@@ -401,7 +526,7 @@ def test_complete_flat_render_profile_reaches_managed_snapshot(tmp_path: Path) -
 
 def test_managed_render_expands_registered_shot_from_sdk_snapshot(tmp_path: Path) -> None:
     """Composite parents are flattened from client reads before admission."""
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         child = client.timelines.create(
             project="demo",
@@ -456,7 +581,7 @@ def test_managed_render_expands_registered_shot_from_sdk_snapshot(tmp_path: Path
 
 
 def test_managed_render_rejects_unregistered_shot_before_expansion(tmp_path: Path) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         parent = client.timelines.create(
             project="demo",
@@ -531,7 +656,7 @@ def test_unstamped_mov_rejects_with_null_kernel_ids_before_materialization(
     assert result.error["sdk_category"] == "validation"
     assert "not stamped" in result.error["message"]
     assert not (tmp_path / "demo" / ".astrid" / "render-snapshots").exists()
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         listed = client.runs.list("demo")
         assert listed.ok and listed.data == []
 
@@ -590,7 +715,7 @@ def test_compatible_explicit_alpha_mov_profile_reaches_snapshot(tmp_path: Path) 
 def test_managed_render_rejects_unregistered_effect_clip_before_materialization(
     tmp_path: Path,
 ) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
@@ -629,7 +754,7 @@ def test_managed_render_rejects_unregistered_effect_clip_before_materialization(
 def test_managed_render_schema_error_is_concise_structured_and_actionable(
     tmp_path: Path,
 ) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
@@ -673,7 +798,7 @@ def test_managed_render_schema_error_is_concise_structured_and_actionable(
 def test_managed_render_does_not_treat_opaque_params_as_element_references(
     tmp_path: Path,
 ) -> None:
-    with AstridClient.open(projects_root=tmp_path) as client:
+    with AstridClient.open() as client:
         assert client.projects.create(slug="demo", name="Demo").ok
         created = client.timelines.create(
             project="demo",
