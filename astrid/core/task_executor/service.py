@@ -158,8 +158,19 @@ def register_task_handler(binding: str, factory: Callable[[], TaskHandler]) -> N
 
 
 def resolve_task_handler(binding: str) -> TaskHandler:
-    """Resolve the one registered handler for *binding*."""
+    """Resolve the one registered handler for *binding*.
+
+    Reigh bindings are runtime-owned and are loaded lazily on demand.  This
+    keeps ``astrid.core.integrations.reigh`` lightweight while allowing the
+    executor/runtime bootstrap to resolve a binding without relying on an
+    unrelated package import having registered it as a side effect.
+    """
     factory = _TASK_HANDLER_FACTORIES.get(binding)
+    if factory is None and binding in {"wgp", "vibecomfy"}:
+        from astrid.core.integrations.reigh import register_bindings
+
+        register_bindings(binding)
+        factory = _TASK_HANDLER_FACTORIES.get(binding)
     if factory is None:
         raise TaskExecutorError(
             f"no TaskHandler registered for binding {binding!r}"
