@@ -106,11 +106,6 @@ def _emit_assemble_managed_events(
         gateway_kernel_kwargs,
     )
 
-    if kernel_binding_factory is None:
-        from astrid.core.timeline.kernel_binding import (
-            kernel_timeline_writer_for as kernel_binding_factory,
-        )
-
     actor = TimelineActor(
         type="system",
         id=f"iteration.assemble:{hash(str(_time.time()))}",
@@ -124,7 +119,13 @@ def _emit_assemble_managed_events(
             "payload": {"config": config},
         }
     ]
-    binding = kernel_binding_factory(project_slug, timeline_slug)
+    # Runtime-owned executions do not discover or compose a local kernel.
+    # Tests/attempt-local callers may inject an explicit binding factory.
+    binding = (
+        kernel_binding_factory(project_slug, timeline_slug)
+        if kernel_binding_factory is not None
+        else None
+    )
     try:
         result = pack_write_gateway(
             project_slug=project_slug,

@@ -231,11 +231,10 @@ def _write_baseline_snapshot(
 # ---------------------------------------------------------------------------
 
 def _default_kernel_binding_factory(project_slug: str, timeline_slug: str):
-    """Lazily resolve the kernel timeline binding (packs seam, import-time free)."""
+    """Legacy worker escape: normal workers are runtime/eventlog-owned."""
 
-    from astrid.core.timeline.kernel_binding import kernel_timeline_writer_for
-
-    return kernel_timeline_writer_for(project_slug, timeline_slug)
+    del project_slug, timeline_slug
+    return None
 
 
 def _worker_append_events(
