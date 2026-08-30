@@ -31,6 +31,7 @@ from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.schema import ExecutorDefinition, ExecutorValidationError
 from astrid.core.execution.executor.folder import discover_folder_executor_roots, load_folder_executor
 from astrid.core.execution.capability_ledger import load_capability_ledger
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 
 
 class HostError(RuntimeError):
@@ -741,7 +742,7 @@ class GenericPackHost:
             if port.name not in values and port.default is not None:
                 values[port.name] = port.default
         for output in record.definition.outputs:
-            if output.name not in values and output.name == "video":
+            if output.name == "video" and "output_name" not in values:
                 values["output_name"] = "hype.mp4"
         argv = [str(part) for part in command.argv]
         for index, part in enumerate(argv):
@@ -756,6 +757,10 @@ class GenericPackHost:
                 if input_arg.flag:
                     argv.extend((input_arg.flag, str(item)))
         env = os.environ.copy()
+        # Pack runtime modules reserve their direct module entry points for
+        # the canonical runner.  GenericPackHost is that runner's process
+        # boundary, so mark the child invocation just as executor_runner does.
+        env[ASTRID_INTERNAL_INVOCATION] = "1"
         env.update({str(key): str(value) for key, value in command.env.items()})
         process = subprocess.Popen(argv, cwd=str(command.cwd or attempt), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         while process.poll() is None:
@@ -775,7 +780,9 @@ class GenericPackHost:
         for output in record.definition.outputs:
             template = output.path_template or output.placeholder
             if template:
-                path = template.replace("{out}", str(output_root)).replace("{run_root}", str(attempt))
+                path = str(template)
+                for key, value in values.items():
+                    path = path.replace("{" + key + "}", str(value))
             else:
                 path = str(output_root / output.name)
             candidate = Path(path)
