@@ -11,10 +11,8 @@ from typing import Any
 
 from astrid.core.element.registry import (
     ElementRegistry,
-    ElementSource,
     clear_default_registry_cache,
     load_default_registry,
-    load_source_elements,
 )
 from astrid.core.element.schema import ElementKind
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
@@ -70,7 +68,6 @@ def _registry(theme: str | Path | None = None, *, project_slug: str | None = Non
         _path_cache_key(theme_dir),
         project_slug,
         _path_cache_key(TOOLS_DIR),
-        _path_cache_key(WORKSPACE_ROOT),
     )
 
 
@@ -85,20 +82,10 @@ def _cached_registry(
     theme_dir_key: str | None,
     project_slug: str | None,
     project_root_key: str | None,
-    legacy_root_key: str | None,
 ) -> ElementRegistry:
     theme_dir = Path(theme_dir_key) if theme_dir_key is not None else None
     project_root = Path(project_root_key) if project_root_key is not None else TOOLS_DIR
-    registry = load_default_registry(active_theme=theme_dir, project_root=project_root)
-    legacy_root = Path(legacy_root_key) if legacy_root_key is not None else WORKSPACE_ROOT
-    if legacy_root.exists():
-        legacy_source = ElementSource("legacy_workspace", legacy_root, 15, True)
-        for element in load_source_elements(
-            legacy_source,
-            element_kind_registry=registry.element_kind_registry,
-        ):
-            registry.register(element)
-    return registry
+    return load_default_registry(active_theme=theme_dir, project_root=project_root)
 
 
 def _clear_registry_cache() -> None:
@@ -114,7 +101,7 @@ def _warn_conflicts(registry: ElementRegistry, *, kind: ElementKind) -> None:
             continue
         if conflict.winner.source == "active_theme":
             for shadowed in conflict.shadowed:
-                if shadowed.source in {"legacy_workspace", "overrides", "managed", "bundled"}:
+                if shadowed.source in {"overrides", "managed", "bundled"}:
                     print(
                         f"WARN theme '{_theme_name_for_element(conflict.winner)}' overrides workspace {singular} '{conflict.id}'",
                         file=sys.stderr,

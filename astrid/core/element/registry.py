@@ -198,8 +198,7 @@ def _load_default_registry_data(
     ~189 ``yaml.safe_load`` calls — a 93-event timeline replay that validates
     four config events spends ~6s total).  Callers rebuild a fresh
     :class:`ElementRegistry` from the cached raw definitions, so per-call
-    registry mutation (e.g. the element catalog's legacy-source registration)
-    never leaks into the shared cache.
+    registry mutation never leaks into the shared cache.
     """
     project_root = Path(project_root_key)
     pack_defs = tuple(
@@ -257,8 +256,7 @@ def load_default_registry(
     """Load the default element registry (corpus parse is cached).
 
     Registry assembly stays per-call so callers may register additional
-    elements (e.g. the legacy-workspace source in the element catalog)
-    without polluting the shared corpus cache.
+    elements without polluting the shared corpus cache.
     """
     elements, element_kind_registry = _load_default_registry_data(
         str(Path(active_theme).resolve()) if active_theme is not None else None,
