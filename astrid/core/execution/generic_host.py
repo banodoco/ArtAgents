@@ -110,6 +110,26 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+def _preflight_unavailable_reason(record: "CapabilityRecord") -> str:
+    """Return a stable, secret-free reason for a failed capability preflight."""
+    failures: list[str] = []
+    for check_name in sorted(record.preflight):
+        check = record.preflight[check_name]
+        if not isinstance(check, Mapping) or check.get("ok") is not False:
+            continue
+        missing = check.get("missing")
+        if isinstance(missing, (list, tuple)) and missing:
+            values = ",".join(sorted(str(value) for value in missing))
+            failures.append(f"{check_name}:missing={values}")
+        elif check.get("reason"):
+            failures.append(f"{check_name}:reason={check['reason']}")
+        else:
+            failures.append(f"{check_name}:failed")
+    if failures:
+        return ";".join(failures)
+    return str(record.matrix.get("evidence_reason") or "capability preflight is not ready")
+
+
 def _source_digest(root: Path) -> str:
     """Hash the complete executor source tree without retaining a source path in a task."""
     entries: list[tuple[str, str]] = []
@@ -449,9 +469,7 @@ class GenericPackHost:
             for record in self.capabilities.values():
                 disposition = str(record.matrix.get("disposition", ""))
                 status = "ready" if record.ready else (disposition if disposition in {"unsupported", "retired"} else "unavailable")
-                unavailable_reason = None if record.ready else (
-                    str(record.matrix.get("evidence_reason") or "capability preflight is not ready")
-                )
+                unavailable_reason = None if record.ready else _preflight_unavailable_reason(record)
                 if isinstance(self.client, RuntimeProtocolClient):
                     self.client.register_capability(
                         record.id,

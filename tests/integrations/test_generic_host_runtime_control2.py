@@ -98,3 +98,112 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         assert restarted.get_object(output_digest).data == b"hello"
     finally:
         daemon.stop()
+
+
+def test_provider_fixture_is_credential_gated_then_settles_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provider admission is honest without making a real network request."""
+    monkeypatch.delenv("ASTRID_TEST_PROVIDER_KEY", raising=False)
+    pack = tmp_path / "provider-pack"
+    pack.mkdir()
+    (pack / "executor.yaml").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "provider.echo",
+                "name": "Offline Provider Echo",
+                "kind": "external",
+                "version": "1.0",
+                "command": {
+                    "argv": [
+                        "{python_exec}",
+                        "-c",
+                        "from pathlib import Path; Path('{out}/answer.txt').write_text('offline-provider')",
+                    ]
+                },
+                "outputs": [
+                    {
+                        "name": "answer",
+                        "type": "file",
+                        "path_template": "{out}/answer.txt",
+                        "artifact_type": "text/plain",
+                    }
+                ],
+                "isolation": {"mode": "subprocess", "network": True},
+                "metadata": {"adapter_family": "provider", "resource_keys": ["provider"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    matrix = tmp_path / "provider-matrix.json"
+    matrix.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "capabilities": [
+                    {
+                        "id": "provider.echo",
+                        "disposition": "required",
+                        "evidence_reason": "Offline provider fixture",
+                        "adapter_family": "provider",
+                        "required_env": ["ASTRID_TEST_PROVIDER_KEY"],
+                        "required_binaries": [],
+                        "required_packages": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    try:
+        generated = WorkspaceClient(daemon.endpoint, daemon.token)
+        generated.handshake("provider-fixture-test", "0.1.0", ["projects:read", "worker:execute"])
+        host = GenericPackHost(
+            pack_roots=[pack],
+            capability_matrix=matrix,
+            client=RuntimeProtocolClient(daemon.endpoint, daemon.token),
+            executor_id="provider-fixture-host",
+        )
+        record = host.discover()[0]
+        host.preflight()
+        assert host.capabilities[record.id].ready is False
+        assert host.capabilities[record.id].preflight["network"] == {"ok": True}
+        assert host.capabilities[record.id].preflight["credentials"]["missing"] == [
+            "ASTRID_TEST_PROVIDER_KEY"
+        ]
+
+        host.register()
+        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        assert capability.status == "unavailable"
+        assert capability.unavailable_reason == "credentials:missing=ASTRID_TEST_PROVIDER_KEY"
+        task = generated.admit_task(
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            input_object_ids=[],
+            idempotency_key="provider-fixture-task",
+        )
+        blocked = generated.claim_task(
+            executor_id="provider-fixture-host",
+            capability_ids=[record.id],
+            idempotency_key="provider-fixture-claim-blocked",
+        )
+        assert blocked is not None and blocked["waiting_reason"] == "capability_unavailable"
+        assert generated.get_task(task.task_id).state == "queued"
+
+        # Readiness changes only after the explicit credential is supplied;
+        # the fixture command itself remains entirely offline.
+        monkeypatch.setenv("ASTRID_TEST_PROVIDER_KEY", "fixture-secret")
+        host.preflight()
+        assert host.capabilities[record.id].ready is True
+        host.register(deliberate=True)
+        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        assert capability.status == "ready"
+        settled = host.run(once=True)
+        assert len(settled) == 1 and settled[0].state == "succeeded"
+        digest = "sha256:" + hashlib.sha256(b"offline-provider").hexdigest()
+        assert generated.get_object(digest).data == b"offline-provider"
+    finally:
+        daemon.stop()
