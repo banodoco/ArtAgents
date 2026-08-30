@@ -286,6 +286,11 @@ def _validate_manifest_preview_inputs(
 
     values = dict(inputs or {})
     ports = tuple(getattr(capability, "inputs", ()) or ())
+    # Defaults belong to the manifest ledger.  Include them in the effective
+    # preview values without consulting runtime or project state.
+    for port in ports:
+        if port.name not in values and getattr(port, "default", None) is not None:
+            values[port.name] = port.default
     missing = [
         str(port.name)
         for port in ports
@@ -358,7 +363,8 @@ def _manifest_dry_run_result(
     outputs: Mapping[str, Any] | None,
     brief: Path | str | None,
     python_exec: str | None,
-    orchestrator_args: tuple[str, ...],
+    out: Path | str | None = None,
+    orchestrator_args: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], bool]:
     """Build the stable no-side-effect preview envelope from a capability DTO."""
 
@@ -386,6 +392,7 @@ def _manifest_dry_run_result(
         outputs=outputs,
         brief=brief,
         python_exec=python_exec,
+        out=out,
         orchestrator_args=orchestrator_args,
     )
     if capability.capability_type == "executor":
@@ -439,13 +446,15 @@ def _manifest_preview_command(
     outputs: Mapping[str, Any] | None,
     brief: Path | str | None,
     python_exec: str | None,
-    orchestrator_args: tuple[str, ...],
+    out: Path | str | None = None,
+    orchestrator_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Expand a manifest command without importing a runner or touching disk.
 
-    This is intentionally a lightweight display-only expansion.  It does not
-    resolve output placeholders or infer pipeline steps; the runtime remains
-    the sole authority for executable command construction.
+    This is intentionally a lightweight display-only expansion. It expands
+    manifest placeholders and input mappings only; no runner or project
+    authority is imported. Pipeline-step executors without an explicit
+    command use their manifest runtime module and declared inputs/defaults.
     """
 
     definition = capability.definition
@@ -453,7 +462,26 @@ def _manifest_preview_command(
         raw_command = definition.get("command")
         if not isinstance(raw_command, Mapping):
             module = definition.get("metadata", {}).get("runtime_module")
-            return ["python", "-m", str(module)] if isinstance(module, str) and module else []
+            if not isinstance(module, str) or not module:
+                return []
+            values = {str(key): value for key, value in inputs.items()}
+            values.setdefault("python_exec", python_exec or "python")
+            command = [str(values["python_exec"]), "-m", module]
+            for port in tuple(getattr(capability, "inputs", ()) or ()):
+                value = values.get(port.name)
+                if value in (None, ""):
+                    continue
+                flag = f"--{str(port.name).replace('_', '-')}"
+                if str(getattr(port, "type", "")) == "boolean":
+                    if _manifest_truthy(value):
+                        command.append(flag)
+                else:
+                    for item in _manifest_input_items(value):
+                        if item not in (None, ""):
+                            command.extend((flag, _manifest_stringify(item)))
+            if out not in (None, ""):
+                command.extend(("--out", _manifest_stringify(out)))
+            return command
     else:
         runtime = definition.get("runtime")
         raw_command = runtime.get("command") if isinstance(runtime, Mapping) else None
@@ -462,11 +490,19 @@ def _manifest_preview_command(
     raw_argv = raw_command.get("argv")
     if not isinstance(raw_argv, (list, tuple)):
         return []
+    ports = tuple(getattr(capability, "inputs", ()) or ())
+    port_by_name = {str(port.name): port for port in ports}
     values: dict[str, Any] = {str(key): value for key, value in inputs.items()}
+    for port in ports:
+        if port.name not in values and getattr(port, "default", None) is not None:
+            values[port.name] = port.default
     values.setdefault("brief", brief)
     values.setdefault("python_exec", python_exec or "python")
     values.setdefault("verbose", "false")
-    values.update({"out": outputs.get("out")} if isinstance(outputs, Mapping) and "out" in outputs else {})
+    if out not in (None, ""):
+        values["out"] = out
+    elif isinstance(outputs, Mapping) and "out" in outputs:
+        values["out"] = outputs.get("out")
     pattern = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
     command: list[str] = []
     for raw_part in raw_argv:
@@ -477,20 +513,102 @@ def _manifest_preview_command(
             continue
         command.append(
             pattern.sub(
-                lambda match: str(values.get(match.group(1), match.group(0))),
+                lambda match: (
+                    _manifest_stringify(values[match.group(1)])
+                    if match.group(1) in values and values[match.group(1)] is not None
+                    else match.group(0)
+                ),
                 raw_part,
             )
         )
-    # A few built-in dispatcher manifests intentionally keep their typed
-    # inputs in metadata rather than repeating every forwarded flag in the
-    # command template.  Include those values in the display preview without
-    # treating this list as an executable runtime command.
-    for name, value in values.items():
-        if name in {"python_exec", "verbose", "out"} or value in (None, ""):
+    mappings = raw_command.get("input_args", ())
+    if isinstance(mappings, (list, tuple)):
+        appended: list[str] = []
+        for raw_mapping in mappings:
+            if not isinstance(raw_mapping, Mapping):
+                continue
+            name = str(raw_mapping.get("input", ""))
+            if not name:
+                continue
+            value = values.get(name)
+            if value in (None, ""):
+                if bool(raw_mapping.get("optional", False)):
+                    continue
+                raise CapabilityMissingInputError(
+                    f"capability {capability.id!r} missing mapped input {name!r}"
+                )
+            items = _manifest_input_items(value)
+            if len(items) > 1 and not bool(raw_mapping.get("repeatable", False)):
+                raise CapabilityValidationError(
+                    f"capability {capability.id!r} input {name!r} is not repeatable"
+                )
+            port = port_by_name.get(name)
+            expanded: list[str] = []
+            for item in items:
+                if item in (None, ""):
+                    continue
+                flag = raw_mapping.get("flag")
+                if str(getattr(port, "type", "")) == "boolean":
+                    if _manifest_truthy(item) and flag:
+                        expanded.append(str(flag))
+                else:
+                    if flag:
+                        expanded.append(str(flag))
+                    expanded.append(_manifest_stringify(item))
+            before = raw_mapping.get("before")
+            if before is None:
+                appended.extend(expanded)
+            else:
+                try:
+                    insert_at = command.index(str(before))
+                except ValueError:
+                    appended.extend(expanded)
+                else:
+                    command[insert_at:insert_at] = expanded
+        command.extend(appended)
+
+    # Auto-forward only declared inputs, matching live command semantics and
+    # avoiding accidental flags for SDK-only controls such as ``verbose``.
+    raw_text = " ".join(str(part) for part in raw_argv)
+    mapped_names = {
+        str(item.get("input"))
+        for item in mappings
+        if isinstance(item, Mapping) and item.get("input")
+    } if isinstance(mappings, (list, tuple)) else set()
+    for port in ports:
+        name = str(port.name)
+        value = values.get(name)
+        if name in mapped_names or f"{{{name}}}" in raw_text or value in (None, ""):
             continue
-        if f"{{{name}}}" not in " ".join(str(part) for part in raw_argv):
-            command.extend((f"--{name.replace('_', '-')}", str(value)))
+        flag = f"--{name.replace('_', '-')}"
+        if str(getattr(port, "type", "")) == "boolean":
+            if _manifest_truthy(value):
+                command.append(flag)
+            continue
+        for item in _manifest_input_items(value):
+            if item not in (None, ""):
+                command.extend((flag, _manifest_stringify(item)))
     return command
+
+
+def _manifest_input_items(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, (list, tuple, set)):
+        return tuple(value)
+    return (value,)
+
+
+def _manifest_stringify(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value)
+    return str(value)
+
+
+def _manifest_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def _validate_timeline_visualize_inputs(
@@ -1738,6 +1856,7 @@ def invoke(
                 outputs=outputs,
                 brief=brief,
                 python_exec=python_exec,
+                out=out,
                 orchestrator_args=tuple(orchestrator_args),
             )
         except AstridSDKError:
