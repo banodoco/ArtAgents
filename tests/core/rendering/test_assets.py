@@ -248,6 +248,35 @@ def test_owned_managed_locator_is_allowed_only_by_exact_hash(
         )
 
 
+def test_declared_managed_locator_does_not_open_a_local_kernel_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runtime-admitted child render rechecks CAS bytes without SQLite."""
+
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    digest = hashlib.sha256(b"runtime-admitted bytes").hexdigest()
+    managed = projects_root / ".astrid" / "media" / "sha256" / digest[:2] / digest[2:4] / digest
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"runtime-admitted bytes")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    (project / "render-snapshot").mkdir()
+    registry_path = _write_registry(
+        project / "render-snapshot" / "assets.json",
+        {"asset": {"file": str(managed), "content_sha256": digest}},
+    )
+
+    with AssetMaterializer(registry_path) as materializer:
+        staged = materializer.assets["asset"].local_path
+        assert staged is not None
+        assert staged.read_bytes() == b"runtime-admitted bytes"
+
+    # No database was bootstrapped as a side effect of child rendering.
+    assert not (projects_root / ".astrid" / "astrid.sqlite3").exists()
+
+
 def test_managed_asset_free_registry_may_be_invocation_temporary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

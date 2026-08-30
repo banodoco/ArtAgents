@@ -14,7 +14,6 @@ import hashlib
 import os
 import re
 import shutil
-import sqlite3
 import stat
 import tempfile
 import threading
@@ -36,7 +35,6 @@ from astrid.core.env_vars import (
 )
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
-from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.rendering import asset_cache
 
 AssetKind = Literal["local", "cached", "remote"]
@@ -110,71 +108,59 @@ def _default_allowed_root(registry_path: Path) -> Path | None:
     return None
 
 
-def _kernel_database_path(projects_root: Path) -> Path | None:
-    """Return the canonical read-only kernel path, if this root is bootstrapped."""
-
-    authority = resolve_kernel_database_authority(projects_root)
-    return authority.selected_path if authority.exists else None
-
-
-def _owned_managed_locators(
+def _declared_managed_locators(
     requested: set[Path],
     *,
     projects_root: Path,
-    project_slug: str | None,
+    registry: Mapping[str, Any],
 ) -> dict[Path, str]:
-    """Return exact managed locators owned by the active project.
+    """Return declared CAS locators admitted by the runtime snapshot.
 
-    A project render may consume Astrid's shared CAS media directory, but it
-    must not turn that directory into a general read root.  The registry's
-    exact absolute paths are intersected with the kernel's ``media`` ownership
-    rows for the active project.  The content hash is retained so the source
-    can be checked again immediately before staging.
+    A managed render snapshot has already been read and admitted through the
+    workspace runtime.  The renderer is a child process and must not open the
+    runtime database to repeat that authority lookup.  Instead it accepts only
+    exact, digest-shaped paths from that immutable snapshot and re-checks the
+    bytes immediately before staging.  Project ownership is established by
+    snapshot admission; this function is deliberately only the child-process
+    integrity fence.
     """
 
-    if not requested or not project_slug:
-        return {}
-    database = _kernel_database_path(projects_root)
-    if database is None:
+    if not requested:
         return {}
     managed_root = (projects_root / ".astrid" / "media").resolve(strict=False)
-    try:
-        from astrid.core.schema_packs.standard import build_standard_registry
-        from astrid.core.store.database import open_database
 
-        connection = open_database(database, build_standard_registry(), read_only=True)
-    except (OSError, sqlite3.Error, ValueError):
+    raw_assets = registry.get("assets", registry)
+    if not isinstance(raw_assets, Mapping):
         return {}
-    try:
-        connection.row_factory = sqlite3.Row
-        project = connection.execute(
-            "SELECT id FROM projects WHERE slug = ? OR id = ? LIMIT 1",
-            (project_slug, project_slug),
-        ).fetchone()
-        if project is None:
-            return {}
-        rows = connection.execute(
-            "SELECT l.locator, m.content_hash "
-            "FROM media_locations AS l JOIN media AS m ON m.id = l.media_id "
-            "WHERE m.project_id = ? AND l.realm = 'managed_local'",
-            (str(project["id"]),),
-        ).fetchall()
-    except sqlite3.Error:
-        return {}
-    finally:
-        connection.close()
-
     authorized: dict[Path, str] = {}
-    for row in rows:
-        try:
-            locator = Path(str(row["locator"])).expanduser().resolve(strict=False)
-            content_hash = str(row["content_hash"])
-        except (OSError, TypeError, ValueError):
+    for entry in raw_assets.values():
+        if not isinstance(entry, Mapping):
             continue
-        # The ownership row alone is not enough: only canonical files inside
-        # this root's managed CAS namespace can be opened by a renderer.
-        if locator in requested and _contained(locator, managed_root):
-            authorized[locator] = content_hash
+        raw_file = entry.get("file")
+        if not isinstance(raw_file, str) or not raw_file.strip():
+            continue
+        try:
+            locator = Path(raw_file).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+        if locator not in requested or not _contained(locator, managed_root):
+            continue
+        parts = locator.parts
+        if len(parts) < 4 or parts[-4] != "sha256":
+            continue
+        digest = parts[-1]
+        if (
+            len(digest) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in digest)
+            or parts[-3].lower() != digest[:2].lower()
+            or parts[-2].lower() != digest[2:4].lower()
+        ):
+            continue
+        recorded = entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+        content_hash = digest if recorded in (None, "") else str(recorded).removeprefix("sha256:")
+        if len(content_hash) != 64 or content_hash.lower() != digest.lower():
+            continue
+        authorized[locator] = content_hash.lower()
     return authorized
 
 
@@ -499,11 +485,10 @@ class AssetMaterializer:
                 )
             )
         self.allowed_managed_paths.update(
-            _owned_managed_locators(
+            _declared_managed_locators(
                 requested_managed_paths,
                 projects_root=resolve_projects_root(),
-                project_slug=os.environ.get(ASTRID_PROJECT_SLUG)
-                or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT),
+                registry=loaded,
             )
         )
         now = datetime.now(timezone.utc)
