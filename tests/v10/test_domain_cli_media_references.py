@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Any
+import types
+from typing import Any, cast
 
 import pytest
 
@@ -444,6 +445,63 @@ def test_media_parser_has_exactly_six_verbs_plus_references_mount() -> None:
         "relate",
         "references",
     }
+
+
+def test_product_dispatch_injects_references_commands_at_composition_boundary() -> None:
+    import astrid.core.cli.domain_product as domain_product
+    from astrid.packs.references import cli as references_cli
+
+    seen: dict[str, object] = {}
+    media_module = types.ModuleType("media_stub")
+
+    def build_parser(client, *, reference_commands):  # noqa: ANN001
+        seen["client"] = client
+        seen["reference_commands"] = reference_commands
+        parser = argparse.ArgumentParser()
+        parser.set_defaults(handler=lambda parsed: 0)
+        return parser
+
+    media_module.build_parser = build_parser  # type: ignore[attr-defined]
+    client = object()
+    assert domain_product.run_product_family(
+        "media",
+        [],
+        client=client,
+        _parser_modules=cast(
+            Any, {"media": media_module, "references": references_cli}
+        ),
+    ) == 0
+    assert seen == {
+        "client": client,
+        "reference_commands": references_cli.COMMANDS,
+    }
+
+
+def test_product_dispatch_rejects_missing_or_malformed_reference_commands() -> None:
+    import astrid.core.cli.domain_product as domain_product
+
+    media_module = types.ModuleType("media_stub")
+    media_module.build_parser = (  # type: ignore[attr-defined]
+        lambda client: argparse.ArgumentParser()
+    )
+    missing = types.ModuleType("missing_references")
+    malformed = types.ModuleType("malformed_references")
+    malformed.COMMANDS = ()  # type: ignore[attr-defined]
+
+    for references_module in (missing, malformed):
+        with pytest.raises(ProductRegistryError, match="valid COMMANDS"):
+            domain_product.run_product_family(
+                "media",
+                [],
+                client=object(),
+                _parser_modules=cast(
+                    Any,
+                    {
+                        "media": media_module,
+                        "references": references_module,
+                    },
+                ),
+            )
 
 
 def test_no_top_level_references_family() -> None:

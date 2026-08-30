@@ -32,9 +32,12 @@ every product handler is a rule-free SDK adapter (m4 plan step 24).
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from astrid.core.cli.registration import CommandSpec
 
 __all__ = [
     "FAMILY_PARSER_MODULES",
@@ -364,9 +367,13 @@ def run_product_family(
             else importlib.import_module(references_module_name)
         )
         reference_commands = getattr(references_module, "COMMANDS", None)
-        if reference_commands is None:
+        if (
+            not isinstance(reference_commands, SequenceABC)
+            or not reference_commands
+            or not all(isinstance(spec, CommandSpec) for spec in reference_commands)
+        ):
             raise ProductRegistryError(
-                "references parser module has no COMMANDS declaration"
+                "references parser module has no valid COMMANDS declaration"
             )
         parser_kwargs["reference_commands"] = reference_commands
     parser = build_parser(client, **parser_kwargs)
