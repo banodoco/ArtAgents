@@ -7,6 +7,7 @@ they do not know about storage or runtime implementation details.
 from __future__ import annotations
 
 import json
+import mimetypes
 from pathlib import Path
 import uuid
 from urllib.parse import quote
@@ -31,12 +32,13 @@ class _RemoteFamily:
         except WorkspaceClientError as exc:
             return DomainResult.failure(ErrorObject(code=exc.code, message=exc.message, details=exc.details), idempotency_key=key or "")
 
-    def _call(self, method: str, path: str, *, body: Any = None, key: str | None = None, expected=(200, 201)) -> DomainResult[Any]:
+    def _call(self, method: str, path: str, *, body: Any = None, key: str | None = None, expected=(200, 201), headers: dict[str, str] | None = None) -> DomainResult[Any]:
         if key is None and method not in {"GET", "HEAD"}:
             key = uuid.uuid4().hex
         try:
-            headers = {"Idempotency-Key": key} if key else None
-            value = self._client.request(method, path, body=body, headers=headers, expected=tuple(expected))
+            request_headers = {"Idempotency-Key": key} if key else {}
+            request_headers.update(headers or {})
+            value = self._client.request(method, path, body=body, headers=request_headers or None, expected=tuple(expected))
             if isinstance(value, dict) and "body" in value and "status" in value: value = value["body"]
             return DomainResult.success(value, idempotency_key=key or "")
         except WorkspaceClientError as exc:
@@ -80,7 +82,15 @@ class RemoteMedia(_RemoteFamily):
         # project-scoped object operation.  Keep this one adapter call on the
         # generated transport until that operation is generated; this route
         # is required for project membership/list/verify semantics.
-        result = self._call("POST", f"/v1/projects/{_path(project)}/objects", body=data, key=idempotency_key, expected=(200, 201))
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        result = self._call(
+            "POST",
+            f"/v1/projects/{_path(project)}/objects",
+            body=data,
+            key=idempotency_key,
+            expected=(200, 201),
+            headers={"Content-Type": media_type, "X-Original-Name": path.name},
+        )
         if result.ok and isinstance(result.data, dict):
             result.data.setdefault("object_id", "sha256:" + str(result.data.get("digest", "")))
             if isinstance(result.data.get("digest"), str) and not result.data["digest"].startswith("sha256:"):
