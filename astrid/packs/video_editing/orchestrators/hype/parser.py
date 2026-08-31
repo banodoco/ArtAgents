@@ -6,13 +6,10 @@ Extracted from ``run.py`` as part of M4 giant-file decomposition (T62).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
-from astrid.core.cli_choices import add_choice_arg
-from astrid.core.theme import resolve_theme_dir, resolve_themes_root
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import (
     STEP_ORDER,
@@ -26,14 +23,14 @@ from .config import (
 
 
 def _resolve_theme_arg(value: object) -> Path:
-    """Resolve --theme as either a theme.json path, a theme directory, or a theme slug."""
-    theme_dir = resolve_theme_dir(value)
-    if theme_dir is None:
-        return (resolve_themes_root() / "banodoco-default" / "theme.json").resolve()
-    candidate = Path(str(value)).expanduser()
-    if candidate.name == "theme.json" or (candidate.exists() and candidate.is_file()):
-        return candidate.resolve()
-    return (theme_dir / "theme.json").resolve()
+    """Resolve only an explicitly supplied, materialized theme document."""
+    text = str(value).strip()
+    if not text or urlparse(text).scheme:
+        usage_error("astrid: theme must be an explicit runtime-materialized theme.json file")
+    candidate = Path(text).expanduser().resolve()
+    if not candidate.is_file() or candidate.name != "theme.json":
+        usage_error("astrid: theme must be an explicit runtime-materialized theme.json file")
+    return candidate
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--theme",
         type=Path,
-        help="Theme JSON for Remotion render. Defaults to themes/banodoco-default/theme.json.",
+        help="Explicit runtime-materialized theme.json for Remotion render.",
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
@@ -88,33 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--no-prefetch",
-        action="store_true",
-        help="Disable URL asset prefetch before bytes-required stages.",
-        default=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--keep-downloads",
-        action="store_true",
-        help="Keep URL downloads in the asset cache after the run (default: delete files this run minted; pre-existing cache entries are always preserved). Env override: HYPE_KEEP_DOWNLOADS=1.",
-        default=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--no-audit",
         action="store_true",
         help="Disable the run-local audit ledger under <out>/audit.",
-        default=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--cache-dir",
-        help="Asset cache root directory. Defaults to HYPE_CACHE_DIR or ~/.cache/banodoco-hype.",
-        default=argparse.SUPPRESS,
-    )
-    add_choice_arg(
-        parser,
-        "--drift",
-        values=("strict", "warn", "refetch"),
-        help="Content drift handling mode for cached URL assets.",
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
@@ -160,36 +133,28 @@ def resolve_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = argparse.Namespace(**merged)
     args.theme_explicit = theme_explicit
     video_value = getattr(args, "video", None)
-    args.video = (
-        None
-        if video_value is None
-        else video_value if asset_cache.is_url(video_value) else Path(video_value).expanduser().resolve()
-    )
+    if video_value is not None and urlparse(str(video_value)).scheme:
+        usage_error("astrid: --video must be a runtime-materialized file, not a URL")
+    args.video = None if video_value is None else Path(video_value).expanduser().resolve()
     args.out = Path(args.out).expanduser().resolve()
     args.brief = Path(args.brief).expanduser().resolve()
     audio_value = getattr(args, "audio", args.video if args.video is not None else None)
-    args.audio = None if audio_value is None else audio_value if asset_cache.is_url(audio_value) else Path(audio_value).expanduser().resolve()
+    if audio_value is not None and urlparse(str(audio_value)).scheme:
+        usage_error("astrid: --audio must be a runtime-materialized file, not a URL")
+    args.audio = None if audio_value is None else Path(audio_value).expanduser().resolve()
     args.target_duration = getattr(args, "target_duration", None)
     if args.video is None and args.audio is None:
         if args.target_duration is None:
             usage_error("astrid: --target-duration is required when both --video and --audio are omitted")
         if float(args.target_duration) <= 0:
             usage_error("astrid: --target-duration must be greater than 0")
-    cache_dir = getattr(args, "cache_dir", None)
-    if cache_dir:
-        args.cache_dir = Path(cache_dir).expanduser().resolve()
-        os.environ["HYPE_CACHE_DIR"] = str(args.cache_dir)
-    args.no_prefetch = bool(getattr(args, "no_prefetch", False))
-    args.drift = getattr(args, "drift", "strict")
-    os.environ["HYPE_DRIFT_MODE"] = args.drift
     args.python_exec = str(getattr(args, "python_exec", sys.executable))
     args.render = bool(getattr(args, "render", False))
     args.no_audit = bool(getattr(args, "no_audit", False))
     args.allow_generative_effects = bool(getattr(args, "allow_generative_effects", False))
     args.dry_run = bool(getattr(args, "dry_run", False))
-    default_theme = resolve_themes_root() / "banodoco-default" / "theme.json"
-    theme_value = getattr(args, "theme", default_theme)
-    args.theme = _resolve_theme_arg(theme_value)
+    theme_value = getattr(args, "theme", None)
+    args.theme = _resolve_theme_arg(theme_value) if theme_value is not None else None
     args.verbose = bool(getattr(args, "verbose", False))
     raw_editor_passes = int(getattr(args, "max_editor_passes", 2))
     if not 1 <= raw_editor_passes <= 2:
@@ -216,8 +181,6 @@ def resolve_args(argv: list[str] | None = None) -> argparse.Namespace:
     for key in ("video", "brief", "audio"):
         path = getattr(args, key)
         if path is None:
-            continue
-        if asset_cache.is_url(path):
             continue
         if not path.exists():
             usage_error(f"astrid: {key} input not found: {path}")

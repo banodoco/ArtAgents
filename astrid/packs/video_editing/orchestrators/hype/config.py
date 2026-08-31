@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from astrid.core.contracts.errors import AstridError
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 try:
     import yaml
@@ -98,8 +98,10 @@ def parse_asset_entry(raw: str) -> tuple[str, Path | str]:
         usage_error(f"astrid: invalid --asset value {raw!r}; expected KEY=PATH")
     if key == "main":
         usage_error("astrid: asset key 'main' is reserved; pass the primary video via --video")
-    if asset_cache.is_url(path_text):
-        return key, path_text
+    if urlparse(path_text).scheme:
+        usage_error(
+            f"astrid: URL asset {key!r} is not supported; inputs must be runtime-materialized files"
+        )
     path = Path(path_text).expanduser().resolve()
     if not path.exists():
         usage_error(f"astrid: asset path not found for {key!r}: {path}")

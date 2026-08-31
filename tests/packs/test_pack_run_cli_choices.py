@@ -63,7 +63,6 @@ class PackRunCliChoicesTests(unittest.TestCase):
             ("astrid.packs.video_editing.orchestrators.thumbnail_maker.run", (), "reference_mode"),
             ("astrid.packs.video_editing.orchestrators.logo_ideas.run", (), "provider"),
             ("astrid.packs.video_editing.orchestrators.logo_ideas.run", (), "output_format"),
-            ("astrid.packs.video_editing.orchestrators.hype.run", (), "drift"),
             ("astrid.packs.vibecomfy.executors.run.run", (), "command"),
             ("astrid.packs.vibecomfy.executors.validate.run", (), "command"),
         ]

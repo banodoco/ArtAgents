@@ -12,7 +12,6 @@ from astrid.packs.editorial.hype.arrangement_rules import (
     TRIM_BOUND_EXTENSION_SEC,
 )
 from astrid.packs.editorial.hype.text_match import segments_in_range, token_set_similarity, tokenize
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 BOILERPLATE_TOKENS = {"um", "uh"}
 BOILERPLATE_BIGRAMS = {("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of")}
@@ -137,15 +136,18 @@ def _resolve_asset_path(run_dir: Path, registry: dict[str, Any], asset_key: str)
     entry = registry.get("assets", {}).get(asset_key, {})
     if not isinstance(entry, dict):
         raise ValueError(f"Asset registry entry {asset_key!r} is missing")
-    if isinstance(entry.get("url"), str) and isinstance(entry.get("content_sha256"), str):
-        return asset_cache.resolve(entry, want="path")
-    if isinstance(entry.get("url"), str) and not isinstance(entry.get("file"), str):
-        return entry["url"]
+    if any(key in entry for key in ("url", "uri", "path", "source_path", "locator", "cache")):
+        raise ValueError(
+            f"Asset registry entry {asset_key!r} contains an unsupported locator; "
+            "the audio reviewer accepts only host-materialized files"
+        )
     file_value = entry.get("file")
-    if not isinstance(file_value, str) or not file_value:
-        raise ValueError(f"Asset registry entry {asset_key!r} has no file path")
-    path = Path(file_value)
-    return path if path.is_absolute() else (run_dir / path).resolve()
+    if not isinstance(file_value, str) or not file_value or not Path(file_value).is_absolute():
+        raise ValueError(f"Asset registry entry {asset_key!r} is not host-materialized")
+    path = Path(file_value).resolve()
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Host-materialized asset for {asset_key!r} is missing: {path}")
+    return path
 
 
 def _joined_text(segments: list[dict[str, Any]]) -> str | None:

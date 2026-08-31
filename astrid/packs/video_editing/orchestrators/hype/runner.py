@@ -6,7 +6,6 @@ Extracted from ``run.py`` as part of M4 giant-file decomposition (T64).
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
 import json
 import logging
@@ -19,10 +18,12 @@ import signal
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from astrid.core import timeline
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.foundation.hash import sha256_file
@@ -34,16 +35,9 @@ from astrid.core.execution.process_group import (
     terminate_tree as _terminate_owned_tree,
     terminate_group as _terminate_owned_group,
 )
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import STEP_ORDER
 from .steps import PER_BRIEF_SENTINELS, Step
-
-
-def _compute_plan_hash(plan_path: str | Path) -> str:
-    """Return the canonical ``sha256:<hex>`` digest of an emitted plan file."""
-
-    return "sha256:" + sha256_file(plan_path)
 
 
 def _clear_per_brief_sentinels(brief_out: Path) -> None:
@@ -660,35 +654,37 @@ def _run_steps_once(steps: list[Step], args: argparse.Namespace) -> int:
             return returncode
     return 0
 
-def _parse_url_expiry(value: str) -> dt.datetime:
-    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.timezone.utc)
 
-def _preflight_url_expiry(label: str, url: str) -> None:
-    path = asset_cache._path_for(url)
-    meta = asset_cache._read_meta(path)
-    expires_at = meta.get("url_expires_at")
-    if not isinstance(expires_at, str):
-        return
-    if _parse_url_expiry(expires_at) <= dt.datetime.now(dt.timezone.utc):
-        raise SystemExit(f"astrid: {label} URL expired at {expires_at}; refresh upstream before running")
+def _write_result_manifest(args: argparse.Namespace) -> None:
+    """Publish the orchestrator's attempt-local result bundle.
 
-def _url_inputs(args: argparse.Namespace) -> list[tuple[str, str]]:
-    urls: list[tuple[str, str]] = []
-    if args.video is not None and asset_cache.is_url(args.video):
-        urls.append(("video", str(args.video)))
-    for key, value in args.asset_pairs:
-        if asset_cache.is_url(value):
-            urls.append((f"asset {key}", str(value)))
-    return urls
-
-def _prefetch_url_inputs(args: argparse.Namespace) -> None:
-    bytes_required = {"transcribe", "scenes", "shots", "scene_describe", "quality_zones"}
-    active = bytes_required - set(args.skip)
-    if args.no_prefetch or not active:
-        return
-    for _, url in _url_inputs(args):
-        asset_cache.fetch(url)
+    GenericPackHost discovers declared outputs from this manifest.  Keeping
+    the bundle rooted under ``out/briefs`` makes the orchestrator's result
+    explicit without creating a second project-level plan or ledger.
+    """
+    inputs = {
+        name: (None if value is None else str(value))
+        for name, value in (
+            ("video", getattr(args, "video", None)),
+            ("audio", getattr(args, "audio", None)),
+            ("brief", getattr(args, "brief", None)),
+            ("theme", getattr(args, "theme", None)),
+        )
+    }
+    outputs: list[dict[str, Any]] = [
+        {"path": "briefs", "type": "directory"},
+    ]
+    if (args.out / "hype.plan.json").is_file():
+        outputs.append({"path": "hype.plan.json", "type": "file"})
+    write_manifest(
+        args.out / "manifest.json",
+        build_manifest(
+            kind="video_editing.hype",
+            inputs=inputs,
+            outputs=outputs,
+            created=datetime.now(timezone.utc).isoformat(),
+        ),
+    )
 
 def pool_main(args: argparse.Namespace) -> int:
     from .steps import _write_dry_run_plan, select_steps  # late import to avoid circular dependency
@@ -698,52 +694,19 @@ def pool_main(args: argparse.Namespace) -> int:
     if args.audit is not None:
         _register_run_inputs(args)
     prepare_brief_artifacts(args)
-    for label, url in _url_inputs(args):
-        _preflight_url_expiry(label, url)
-
     # Phase 3 mixed-mode: --dry-run plans the run without invoking executors.
     # Computes step set, builds redacted commands, writes hype.plan.json, exits.
     if getattr(args, "dry_run", False):
-        return _write_dry_run_plan(args)
+        returncode = _write_dry_run_plan(args)
+        if returncode == 0:
+            _write_result_manifest(args)
+        return returncode
 
     selected_steps = select_steps(args)
 
-    # Sprint 5a: emit the plan v2 to the project root (canonical plan.json
-    _plan_hash = ""
-    project_slug = getattr(args, "project", None)
-    if project_slug is not None:
-        from astrid.core.foundation.project_paths import project_dir
-
-        proj_root = project_dir(project_slug)
-        plan_path = proj_root / "plan.json"
-        try:
-            from astrid.packs.video_editing.orchestrators.hype.plan_template import (
-                build_runtime_plan_v2,
-                emit_plan_json,
-            )
-
-            plan = build_runtime_plan_v2(
-                args=args,
-                selected_steps=selected_steps,
-                run_id=getattr(args, "run_id", None),
-            )
-            emit_plan_json(plan, plan_path)
-            _plan_hash = _compute_plan_hash(plan_path)
-        except Exception as exc:
-            logging.warning("hype: plan emission failed: %s", exc)
-            # Continue with empty plan_hash; the run can still proceed via
-            # the legacy path, but plan-based dispatch won't be available.
-    else:
-        # No project slug — running outside project mode. Check for an
-        # existing plan.json in the run root as a fallback.
-        plan_json = args.out / "plan.json"
-        if plan_json.is_file():
-            try:
-                _plan_hash = _compute_plan_hash(plan_json)
-            except Exception:
-                _plan_hash = ""
-    # Kernel is authority: no run.json second ledger (plan_hash retained for logs)
-    _prefetch_url_inputs(args)
+    # The runtime ledger owns orchestration state.  Hype emits only its
+    # attempt-local result artifacts (including the optional dry-run plan);
+    # it never reads or writes a project-root plan.json.
     steps = [step for step in selected_steps if step.name not in set(args.skip)]
     editor_steps = [step for step in steps if step.name != "validate"]
     validate_steps = [step for step in steps if step.name == "validate"]
@@ -755,6 +718,7 @@ def pool_main(args: argparse.Namespace) -> int:
         if returncode != 0:
             return returncode
         if not args.render:
+            _write_result_manifest(args)
             return 0
 
         review_path = args.brief_out / "editor_review.json"
@@ -794,7 +758,11 @@ def pool_main(args: argparse.Namespace) -> int:
         args.editor_iteration = int(args.editor_iteration) + 1
         args.from_step = "cut"
     if args.render and validate_steps:
-        return _run_steps_once(validate_steps, args)
+        returncode = _run_steps_once(validate_steps, args)
+        if returncode == 0:
+            _write_result_manifest(args)
+        return returncode
+    _write_result_manifest(args)
     return 0
 
 def _register_run_inputs(args: argparse.Namespace) -> None:

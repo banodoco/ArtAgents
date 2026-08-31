@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,12 @@ def test_cut_resume_copies_materialized_artifacts_without_workspace_lookup(
         Path("examples/hype.assets.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
+    registry = json.loads((source / "hype.assets.json").read_text(encoding="utf-8"))
+    for key, entry in registry["assets"].items():
+        materialized = source / f"{key}.mp4"
+        materialized.write_bytes(b"runtime-materialized fixture")
+        entry["file"] = str(materialized)
+    (source / "hype.assets.json").write_text(json.dumps(registry), encoding="utf-8")
     out = tmp_path / "out"
     args = cut_run.build_parser().parse_args(
         ["--timeline", str(source / "hype.timeline.json"), "--out", str(out)]

@@ -99,6 +99,36 @@ def build_resume_metadata(
     }
 
 
+def _require_materialized_registry(registry: AssetRegistry) -> None:
+    """Fail closed unless every resumed asset is an attempt-local file.
+
+    Resume is an offline operation.  It must never turn a URL, cache record,
+    or relative locator into a fetch/read through another authority.
+    """
+    for key, entry in registry.get("assets", {}).items():
+        if not isinstance(entry, dict):
+            raise AstridError(f"Resume asset registry entry {key!r} is invalid")
+        unsupported = {"url", "uri", "path", "source_path", "locator", "cache"}.intersection(entry)
+        if unsupported:
+            raise AstridError(
+                f"Resume asset {key!r} contains unsupported locator fields: "
+                f"{', '.join(sorted(unsupported))}",
+                recovery_command="Supply the runtime-materialized asset registry for this attempt",
+            )
+        file_value = entry.get("file")
+        if not isinstance(file_value, str) or not file_value or not Path(file_value).is_absolute():
+            raise AstridError(
+                f"Resume asset {key!r} is not runtime-materialized",
+                recovery_command="Supply an absolute attempt-local materialized file in hype.assets.json",
+            )
+        materialized = Path(file_value).resolve()
+        if materialized.is_symlink() or not materialized.is_file():
+            raise AstridError(
+                f"Resume materialized asset {key!r} is missing: {materialized}",
+                recovery_command="Re-run the task so the runtime host can materialize the asset",
+            )
+
+
 def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
     ensure_resume_mode_args(args)
 
@@ -112,6 +142,7 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
 
     config = load_timeline(timeline_path)
     registry = load_registry(assets_path_in)
+    _require_materialized_registry(registry)
 
     # Backfill an old attempt artifact without consulting a workspace theme
     # hierarchy. Runtime-owned style documents must be materialized explicitly.

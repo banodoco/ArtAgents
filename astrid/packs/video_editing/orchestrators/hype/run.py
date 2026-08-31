@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cache-aware subprocess orchestrator for the hype pipeline, including refine between cut and render in pool flow.
+"""Runtime-hosted subprocess orchestrator for the hype pipeline, including refine between cut and render in pool flow.
 
 .. note::
 
@@ -16,11 +16,9 @@ from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.hype')
-import os
 import sys
 
 from astrid.core.project.runtime import ProjectRuntimeError
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
 from astrid.packs.video_editing.orchestrators.hype.config import (  # noqa: F401 — re-exported for facade compatibility
@@ -55,17 +53,13 @@ from astrid.packs.video_editing.orchestrators.hype.runner import (  # noqa: F401
     _coerce_frontmatter_value,
     _invalidate_downstream_sentinels,
     _notes_overlap_ratio,
-    _parse_url_expiry,
     _plan_action,
-    _prefetch_url_inputs,
-    _preflight_url_expiry,
     _redact_command,
     _register_run_inputs,
     _register_step_outputs,
     _rotate_editor_review,
     _run_revise,
     _run_steps_once,
-    _url_inputs,
     log_dir_for_step,
     parse_brief_frontmatter,
     pool_main,
@@ -127,12 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         if project_context is not None:
             args.project = project_context.project_slug
             args.render_parent_run_id = project_context.run_id
-        keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
-        keep_flag = bool(getattr(args, "keep_downloads", False))
-        session_enabled = not (keep_flag or keep_env)
         try:
-            with asset_cache.ephemeral_session(enabled=session_enabled):
-                returncode = pool_main(args)
+            returncode = pool_main(args)
         except SystemExit as exc:
             if project_context is not None:
                 return _system_exit_code(exc)

@@ -18,7 +18,6 @@ from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.audit import AuditContext
-from astrid.core.foundation.paths import WORKSPACE_ROOT
 from astrid.core.theme import load_theme
 from astrid.core.timeline import (
     ARRANGEMENT_VERSION,
@@ -481,14 +480,16 @@ def _system_prompt_prefix(*, allow_generative_effects: bool) -> str:
 def _resolve_theme_path(theme_value: str | None) -> Path | None:
     if theme_value is None:
         return None
-    candidate = Path(theme_value)
-    if candidate.name == "theme.json":
-        return candidate
-    if candidate.exists() and candidate.is_dir():
-        return candidate / "theme.json"
-    if candidate.exists():
-        return candidate
-    return WORKSPACE_ROOT / "themes" / theme_value / "theme.json"
+    candidate = Path(theme_value).expanduser().resolve()
+    if candidate.is_dir():
+        candidate = candidate / "theme.json"
+    if not candidate.is_file() or candidate.name != "theme.json":
+        raise AstridError(
+            "arrange requires an explicit runtime-materialized theme.json file; "
+            "theme slugs and workspace theme fallback are not supported",
+            recovery_command="Pass --theme <attempt-local theme.json>, or omit theme-dependent guidance",
+        )
+    return candidate
 
 
 def _voice_prompt_block(theme: dict[str, Any] | None) -> str:

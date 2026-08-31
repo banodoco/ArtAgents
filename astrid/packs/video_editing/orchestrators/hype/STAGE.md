@@ -1,13 +1,15 @@
 # video_editing.hype
 
-End-to-end hype editing pipeline: transcribe → scenes → quality_zones → shots →
+End-to-end runtime-hosted hype editing pipeline: transcribe → scenes → quality_zones → shots →
 triage → scene_describe → quote_scout → pool_build → pool_merge → arrange → cut →
 refine → render → editor_review → validate.
 
 ## When to Use
 
-Use when you have a source video and a creative brief and want a finished
-Remotion-rendered hype video with cache-aware step resume.
+Use when a runtime host has materialized a source video and creative brief and
+you want a finished Remotion-rendered hype video. The orchestrator is
+attempt-local: it never fetches URLs, resolves workspace/default themes, or
+reads and writes a project-root `plan.json`.
 
 ## Invocation
 
@@ -21,7 +23,7 @@ result = sdk.invoke(
 )
 ```
 
-Key flags: `--video`, `--brief`, `--out` (all required). Optional: `--theme`,
+Key flags: `--video`, `--brief`, `--out` (all required and runtime-materialized). Optional: `--theme` (an explicit attempt-local `theme.json`),
 `--target-duration`, `--asset KEY=PATH`, `--skip <step>`, `--from <step>`,
 `--dry-run`, `--env-file`, `--verbose`.
 
@@ -38,5 +40,6 @@ Key flags: `--video`, `--brief`, `--out` (all required). Optional: `--theme`,
     hype.mp4                # rendered output
     editor_review.json      # review pass results
     validation.json         # final validation
-  run.json                  # run provenance
+  hype.plan.json             # optional dry-run result artifact
+  manifest.json              # universal result manifest for the attempt
 ```

@@ -62,7 +62,7 @@
       "artifact_type": "timeline"
     },
     {
-      "description": "",
+      "description": "Runtime-host materialized asset registry; URL, cache, and arbitrary path locators are rejected.",
       "name": "assets",
       "required": false,
       "type": "file",
@@ -151,6 +151,6 @@
     "metadata",
     "source_audio"
   ],
-  "short_description": "Apply targeted reviewer-driven refinements to an existing arrangement.",
+  "short_description": "Apply targeted reviewer-driven refinements using runtime-materialized media.",
   "version": "1.0"
 }

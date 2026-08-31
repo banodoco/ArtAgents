@@ -54,7 +54,7 @@
       "type": "file"
     },
     {
-      "description": "",
+      "description": "Optional explicit runtime-materialized theme.json; no workspace/theme slug fallback.",
       "name": "theme",
       "required": false,
       "type": "file"
@@ -110,6 +110,6 @@
     "brief",
     "pool"
   ],
-  "short_description": "Compose a brief-specific shot arrangement from the source clip pool.",
+  "short_description": "Compose a brief-specific shot arrangement from runtime-materialized inputs.",
   "version": "1.0"
 }

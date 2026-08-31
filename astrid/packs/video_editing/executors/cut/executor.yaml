@@ -65,13 +65,13 @@
       "type": "file"
     },
     {
-      "description": "",
+      "description": "Runtime-materialized source video; URL and cache locators are rejected.",
       "name": "video",
       "required": false,
       "type": "file"
     },
     {
-      "description": "",
+      "description": "Runtime-materialized source audio; URL and cache locators are rejected.",
       "name": "audio",
       "required": false,
       "type": "file"

@@ -49,7 +49,6 @@ from astrid.packs.editorial.hype.arrangement_rules import (
     compile_arrangement_plan,
 )
 from astrid.packs.editorial.hype.text_match import segments_in_range, token_set_similarity, tokenize
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.executors.cut.run import (
     build_metadata_from_arrangement,
     build_multitrack_timeline,
@@ -121,18 +120,25 @@ def _resolve_asset_path(registry_path: Path, registry: dict[str, Any], asset_key
             f"Asset registry entry {asset_key!r} is missing",
             recovery_command="Check that the asset key exists in the registry and the registry file is correctly formed",
         )
-    if isinstance(entry.get("url"), str) and isinstance(entry.get("content_sha256"), str):
-        return asset_cache.resolve(entry, want="path")
-    if isinstance(entry.get("url"), str) and not isinstance(entry.get("file"), str):
-        return entry["url"]
-    file_value = entry.get("file")
-    if not isinstance(file_value, str) or not file_value:
+    if any(key in entry for key in ("url", "uri", "path", "source_path", "locator", "cache")):
         raise AstridError(
-            f"Asset registry entry {asset_key!r} has no file path",
-            recovery_command="Ensure the asset registry entry includes a valid 'file' field with an absolute or relative path",
+            f"Asset registry entry {asset_key!r} contains an unsupported locator; "
+            "refine accepts only host-materialized files",
+            recovery_command="Pass the runtime-materialized asset registry produced for this attempt",
         )
-    path = Path(file_value)
-    return path if path.is_absolute() else (registry_path.parent / path).resolve()
+    file_value = entry.get("file")
+    if not isinstance(file_value, str) or not file_value or not Path(file_value).is_absolute():
+        raise AstridError(
+            f"Asset registry entry {asset_key!r} is not host-materialized",
+            recovery_command="Ensure the attempt registry contains an absolute materialized 'file' path",
+        )
+    path = Path(file_value).resolve()
+    if path.is_symlink() or not path.is_file():
+        raise AstridError(
+            f"Host-materialized asset for {asset_key!r} is missing: {path}",
+            recovery_command="Re-run the task so the runtime host can materialize the asset",
+        )
+    return path
 
 
 def _resolve_primary_asset(
@@ -584,7 +590,7 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
         registry,
         args.primary_asset,
         compiled_plan=compiled_plan,
-        theme_slug=prior_theme_slug if isinstance(prior_theme_slug, str) and prior_theme_slug else "banodoco-default",
+        theme_slug=prior_theme_slug if isinstance(prior_theme_slug, str) and prior_theme_slug else None,
     )
     if isinstance(prior_timeline, dict) and isinstance(prior_timeline.get("theme_overrides"), dict):
         rebuilt.setdefault("theme_overrides", prior_timeline["theme_overrides"])
