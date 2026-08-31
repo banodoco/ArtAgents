@@ -67,6 +67,7 @@ class AssetMaterializer:
         materialized_objects: Mapping[str, str | Path | bytes] | None = None,
         materialized_root: str | Path | None = None,
         staging_parent: str | Path | None = None,
+        allow_derived_files: bool = False,
     ) -> None:
         requested_registry = Path(registry_path).expanduser()
         if not requested_registry.exists():
@@ -74,6 +75,7 @@ class AssetMaterializer:
         self.registry_path = requested_registry.resolve(strict=True)
 
         self.materialized_objects = dict(materialized_objects or {})
+        self.allow_derived_files = bool(allow_derived_files)
         path_values = [value for value in self.materialized_objects.values() if not isinstance(value, bytes)]
         if path_values and materialized_root is None:
             raise ValueError("materialized_root is required for path-backed runtime objects")
@@ -162,10 +164,12 @@ class AssetMaterializer:
                 field
                 for field in (
                     "url", "sourceUrl", "remoteUrl", "thumbnailUrl", "thumbnail_url",
-                    "file", "path", "source_path", "locator", "realm",
+                    "path", "source_path", "locator", "realm",
                 )
                 if field in entry
             ]
+            if "file" in entry and not self.allow_derived_files:
+                forbidden.append("file")
             if forbidden:
                 raise ValueError(
                     f"Asset {key!r} contains retired media locator field(s): {', '.join(forbidden)}"
@@ -176,6 +180,21 @@ class AssetMaterializer:
             raw_digest = entry.get("digest") or entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
             if not isinstance(raw_digest, str) or not raw_digest.strip():
                 raise ValueError(f"Asset {key!r} requires a runtime-managed digest")
+            if self.allow_derived_files and isinstance(entry.get("file"), str):
+                source = Path(entry["file"]).expanduser()
+                if self.materialized_root is None:
+                    raise ValueError("materialized_root is required for derived asset files")
+                try:
+                    resolved = source.resolve(strict=True)
+                except OSError as exc:
+                    raise FileNotFoundError(f"Asset {key!r} derived file is unavailable") from exc
+                if source.is_symlink() or not _contained(resolved, self.materialized_root) or not resolved.is_file():
+                    raise ValueError(f"Asset {key!r} derived file is outside the materialized root")
+                staged_path = self._materialize_managed_object(key, object_id, raw_digest, resolved, index)
+                self.assets[key] = MaterializedAsset(
+                    key=key, kind="managed", metadata=copy.deepcopy(dict(entry)), local_path=staged_path
+                )
+                continue
             candidates = (object_id, raw_digest, raw_digest.removeprefix("sha256:"), f"sha256:{raw_digest.removeprefix('sha256:')}")
             materialized = next((self.materialized_objects[candidate] for candidate in candidates if candidate in self.materialized_objects), None)
             if materialized is None:

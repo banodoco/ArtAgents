@@ -237,6 +237,8 @@ def render(
     backend_config: Mapping[str, Mapping[str, Any]] | None = None,
     profile: Mapping[str, Any] | None = None,
     timeline_authority: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> Path:
     """Render through :class:`RenderService` and publish one locked pair.
 
@@ -277,6 +279,8 @@ def render(
         backend_config=config,
         profile=profile,
         previous_outputs=previous_outputs,
+        materialized_root=materialized_root,
+        materialized_objects=materialized_objects,
     )
     _rewrite_provenance_output_path(
         Path(output),
@@ -304,6 +308,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeline", type=Path, required=True)
     parser.add_argument("--assets", type=Path)
+    parser.add_argument("--materialized-root", type=Path)
+    parser.add_argument("--materialized-objects", default=None)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--selector",
@@ -375,6 +381,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = _parse_backend_config(args.backend_config)
         profile = _parse_profile(args.profile)
         timeline_authority = _parse_profile(args.timeline_authority)
+        materialized_objects = _parse_profile(args.materialized_objects)
+        if materialized_objects is not None and not isinstance(materialized_objects, Mapping):
+            raise ValueError("--materialized-objects must be a JSON object")
         if args.assets is None:
             with TemporaryDirectory(prefix="astrid-render-assets-") as tmp_text:
                 assets_path = Path(tmp_text) / "hype.assets.json"
@@ -392,6 +401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     backend_config=config,
                     profile=profile,
                     timeline_authority=timeline_authority,
+                    materialized_root=args.materialized_root,
+                    materialized_objects=materialized_objects,
                 )
         else:
             output = render(
@@ -407,6 +418,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 backend_config=config,
                 profile=profile,
                 timeline_authority=timeline_authority,
+                materialized_root=args.materialized_root,
+                materialized_objects=materialized_objects,
             )
     except RendererException as exc:  # pragma: no cover - CLI path
         print(_renderer_cli_error(exc), file=sys.stderr)

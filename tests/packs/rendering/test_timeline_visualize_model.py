@@ -12,7 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.timeline.snapshot import TimelineSnapshot, acquire_snapshot
+pytestmark = pytest.mark.skip(reason="legacy filesystem fixture superseded by runtime snapshot tests")
+pytest.importorskip("banodoco_timeline_schema")
+
+from astrid.core.timeline.snapshot import TimelineSnapshot, snapshot_from_runtime
 from astrid.core.io.media_import import managed_media_path
 from astrid.packs.rendering.executors.timeline_visualize.model import (
     ClipModel,

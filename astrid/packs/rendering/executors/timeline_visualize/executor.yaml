@@ -131,6 +131,20 @@
       "required": false,
       "artifact_type": null,
       "description": "Contained rendered-video source used only with rendered filmstrip mode."
+    },
+    {
+      "name": "materialized_root",
+      "type": "file",
+      "required": false,
+      "artifact_type": null,
+      "description": "Host-owned attempt-local managed object root."
+    },
+    {
+      "name": "materialized_objects",
+      "type": "json",
+      "required": false,
+      "artifact_type": null,
+      "description": "Host-owned object-id to attempt-local path handoff."
     }
   ],
   "outputs": [
@@ -164,6 +178,16 @@
         "input": "formats",
         "flag": "--format",
         "repeatable": true,
+        "optional": true
+      },
+      {
+        "input": "materialized_root",
+        "flag": "--materialized-root",
+        "optional": true
+      },
+      {
+        "input": "materialized_objects",
+        "flag": "--materialized-objects",
         "optional": true
       }
     ]

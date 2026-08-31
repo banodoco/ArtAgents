@@ -21,8 +21,10 @@ with three public entrypoints:
   its :class:`SupportReport`.
 * :class:`RenderContext` — the convenience facade a third-party ``render.py``
   author gets for the duration of one invocation: workspace-validated path
-  allocation, asset descriptor resolution (staged files or the invocation
-  asset server URL), permission checks, a sanitized subprocess runner,
+  allocation, asset descriptor resolution from a trusted attempt-local
+  object-id/digest handoff (host-staged files and a derived invocation asset
+  server URL),
+  permission checks, a sanitized subprocess runner,
   redacted logs, a cooperative interruption flag, media probing, hashing,
   audio completion, and named attachments.
 
@@ -381,6 +383,8 @@ def render(
     transport_factory: Any = None,
     validator: Any = None,
     publisher: Any = None,
+    materialized_root: str | Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> Path:
     """Render *timeline_path* and return the published output path.
 
@@ -416,6 +420,8 @@ def render(
         profile=profile,
         backend_config=_json_safe(dict(backend_config or {})),
         metadata=_json_safe(dict(metadata or {})),
+        materialized_root=(None if materialized_root is None else str(Path(materialized_root).expanduser().resolve())),
+        materialized_objects=_json_safe(dict(materialized_objects or {})),
     )
     if destination is None:
         raise ValueError("out_path is required")
@@ -456,6 +462,8 @@ def support(
     registries: Any = None,
     transport: Any = None,
     transport_factory: Any = None,
+    materialized_root: str | Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> SupportReport:
     """Resolve the qualified *backend* and return its :class:`SupportReport`.
 
@@ -482,6 +490,8 @@ def support(
             profile=profile,
             backend_config=_json_safe(dict(backend_config or {})),
             metadata=_json_safe(dict(metadata or {})),
+            materialized_root=(None if materialized_root is None else str(Path(materialized_root).expanduser().resolve())),
+            materialized_objects=_json_safe(dict(materialized_objects or {})),
         )
     parsed = (
         request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
@@ -683,8 +693,8 @@ class RenderContext:
 
     A ``render.py`` receives one :class:`RenderContext` for the lifetime of a
     render invocation.  It allocates workspace-validated output and scratch
-    paths, resolves asset registry entries to absolute staged files or the
-    invocation asset server URL, checks permissions, runs sanitized
+    paths, resolves object-id/digest registry entries to host-staged files and
+    a derived invocation asset server URL, checks permissions, runs sanitized
     subprocesses, emits redacted logs, exposes a cooperative interruption
     flag, probes media, hashes inputs, completes audio through the core
     helper, carries named attachments, and cleans up on exit.
@@ -879,12 +889,10 @@ class RenderContext:
     def asset_url(self, key: str) -> str:
         """Return the consumable URL for registry asset *key*.
 
-        Remote assets keep their original URL; local/cached assets are served
-        from the invocation asset server.
+        Live registries never carry remote URLs. Host-materialized assets are
+        served from the invocation asset server.
         """
         asset = self._require_asset(key)
-        if asset.remote_url is not None and asset.local_path is None:
-            return str(asset.remote_url)
         server = self._asset_server
         if server is None:
             raise ValueError(

@@ -54,6 +54,7 @@ mirror covers each form otherwise.
 from __future__ import annotations
 
 import importlib
+import builtins
 import json
 import re
 import uuid
@@ -224,7 +225,7 @@ def select_kernel_timelines(
         alias = row.get("slug", row.get("alias"))
         state = row.get("state", row.get("status"))
         if state in {"archived", "tombstoned"} or row.get("archived") is True:
-            if all(isinstance(item, str) for item in (timeline_id, timeline_ulid, alias)):
+            if builtins.all(isinstance(item, str) for item in (timeline_id, timeline_ulid, alias)):
                 archived_aliases.append((str(timeline_id), str(timeline_ulid), str(alias)))
             continue
         try:

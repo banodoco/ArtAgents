@@ -115,6 +115,8 @@ def verify_now(
     *,
     runtime_client: Any | None = None,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Any | None = None,
 ) -> AssetIntegrity:
     """Fail closed when visualization lacks a host-managed byte handle.
 
@@ -125,6 +127,53 @@ def verify_now(
     if not isinstance(integrity, AssetIntegrity):
         raise TypeError("integrity must be an AssetIntegrity")
     del runtime_client, media_snapshot
+    if isinstance(materialized_objects, Mapping):
+        object_id = integrity.source_id
+        expected = integrity.expected_sha256
+        candidate = None
+        for key in (object_id, expected, f"sha256:{expected}" if expected else None):
+            if key and key in materialized_objects:
+                candidate = materialized_objects[key]
+                break
+        if candidate is not None:
+            from pathlib import Path
+            import hashlib
+            source = Path(str(candidate)).expanduser()
+            try:
+                if materialized_root is None:
+                    raise ValueError("materialized root is missing")
+                root = Path(str(materialized_root)).expanduser().resolve(strict=True)
+                resolved = source.resolve(strict=True)
+                if source.is_symlink() or not resolved.is_file() or not resolved.is_relative_to(root):
+                    raise ValueError("materialized object escaped its attempt root")
+                observed = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            except (OSError, ValueError):
+                return _fresh_integrity(
+                    integrity,
+                    state="missing",
+                    observed_sha256=None,
+                    reason="materialized object bytes are unavailable under the attempt root",
+                )
+            if expected is None:
+                return _fresh_integrity(
+                    integrity,
+                    state="hash_unrecorded",
+                    observed_sha256=observed,
+                    reason="materialized object has no expected sha256",
+                )
+            if observed != expected:
+                return _fresh_integrity(
+                    integrity,
+                    state="hash_mismatch",
+                    observed_sha256=observed,
+                    reason="materialized object bytes differ from the expected sha256",
+                )
+            return _fresh_integrity(
+                integrity,
+                state=VERIFIED_STATE,
+                observed_sha256=observed,
+                reason="verified runtime materialization",
+            )
     # Live visualization receives attempt-local managed bytes from the host;
     # this helper must never reopen a project path or CAS locator.
     return _fresh_integrity(

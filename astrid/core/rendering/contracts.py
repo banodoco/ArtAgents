@@ -783,6 +783,10 @@ class RenderRequest:
     profile: RenderProfile | None = None
     backend_config: BackendConfig = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=dict)
+    # Explicit host-owned execution handoff. Values are attempt-local paths;
+    # they are never authority or durable media locators.
+    materialized_root: str | None = None
+    materialized_objects: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if type(self.schema_version) is not int or self.schema_version != SCHEMA_VERSION:
@@ -816,6 +820,15 @@ class RenderRequest:
             _coerce_namespaced_backend_config(self.backend_config, "backend_config"),
         )
         object.__setattr__(self, "metadata", _require_string_mapping(self.metadata, "metadata"))
+        object.__setattr__(self, "materialized_root", _require_optional_string(self.materialized_root, "materialized_root"))
+        handoff = _require_mapping(self.materialized_objects, "materialized_objects")
+        normalized_handoff: dict[str, str] = {}
+        for raw_key, raw_value in handoff.items():
+            key = _require_string(raw_key, "materialized_objects key")
+            normalized_handoff[key] = _require_string(raw_value, f"materialized_objects[{key!r}]")
+        if normalized_handoff and self.materialized_root is None:
+            raise ValueError("materialized_root is required with materialized_objects")
+        object.__setattr__(self, "materialized_objects", normalized_handoff)
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -829,6 +842,10 @@ class RenderRequest:
                 "profile": self.profile,
                 "backend_config": self.backend_config,
                 "metadata": self.metadata,
+                **(
+                    {"materialized_root": self.materialized_root, "materialized_objects": self.materialized_objects}
+                    if self.materialized_root is not None or self.materialized_objects else {}
+                ),
             }
         )
 
@@ -846,6 +863,8 @@ class RenderRequest:
                 "profile",
                 "backend_config",
                 "metadata",
+                "materialized_root",
+                "materialized_objects",
             }
             _validate_object_keys(
                 data,
@@ -870,6 +889,8 @@ class RenderRequest:
                 profile=data.get("profile"),
                 backend_config=data.get("backend_config", {}),
                 metadata=data.get("metadata", {}),
+                materialized_root=data.get("materialized_root"),
+                materialized_objects=data.get("materialized_objects", {}),
             )
         except Exception as exc:
             from .errors import RendererException
@@ -896,6 +917,8 @@ class RenderRequest:
             profile=self.profile,
             backend_config={qualified: selected} if selected is not None else {},
             metadata=self.metadata,
+            materialized_root=self.materialized_root,
+            materialized_objects=self.materialized_objects,
         )
 
 

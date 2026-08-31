@@ -1228,7 +1228,27 @@ class GenericPackHost:
         return {"protocol": actual_protocol, "schema_digest": actual_schema or expected_schema, "runtime_epoch": value.get("runtime_epoch")}
 
     def _materialize_inputs(self, spec: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
+        """Materialize digest inputs and managed registry objects in *attempt*.
+
+        Runtime object ids/digests are the only authority for live media.  A
+        registry supplied as an input is read only to discover those identities;
+        every object is fetched through the runtime, hash-checked, and copied
+        below ``attempt/managed-objects``.  Renderers receive a derived private
+        registry whose ``file`` values point at those attempt-local copies.
+        """
         values = dict(spec.get("inputs", {})) if isinstance(spec.get("inputs", {}), Mapping) else {}
+        # Timeline visualization tasks carry their canonical registry inside
+        # the immutable snapshot rather than as a separate input file. Expose
+        # it to the same host-only materialization path used by render tasks.
+        snapshot = spec.get("timeline_snapshot")
+        snapshot_registry = snapshot.get("registry") if isinstance(snapshot, Mapping) else None
+        if "assets_registry" not in values and isinstance(snapshot_registry, Mapping):
+            snapshot_registry_path = Path(attempt).resolve() / "inputs" / "snapshot-assets.json"
+            snapshot_registry_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_registry_path.write_text(json.dumps(snapshot_registry, sort_keys=True), encoding="utf-8")
+            values["assets_registry"] = str(snapshot_registry_path)
+        if "materialized_root" in values or "materialized_objects" in values:
+            raise HostError("materialized media handoff is host-owned and cannot be caller supplied")
         for item in spec.get("input_digests", ()) if isinstance(spec.get("input_digests", ()), list) else ():
             if isinstance(item, Mapping) and item.get("name") and item.get("digest"):
                 values.setdefault(str(item["name"]), {"digest": str(item["digest"])})
@@ -1236,6 +1256,41 @@ class GenericPackHost:
             input_name = Path(str(name))
             if not str(name) or input_name.is_absolute() or ".." in input_name.parts:
                 raise HostError(f"input name escapes the attempt directory: {name!r}")
+        attempt = Path(attempt).resolve()
+        managed_root = attempt / "managed-objects"
+        managed_root.mkdir(parents=True, exist_ok=True)
+        materialized_objects: dict[str, str] = {}
+        fetched_objects: dict[tuple[str, str], Path] = {}
+
+        def fetch_object(reference: str, digest: str, name: str) -> Path:
+            if self.client is None or not hasattr(self.client, "get_object"):
+                raise HostError(f"runtime client is required to materialize managed input {name}")
+            normalized = str(digest).removeprefix("sha256:")
+            if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
+                raise HostError(f"invalid managed digest for {name}")
+            cache_key = (str(reference), normalized)
+            cached = fetched_objects.get(cache_key)
+            if cached is not None:
+                return cached
+            data = self.client.get_object(normalized)
+            if not isinstance(data, (bytes, bytearray)):
+                data = getattr(data, "data", None)
+            if not isinstance(data, (bytes, bytearray)):
+                raise HostError(f"runtime object fetch returned no bytes for {name}")
+            payload = bytes(data)
+            if hashlib.sha256(payload).hexdigest() != normalized:
+                raise HostError(f"input object hash mismatch for {name}")
+            destination = managed_root / f"{len(list(managed_root.iterdir())):04d}-{hashlib.sha256(reference.encode()).hexdigest()[:16]}"
+            destination.write_bytes(payload)
+            fetched_objects[cache_key] = destination
+            return destination
+
+        registry_input_names = {
+            "assets_registry",
+            "assets_registry_path",
+            "assets",
+            "hype_assets",
+        }
         for name, value in list(values.items()):
             digest = value.get("digest") if isinstance(value, Mapping) else (value if isinstance(value, str) and len(value) == 64 else None)
             if digest and self.client is not None and hasattr(self.client, "get_object"):
@@ -1244,12 +1299,53 @@ class GenericPackHost:
                 path = (input_root / input_name).resolve()
                 if not path.is_relative_to(input_root):
                     raise HostError(f"input name escapes the attempt directory: {name!r}")
-                data = self.client.get_object(digest)
-                if hashlib.sha256(data).hexdigest() != digest:
+                data = self.client.get_object(str(digest).removeprefix("sha256:"))
+                if not isinstance(data, (bytes, bytearray)):
+                    data = getattr(data, "data", None)
+                if not isinstance(data, (bytes, bytearray)) or hashlib.sha256(bytes(data)).hexdigest() != str(digest).removeprefix("sha256:"):
                     raise HostError(f"input object hash mismatch for {name}")
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
+                path.write_bytes(bytes(data))
                 values[name] = str(path)
+
+            if name not in registry_input_names:
+                continue
+            registry_path = Path(str(values[name])).expanduser()
+            if not registry_path.is_absolute():
+                registry_path = (attempt / registry_path).resolve()
+            try:
+                registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise HostError(f"managed asset registry cannot be read for {name}: {exc}") from exc
+            if not isinstance(registry, Mapping) or not isinstance(registry.get("assets"), Mapping):
+                raise HostError(f"managed asset registry for {name} is invalid")
+            derived = dict(registry)
+            derived_assets: dict[str, Any] = {}
+            for key, raw in registry["assets"].items():
+                if not isinstance(raw, Mapping):
+                    raise HostError(f"managed asset {key!r} is invalid")
+                forbidden = {"url", "uri", "path", "source_path", "locator", "realm", "file"}
+                if forbidden.intersection(raw):
+                    raise HostError(f"managed asset {key!r} contains an unmanaged locator")
+                object_id = raw.get("object_id") or raw.get("media_id")
+                raw_digest = raw.get("digest") or raw.get("content_sha256") or raw.get("sha256") or raw.get("hash")
+                if not isinstance(object_id, str) or not object_id.strip() or not isinstance(raw_digest, str):
+                    raise HostError(f"managed asset {key!r} requires object_id and digest")
+                digest_hex = raw_digest.removeprefix("sha256:")
+                destination = fetch_object(object_id, digest_hex, str(key))
+                materialized_objects[object_id] = str(destination)
+                materialized_objects[digest_hex] = str(destination)
+                entry = dict(raw)
+                entry["file"] = str(destination)
+                derived_assets[str(key)] = entry
+            derived["assets"] = derived_assets
+            derived_path = attempt / "inputs" / f"{Path(str(name)).name}.materialized.json"
+            derived_path.parent.mkdir(parents=True, exist_ok=True)
+            derived_path.write_text(json.dumps(derived, sort_keys=True), encoding="utf-8")
+            values[name] = str(derived_path)
+        if materialized_objects:
+            values["materialized_root"] = str(managed_root)
+            values["materialized_objects"] = materialized_objects
         return values
 
     def _start_network_broker(

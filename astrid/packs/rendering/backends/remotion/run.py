@@ -651,6 +651,9 @@ def _execute_remotion(
     composition_id: str,
     theme_path: Path | None,
     min_free_gb: float | None,
+    materialized_root: Path | None = None,
+    staging_parent: Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> _ExecutionDetails:
     """Render one private video and return the data needed for provenance."""
 
@@ -664,6 +667,9 @@ def _execute_remotion(
             composition_id=composition_id,
             theme_path=theme_path,
             min_free_gb=min_free_gb,
+            materialized_root=materialized_root,
+            staging_parent=staging_parent,
+            materialized_objects=materialized_objects,
         )
 
 
@@ -677,6 +683,9 @@ def _execute_remotion_locked(
     composition_id: str,
     theme_path: Path | None,
     min_free_gb: float | None,
+    materialized_root: Path | None = None,
+    staging_parent: Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> _ExecutionDetails:
     """Execute one render while the caller owns the non-recursive outer lock."""
 
@@ -695,7 +704,15 @@ def _execute_remotion_locked(
     staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
     with ExitStack() as asset_lifecycle:
         try:
-            materializer = asset_lifecycle.enter_context(AssetMaterializer(assets_path))
+            materializer = asset_lifecycle.enter_context(
+                AssetMaterializer(
+                    assets_path,
+                    materialized_objects=materialized_objects,
+                    materialized_root=materialized_root,
+                    allow_derived_files=materialized_root is not None,
+                    staging_parent=staging_parent,
+                )
+            )
             asset_server = None
             if materializer.needs_server:
                 try:
@@ -851,6 +868,7 @@ def render(
             composition_id=composition_id,
             theme_path=theme_path,
             min_free_gb=min_free_gb,
+            staging_parent=out_path.parent,
         )
         provenance = _render_provenance_payload(
             out_path,
@@ -1003,7 +1021,12 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         # boundary plus the exact kernel-owned managed-media allowlist; it
         # stages only in its disposable probe directory and closes immediately.
         try:
-            with AssetMaterializer(assets_path):
+            with AssetMaterializer(
+                assets_path,
+                materialized_objects=request.materialized_objects,
+                materialized_root=request.materialized_root,
+                allow_derived_files=request.materialized_root is not None,
+            ):
                 pass
         except Exception as exc:  # noqa: BLE001 - support report normalizes registry failures
             reasons.append(f"local assets are not renderable: {exc}")
@@ -1157,6 +1180,9 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             composition_id=settings.composition_id,
             theme_path=settings.theme_path,
             min_free_gb=settings.min_free_gb,
+            materialized_root=request.materialized_root,
+            staging_parent=workspace,
+            materialized_objects=request.materialized_objects,
         )
         output_path.unlink(missing_ok=True)
         os.replace(staged_video, output_path)

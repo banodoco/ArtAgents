@@ -365,6 +365,9 @@ implicit fallback are rejected. `window` accepts a `FrameWindow` or a wire
 mapping, `audio` accepts `AudioOwnership` or its string value, and
 `profile` accepts a `RenderProfile` or a wire mapping. `out_path` selects the
 published destination; when `output_name` is omitted its basename is used.
+For runtime-managed media, the host supplies the optional attempt-local
+`materialized_root`/`materialized_objects` handoff; live registries remain
+object-id/digest-only and never accept generic file or URL locators.
 
 ### `support(backend, ...) -> SupportReport`
 

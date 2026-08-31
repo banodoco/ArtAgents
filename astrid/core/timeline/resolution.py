@@ -129,7 +129,11 @@ def classify_asset(
     entry = registry_entry if isinstance(registry_entry, Mapping) else {}
     role = _derive_role(key, entry, roles, default_role)
     expected = _expected_hash(entry)
-    source_id = entry.get("sourceId") if isinstance(entry.get("sourceId"), str) else None
+    source_id = (
+        entry.get("object_id")
+        or entry.get("media_id")
+        or (entry.get("sourceId") if isinstance(entry.get("sourceId"), str) else None)
+    )
     source_version = entry.get("sourceVersion") if isinstance(entry.get("sourceVersion"), str) else None
     forbidden = next((field for field in (*_URL_KEYS, *_THUMBNAIL_URL_KEYS, "path", "source_path", "locator", "realm") if field in entry), None)
     if forbidden is not None:

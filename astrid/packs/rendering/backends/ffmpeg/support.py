@@ -24,6 +24,7 @@ from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     SupportReport,
 )
+from astrid.core.rendering.assets import AssetMaterializer
 from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
 from astrid.packs.rendering.backends.ffmpeg.text import (
     _finite_number,
@@ -785,6 +786,20 @@ def support(
         reasons.append("assets registry must contain an assets object")
         table = {}
     assets_path = _registry_path(request)
+    if request.materialized_root is not None and assets_path.is_file():
+        try:
+            # The host has already staged and verified these objects. This
+            # defense-in-depth check proves the derived registry still points
+            # only inside that attempt-local root and that its digests match.
+            with AssetMaterializer(
+                assets_path,
+                materialized_objects=request.materialized_objects,
+                materialized_root=request.materialized_root,
+                allow_derived_files=True,
+            ):
+                pass
+        except Exception as exc:  # noqa: BLE001 - folded into support evidence
+            reasons.append(f"attempt-local managed assets are not renderable: {exc}")
     tracks = {
         track.get("id"): track
         for track in timeline_data.get("tracks", [])

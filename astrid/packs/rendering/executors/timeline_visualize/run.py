@@ -410,6 +410,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--filmstrip", choices=StaticChoices(("auto", "off", "assets", "rendered")), default="auto"
     )
     parser.add_argument("--rendered-video", type=Path)
+    parser.add_argument("--materialized-root", type=Path)
+    parser.add_argument("--materialized-objects")
     return parser
 
 
@@ -784,6 +786,8 @@ def _asset_filmstrips(
     sample_root: Path,
     pages: tuple[LayoutPage, ...],
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
 ) -> dict[str, list[Path]]:
     if mode == "off":
         return {}
@@ -842,12 +846,24 @@ def _asset_filmstrips(
             fresh = verify_now(
                 integrity,
                 media_snapshot=media_snapshot,
+                materialized_objects=materialized_objects,
+                materialized_root=materialized_root,
             )
             if guard_sampling(fresh) is not None:
                 continue
-            # Source sampling requires an attempt-local managed-byte handle;
-            # timeline visualization has no path authority of its own.
-            continue
+            source_value = None
+            if isinstance(raw_assets, Mapping) and asset_key is not None:
+                raw_entry = raw_assets.get(asset_key)
+                if isinstance(raw_entry, Mapping):
+                    object_id = raw_entry.get("object_id") or raw_entry.get("media_id")
+                    digest = raw_entry.get("digest") or raw_entry.get("content_sha256") or raw_entry.get("sha256")
+                    for candidate_key in (object_id, digest, str(digest).removeprefix("sha256:") if digest else None):
+                        if candidate_key and isinstance(materialized_objects, Mapping) and candidate_key in materialized_objects:
+                            source_value = materialized_objects[candidate_key]
+                            break
+            if source_value is None:
+                continue
+            source = Path(str(source_value)).expanduser()
             media_type: str | None = None
             registry_entry = (
                 raw_assets.get(asset_key)
@@ -869,6 +885,8 @@ def _asset_filmstrips(
                 integrity=fresh,
                 project_root=project_root,
                 media_snapshot=media_snapshot,
+                materialized_objects=materialized_objects,
+                materialized_root=materialized_root,
             )
     return filmstrips
 
@@ -1044,6 +1062,8 @@ def _materialize_view(
     speech_occurrences: list[SpeechOccurrence] | None = None,
     transcript_asset_key: str | None = None,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
 ) -> PackLayout:
     pages = _pages_for(
         args,
@@ -1073,6 +1093,8 @@ def _materialize_view(
             sample_root=Path(raw_sample_root),
             pages=pages,
             media_snapshot=media_snapshot,
+            materialized_objects=materialized_objects,
+            materialized_root=materialized_root,
         )
         ground_truth = emit_ground_truth(
             model,
@@ -1245,6 +1267,8 @@ def _render_one(
     pack_root: Path,
     execution_authority: Mapping[str, Any] | None = None,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
 ) -> PackLayout:
     if selected.runtime_config is None or not selected.runtime_events:
         raise ValueError("runtime timeline materialization is incomplete")
@@ -1338,6 +1362,8 @@ def _render_one(
         speech_occurrences=speech_occurrences,
         transcript_asset_key=transcript_asset_key,
         media_snapshot=media_snapshot,
+        materialized_objects=materialized_objects,
+        materialized_root=materialized_root,
     )
 
 
@@ -1348,6 +1374,8 @@ def refresh_root(
     project_root: Path,
     pack_root: Path,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
 ) -> PackLayout:
     """The sole frozen-lineage transition to current managed timeline state."""
 
@@ -1446,6 +1474,8 @@ def refresh_root(
         speech_occurrences=speech_occurrences,
         transcript_asset_key=transcript_asset_key,
         media_snapshot=media_snapshot,
+        materialized_objects=materialized_objects,
+        materialized_root=materialized_root,
     )
 
 
@@ -1516,6 +1546,8 @@ def _execute_from_frozen(
     pack_root: Path,
     execution_authority: Mapping[str, Any] | None,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | None = None,
 ) -> dict[str, Any]:
     frozen = load_frozen_view(args.from_view, project_root=project_root)
     try:
@@ -1536,6 +1568,8 @@ def _execute_from_frozen(
                 project_root=project_root,
                 pack_root=pack_root,
                 media_snapshot=media_snapshot,
+                materialized_objects=materialized_objects,
+                materialized_root=materialized_root,
             )
         else:
             model = model_from_frozen(frozen)
@@ -1567,6 +1601,8 @@ def _execute_from_frozen(
                 speech_occurrences=speech_occurrences,
                 transcript_asset_key=transcript_asset_key,
                 media_snapshot=media_snapshot,
+                materialized_objects=materialized_objects,
+                materialized_root=materialized_root,
             )
         manifest_path = layout.manifest_path
         outputs: dict[str, Any] = {
@@ -1588,6 +1624,15 @@ def _execute_from_frozen(
 
 def execute(argv: list[str] | None = None) -> dict[str, Any]:
     args = build_parser().parse_args(argv)
+    if args.materialized_objects:
+        try:
+            args.materialized_objects = json.loads(args.materialized_objects)
+        except json.JSONDecodeError:
+            raise ValueError("--materialized-objects must be a JSON object") from None
+        if not isinstance(args.materialized_objects, Mapping):
+            raise ValueError("--materialized-objects must be a JSON object")
+    else:
+        args.materialized_objects = None
     _validate_selectors(args)
     if not args.project_slug:
         raise ValueError(
@@ -1617,6 +1662,8 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             pack_root=pack_root,
             execution_authority=execution_authority,
             media_snapshot=media_snapshot,
+            materialized_objects=args.materialized_objects,
+            materialized_root=args.materialized_root,
         )
 
     kernel_materialization_root = out_root / ".kernel-timelines"
@@ -1637,6 +1684,8 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             pack_root=pack_root,
             execution_authority=execution_authority,
             media_snapshot=media_snapshot,
+            materialized_objects=args.materialized_objects,
+            materialized_root=args.materialized_root,
         )
         manifest_path = layout.manifest_path
         pages = list(layout.pages)
@@ -1651,6 +1700,8 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
                 pack_root=pack_root / f"TL{index:02d}",
                 execution_authority=execution_authority,
                 media_snapshot=media_snapshot,
+                materialized_objects=args.materialized_objects,
+                materialized_root=args.materialized_root,
             )
             for index, row in enumerate(selected, start=1)
         ]

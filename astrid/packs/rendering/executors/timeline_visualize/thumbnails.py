@@ -49,7 +49,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from PIL import Image
 
@@ -340,6 +340,8 @@ def sample_filmstrip(
     project_root: Path | str | None = None,
     runtime_client: Any | None = None,
     media_snapshot: Any | None = None,
+    materialized_objects: Mapping[str, Any] | None = None,
+    materialized_root: Path | str | None = None,
 ) -> list[Path]:
     """Sample one verified source into a deterministic filmstrip.
 
@@ -372,6 +374,8 @@ def sample_filmstrip(
             integrity,
             runtime_client=runtime_client,
             media_snapshot=media_snapshot,
+            materialized_objects=materialized_objects,
+            materialized_root=materialized_root,
         )
         reason = guard_sampling(fresh)
         if reason is not None:

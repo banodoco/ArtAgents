@@ -272,7 +272,11 @@ rational FPS.
 - nullable `profile` (`null` means the host resolves the canonical profile);
 - `backend_config`, an object keyed only by qualified implementation IDs;
 - string-to-string `metadata`, for correlation data such as project, run, or
-  session IDs.
+  session IDs;
+- optional host-owned `materialized_root` and `materialized_objects`, an
+  attempt-local object-id-to-path handoff. These are derived execution
+  artifacts, never media authority or durable locators, and are omitted from
+  ordinary requests.
 
 The timeline stays backend-neutral. No Remotion, FFmpeg, Blender, Unreal, or
 other implementation field may appear at the request top level. Configuration
@@ -296,9 +300,10 @@ errors.
 ## Assets and workspace paths
 
 The host owns asset resolution and localization. Request input paths may be
-absolute after localization. The timeline and optional registry remain the
-canonical replay inputs; remote URLs and cached assets are materialized or
-made available by later host plumbing according to declared permissions.
+absolute after localization. Live registries contain only runtime-managed
+object IDs and digests; the host verifies and stages those bytes under the
+attempt root, then passes a derived private registry/path to the renderer.
+Remote URLs, project paths, and generic CAS locators are never authority.
 
 Artifact paths in results have a different rule: they are normalized paths
 relative to the unique invocation workspace. They cannot be absolute, begin

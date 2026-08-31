@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import ast
 import json
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 
-from astrid.core.timeline.snapshot import acquire_snapshot
+pytest.importorskip("banodoco_timeline_schema")
+
+from astrid.core.timeline.snapshot import snapshot_from_runtime
 from astrid.packs.rendering.executors.timeline_visualize.ids import (
     SEMANTIC_KIND_TO_CODE,
     parse_qualified_ref,
@@ -42,10 +43,19 @@ PROJECT_SLUG = "desert-plant-growth"
 
 @pytest.fixture
 def desert_model(tmp_path: Path) -> TimelineInspectionModel:
-    timeline_dir = tmp_path / "timelines" / TRUTH["timeline"]["ulid"]
-    timeline_dir.parent.mkdir(parents=True)
-    shutil.copytree(SLICE_DIR, timeline_dir)
-    snapshot = acquire_snapshot(timeline_dir, project_slug=PROJECT_SLUG)
+    del tmp_path
+    events = [
+        json.loads(line)
+        for line in (SLICE_DIR / "assembly.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    identity = TRUTH["timeline"]
+    snapshot = snapshot_from_runtime(
+        timeline_id=identity["uuid"],
+        timeline_ulid=identity["ulid"],
+        slug=identity["slug"],
+        project_slug=PROJECT_SLUG,
+        events=events,
+    )
     return build_model(snapshot)
 
 
@@ -265,10 +275,18 @@ def test_build_is_deterministic_across_repeated_builds(
     assert list(first.semantic_to_display.items()) == list(second.semantic_to_display.items())
 
     # Re-acquiring the slice and rebuilding yields a byte-identical map.
-    timeline_dir = tmp_path / "rebuilt" / TRUTH["timeline"]["ulid"]
-    timeline_dir.parent.mkdir(parents=True)
-    shutil.copytree(SLICE_DIR, timeline_dir)
-    snapshot = acquire_snapshot(timeline_dir, project_slug=PROJECT_SLUG)
+    events = [
+        json.loads(line)
+        for line in (SLICE_DIR / "assembly.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    identity = TRUTH["timeline"]
+    snapshot = snapshot_from_runtime(
+        timeline_id=identity["uuid"],
+        timeline_ulid=identity["ulid"],
+        slug=identity["slug"],
+        project_slug=PROJECT_SLUG,
+        events=events,
+    )
     assert _map(build_model(snapshot)) == first
 
 

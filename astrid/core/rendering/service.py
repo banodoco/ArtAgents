@@ -274,6 +274,8 @@ class RenderService:
         metadata: Mapping[str, str] | None = None,
         previous_outputs: Iterable[object] = (),
         v1_compatibility: Mapping[str, Any] | None = None,
+        materialized_root: str | Path | None = None,
+        materialized_objects: Mapping[str, str] | None = None,
     ) -> Path:
         """Render either a wire request or a timeline/assets path pair.
 
@@ -322,6 +324,8 @@ class RenderService:
                         for key, value in (backend_config or {}).items()
                     },
                     "metadata": dict(metadata or {}),
+                    "materialized_root": None if materialized_root is None else str(Path(materialized_root).expanduser().resolve()),
+                    "materialized_objects": dict(materialized_objects or {}),
                 }
             )
         if destination is None:
@@ -2030,6 +2034,11 @@ class RenderService:
 
         payload = invocation.payload
         payload_dict = payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+        # Attempt-local media handles are deliberately not replay authority;
+        # the replay bundle captures the registry bytes and must be
+        # re-materialized by a future host invocation.
+        payload_dict.pop("materialized_root", None)
+        payload_dict.pop("materialized_objects", None)
         eligibility = invocation.candidate.eligibility
         metadata: dict[str, Any] = {
             "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
@@ -2067,7 +2076,10 @@ class RenderService:
         support_report = self._support_reports.get(invocation.candidate.id)
         return ReplayBundle(
             renderer_id=invocation.candidate.id,
-            request_digest=compute_request_digest(request.to_dict()),
+            request_digest=compute_request_digest(
+                {key: value for key, value in request.to_dict().items()
+                 if key not in {"materialized_root", "materialized_objects"}}
+            ),
             manifest_digest=invocation.candidate.manifest_digest,
             argv=argv,
             inputs=self._collect_replay_inputs(invocation, request),

@@ -72,6 +72,13 @@
     },
     "metadata": {
       "$ref": "#/definitions/stringMap"
+    },
+    "materialized_root": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "materialized_objects": {
+      "$ref": "#/definitions/stringMap"
     }
   },
   "allOf": [
