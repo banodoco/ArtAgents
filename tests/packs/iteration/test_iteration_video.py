@@ -1,12 +1,10 @@
 import contextlib
 import io
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
-from astrid.core.project.project import create_project
-from astrid.core.threads.index import ThreadIndexStore
-from astrid.core.threads.schema import make_thread_record
 from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 
@@ -15,19 +13,23 @@ TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
 
-def test_iteration_video_renders_attached_without_local_variant_authority(
+def test_iteration_video_public_route_uses_runtime_authority(
     tmp_path: Path, monkeypatch
 ) -> None:
     repo = tmp_path
-    projects_root = repo / "projects"
     out_dir = repo / "runs" / "iteration-video"
     forwarded: dict[str, object] = {}
-    _write_thread(repo)
+    runtime = _runtime_client()
 
-    def fake_prepare_iteration(**kwargs):
-        forwarded["max_iterations"] = kwargs["max_iterations"]
-        _write_prepare_outputs(kwargs["out_path"])
-        return {"manifest_path": str(kwargs["out_path"] / "iteration.manifest.json")}
+    def fake_assemble_iteration(**kwargs):
+        forwarded["input_manifest"] = kwargs["input_manifest"]
+        out = kwargs["out_path"]
+        out.mkdir(parents=True, exist_ok=True)
+        _write_json(out / "iteration.manifest.json", {"runs": [], "quality": {"data_quality": 1.0}})
+        _write_json(out / "iteration.quality.json", {"data_quality": 1.0})
+        _write_json(out / "hype.timeline.json", {})
+        _write_json(out / "hype.assets.json", {})
+        return {"manifest_path": str(out / "iteration.manifest.json")}
 
     def fake_render(timeline: Path, assets: Path, output: Path, **kwargs) -> Path:
         forwarded["render_timeline"] = timeline
@@ -43,10 +45,8 @@ def test_iteration_video_renders_attached_without_local_variant_authority(
         )
         return output
 
-    monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
-    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
-    create_project("demo", root=projects_root)
-    monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fake_prepare_iteration)
+    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
+    monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble_iteration)
     monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
 
     stdout = io.StringIO()
@@ -58,6 +58,7 @@ def test_iteration_video_renders_attached_without_local_variant_authority(
                 project="demo",
                 project_was_auto_resolved=True,
                 run_root=out_dir,
+                execution_mode="in_process",
                 inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
                 orchestrator_args=(
                     "--repo-root",
@@ -75,7 +76,8 @@ def test_iteration_video_renders_attached_without_local_variant_authority(
         )
 
     assert result.ok
-    assert forwarded["max_iterations"] == 7
+    assert runtime.calls == [("list", "demo")]
+    assert forwarded["input_manifest"]["authority"] == {"kind": "runtime", "project": "demo", "run_ids": [TARGET_RUN_ID]}
     assert Path(forwarded["render_timeline"]).name == "hype.timeline.json"
     assert Path(forwarded["render_assets"]).name == "hype.assets.json"
     assert Path(forwarded["render_output"]).name == "iteration.mp4"
@@ -93,59 +95,34 @@ def test_iteration_video_renders_attached_without_local_variant_authority(
     assert not (out_dir / "_prepare").exists()
 
     assert not (out_dir / "run.json").exists()
-    run_records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
-    assert run_records == []
     assert not (out_dir / ".astrid.variants.json").exists()
     assert not (repo / ".astrid" / "threads" / THREAD_ID / "groups.json").exists()
 
 
 def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_content(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path
-    _write_thread(repo)
-    _write_run(
-        repo,
-        "root",
-        _record(ROOT_RUN_ID, output_artifacts=[_artifact("image", "a" * 64)]),
-    )
-    _write_run(
-        repo,
-        "target",
-        _record(
-            TARGET_RUN_ID,
-            parent_run_ids=[{"run_id": ROOT_RUN_ID, "kind": "causal"}],
-            output_artifacts=[
-                _artifact("image", "b" * 64),
-                _artifact("model_3d", "c" * 64),
-            ],
-        ),
-    )
-    cache_dir = repo / ".astrid" / "iteration_cache"
-    cache_dir.mkdir(parents=True)
-    (cache_dir / f"{ROOT_RUN_ID}__understanding.understand.v1.json").write_text("{}\n", encoding="utf-8")
-
-    def fail_prepare(*args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError("inspect must not summarize")
+    runtime = _runtime_client(include_root=True)
 
     def fail_render(*args, **kwargs):  # pragma: no cover - should never be called
         raise AssertionError("inspect must not render")
 
-    monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fail_prepare)
+    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
     monkeypatch.setattr(iteration_video, "run_builtin_render", fail_render)
 
-    report = iteration_video.inspect_iteration_thread(repo_root=repo, thread_ref=THREAD_ID, target_run_id=TARGET_RUN_ID)
+    report = iteration_video.inspect_iteration_thread(repo_root=repo, thread_ref=THREAD_ID, target_run_id=TARGET_RUN_ID, project_slug="demo")
     text = iteration_video.format_inspection(report, no_content=True)
 
-    assert report["summary_cache"] == {"hits": 1, "misses": 1}
+    assert report["summary_cache"] == {"hits": 0, "misses": 0}
     assert report["detected_modalities"] == ["image", "model_3d"]
     assert {item["renderer"] for item in report["chosen_renderers"]} == {"image_grid", "generic_card"}
-    assert "Estimated cost: ~$0.009" in text
+    assert "Estimated cost: ~$0.000" in text
     assert "content: suppressed" in text
     assert "SECRET prompt" not in text
 
 
 def test_iteration_video_orchestrator_declares_no_cut_child() -> None:
     manifest = _read_json(Path("astrid/packs/video_editing/orchestrators/iteration_video/orchestrator.yaml"))
-    assert manifest["child_executors"] == ["iteration.prepare", "iteration.assemble", "rendering.render"]
+    assert manifest["child_executors"] == ["iteration.assemble", "rendering.render"]
     assert "video_editing.cut" not in manifest["child_executors"]
     assert {item["name"] for item in manifest["outputs"]} == {
         "iteration.mp4",
@@ -172,47 +149,22 @@ def test_iteration_plan_uses_qualified_facade_and_declares_provenance(tmp_path: 
     }
 
 
-def _write_thread(repo: Path) -> None:
-    thread = make_thread_record(thread_id=THREAD_ID, label="Logo Sprint")
-    thread["run_ids"] = [ROOT_RUN_ID, TARGET_RUN_ID]
-    ThreadIndexStore(repo).write({"schema_version": 1, "active_thread_id": THREAD_ID, "threads": {THREAD_ID: thread}})
+def _runtime_client(*, include_root: bool = False):
+    records = [_record(TARGET_RUN_ID, output_artifacts=[_artifact("image", "b" * 64), _artifact("model_3d", "c" * 64)])]
+    if include_root:
+        records.insert(0, _record(ROOT_RUN_ID, output_artifacts=[_artifact("image", "a" * 64)]))
+        records[1]["parent_run_ids"] = [{"run_id": ROOT_RUN_ID, "kind": "causal"}]
 
+    calls: list[tuple[str, str]] = []
 
-def _write_prepare_outputs(out_path: Path) -> None:
-    out_path.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "schema_version": 1,
-        "target_run_id": TARGET_RUN_ID,
-        "thread_id": THREAD_ID,
-        "runs": [
-            {
-                "run_id": TARGET_RUN_ID,
-                "thread_id": THREAD_ID,
-                "label": "in_thread",
-                "causal_depth": 0,
-                "output_artifacts": [
-                    {"kind": "image", "role": "other", "path": "runs/source/image.png", "sha256": "a" * 64, "duration": 4}
-                ],
-                "summary": {"summary": "SECRET prompt should not appear in no-content output"},
-            }
-        ],
-        "quality": {"data_quality": 0.95},
-    }
-    quality = {
-        "schema_version": 1,
-        "target_run_id": TARGET_RUN_ID,
-        "data_quality": 0.95,
-        "valid_roots": [TARGET_RUN_ID],
-        "unresolved_producer_runs": [],
-    }
-    _write_json(out_path / "iteration.manifest.json", manifest)
-    _write_json(out_path / "iteration.quality.json", quality)
+    class Runs:
+        def list(self, project):
+            calls.append(("list", project))
+            return type("Result", (), {"ok": True, "data": records})()
 
-
-def _write_run(repo: Path, slug: str, record: dict) -> None:
-    run_dir = repo / "runs" / slug
-    run_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(run_dir / "run.json", record)
+    runtime = type("Runtime", (), {"runs": Runs()})()
+    runtime.calls = calls
+    return runtime
 
 
 def _record(

@@ -10,10 +10,10 @@ stability: stable
 support: core
 permissions:
   - id: subprocess
-    reason: Runs iteration assembly and preparation executors as subprocesses.
+    reason: Runs iteration assembly and experiment executors as subprocesses.
   - id: project_files
     reason: Reads iteration manifests and writes timeline and asset files.
-description: Builds an iteration video from runtime-owned run provenance — gathers candidate runs, scores quality, and assembles a canonical iteration timeline plus render-ready hype inputs. Also provides provider-independent experiment preparation and review.
+description: Builds an iteration video from runtime-owned run provenance — discovers candidate runs through the generated client, scores quality, and assembles a canonical iteration timeline plus render-ready hype inputs. Also provides provider-independent experiment preparation and review.
 keywords:
   - iteration
   - provenance
@@ -27,7 +27,6 @@ keywords:
   - review
   - provider-independent
 capabilities:
-  - prepare_iteration
   - collect_runtime_provenance
   - score_iteration_quality
   - assemble_iteration_timeline
@@ -40,8 +39,7 @@ content:
   executors: executors
   orchestrators: orchestrators
 agent:
-  purpose: "Use to turn runtime-owned run history into an iteration video artifact: prepare provenance/quality from a target run, then assemble the canonical iteration timeline and render-compatible hype inputs."
+  purpose: "Use to turn runtime-owned run history into an iteration video artifact: discover provenance/quality from the selected project runtime, then assemble the canonical iteration timeline and render-compatible hype inputs."
   do_not_use_for: "Not for raw video editing or clip trimming (use the media pack) or final video rendering (use the rendering pack on the emitted hype adapter)."
   normal_entrypoints:
-    - iteration.prepare
     - iteration.assemble

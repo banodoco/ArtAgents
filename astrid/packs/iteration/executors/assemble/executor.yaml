@@ -20,7 +20,7 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Adapt prepared iteration data into canonical iteration artifacts and render-compatible hype inputs.",
+  "description": "Adapt runtime-derived or file-backed iteration data into canonical iteration artifacts and render-compatible hype inputs.",
   "graph": {
     "consumes": [
       "iteration_manifest",
@@ -35,7 +35,7 @@
   "id": "iteration.assemble",
   "inputs": [
     {
-      "description": "Directory containing iteration.prepare outputs.",
+      "description": "Legacy directory containing iteration manifest and quality inputs.",
       "name": "prepare_dir",
       "required": true,
       "type": "directory"
@@ -105,6 +105,6 @@
       "type": "file"
     }
   ],
-  "short_description": "Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs.",
+  "short_description": "Adapt runtime-derived or file-backed iteration data into canonical iteration artifacts and render-ready hype inputs.",
   "version": "1.0"
 }

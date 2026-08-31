@@ -1,23 +1,23 @@
 ---
 name: iteration
 description: >
-  Iteration pack — builds iteration videos from thread provenance by
-  gathering candidate runs, scoring quality, and assembling a canonical
-  iteration timeline plus render-ready hype inputs.
+  Iteration pack — assembles runtime-owned project runs into a canonical
+  iteration timeline plus render-ready hype inputs, and supports
+  provider-independent experiment review.
 ---
 
 # Iteration
 
-The iteration pack turns a thread's run history into an iteration video artifact.
-It collects thread provenance, scores quality across candidate runs, and assembles
-the canonical iteration timeline with render-compatible hype inputs.
+The iteration pack provides the assembly and experiment-review surfaces. The
+`video_editing.iteration_video` orchestrator discovers project runs through the
+runtime client, derives lineage and quality, and passes those inputs to the
+assembler; no thread index or filesystem run projection is an authority.
 
 ## Executors
 
 | Executor | What it does |
 |---|---|
-| `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
-| `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs (timeline + assets). |
+| `iteration.assemble` | Adapt runtime-derived (or legacy file-backed) iteration data into canonical iteration artifacts and render-ready hype inputs (timeline + assets). |
 | `iteration.experiment_prepare` | Normalize an experiment's provider manifests into a provider-independent review model with diagnostics. |
 | `iteration.experiment_review` | Render a deterministic, provider-independent HTML review page from a normalized review.json. |
 | `iteration.experiment_import` | Import an unmanaged/legacy run root (e.g. Discord-command POC) into a provider-independent experiment with an honest import report. Read-only over source; idempotent and byte-stable. |
@@ -73,9 +73,11 @@ result = sdk.invoke(
 
 ## When to use
 
-- Use `iteration.prepare` → `iteration.assemble` in sequence to turn a thread's
-  run history into an iteration video.
-- The `video_editing.iteration_video` orchestrator sequences these automatically.
+- The `video_editing.iteration_video` orchestrator reads the selected runtime
+  project's runs through the generated client, derives the lineage graph and
+  quality metadata in memory, then invokes `iteration.assemble` and rendering.
+  The retired `iteration.prepare` executor is not a public entrypoint and is
+  never declared or invoked by iteration-video.
 - Use the `experiment_*` executors to review/import runs from any provider
   without executing anything.
 
@@ -92,14 +94,8 @@ result = sdk.invoke(
 ```python
 import astrid.sdk as sdk
 
-# Prepare iteration data from a thread run
-result = sdk.invoke(
-    "iteration.prepare",
-    inputs={"run_id": "<run_id>"},
-    out="./out",
-)
-
-# Assemble into render-ready hype inputs
+# Assemble file-backed inputs into render-ready hype inputs. The public
+# iteration-video route derives these inputs directly from runtime APIs.
 result = sdk.invoke(
     "iteration.assemble",
     inputs={"prepare_dir": "./out"},

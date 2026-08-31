@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble prepared iteration data into render-compatible adapter files."""
+"""Assemble runtime-derived or file-backed iteration data into render adapters."""
 
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ class AssembleError(RuntimeError):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Assemble iteration.prepare outputs into render adapter files.")
-    parser.add_argument("--prepare-dir", required=True, help="Directory containing iteration.prepare outputs.")
+    parser = argparse.ArgumentParser(description="Assemble iteration inputs into render adapter files.")
+    parser.add_argument("--prepare-dir", required=True, help="Legacy directory containing iteration manifest and quality inputs.")
     parser.add_argument("--out", required=True, help="Directory for iteration.assemble outputs.")
     parser.add_argument("--force", action="store_true", help="Bypass the data_quality floor and record forced=true.")
     parser.add_argument("--direction", default=None, help="Optional direction label. It is not parsed in v1.")
@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def assemble_iteration(
     *,
-    prepare_dir: Path,
+    prepare_dir: Path | None = None,
     out_path: Path,
     repo_root: Path = REPO_ROOT,
     force: bool = False,
@@ -193,16 +193,27 @@ def assemble_iteration(
     theme: str | None = None,
     style_preset: str | None = None,
     audio_bed: str = "auto",
+    input_manifest: Mapping[str, Any] | None = None,
+    input_quality: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if mode != "chaptered":
         raise AssembleError("iteration.assemble supports only --mode chaptered in v1; parallel and interleaved are deferred.")
     if audio_bed == "generated_music":
         raise AssembleError("iteration.assemble never generates music; use auto, iterations-as-bed, theme-declared-bed, or silence-room-tone.")
-    prepare_dir = prepare_dir.expanduser().resolve()
+    if prepare_dir is not None:
+        prepare_dir = prepare_dir.expanduser().resolve()
     out_path = out_path.expanduser().resolve()
     repo_root = repo_root.expanduser().resolve()
-    prepare_manifest = _read_json(prepare_dir / "iteration.manifest.json")
-    quality = _read_json(prepare_dir / "iteration.quality.json")
+    if input_manifest is not None or input_quality is not None:
+        if not isinstance(input_manifest, Mapping) or not isinstance(input_quality, Mapping):
+            raise AssembleError("input_manifest and input_quality must be supplied together")
+        prepare_manifest = dict(input_manifest)
+        quality = dict(input_quality)
+    elif prepare_dir is not None:
+        prepare_manifest = _read_json(prepare_dir / "iteration.manifest.json")
+        quality = _read_json(prepare_dir / "iteration.quality.json")
+    else:
+        raise AssembleError("either prepare_dir or runtime-derived input artifacts are required")
     _enforce_quality_floor(quality, force=force)
 
     assembly = build_assembly(
@@ -247,7 +258,8 @@ def assemble_iteration(
         "schema_version": 1,
         "kind": "render",
         "inputs": {
-            "prepare_dir": str(prepare_dir),
+            "prepare_dir": str(prepare_dir) if prepare_dir is not None else None,
+            "runtime_authority": input_manifest is not None,
             "out": str(out_path),
             "force": force,
             "direction": direction,

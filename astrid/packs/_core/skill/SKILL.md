@@ -507,7 +507,6 @@ orchestrator, or element manifests.
 | --- | --- |
 | `blender.render` | Render a Blender scene (declarative spec or .blend file) to a still or animation, locally or on a cloud render host. |
 | `comfy_wrap.run` | Generate an image by injecting a prompt into a ComfyUI workflow JSON and running it via vibecomfy. |
-| `discord_local.command` | Preview, submit once, or recover one Discord generation as an experiment-ready run. |
 | `editorial.arrange` | Compose a brief-specific shot arrangement from the source clip pool. |
 | `editorial.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
 | `editorial.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
@@ -531,11 +530,11 @@ orchestrator, or element manifests.
 | `generation.generate_image` | Generate images from text prompts via local, cloud, or Codex backends. v2: model→mode→backend. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
 | `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf/v2v modes. |
-| `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
+| `iteration.assemble` | Adapt runtime-derived or file-backed iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.experiment_import` | Import an unmanaged run root into an experiment without rewriting history or guessing ambiguous associations. |
 | `iteration.experiment_prepare` | Normalize an experiment's provider manifests into a provider-independent review model with diagnostics. |
 | `iteration.experiment_review` | Render a deterministic HTML gallery comparing provider outputs with prompt, parameters, warnings, and diagnostics. |
-| `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
+| `iteration.prepare` | Collect runtime-owned provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `media.gif_search` | Search GIPHY for GIF or sticker assets and optionally download a selected rendition. |
 | `media.speech_repair_lavasr` | Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass. |
@@ -545,7 +544,7 @@ orchestrator, or element manifests.
 | `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
 | `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
-| `rendering.render` | Render a hype timeline to an .mp4 output through the selected backend. |
+| `rendering.render` | Render a hype timeline to opaque MP4 or explicitly stamped alpha MOV through the selected backend. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
 | `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |
 | `rendering.timeline_visualize` | Build a deterministic, agent-navigable evidence pack from managed timeline event logs. |
@@ -554,13 +553,13 @@ orchestrator, or element manifests.
 | `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
-| `seedance_local.reference_video` | Generate one Seedance 2.0 video from ordered local image references and/or a reference clip. |
 | `stream_content.clip_candidates` | Score transcript windows as publishable stream clip candidates. |
 | `stream_content.segment_map` | Fuse OCR, transcript density, and scene cuts into a complete stream timeline. |
 | `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `training.pool_build` | Build the candidate clip pool from triaged source-video scenes. |
 | `training.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. |
 | `training.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
+| `typed_timeline.map` | Map typed rows to a validated timeline JSON. |
 | `understanding.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
 | `understanding.scene_describe` | Caption each detected scene with a vision model for downstream selection. |
 | `understanding.understand` | Dispatch to the audio, visual, or video understanding executor based on --mode. |
@@ -581,10 +580,11 @@ orchestrator, or element manifests.
 | `stream_content.distill` | Distill a long event stream into segments, extracted blocks, candidates, and a review page. |
 | `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
+| `typed_timeline.render` | Map typed rows then render via ffmpeg fast-path. |
 | `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
 | `video_editing.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
 | `video_editing.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |
-| `video_editing.iteration_video` | Prepare an iteration graph, assemble render inputs, render, and finalize iteration video outputs. |
+| `video_editing.iteration_video` | Discover runtime project runs, assemble render inputs, render, and finalize iteration video outputs. |
 | `video_editing.logo_ideas` | Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders. |
 | `video_editing.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
 | `video_editing.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
@@ -600,12 +600,7 @@ orchestrator, or element manifests.
 | `animations/slide-up` | Slide up exit animation. |
 | `animations/type-on` | Typewriter-style text reveal animation. |
 | `effects/audio-reactive-colour` | Fill the frame with colours selected by frozen integer-frame markers. |
-| `effects/model-trends` | Animated stacked-area chart of model-family share-of-conversation, driven by Remotion frame. |
-| `effects/neon-orbit-card` | DOM-to-canvas Remotion effect for post-processed cards. |
-| `effects/sliding-media` | Full-screen media clip with slide-in/out motion. |
-| `effects/text-card` | Anchored text card overlay with built-in fade in/out. |
-| `effects/vibe-comfy-asset-overlay` | Asset-driven Vibe Comfy overlay with procedural noodle. |
-| `effects/vibe-comfy-bumper` | Procedural Remotion bumper for Vibe Comfy. |
+| `effects/text-card` | Default text card effect for captions and titles. |
 | `transitions/cross-fade` | Cross fade transition. |
 | `transitions/fade` | Fade-through-black transition. |
 

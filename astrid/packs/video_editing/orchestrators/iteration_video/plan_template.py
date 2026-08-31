@@ -25,11 +25,11 @@ def build_plan_v2(
     run_id: str | None = None,
     renderer: str = "remotion",
 ) -> dict[str, Any]:
-    """Build a task plan for prepare → assemble → render iteration-video work."""
+    """Build a task plan for runtime discovery → assemble → render work."""
 
     run_root = Path(run_root)
     plan_id = f"iteration-video-{run_id or uuid.uuid4().hex[:12]}"
-    cmd_prepare = _build_prepare_cmd(python_exec, run_root, target_run_id, repo_root)
+    del target_run_id
     cmd_assemble = _build_assemble_cmd(python_exec, run_root, repo_root)
     cmd_render = _build_render_cmd(python_exec, run_root, renderer=renderer)
     local_zero = cost_entry(0, source="local")
@@ -38,11 +38,11 @@ def build_plan_v2(
         plan_id=plan_id,
         steps=[
             build_leaf_template(
-                "prepare",
-                command=cmd_prepare,
+                "runtime-discovery",
+                command=(python_exec, "-c", "# runtime project runs are read by iteration_video"),
                 produces=[
-                    file_output("manifest", "iteration.manifest.json"),
-                    file_output("quality", "iteration.quality.json"),
+                    file_output("runtime_manifest", "runtime-derived/iteration.manifest.json"),
+                    file_output("runtime_quality", "runtime-derived/iteration.quality.json"),
                 ],
                 cost=local_zero,
             ),
@@ -72,27 +72,13 @@ def build_plan_v2(
     )
 
 
-def _build_prepare_cmd(
-    python_exec: str,
-    run_root: Path,
-    target_run_id: str,
-    repo_root: str | Path | None,
-) -> str:
-    out = run_root / "steps" / "prepare" / "v1" / "produces"
-    repo_flag = f" --repo-root {Path(repo_root).resolve()}" if repo_root else ""
-    return (
-        f"{python_exec} -m astrid.packs.iteration.executors.prepare.run "
-        f"--target-run-id {target_run_id} --out {out}{repo_flag}"
-    )
-
-
 def _build_assemble_cmd(
     python_exec: str,
     run_root: Path,
     repo_root: str | Path | None,
 ) -> str:
     out = run_root / "steps" / "assemble" / "v1" / "produces"
-    prepare_dir = run_root / "steps" / "prepare" / "v1" / "produces"
+    prepare_dir = run_root / "steps" / "runtime-derived" / "v1" / "produces"
     repo_flag = f" --repo-root {Path(repo_root).resolve()}" if repo_root else ""
     return (
         f"{python_exec} -m astrid.packs.iteration.executors.assemble.run "

@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
@@ -50,17 +51,15 @@ def test_dogfood_fixture_backfill_active_thread_no_content_and_local_path_policy
 
 def test_dogfood_fixture_inspect_report_and_fallback_without_render_or_summarize(tmp_path: Path, monkeypatch) -> None:
     repo = _install_fixture(tmp_path)
-
-    def fail_prepare(*args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError("inspect must not summarize")
+    runtime = _runtime_from_fixture(repo)
 
     def fail_render(*args, **kwargs):  # pragma: no cover - should never be called
         raise AssertionError("inspect must not render")
 
-    monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fail_prepare)
+    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
     monkeypatch.setattr(iteration_video, "run_builtin_render", fail_render)
 
-    report = iteration_video.inspect_iteration_thread(repo_root=repo, thread_ref=THREAD_ID, target_run_id=TARGET_RUN_ID)
+    report = iteration_video.inspect_iteration_thread(repo_root=repo, thread_ref=THREAD_ID, target_run_id=TARGET_RUN_ID, project_slug="demo")
     text = iteration_video.format_inspection(report, no_content=True)
 
     assert report["detected_modalities"] == ["audio", "image", "model_3d"]
@@ -69,15 +68,16 @@ def test_dogfood_fixture_inspect_report_and_fallback_without_render_or_summarize
     assert ("audio", "audio_waveform", False) in renderers
     assert ("model_3d", "generic_card", True) in renderers
     assert report["quality"]["data_quality"] == 1.0
-    assert report["summary_cache"] == {"hits": 0, "misses": 4}
-    assert report["cost_estimate"]["estimated_cost"] == 0.036
-    assert "Estimated cost: ~$0.036" in text
+    assert report["summary_cache"] == {"hits": 0, "misses": 0}
+    assert report["cost_estimate"]["estimated_cost"] == 0.0
+    assert "Estimated cost: ~$0.000" in text
     assert "content: suppressed" in text
     assert "unlabeled" in text
 
 
 def test_dogfood_fixture_render_handoff_outputs_report_without_sidecar_authority(tmp_path: Path, monkeypatch) -> None:
     repo = _install_fixture(tmp_path)
+    runtime = _runtime_from_fixture(repo)
     out_dir = repo / "runs" / "astrid_logo_v3_iteration"
     render_inputs: dict[str, Path] = {}
 
@@ -91,12 +91,27 @@ def test_dogfood_fixture_render_handoff_outputs_report_without_sidecar_authority
         return output
 
     monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
+    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
+
+    def fake_assemble(**kwargs):
+        out = kwargs["out_path"]
+        out.mkdir(parents=True, exist_ok=True)
+        _write_json(out / "iteration.manifest.json", {"assembly": {"direction_label": "fixture"}})
+        _write_json(out / "iteration.quality.json", {"data_quality": 1.0})
+        _write_json(out / "iteration.timeline.json", {})
+        _write_json(out / "hype.timeline.json", {})
+        _write_json(out / "hype.assets.json", {})
+        (out / "iteration.report.html").write_text("renderer-fallback", encoding="utf-8")
+        return {"manifest_path": str(out / "iteration.manifest.json")}
+
+    monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble)
 
     result = iteration_video.run_iteration_video(
         repo_root=repo,
         out_path=out_dir,
         thread_ref=THREAD_ID,
         target_run_id=TARGET_RUN_ID,
+        project_slug="demo",
         max_iterations=10,
         direction="fixture",
         clip_mode="hold",
@@ -128,7 +143,7 @@ def test_dogfood_fixture_render_handoff_outputs_report_without_sidecar_authority
     assert not (out_dir / ".astrid.variants.json").exists()
 
     orchestrator = _read_json(Path("astrid/packs/video_editing/orchestrators/iteration_video/orchestrator.yaml"))
-    assert orchestrator["child_executors"] == ["iteration.prepare", "iteration.assemble", "rendering.render"]
+    assert orchestrator["child_executors"] == ["iteration.assemble", "rendering.render"]
     assert "video_editing.cut" not in json.dumps(orchestrator)
 
 
@@ -177,5 +192,22 @@ def _install_fixture(tmp_path: Path) -> Path:
     return repo
 
 
+def _runtime_from_fixture(repo: Path):
+    records = []
+    for path in sorted((repo / "runs").glob("*/run.json")):
+        records.append(json.loads(path.read_text(encoding="utf-8")))
+
+    class Runs:
+        def list(self, project):
+            return type("Result", (), {"ok": True, "data": records})()
+
+    return type("Runtime", (), {"runs": Runs()})()
+
+
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")

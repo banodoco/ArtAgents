@@ -19,7 +19,7 @@ together form the video creation and editing surface of Astrid.
 | Full hype video pipeline (transcribe → render) | `video_editing.hype` | End-to-end pipeline: transcribe source, detect scenes, build clip pool, arrange shots, cut timeline, render video. The default entry point for hype videos. |
 | Event talk videos (templated talks + render) | `video_editing.event_talks` | Build event talk videos from a template, search transcripts, find holding screens, and render via local ffmpeg/Remotion. |
 | Thumbnail generation from video + query | `video_editing.thumbnail_maker` | Generate a set of thumbnail candidates from a source video and a text query. Plans evidence needs, discovers source frames, and renders a grid of candidates. |
-| Iteration video compilation | `video_editing.iteration_video` | Prepare an iteration graph, assemble render adapter files, render through rendering.render, and finalize iteration video outputs. |
+| Iteration video compilation | `video_editing.iteration_video` | Read selected runtime project runs, assemble render adapter files, render through rendering.render, and finalize iteration video outputs. |
 | Logo concept grid generation | `video_editing.logo_ideas` | Generate a grid of distinct logo concepts: Kimi K2 drafts prompts, then GPT Image 2 renders a composite grid (or per-image renders with `--provider z-image`). |
 | Image-to-video animation | `video_editing.animate_image` | Two-stage pipeline: generate a still image via fal GPT Image 2 edit, then animate it with fal WAN 2.2 animate/move driven by a reference video. |
 | Grid-based variation editing | `video_editing.vary_grid` | Iterative grid editor: take an existing grid image, pick reference cells, generate a new grid of variations via fal GPT Image 2 edit. |
@@ -45,8 +45,8 @@ and `hype.metadata.json` — the three-file input to rendering.render.
   want templated video output with transcript search and holding screens.
 - Use `video_editing.thumbnail_maker` when you need thumbnail candidates
   for a video — provides a query-driven planning and generation flow.
-- Use `video_editing.iteration_video` for compiling iteration/experiment
-  runs into a video summary.
+- Use `video_editing.iteration_video` for compiling selected runtime-project
+  runs into a video summary. It does not read thread indexes or run.json files.
 - Use `video_editing.logo_ideas` for quick logo concept exploration via
   LLM prompt drafting and image generation.
 - Use `video_editing.animate_image` to turn a still image into an

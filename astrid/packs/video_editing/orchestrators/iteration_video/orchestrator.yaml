@@ -4,16 +4,15 @@
     "mode": "none"
   },
   "child_executors": [
-    "iteration.prepare",
     "iteration.assemble",
     "rendering.render"
   ],
   "child_orchestrators": [],
-  "description": "Prepare an iteration graph, assemble render adapter files, render through rendering.render, and finalize iteration video outputs.",
+  "description": "Discover runtime-owned project runs, assemble render adapter files, render through rendering.render, and finalize iteration video outputs.",
   "id": "video_editing.iteration_video",
   "inputs": [
     {
-      "description": "Historical lineage id (runtime-owned run provenance is preferred; not session binding).",
+      "description": "Optional runtime-record lineage id (not session binding).",
       "name": "thread",
       "required": false,
       "type": "string"
@@ -64,6 +63,6 @@
     "kind": "python",
     "module": "astrid.packs.video_editing.orchestrators.iteration_video.run"
   },
-  "short_description": "Prepare an iteration graph, assemble render inputs, render, and finalize iteration video outputs.",
+  "short_description": "Discover runtime project runs, assemble render inputs, render, and finalize iteration video outputs.",
   "version": "1.0"
 }

@@ -1,7 +1,9 @@
 # Iteration Assemble Executor
 
-`iteration.assemble` consumes the outputs from `iteration.prepare` and writes
-the render adapter files for `rendering.render`.
+`iteration.assemble` writes render adapter files for `rendering.render`. The
+public `video_editing.iteration_video` route supplies runtime-derived manifest
+and quality mappings directly; the `prepare_dir` input remains only as a
+file-backed compatibility form for direct assembler calls.
 
 Inputs:
 

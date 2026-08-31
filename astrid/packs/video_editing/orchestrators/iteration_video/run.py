@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate prepare, assemble, render, and finalization for iteration videos."""
+"""Orchestrate runtime-authority run discovery, assembly, and rendering."""
 
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import argparse
 import json
 import os
 import sys
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,7 +24,6 @@ from astrid.core.ids import is_ulid
 
 SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
-from astrid.packs.iteration.executors.prepare import run as prepare
 
 OUTPUT_FILES = (
     ("iteration.mp4", "video"),
@@ -38,6 +39,19 @@ class IterationVideoError(RuntimeError):
     pass
 
 
+@dataclass
+class RuntimeRunNode:
+    """Small graph view assembled from runtime run resources."""
+
+    run_id: str
+    record: dict[str, Any]
+    depth: int
+    label: str
+    parent_edges: list[dict[str, Any]] = field(default_factory=list)
+    unresolved_parent_run_ids: list[str] = field(default_factory=list)
+    selection_order: int = 999_999
+
+
 def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
     out_path = Path(request.out).expanduser().resolve()
     args = _parse_passthrough(tuple(getattr(request, "orchestrator_args", ()) or ()))
@@ -48,23 +62,31 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
         return _dry_run_result(orchestrator.id, out_path=out_path)
 
     try:
-        result = run_iteration_video(
-            repo_root=repo_root,
-            out_path=out_path,
-            thread_ref=thread_ref,
-            target_run_id=str(target_run_id) if target_run_id else None,
-            max_iterations=args.max_iterations,
-            renderers=args.renderers,
-            renderer=args.renderer,
-            clip_mode=args.clip_mode,
-            direction=args.direction,
-            mode=args.mode,
-            audio_bed=args.audio_bed,
-            force=args.force,
-            no_content=args.no_content,
-            **_attached_render_binding(request),
-        )
-    except (IterationVideoError, prepare.PrepareError, assemble.AssembleError, OSError, RuntimeError) as exc:
+        # The orchestrator subprocess has no local project/run authority. Open
+        # the selected workspace runtime here and pass its client explicitly to
+        # the route so all run selection and provenance reads are API-backed.
+        with _runtime_client_context() as runtime_client:
+            render_binding = _attached_render_binding(request)
+            render_binding.pop("project_slug", None)
+            result = run_iteration_video(
+                repo_root=repo_root,
+                out_path=out_path,
+                thread_ref=thread_ref,
+                target_run_id=str(target_run_id) if target_run_id else None,
+                max_iterations=args.max_iterations,
+                renderers=args.renderers,
+                renderer=args.renderer,
+                clip_mode=args.clip_mode,
+                direction=args.direction,
+                mode=args.mode,
+                audio_bed=args.audio_bed,
+                force=args.force,
+                no_content=args.no_content,
+                project_slug=getattr(request, "project", None),
+                runtime_client=runtime_client,
+                **render_binding,
+            )
+    except (IterationVideoError, assemble.AssembleError, OSError, RuntimeError) as exc:
         return {
             "orchestrator_id": orchestrator.id,
             "kind": orchestrator.kind,
@@ -98,28 +120,37 @@ def run_iteration_video(
     force: bool = False,
     no_content: bool = False,
     project_slug: str | None = None,
+    runtime_client: Any | None = None,
     parent_run_id: str | None = None,
     render_step_id: str | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.expanduser().resolve()
     out_path = out_path.expanduser().resolve()
-    target = resolve_target_run_id(repo_root, thread_ref=thread_ref, target_run_id=target_run_id)
-    prepare_dir = out_path.parent / f".{out_path.name}.prepare"
-    prepare_result = prepare.prepare_iteration(
-        repo_root=repo_root,
-        out_path=prepare_dir,
-        target_run_id=target["target_run_id"],
-        max_iterations=max_iterations,
-    )
-    assemble_result = assemble.assemble_iteration(
-        prepare_dir=prepare_dir,
-        out_path=out_path,
-        repo_root=repo_root,
-        force=force,
-        direction=direction,
-        mode=mode,
-        audio_bed=audio_bed,
-    )
+    del max_iterations  # Runtime reads are bounded by the API page, not summaries.
+    with _runtime_client_context(runtime_client) as client:
+        target, records = resolve_target_run_id(
+            repo_root,
+            thread_ref=thread_ref,
+            target_run_id=target_run_id,
+            project_slug=project_slug,
+            runtime_client=client,
+        )
+        nodes = _collect_runtime_graph(records, target["target_run_id"])
+        input_manifest, input_quality = _build_runtime_inputs(
+            nodes,
+            target_run_id=target["target_run_id"],
+            project_slug=target["project_slug"],
+        )
+        assemble_result = assemble.assemble_iteration(
+            out_path=out_path,
+            repo_root=repo_root,
+            force=force,
+            direction=direction,
+            mode=mode,
+            audio_bed=audio_bed,
+            input_manifest=input_manifest,
+            input_quality=input_quality,
+        )
     _record_requested_flags(
         out_path / "iteration.manifest.json",
         renderers=renderers,
@@ -130,19 +161,21 @@ def run_iteration_video(
         out_path,
         repo_root=repo_root,
         renderer=renderer,
-        project_slug=project_slug,
+        # Render must use the same selected runtime project that supplied the
+        # input runs.  This matters for direct SDK callers that omit the
+        # optional project argument and rely on runtime selection.
+        project_slug=target["project_slug"],
         parent_run_id=parent_run_id,
         step_id=render_step_id,
     )
     return {
         "thread_id": target["thread_id"],
         "target_run_id": target["target_run_id"],
-        "prepare": prepare_result,
         "assemble": assemble_result,
         "outputs": {name: str(out_path / name) for name, _kind in OUTPUT_FILES},
         "planned_commands": (
-            ("iteration.prepare", target["target_run_id"]),
-            ("iteration.assemble", str(prepare_dir), str(out_path)),
+            ("runtime.runs.list/show", target["project_slug"], target["target_run_id"]),
+            ("iteration.assemble", str(out_path)),
             ("rendering.render", str(out_path / "hype.timeline.json"), str(out_path / "hype.assets.json")),
         ),
     }
@@ -204,19 +237,29 @@ def inspect_iteration_thread(
     repo_root: Path,
     thread_ref: str,
     target_run_id: str | None = None,
-    summarizer_model_version: str = prepare.DEFAULT_SUMMARIZER_MODEL_VERSION,
-    cost_per_call: float = prepare.DEFAULT_COST_PER_CALL,
+    summarizer_model_version: str = "runtime.runs.v1",
+    cost_per_call: float = 0.0,
+    project_slug: str | None = None,
+    runtime_client: Any | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.expanduser().resolve()
-    target = resolve_target_run_id(repo_root, thread_ref=thread_ref, target_run_id=target_run_id)
-    all_records = prepare.load_run_records(repo_root)
-    if target["target_run_id"] not in all_records:
-        raise IterationVideoError(f"unknown target run: {target['target_run_id']}")
-    nodes = prepare.order_nodes(prepare.collect_graph(repo_root, all_records, target["target_run_id"]))
-    quality = prepare.compute_quality(nodes, target_run_id=target["target_run_id"])
-    renderers = renderer_decisions(nodes)
-    cache_stats = inspect_cache(repo_root, nodes, summarizer_model_version=summarizer_model_version)
-    uncached = cache_stats["misses"]
+    with _runtime_client_context(runtime_client) as client:
+        target, records = resolve_target_run_id(
+            repo_root,
+            thread_ref=thread_ref,
+            target_run_id=target_run_id,
+            project_slug=project_slug,
+            runtime_client=client,
+        )
+        nodes = _collect_runtime_graph(records, target["target_run_id"])
+        quality = _build_runtime_inputs(
+            nodes,
+            target_run_id=target["target_run_id"],
+            project_slug=target["project_slug"],
+        )[1]
+        renderers = renderer_decisions(nodes)
+    cache_stats = {"hits": 0, "misses": 0}
+    uncached = 0
     return {
         "schema_version": SCHEMA_VERSION,
         "thread_id": target["thread_id"],
@@ -256,36 +299,320 @@ def format_inspection(report: Mapping[str, Any], *, no_content: bool = False) ->
     return "\n".join(lines) + "\n"
 
 
-def resolve_target_run_id(repo_root: Path, *, thread_ref: str, target_run_id: str | None = None) -> dict[str, str]:
-    all_records = prepare.load_run_records(repo_root)
+def _runtime_client_context(client: Any | None = None):
+    if client is not None:
+        return nullcontext(client)
+    from astrid.sdk.client import AstridClient
+
+    return AstridClient.open()
+
+
+def _resolve_runtime_project(client: Any, project_slug: str | None) -> str:
+    if project_slug:
+        return str(project_slug)
+    # A worker receives ASTRID_PROJECT_SLUG from the canonical runner. Keep an
+    # explicit client selection hook for embedders that do not use that env.
+    env_project = os.environ.get("ASTRID_PROJECT_SLUG")
+    if env_project:
+        return env_project
+    selected = getattr(client, "selected_project_ref", None)
+    if callable(selected):
+        value = selected()
+        if value:
+            return str(value)
+    projects = getattr(client, "projects", None)
+    current = getattr(projects, "current", None)
+    if callable(current):
+        result = current()
+        data = getattr(result, "data", result)
+        if isinstance(data, Mapping):
+            value = data.get("project_id") or data.get("slug") or data.get("project")
+            if value:
+                return str(value)
+    raise IterationVideoError(
+        "iteration video requires a selected runtime project; pass --project or attach project context"
+    )
+
+
+def _unwrap_runtime_result(value: Any) -> Any:
+    if hasattr(value, "ok") and hasattr(value, "data"):
+        if not bool(value.ok):
+            error = getattr(value, "error", None)
+            raise IterationVideoError(str(error or "runtime run read failed"))
+        return value.data
+    return value
+
+
+def _runtime_run_list(client: Any, project: str) -> list[Any]:
+    runs = getattr(client, "runs", None)
+    method = getattr(runs, "list", None)
+    if callable(method):
+        value = _unwrap_runtime_result(method(project))
+    else:
+        method = getattr(client, "list_project_runs", None)
+        if not callable(method):
+            raise IterationVideoError("runtime client does not expose project run listing")
+        value = method(project)
+    if isinstance(value, Mapping):
+        value = value.get("items", ())
+    if not isinstance(value, (list, tuple)):
+        raise IterationVideoError("runtime project run listing returned an invalid response")
+    return list(value)
+
+
+def _runtime_run_show(client: Any, project: str, run_id: str) -> dict[str, Any] | None:
+    runs = getattr(client, "runs", None)
+    method = getattr(runs, "show", None)
+    try:
+        value = _unwrap_runtime_result(method(project, run_id)) if callable(method) else client.get_run(run_id)
+    except Exception:
+        return None
+    return _normalize_runtime_record(value, client=client, project=project)
+
+
+def _load_runtime_records(client: Any, project: str) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for raw in _runtime_run_list(client, project):
+        record = _normalize_runtime_record(raw, client=client, project=project)
+        run_id = str(record.get("run_id") or "")
+        if run_id:
+            records[run_id] = record
+    return records
+
+
+def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[str, Any]:
+    if hasattr(raw, "__dict__") and not isinstance(raw, Mapping):
+        raw = vars(raw)
+    if not isinstance(raw, Mapping):
+        raise IterationVideoError("runtime run resource is not an object")
+    source = dict(raw)
+    run_id = str(source.get("run_id") or source.get("id") or "")
+    spec = source.get("spec") if isinstance(source.get("spec"), Mapping) else {}
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), Mapping) else {}
+    result = source.get("result") if isinstance(source.get("result"), Mapping) else {}
+    record: dict[str, Any] = {**dict(spec), **source}
+    record["run_id"] = run_id
+    record["thread_id"] = str(
+        source.get("thread_id") or metadata.get("thread_id") or spec.get("thread_id") or ""
+    )
+    record["executor_id"] = str(
+        source.get("executor_id") or source.get("capability") or source.get("capability_id")
+        or spec.get("executor_id") or "runtime.run"
+    )
+    record["out_path"] = source.get("out_path") or source.get("run_root") or spec.get("out_path")
+    record["parent_run_ids"] = source.get("parent_run_ids") or spec.get("parent_run_ids") or []
+    record["provenance"] = source.get("provenance") or spec.get("provenance") or {}
+    record["input_artifacts"] = _artifact_list(
+        source.get("input_artifacts") or spec.get("input_artifacts") or source.get("inputs") or spec.get("inputs")
+    )
+    output_raw = (
+        source.get("output_artifacts") or source.get("outputs") or result.get("output_artifacts")
+        or result.get("outputs") or result.get("output_objects") or spec.get("output_artifacts")
+    )
+    record["output_artifacts"] = _artifact_list(output_raw)
+    if not record["output_artifacts"]:
+        _hydrate_task_outputs(record, client=client, project=project)
+    return record
+
+
+def _hydrate_task_outputs(record: dict[str, Any], *, client: Any, project: str) -> None:
+    task_ids = record.get("task_ids") or []
+    tasks = getattr(client, "tasks", None)
+    show = getattr(tasks, "show", None)
+    if not callable(show):
+        show = getattr(client, "get_task", None)
+    if not callable(show):
+        return
+    outputs: list[Any] = []
+    for task_id in task_ids if isinstance(task_ids, (list, tuple)) else ():
+        try:
+            value = _unwrap_runtime_result(show(task_id, project) if tasks is not None and hasattr(tasks, "show") else show(task_id))
+        except Exception:
+            continue
+        if not isinstance(value, Mapping):
+            continue
+        result = value.get("result") if isinstance(value.get("result"), Mapping) else value
+        outputs.extend(_artifact_list(result.get("output_artifacts") or result.get("outputs") or result.get("output_objects")))
+    record["output_artifacts"] = outputs
+
+
+def _artifact_list(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, Mapping):
+        raw = list(raw.values())
+    if not isinstance(raw, (list, tuple)):
+        return []
+    result: list[dict[str, Any]] = []
+    for value in raw:
+        if hasattr(value, "__dict__") and not isinstance(value, Mapping):
+            value = vars(value)
+        if not isinstance(value, Mapping):
+            continue
+        item = dict(value)
+        digest = item.get("sha256") or item.get("content_sha256") or item.get("digest")
+        if isinstance(digest, str):
+            item["sha256"] = digest.removeprefix("sha256:")
+        if not item.get("path"):
+            for key in ("file", "locator", "local_path"):
+                if item.get(key):
+                    item["path"] = item[key]
+                    break
+        if not item.get("kind"):
+            media_type = str(item.get("media_type") or item.get("mime_type") or "")
+            item["kind"] = media_type.split("/", 1)[0] if "/" in media_type else "opaque"
+        result.append(item)
+    return result
+
+
+def _runtime_sort_key(record: Mapping[str, Any], run_id: str) -> tuple[str, str, str]:
+    return (
+        str(record.get("updated_at") or record.get("finished_at") or record.get("created_at") or ""),
+        str(record.get("started_at") or record.get("created_at") or ""),
+        run_id,
+    )
+
+
+def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id: str) -> list[RuntimeRunNode]:
+    if target_run_id not in records:
+        raise IterationVideoError(f"unknown runtime run: {target_run_id}")
+    nodes: dict[str, RuntimeRunNode] = {}
+    queue: list[tuple[str, int]] = [(target_run_id, 0)]
+    while queue:
+        run_id, depth = queue.pop(0)
+        record = records.get(run_id)
+        if record is None:
+            continue
+        existing = nodes.get(run_id)
+        if existing is not None and existing.depth >= depth:
+            continue
+        parents, unresolved = _runtime_parent_edges(record, records)
+        thread_id = str(records[target_run_id].get("thread_id") or "")
+        nodes[run_id] = RuntimeRunNode(
+            run_id=run_id,
+            record=record,
+            depth=depth,
+            label="in_thread" if str(record.get("thread_id") or "") == thread_id else "pulled_by_ancestry",
+            parent_edges=parents,
+            unresolved_parent_run_ids=unresolved,
+        )
+        queue.extend((str(edge["run_id"]), depth + 1) for edge in parents)
+    return sorted(nodes.values(), key=lambda item: (-item.depth, item.selection_order, item.run_id))
+
+
+def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    raw_edges: list[Any] = list(record.get("parent_run_ids") or [])
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), Mapping) else {}
+    raw_edges.extend(provenance.get("contributing_runs") or [])
+    edges: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_edges:
+        value = raw if isinstance(raw, Mapping) else {"run_id": raw}
+        run_id = value.get("run_id") if isinstance(value, Mapping) else None
+        if not isinstance(run_id, str) or not is_ulid(run_id) or run_id in seen:
+            continue
+        seen.add(run_id)
+        edge = {"run_id": run_id, "kind": str(value.get("kind") or "causal")}
+        if run_id not in records:
+            unresolved.append(run_id)
+        else:
+            edges.append(edge)
+    return edges, unresolved
+
+
+def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, project_slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    total = len(nodes)
+    unresolved = [
+        {"run_id": node.run_id, "missing_parent_run_ids": node.unresolved_parent_run_ids}
+        for node in nodes if node.unresolved_parent_run_ids
+    ]
+    quality = {
+        "schema_version": SCHEMA_VERSION,
+        "target_run_id": target_run_id,
+        "total_runs": total,
+        "data_quality": 1.0 if total and not unresolved else (0.8 if total else 0.0),
+        "unresolved_producer_runs": unresolved,
+        "authority": {"kind": "runtime", "project": project_slug},
+    }
+    runs = []
+    for node in nodes:
+        runs.append({
+            "run_id": node.run_id,
+            "thread_id": node.record.get("thread_id"),
+            "label": node.label,
+            "causal_depth": node.depth,
+            "selection_order": node.selection_order,
+            "parent_run_ids": node.parent_edges,
+            "unresolved_parent_run_ids": node.unresolved_parent_run_ids,
+            "out_path": node.record.get("out_path"),
+            "executor_id": node.record.get("executor_id"),
+            "orchestrator_id": node.record.get("orchestrator_id"),
+            "output_artifacts": node.record.get("output_artifacts", []),
+            "summary": None,
+        })
+    target = next((node for node in nodes if node.run_id == target_run_id), None)
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "target_run_id": target_run_id,
+        "thread_id": target.record.get("thread_id") if target else None,
+        "runs": runs,
+        "quality": dict(quality),
+        "summary_cache": {"hits": 0, "misses": 0},
+        "cost_estimate": {"summarize_calls": 0, "uncached_summarize_calls": 0, "cost_per_call": 0.0, "estimated_cost": 0.0},
+        "authority": {"kind": "runtime", "project": project_slug, "run_ids": [node.run_id for node in nodes]},
+    }
+    return manifest, quality
+
+
+def resolve_target_run_id(
+    repo_root: Path,
+    *,
+    thread_ref: str,
+    target_run_id: str | None = None,
+    project_slug: str | None = None,
+    runtime_client: Any | None = None,
+) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+    del repo_root
+    client = runtime_client
+    if client is None:
+        raise IterationVideoError("runtime client is required for iteration-video run discovery")
+    project = _resolve_runtime_project(client, project_slug)
+    all_records = _load_runtime_records(client, project)
     thread_id = None if thread_ref in {"", "@active", None} else thread_ref
     if thread_id is not None and not is_ulid(thread_id):
         raise IterationVideoError("thread must be a thread id or @active")
     if target_run_id is not None:
         if not is_ulid(target_run_id):
             raise IterationVideoError("target run id must be a 26-character Crockford ULID")
+        if target_run_id not in all_records:
+            fetched = _runtime_run_show(client, project, target_run_id)
+            if fetched is not None:
+                all_records[target_run_id] = fetched
         record = all_records.get(target_run_id)
-        return {
+        if record is None:
+            raise IterationVideoError(f"unknown runtime run: {target_run_id}")
+        return ({
             "thread_id": str(record.get("thread_id") if isinstance(record, Mapping) else thread_id or ""),
             "thread_label": "",
             "target_run_id": target_run_id,
-        }
+            "project_slug": project,
+        }, all_records)
     candidates = [
         run_id for run_id, record in all_records.items()
         if thread_id is None or str(record.get("thread_id") or "") == thread_id
     ]
     if not candidates:
         raise IterationVideoError(f"no runtime runs found for thread: {thread_id or '@active'}")
-    selected = sorted(candidates)[-1]
+    selected = max(candidates, key=lambda run_id: _runtime_sort_key(all_records[run_id], run_id))
     record = all_records[selected]
-    return {
+    return ({
         "thread_id": str(record.get("thread_id") or thread_id or ""),
         "thread_label": "",
         "target_run_id": selected,
-    }
+        "project_slug": project,
+    }, all_records)
 
 
-def renderer_decisions(nodes: list[prepare.RunNode]) -> list[dict[str, Any]]:
+def renderer_decisions(nodes: list[RuntimeRunNode]) -> list[dict[str, Any]]:
     decisions = []
     for node in nodes:
         for artifact in node.record.get("output_artifacts", []) or []:
@@ -304,17 +631,9 @@ def renderer_decisions(nodes: list[prepare.RunNode]) -> list[dict[str, Any]]:
     return decisions
 
 
-def inspect_cache(repo_root: Path, nodes: list[prepare.RunNode], *, summarizer_model_version: str) -> dict[str, int]:
-    cache_dir = repo_root / ".astrid" / "iteration_cache"
-    hits = 0
-    misses = 0
-    safe_version = "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "_" for ch in summarizer_model_version)
-    for node in nodes:
-        if (cache_dir / f"{node.run_id}__{safe_version}.json").is_file():
-            hits += 1
-        else:
-            misses += 1
-    return {"hits": hits, "misses": misses}
+def inspect_cache(repo_root: Path, nodes: list[RuntimeRunNode], *, summarizer_model_version: str) -> dict[str, int]:
+    del repo_root, nodes, summarizer_model_version
+    return {"hits": 0, "misses": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -328,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
                 thread_ref=args.thread,
                 target_run_id=args.target_run_id,
                 cost_per_call=args.cost_per_call,
+                project_slug=args.project,
             )
         except IterationVideoError as exc:
             print(str(exc), file=sys.stderr)
@@ -354,8 +674,9 @@ def main(argv: list[str] | None = None) -> int:
             audio_bed=args.audio_bed,
             force=args.force,
             no_content=args.no_content,
+            project_slug=args.project,
         )
-    except (IterationVideoError, prepare.PrepareError, assemble.AssembleError, OSError, RuntimeError) as exc:
+    except (IterationVideoError, assemble.AssembleError, OSError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result["outputs"], indent=2, sort_keys=True))
@@ -387,6 +708,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Create an iteration video from a thread.")
     parser.add_argument("--thread", default="@active", help="Thread id or @active.")
     parser.add_argument("--target-run-id", default=None)
+    parser.add_argument("--project", default=None, help="Runtime project id or slug (defaults to the selected project).")
     parser.add_argument("--out", required=True)
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     parser.add_argument("--max-iterations", type=int, default=None)
@@ -409,8 +731,9 @@ def _inspect_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect an iteration video plan without render or summarize.")
     parser.add_argument("thread", help="Thread id or @active.")
     parser.add_argument("--target-run-id", default=None)
+    parser.add_argument("--project", default=None, help="Runtime project id or slug (defaults to the selected project).")
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
-    parser.add_argument("--cost-per-call", type=float, default=prepare.DEFAULT_COST_PER_CALL)
+    parser.add_argument("--cost-per-call", type=float, default=0.0)
     parser.add_argument("--no-content", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -423,7 +746,7 @@ def _dry_run_result(orchestrator_id: str, *, out_path: Path) -> dict[str, Any]:
         "returncode": None,
         "dry_run": True,
         "planned_commands": (
-            ("iteration.prepare", str(out_path / "_prepare")),
+            ("runtime.runs.list/show", "selected project"),
             ("iteration.assemble", str(out_path)),
             ("rendering.render", str(out_path / "hype.timeline.json"), str(out_path / "hype.assets.json")),
         ),
