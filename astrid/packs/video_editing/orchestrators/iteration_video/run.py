@@ -216,10 +216,9 @@ def _attached_render_binding(request: Any) -> dict[str, str | None]:
         }
     project_slug = getattr(request, "project", None)
     run_root = getattr(request, "run_root", None)
-    # A runtime-selected project without a parent run is a valid public route;
-    # only an orphaned run-root is an invalid binding. The render helper will
-    # use its unbound service path while the outer invocation remains runtime
-    # admitted.
+    # Rendering must remain attached to the admitted parent run. A project
+    # without that parent is intentionally left unbound so the render helper
+    # rejects the route instead of inventing a local service authority.
     if run_root and not project_slug:
         raise IterationVideoError(
             "iteration render received a run context without a parent project"

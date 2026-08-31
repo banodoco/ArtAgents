@@ -25,18 +25,6 @@ class _Registry:
         return SimpleNamespace(id=self.resolved_id)
 
 
-class _Service:
-    def __init__(self) -> None:
-        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def render(self, *args: object, **kwargs: object) -> Path:
-        self.calls.append((args, kwargs))
-        output = Path(args[2])
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"public")
-        return output
-
-
 def _seed_parent(root: Path) -> None:
     # The parent is owned by the neutral runtime fixture; this test only
     # supplies its explicit project directory and mocks the runtime lookup.
@@ -285,7 +273,7 @@ def test_executor_override_changes_attached_behavior(
     assert output.read_text(encoding="utf-8") == "local.custom-render"
 
 
-def test_unbound_falls_back_to_public_service_without_ledger(
+def test_unbound_render_is_rejected_without_runtime_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The autouse suite sandbox already creates ``tmp_path / "projects"``;
@@ -295,20 +283,15 @@ def test_unbound_falls_back_to_public_service_without_ledger(
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
     for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
-    service = _Service()
     output = tmp_path / "public" / "standalone.mp4"
 
-    result = attached.invoke_attached_render(
-        tmp_path / "timeline.json",
-        tmp_path / "assets.json",
-        output,
-        selector="rendering.fixture",
-        service=service,
-    )
-
-    assert result == output
-    assert len(service.calls) == 1
-    assert service.calls[0][1]["selector"] == "rendering.fixture"
+    with pytest.raises(attached.AttachedRenderError, match="runtime parent"):
+        attached.invoke_attached_render(
+            tmp_path / "timeline.json",
+            tmp_path / "assets.json",
+            output,
+            selector="rendering.fixture",
+        )
     assert not projects_root.exists()
     assert not list(tmp_path.rglob("run.json"))
 
@@ -319,7 +302,6 @@ def test_bound_with_invalid_parent_is_rejected_without_fallback(
     projects_root = tmp_path / "projects"
     projects_root.mkdir(parents=True, exist_ok=True)
     _patch_runtime_parent(monkeypatch, run_id="missing-run", valid=False)
-    service = _Service()
     invoked = False
 
     def should_not_run(*_args, **_kwargs):
@@ -338,9 +320,7 @@ def test_bound_with_invalid_parent_is_rejected_without_fallback(
             step_id="render",
             root=projects_root,
             executor_registry=_Registry(),
-            service=service,
         )
 
     assert not invoked
-    assert service.calls == []
     assert not (projects_root / "demo" / "runs" / "missing-run").exists()

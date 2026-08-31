@@ -378,64 +378,46 @@ def render(
     sidecar_path: str | Path | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    service: Any = None,
     transport: Any = None,
     transport_factory: Any = None,
     validator: Any = None,
-    publisher: Any = None,
     materialized_root: str | Path | None = None,
     materialized_objects: Mapping[str, str] | None = None,
 ) -> Path:
-    """Render *timeline_path* and return the published output path.
+    """Reject the retired direct render convenience path.
 
-    Builds a frozen :class:`RenderRequest` from the friendly arguments and
-    dispatches through the shared
-    :class:`~astrid.core.rendering.service.RenderService` (injectable via
-    ``service`` for embedding and tests).  ``out_path`` selects the
-    published destination; when ``output_name`` is omitted its basename is
-    used.  ``selector`` is a qualified renderer id; omit it to use
-    ``rendering.remotion``.
+    Rendering is a product operation, so admission, materialization, leases,
+    and settlement must come from ``sdk.invoke`` and the neutral generic host.
+    The protocol-only ``renderer_main`` entrypoint below remains available to
+    a host-launched renderer backend; it is not a second product execution
+    route.
     """
-    from astrid.core.rendering.service import RenderService
 
-    destination = (
-        None if out_path is None else Path(out_path).expanduser().absolute()
+    del (
+        timeline_path,
+        output_name,
+        assets_registry_path,
+        out_path,
+        selector,
+        window,
+        audio,
+        profile,
+        backend_config,
+        metadata,
+        sidecar_path,
+        project_root,
+        extra_pack_roots,
+        transport,
+        transport_factory,
+        validator,
+        materialized_root,
+        materialized_objects,
     )
-    if output_name is None:
-        if destination is None:
-            raise ValueError("output_name or out_path is required")
-        output_name = destination.name
+    from astrid.sdk.exceptions import UnsupportedCapabilityError
 
-    request = RenderRequest(
-        schema_version=SCHEMA_VERSION,
-        timeline_path=str(Path(timeline_path).expanduser().resolve()),
-        assets_registry_path=(
-            None
-            if assets_registry_path is None
-            else str(Path(assets_registry_path).expanduser().resolve())
-        ),
-        output_name=output_name,
-        window=window,
-        audio=(audio.value if isinstance(audio, AudioOwnership) else audio),
-        profile=profile,
-        backend_config=_json_safe(dict(backend_config or {})),
-        metadata=_json_safe(dict(metadata or {})),
-        materialized_root=(None if materialized_root is None else str(Path(materialized_root).expanduser().resolve())),
-        materialized_objects=_json_safe(dict(materialized_objects or {})),
-    )
-    if destination is None:
-        raise ValueError("out_path is required")
-
-    selected_service = service or RenderService(
-        project_root=project_root,
-        extra_pack_roots=extra_pack_roots,
-        **_service_injection(transport=transport, transport_factory=transport_factory, validator=validator, publisher=publisher),
-    )
-    return selected_service.render(
-        request,
-        out_path=destination,
-        selector=selector,
-        sidecar_path=sidecar_path,
+    raise UnsupportedCapabilityError(
+        "direct SDK rendering is retired; admit rendering.render through "
+        "sdk.invoke(..., kind='executor', project=...)"
     )
 
 
@@ -536,8 +518,6 @@ def _support_report(
     the render dispatch (transport-selected environment variable, then the
     request's ``backend_config`` namespace).
     """
-    from astrid.core.rendering.service import RenderService
-
     selected_backend = _resolve_backend(request, explicit=backend)
     resolved_registries = _resolve_registries(
         registries=registries,
@@ -547,29 +527,59 @@ def _support_report(
     )
     renderers, _planners, _finalizers = resolved_registries
     candidate = _resolve_candidate(renderers, selected_backend)
-    selected_service = service or RenderService(
-        registries=resolved_registries,
-        extra_pack_roots=extra_pack_roots,
-        **_service_injection(transport=transport, transport_factory=transport_factory),
-    )
     if workspace is None:
         raise ValueError("support requires an invocation workspace")
-    return selected_service._support(
-        candidate,
-        request=request,
-        workspace=workspace,
-        registry=renderers,
-    )
+    projected = request.for_backend(candidate.id)
+    from astrid.core.foundation.atomic_io import write_json_atomic
+    from astrid.core.rendering.errors import raise_protocol_error
+    from astrid.core.rendering.transport import CommandTransport
 
-
-def _service_injection(**overrides: Any) -> dict[str, Any]:
-    """Return injectable ``RenderService`` kwargs, skipping ``None`` values.
-
-    ``RenderService`` treats an explicit ``None`` transport/validator/
-    publisher as "disable the default", so omitted SDK arguments must not be
-    forwarded.
-    """
-    return {key: value for key, value in overrides.items() if value is not None}
+    # Support is a read-only protocol probe.  Run the backend in a disposable
+    # child process directly, without constructing a product render service or
+    # opening any local storage authority.
+    with tempfile.TemporaryDirectory(
+        prefix="astrid-render-support-", dir=str(workspace)
+    ) as support_root:
+        support_workspace = Path(support_root)
+        request_path = support_workspace / "support-request.json"
+        result_path = support_workspace / "support-result.json"
+        write_json_atomic(request_path, projected.to_dict())
+        selected_transport = transport or (transport_factory or CommandTransport)(
+            candidate.id
+        )
+        response = selected_transport.run(
+            "support",
+            candidate.manifest.command,
+            backend=candidate.id,
+            request_path=request_path,
+            result_path=result_path,
+            cwd=candidate.pack_root,
+            timeout=candidate.manifest.timeout_seconds,
+            required_binaries=(),
+        )
+    if not isinstance(response, SupportReport):
+        raise_protocol_error(
+            backend=candidate.id,
+            message="support operation did not return a SupportReport",
+            details={"received_type": type(response).__name__},
+        )
+    if response.backend != candidate.id:
+        raise_protocol_error(
+            backend=candidate.id,
+            message="support report names a different backend",
+            details={"reported_backend": response.backend},
+        )
+    if response.backend_version != candidate.manifest.version:
+        raise_protocol_error(
+            backend=candidate.id,
+            message="support report version does not match its manifest",
+            recovery_command="update the backend command and manifest as one versioned unit",
+            details={
+                "reported_version": response.backend_version,
+                "manifest_version": candidate.manifest.version,
+            },
+        )
+    return response
 
 
 def _resolve_registries(

@@ -112,9 +112,7 @@ def test_live_media_modules_have_no_locator_fetch_or_resolution_authority() -> N
         fromlist=["resolve_managed_render_snapshot"],
     ).resolve_managed_render_snapshot))
     assert not (root / "astrid/core/io/managed_media_resolver.py").exists()
-    media_import = (root / "astrid/core/io/media_import.py").read_text(encoding="utf-8")
-    assert "prepare_external_local" not in media_import
-    assert "MEDIA_LOCATION_REALMS" not in media_import
+    assert not (root / "astrid/core/io/media_import.py").exists()
     assert not (root / "astrid/core/migrations").exists()
     tree = ast.parse(resolution)
     assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" for node in ast.walk(tree))

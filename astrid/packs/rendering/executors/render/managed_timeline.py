@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from astrid.core import timeline
 from astrid.core._shared.jsonio import write_json_atomic
-from astrid.core.io.media_import import validate_digest
+from astrid.core.foundation.hash import validate_digest
 from astrid.sdk.pagination import paged_rows
 
 

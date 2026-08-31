@@ -18,6 +18,22 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_digest(digest: object) -> str:
+    """Validate and return one lowercase bare SHA-256 digest.
+
+    This is a neutral byte-identity primitive.  It deliberately has no
+    filesystem, CAS, project, or media-ingest knowledge so live consumers can
+    validate runtime-managed object handoffs without importing retired storage
+    code.
+    """
+
+    if not isinstance(digest, str):
+        raise TypeError("digest must be a string")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("digest must be a lowercase 64-hex SHA-256")
+    return digest
+
+
 def canonical_json_digest(obj: Any) -> str:
     """Return the stable digest used by protocol identity contracts."""
 
@@ -31,4 +47,9 @@ def executor_definition_digest(executor_def: Any) -> str:
     return canonical_json_digest(executor_def.to_dict())
 
 
-__all__ = ["canonical_json_digest", "executor_definition_digest", "sha256_file"]
+__all__ = [
+    "canonical_json_digest",
+    "executor_definition_digest",
+    "sha256_file",
+    "validate_digest",
+]

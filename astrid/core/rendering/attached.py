@@ -5,8 +5,8 @@ The helper has two deliberately distinct paths:
 * a bound call invokes the override-aware ``rendering.render`` executor and
   records its committed video/provenance pair under the parent run's task-step
   ``produces`` directory;
-* a completely unbound call invokes :class:`RenderService` directly and does
-  not create project ledger state.
+* an unbound call is rejected: rendering must be a child of a runtime-owned
+  task, never a local/in-process convenience path.
 
 Partial or invalid bindings never degrade to the unbound path.
 """
@@ -25,9 +25,6 @@ from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.foundation.project_paths import resolve_projects_root, validate_run_id
 from astrid.core.project.runtime import ProjectRuntimeError, step_dir_for
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-
-from .service import RenderService
-
 
 class AttachedRenderError(RuntimeError):
     """Raised when a render cannot be safely attached to its parent run."""
@@ -48,15 +45,14 @@ def invoke_attached_render(
     root: str | Path | None = None,
     project_root: str | Path = REPO_ROOT,
     executor_registry: ExecutorRegistry | None = None,
-    service: RenderService | None = None,
 ) -> Path:
     """Render to ``output_path``, attaching to a parent ledger when bound.
 
     ``project_slug`` and ``parent_run_id`` must be supplied together.  When
     omitted, an existing ``ASTRID_TASK_PROJECT``/``ASTRID_TASK_RUN_ID`` pair is
     used.  A bound call also requires a unique, single-segment ``step_id``.
-    Only the absence of all binding information selects the public
-    :class:`RenderService` path.
+    There is no unbound fallback: runtime task admission and the generic host
+    own execution for every supported render.
 
     The three required ``ASTRID_TASK_*`` variables are scoped to the child and
     restored byte-for-byte (including unset versus empty) after success or
@@ -74,13 +70,9 @@ def invoke_attached_render(
     )
 
     if bound_project is None:
-        public_service = service or RenderService(project_root=project_root)
-        return public_service.render(
-            timeline,
-            assets,
-            output,
-            selector=selected,
-            backend_config=backend_config,
+        raise AttachedRenderError(
+            "render requires an admitted runtime parent project/run; "
+            "use sdk.invoke('rendering.render', kind='executor', project=...)"
         )
 
     if step_id is None or not str(step_id):

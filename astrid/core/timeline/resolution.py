@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from astrid.core.io.media_import import validate_digest
+from astrid.core.foundation.hash import validate_digest
 from astrid.sdk.pagination import paged_rows
 
 _HASH_KEYS = ("digest", "content_sha256", "sha256", "hash")

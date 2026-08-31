@@ -16,7 +16,6 @@ pytestmark = pytest.mark.skip(reason="legacy filesystem fixture superseded by ru
 pytest.importorskip("banodoco_timeline_schema")
 
 from astrid.core.timeline.snapshot import TimelineSnapshot, snapshot_from_runtime
-from astrid.core.io.media_import import managed_media_path
 from astrid.packs.rendering.executors.timeline_visualize.model import (
     ClipModel,
     IntervalFrames,
@@ -145,7 +144,10 @@ def test_managed_visualization_uses_admitted_runtime_media_snapshot(
     snapshot, project_root, _timeline_dir = _prepared_snapshot(tmp_path)
     payload = b"runtime admitted visualization asset"
     digest = hashlib.sha256(payload).hexdigest()
-    managed = managed_media_path(project_root.parent, digest)
+    # This legacy module is retained only as a skipped historical specification;
+    # runtime tests provide materialized objects directly and never derive a
+    # filesystem CAS path.
+    managed = tmp_path / "runtime-materialized" / "object-1"
     managed.parent.mkdir(parents=True, exist_ok=True)
     managed.write_bytes(payload)
     registry = {

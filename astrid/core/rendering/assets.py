@@ -25,7 +25,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from astrid.core.io.media_import import validate_digest
+from astrid.core.foundation.hash import validate_digest
 
 @dataclass
 class MaterializedAsset:
@@ -36,6 +36,7 @@ class MaterializedAsset:
     metadata: dict[str, Any]
     local_path: Path | None = None
     local_url: str | None = None
+
 
 def _contained(path: Path, root: Path) -> bool:
     try:

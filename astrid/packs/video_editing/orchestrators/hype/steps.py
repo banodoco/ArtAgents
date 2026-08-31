@@ -134,7 +134,7 @@ def build_hype_render_cmd(args: argparse.Namespace) -> list[str]:
 
 
 def invoke_hype_render(args: argparse.Namespace) -> Path:
-    """Render Hype through the attached facade, or the public service unbound."""
+    """Render Hype through the runtime-admitted attached facade."""
 
     project_slug = getattr(args, "project", None)
     parent_run_id = getattr(args, "render_parent_run_id", None)

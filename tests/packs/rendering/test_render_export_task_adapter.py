@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("banodoco_timeline_schema")
 
-from astrid.core.io.media_import import sha256_file_bytes
+from astrid.core.foundation.hash import sha256_file
 from astrid.core.rendering import remotion_runtime
 from astrid.core.rendering.remotion_runtime import (
     NODE_EXECUTABLE_ENV,
@@ -66,7 +66,7 @@ def _timeline_config() -> dict:
 
 
 def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespace:
-    digest = sha256_file_bytes(FIXTURE_VIDEO)
+    digest = sha256_file(FIXTURE_VIDEO)
     # The worker receives an explicit host handoff.  This is deliberately
     # staged under the invocation's materialized root; no product locator or
     # local managed-media authority is consulted by the adapter.
@@ -227,8 +227,8 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
         staging_dir=tmp_path / "staging",
     )
 
-    assert sha256_file_bytes(managed) == digest
-    assert sha256_file_bytes(captured["staged_asset"]) == digest
+    assert sha256_file(managed) == digest
+    assert sha256_file(captured["staged_asset"]) == digest
     assert not captured["owned_root"].exists()
 
 
