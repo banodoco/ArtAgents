@@ -353,12 +353,12 @@ def _runtime_run_show(
 ) -> dict[str, Any] | None:
     runs = getattr(client, "runs", None)
     method = getattr(runs, "show", None)
+    # A project-scoped run read is required. A generic workspace lookup would
+    # allow a foreign project record into the lineage graph.
+    if not callable(method):
+        return None
     try:
-        value = (
-            _unwrap_runtime_result(method(project, run_id))
-            if callable(method)
-            else _unwrap_runtime_result(client.get_run(run_id))
-        )
+        value = _unwrap_runtime_result(method(project, run_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
     record = _normalize_runtime_record(value, client=client, project=project)
@@ -493,11 +493,13 @@ def _runtime_task_records(
     for raw in value:
         item = _as_mapping(raw)
         if item is None:
+            binding_available = False
             continue
-        supplied_project = item.get("project_id") or item.get("project") or item.get("project_slug")
-        if supplied_project is not None and str(supplied_project) not in accepted_projects:
-            # A project-scoped list must never contribute a task from another
-            # project, even if a hostile/misbehaving service reuses a run id.
+        supplied_projects = _runtime_project_owners(item)
+        if not supplied_projects or any(value not in accepted_projects for value in supplied_projects):
+            # A project-scoped list must identify the owning project. Never
+            # accept an unowned task or a task from another project, even if a
+            # hostile/misbehaving service reuses a run id.
             binding_available = False
             continue
         task_id = str(item.get("task_id") or item.get("id") or "")
@@ -512,6 +514,8 @@ def _runtime_task_records(
             output_raw = result.get("output_artifacts") or result.get("outputs")
         task["output_artifacts"] = _artifact_list(output_raw)
         by_run.setdefault(run_id, []).append(task)
+    if not binding_available:
+        return {}, False
     return by_run, binding_available
 
 
@@ -594,13 +598,37 @@ def _assert_runtime_project(
     *,
     project_identities: set[str] | None = None,
 ) -> None:
-    supplied = record.get("project_id") or record.get("project") or record.get("project_slug")
     accepted = project_identities or {str(project)}
-    if supplied is not None and str(supplied) not in accepted:
+    supplied_projects = _runtime_project_owners(record)
+    if not supplied_projects:
+        raise IterationVideoError(
+            f"runtime run {record.get('run_id') or '<unknown>'} has no project ownership"
+        )
+    if any(value not in accepted for value in supplied_projects):
+        supplied = supplied_projects[0]
         raise IterationVideoError(
             f"runtime run {record.get('run_id') or '<unknown>'} belongs to project {supplied!r}, "
             f"not selected project {project!r}"
         )
+
+
+def _runtime_project_owners(record: Mapping[str, Any]) -> list[str]:
+    """Return every explicit project owner, rejecting empty owner fields.
+
+    Runtime resources may expose an id and a slug simultaneously. Treating
+    those fields as an ``or`` chain would let a foreign value hide behind a
+    valid one, so ownership is valid only when every supplied value is a
+    non-empty identity.
+    """
+    owners: list[str] = []
+    for key in ("project_id", "project", "project_slug"):
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or not str(value):
+            return []
+        owners.append(str(value))
+    return owners
 
 
 def _runtime_run_events(
@@ -670,9 +698,20 @@ def _runtime_attached_values(
     run: Mapping[str, Any], tasks: list[Mapping[str, Any]], *keys: str
 ) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
+    bound_task_ids = {
+        str(task.get("task_id"))
+        for task in tasks
+        if task.get("task_id") is not None and str(task.get("task_id"))
+    }
+    raw_run_task_ids = run.get("task_ids")
+    if isinstance(raw_run_task_ids, (list, tuple)):
+        bound_task_ids.update(
+            str(value) for value in raw_run_task_ids if value is not None and str(value)
+        )
     for resource in (run, *tasks):
         owner_run_id = str(run.get("run_id") or "")
         owner_task_id = str(resource.get("task_id") or "")
+        resource_task_ids = {owner_task_id} if owner_task_id else bound_task_ids
         for key in keys:
             value = resource.get(key)
             if key == "receipt" and value is not None and not isinstance(value, (list, tuple)):
@@ -688,6 +727,7 @@ def _runtime_attached_values(
                         item,
                         run_id=owner_run_id,
                         task_id=owner_task_id,
+                        task_ids=resource_task_ids,
                         require_subject=True,
                     )
                 )
@@ -706,6 +746,7 @@ def _runtime_attached_values(
                             item,
                             run_id=owner_run_id,
                             task_id=owner_task_id,
+                            task_ids=resource_task_ids,
                             require_subject=False,
                         ):
                             found.append(item)
@@ -718,6 +759,7 @@ def _runtime_attached_values(
                                 item,
                                 run_id=owner_run_id,
                                 task_id=owner_task_id,
+                                task_ids=resource_task_ids,
                                 require_subject=False,
                             )
                         )
@@ -729,14 +771,18 @@ def _fact_belongs_to(
     *,
     run_id: str,
     task_id: str,
+    task_ids: set[str],
     require_subject: bool,
 ) -> bool:
     fact_run_id = fact.get("run_id")
     if fact_run_id is not None and str(fact_run_id) != run_id:
         return False
     fact_task_id = fact.get("task_id")
-    if fact_task_id is not None and task_id and str(fact_task_id) != task_id:
-        return False
+    if fact_task_id is not None:
+        if task_id and str(fact_task_id) != task_id:
+            return False
+        if str(fact_task_id) not in task_ids:
+            return False
     return not require_subject or fact_run_id is not None or fact_task_id is not None
 
 
@@ -784,13 +830,19 @@ def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[st
         or spec.get("executor_id") or "runtime.run"
     )
     record["out_path"] = source.get("out_path") or source.get("run_root") or spec.get("out_path")
+    parent_present = "parent_run_ids" in source or "parent_run_ids" in spec
     parent_run_ids = source.get("parent_run_ids") if "parent_run_ids" in source else spec.get("parent_run_ids")
-    if parent_run_ids is not None:
+    if parent_present:
         record["parent_run_ids"] = parent_run_ids
+    provenance_present = "provenance" in source or "provenance" in spec
     provenance = source.get("provenance") if "provenance" in source else spec.get("provenance")
-    if provenance is not None:
+    if provenance_present:
         record["provenance"] = provenance
-    record["runtime_parent_lineage_available"] = parent_run_ids is not None or provenance is not None
+    record["runtime_parent_lineage_available"] = (
+        (not parent_present or _valid_parent_collection(parent_run_ids))
+        and (not provenance_present or _valid_provenance(provenance))
+        and (parent_present or provenance_present)
+    )
     record["input_artifacts"] = _artifact_list(
         source.get("input_artifacts") or spec.get("input_artifacts") or source.get("inputs") or spec.get("inputs")
     )
@@ -799,30 +851,7 @@ def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[st
         or result.get("outputs") or result.get("output_objects") or spec.get("output_artifacts")
     )
     record["output_artifacts"] = _artifact_list(output_raw)
-    if not record["output_artifacts"]:
-        _hydrate_task_outputs(record, client=client, project=project)
     return record
-
-
-def _hydrate_task_outputs(record: dict[str, Any], *, client: Any, project: str) -> None:
-    task_ids = record.get("task_ids") or []
-    tasks = getattr(client, "tasks", None)
-    show = getattr(tasks, "show", None)
-    if not callable(show):
-        show = getattr(client, "get_task", None)
-    if not callable(show):
-        return
-    outputs: list[Any] = []
-    for task_id in task_ids if isinstance(task_ids, (list, tuple)) else ():
-        try:
-            value = _unwrap_runtime_result(show(task_id, project) if tasks is not None and hasattr(tasks, "show") else show(task_id))
-        except Exception:
-            continue
-        if not isinstance(value, Mapping):
-            continue
-        result = value.get("result") if isinstance(value.get("result"), Mapping) else value
-        outputs.extend(_artifact_list(result.get("output_artifacts") or result.get("outputs") or result.get("output_objects")))
-    record["output_artifacts"] = outputs
 
 
 def _artifact_list(raw: Any) -> list[dict[str, Any]]:
@@ -866,7 +895,10 @@ def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id:
         if existing is not None and existing.depth >= depth:
             continue
         parents, unresolved = _runtime_parent_edges(record, records)
-        lineage_incomplete = not bool(record.get("runtime_parent_lineage_available"))
+        lineage_incomplete = (
+            not bool(record.get("runtime_parent_lineage_available"))
+            or "invalid_parent_lineage" in unresolved
+        )
         nodes[run_id] = RuntimeRunNode(
             run_id=run_id,
             record=record,
@@ -881,9 +913,18 @@ def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id:
 
 
 def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    raw_edges: list[Any] = list(record.get("parent_run_ids") or [])
-    provenance = record.get("provenance") if isinstance(record.get("provenance"), Mapping) else {}
-    raw_edges.extend(provenance.get("contributing_runs") or [])
+    raw_parent_ids = record.get("parent_run_ids")
+    raw_edges: list[Any] = list(raw_parent_ids) if isinstance(raw_parent_ids, (list, tuple)) else []
+    invalid_lineage = raw_parent_ids is not None and not _valid_parent_collection(raw_parent_ids)
+    provenance_value = record.get("provenance")
+    provenance = provenance_value if isinstance(provenance_value, Mapping) else {}
+    if provenance_value is not None and not _valid_provenance(provenance_value):
+        invalid_lineage = True
+    contributing = provenance.get("contributing_runs")
+    if contributing is not None and isinstance(contributing, (list, tuple)):
+        raw_edges.extend(contributing)
+    elif contributing is not None:
+        invalid_lineage = True
     for relation in record.get("runtime_relations", []) or []:
         if isinstance(relation, Mapping) and relation.get("from_run_id") == record.get("run_id"):
             raw_edges.append({
@@ -892,11 +933,17 @@ def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[
             })
     edges: list[dict[str, Any]] = []
     unresolved: list[str] = []
+    if invalid_lineage:
+        unresolved.append("invalid_parent_lineage")
     seen: set[str] = set()
     for raw in raw_edges:
         value = raw if isinstance(raw, Mapping) else {"run_id": raw}
         run_id = value.get("run_id") if isinstance(value, Mapping) else None
-        if not isinstance(run_id, str) or not _is_runtime_identifier(run_id) or run_id in seen:
+        if not isinstance(run_id, str) or not _is_runtime_identifier(run_id):
+            if "invalid_parent_lineage" not in unresolved:
+                unresolved.append("invalid_parent_lineage")
+            continue
+        if run_id in seen:
             continue
         seen.add(run_id)
         edge = {"run_id": run_id, "kind": str(value.get("kind") or "causal")}
@@ -905,6 +952,23 @@ def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[
         else:
             edges.append(edge)
     return edges, unresolved
+
+
+def _valid_parent_collection(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)):
+        return False
+    for item in value:
+        candidate = item.get("run_id") if isinstance(item, Mapping) else item
+        if not isinstance(candidate, str) or not _is_runtime_identifier(candidate):
+            return False
+    return True
+
+
+def _valid_provenance(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    contributing = value.get("contributing_runs")
+    return contributing is None or _valid_parent_collection(contributing)
 
 
 def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, project_slug: str) -> tuple[dict[str, Any], dict[str, Any]]:

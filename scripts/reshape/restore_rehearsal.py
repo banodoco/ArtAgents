@@ -8,7 +8,7 @@ import tarfile
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -22,15 +22,68 @@ class RestoreReport:
 
 def _safe_member_names(tar: tarfile.TarFile) -> list[str]:
     names: list[str] = []
+    seen: set[str] = set()
     for member in tar.getmembers():
         name = member.name
-        parts = Path(name).parts
-        if not name or Path(name).is_absolute() or ".." in parts:
+        parts = PurePosixPath(name).parts
+        if not name or not parts or "." in parts or PurePosixPath(name).is_absolute() or ".." in parts:
             raise SystemExit(f"ERROR: unsafe path in snapshot: {name!r}")
         if parts[0] not in {"projects", "repo"}:
             raise SystemExit(f"ERROR: unexpected top-level snapshot path: {name!r}")
+        if _is_retired_thread_path(name):
+            raise SystemExit(f"ERROR: retired thread state is not restorable: {name!r}")
+        if name in seen:
+            raise SystemExit(f"ERROR: duplicate path in snapshot: {name!r}")
+        seen.add(name)
+        if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
+            raise SystemExit(f"ERROR: unsupported archive member type: {name!r}")
         names.append(name)
     return names
+
+
+def _is_retired_thread_path(name: str) -> bool:
+    """Return whether *name* belongs to the retired thread state store."""
+    parts = PurePosixPath(name).parts
+    retired_parts = {
+        "thread",
+        "threads",
+        "thread.json",
+        "threads.json",
+        "thread_state",
+        "threads_state",
+        "thread-state",
+        "threads-state",
+        "thread_state.json",
+        "threads_state.json",
+        "thread-state.json",
+        "threads-state.json",
+        "thread_groups",
+        "thread_groups.json",
+        "thread_index",
+        "thread_index.json",
+        "thread_ids",
+        "thread_ids.json",
+    }
+    return any(part in retired_parts for part in parts)
+
+
+def _safe_extract(tar: tarfile.TarFile, restore_dir: Path) -> None:
+    """Extract only regular files/directories beneath the restore root."""
+    for member in tar.getmembers():
+        destination = restore_dir.joinpath(*PurePosixPath(member.name).parts)
+        try:
+            destination.relative_to(restore_dir)
+        except ValueError as exc:  # pragma: no cover - guarded by name validation
+            raise SystemExit(f"ERROR: unsafe extraction path: {member.name!r}") from exc
+        if member.isdir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source = tar.extractfile(member)
+        if source is None:
+            raise SystemExit(f"ERROR: archive member has no file payload: {member.name!r}")
+        with source, destination.open("xb") as target:
+            shutil.copyfileobj(source, target)
 
 
 def _prepare_restore_dir(out_dir: Path | None) -> Path:
@@ -105,7 +158,7 @@ def rehearse_restore(
         names = set(_safe_member_names(tar))
         if "projects" not in names or "repo" not in names:
             raise SystemExit("ERROR: snapshot must contain stable projects/ and repo/ roots")
-        tar.extractall(restore_dir)
+        _safe_extract(tar, restore_dir)
 
     projects_dir = restore_dir / "projects"
     repo_dir = restore_dir / "repo"

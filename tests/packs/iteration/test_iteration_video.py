@@ -90,6 +90,43 @@ def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> N
         )
 
 
+def test_iteration_rejects_run_without_project_ownership() -> None:
+    class Runs:
+        def show(self, project, run_id):
+            assert project == "selected"
+            return {"run_id": run_id, "output_artifacts": [{"kind": "secret"}]}
+
+    class Runtime:
+        runs = Runs()
+
+    with pytest.raises(iteration_video.IterationVideoError, match="no project ownership"):
+        iteration_video._runtime_run_show(Runtime(), "selected", TARGET_RUN_ID)
+
+
+def test_iteration_rejects_conflicting_run_project_owners() -> None:
+    class Runs:
+        def show(self, project, run_id):
+            return {
+                "run_id": run_id,
+                "project_id": "selected",
+                "project_slug": "other-project",
+            }
+
+    class Runtime:
+        runs = Runs()
+
+    with pytest.raises(iteration_video.IterationVideoError, match="not selected project"):
+        iteration_video._runtime_run_show(Runtime(), "selected", TARGET_RUN_ID)
+
+
+def test_iteration_does_not_use_unscoped_run_lookup() -> None:
+    class Runtime:
+        def get_run(self, run_id):
+            raise AssertionError("unscoped get_run must not be used")
+
+    assert iteration_video._runtime_run_show(Runtime(), "selected", TARGET_RUN_ID) is None
+
+
 def test_iteration_only_uses_supported_known_run_relation_direction() -> None:
     relations = [
         {"from_run_id": TARGET_RUN_ID, "to_run_id": ROOT_RUN_ID, "kind": "derived_from"},
@@ -169,6 +206,33 @@ def test_iteration_task_project_mismatch_is_not_attached() -> None:
     assert available is False
 
 
+def test_iteration_task_without_project_ownership_is_not_attached() -> None:
+    class Tasks:
+        def list(self, project):
+            return [{"task_id": "task-unowned", "run_id": TARGET_RUN_ID}]
+
+    runtime = type("Runtime", (), {"tasks": Tasks()})()
+    task_records, available = iteration_video._runtime_task_records(runtime, "selected")
+    assert task_records == {}
+    assert available is False
+
+
+def test_iteration_rejects_conflicting_task_project_owners() -> None:
+    class Tasks:
+        def list(self, project):
+            return [{
+                "task_id": "task-bound",
+                "run_id": TARGET_RUN_ID,
+                "project_id": "selected",
+                "project_slug": "other-project",
+            }]
+
+    runtime = type("Runtime", (), {"tasks": Tasks()})()
+    task_records, available = iteration_video._runtime_task_records(runtime, "selected")
+    assert task_records == {}
+    assert available is False
+
+
 def test_iteration_evidence_and_receipts_require_run_binding() -> None:
     run = {
         "run_id": TARGET_RUN_ID,
@@ -179,6 +243,18 @@ def test_iteration_evidence_and_receipts_require_run_binding() -> None:
     attached_receipts = iteration_video._runtime_attached_values(run, [], "receipts")
     assert attached_evidence == [{"id": "bound", "run_id": TARGET_RUN_ID}]
     assert attached_receipts == [{"id": "bound-receipt", "run_id": TARGET_RUN_ID}]
+
+
+def test_iteration_rejects_task_mismatch_on_run_bound_fact() -> None:
+    run = {
+        "run_id": TARGET_RUN_ID,
+        "task_ids": ["task-bound"],
+        "runtime_run_events": [{
+            "aggregate_id": TARGET_RUN_ID,
+            "payload": {"evidence": [{"id": "wrong-task", "task_id": "task-other"}]},
+        }],
+    }
+    assert iteration_video._runtime_attached_values(run, [], "evidence") == []
 
 
 def test_generated_runtime_run_without_parent_fields_is_incomplete() -> None:
@@ -201,6 +277,27 @@ def test_generated_runtime_run_without_parent_fields_is_incomplete() -> None:
     assert quality["data_quality"] < 1.0
     assert quality["missing_lineage"] == [TARGET_RUN_ID]
     assert "lineage_unavailable" in quality["unavailable_sources"]
+
+
+def test_iteration_malformed_parent_ids_remain_missing_lineage() -> None:
+    record = iteration_video._normalize_runtime_record(
+        {"run_id": TARGET_RUN_ID, "project_id": "demo", "parent_run_ids": [None]},
+        client=object(),
+        project="demo",
+    )
+    assert record["runtime_parent_lineage_available"] is False
+    node = iteration_video.RuntimeRunNode(
+        run_id=TARGET_RUN_ID, record=record, depth=0, label="target"
+    )
+    _manifest, quality = iteration_video._build_runtime_inputs(
+        [node], target_run_id=TARGET_RUN_ID, project_slug="demo"
+    )
+    assert quality["missing_lineage"] == [TARGET_RUN_ID]
+    assert quality["dimensions"]["lineage"] is False
+    _edges, unresolved = iteration_video._runtime_parent_edges(record, {})
+    assert unresolved == ["invalid_parent_lineage"]
+    graph = iteration_video._collect_runtime_graph({TARGET_RUN_ID: record}, TARGET_RUN_ID)
+    assert graph[0].lineage_incomplete is True
 
 
 def test_iteration_video_public_route_materializes_runtime_output_object(tmp_path: Path, monkeypatch) -> None:
@@ -317,6 +414,7 @@ def _runtime_client(*, include_root: bool = False):
         def list(self, project):
             return type("Result", (), {"ok": True, "data": [{
                 "task_id": f"task-{TARGET_RUN_ID}", "run_id": TARGET_RUN_ID,
+                "project_id": project,
                 "output_artifacts": [_artifact("image", "d" * 64)],
             }]})()
 
@@ -341,6 +439,7 @@ def _record(
     return {
         "schema_version": 1,
         "run_id": run_id,
+        "project_id": "demo",
         "parent_run_ids": parent_run_ids or [],
         "executor_id": "generation.generate_image_openai",
         "orchestrator_id": None,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tarfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -90,3 +92,72 @@ def test_restore_rehearsal_destructive_restore_copies_only_after_full_opt_in(tmp
 
     assert (target_projects / "alpha" / "current_run.json").read_text(encoding="utf-8") == "{}\n"
     assert (target_repo / "runs" / "out-1" / ".astrid.variants.json").read_text(encoding="utf-8") == "{}\n"
+
+
+def test_restore_rehearsal_rejects_retired_thread_state(tmp_path: Path) -> None:
+    snapshot = tmp_path / "malicious.tar.gz"
+    with tarfile.open(snapshot, "w:gz") as tar:
+        for name in ("projects", "repo", "repo/.astrid", "repo/.astrid/threads.json"):
+            if name.endswith(".json"):
+                payload = b"{}\n"
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                tar.addfile(info, BytesIO(payload))
+            else:
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+
+    with pytest.raises(SystemExit, match="retired thread state"):
+        rehearse_restore(snapshot=snapshot, out_dir=tmp_path / "restore")
+
+
+def test_restore_rehearsal_rejects_retired_thread_state_variants(tmp_path: Path) -> None:
+    snapshot = tmp_path / "malicious-thread-state.tar.gz"
+    with tarfile.open(snapshot, "w:gz") as tar:
+        for name in ("projects", "repo", "repo/.astrid", "repo/.astrid/thread_state.json"):
+            if name.endswith(".json"):
+                payload = b"{}\n"
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                tar.addfile(info, BytesIO(payload))
+            else:
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+
+    with pytest.raises(SystemExit, match="retired thread state"):
+        rehearse_restore(snapshot=snapshot, out_dir=tmp_path / "restore")
+
+
+def test_restore_rehearsal_rejects_symlink_members(tmp_path: Path) -> None:
+    snapshot = tmp_path / "symlink.tar.gz"
+    with tarfile.open(snapshot, "w:gz") as tar:
+        for name in ("projects", "repo"):
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+        info = tarfile.TarInfo("repo/link")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "/outside"
+        tar.addfile(info)
+
+    with pytest.raises(SystemExit, match="unsupported archive member type"):
+        rehearse_restore(snapshot=snapshot, out_dir=tmp_path / "restore")
+
+
+def test_restore_rehearsal_rejects_traversal_members(tmp_path: Path) -> None:
+    snapshot = tmp_path / "traversal.tar.gz"
+    with tarfile.open(snapshot, "w:gz") as tar:
+        for name in ("projects", "repo", "../escaped.txt"):
+            info = tarfile.TarInfo(name)
+            if name.endswith("/") or name in {"projects", "repo"}:
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+                continue
+            payload = b"must not escape\n"
+            info.size = len(payload)
+            tar.addfile(info, BytesIO(payload))
+
+    with pytest.raises(SystemExit, match="unsafe path"):
+        rehearse_restore(snapshot=snapshot, out_dir=tmp_path / "restore")
