@@ -471,7 +471,7 @@ def test_validate_repo_structure_flags_non_exempt_compatibility_shim_as_error(tm
     )
 
 
-def test_validate_migration_completion_exempts_only_in_process_sys_modules_pattern(
+def test_validate_migration_completion_flags_in_process_sys_modules_pattern(
     tmp_path: Path,
 ) -> None:
     _write(
@@ -489,11 +489,11 @@ def test_validate_migration_completion_exempts_only_in_process_sys_modules_patte
 
     advisories = validate_migration_completion(tmp_path)
 
-    assert "astrid/core/runtime/in_process.py: sys.modules injection remains outside tests" not in advisories
+    assert "astrid/core/runtime/in_process.py: sys.modules injection remains outside tests" in advisories
     assert "astrid/core/not_in_process.py: sys.modules injection remains outside tests" in advisories
 
 
-def test_validate_repo_structure_keeps_in_process_sys_modules_exemption_green(tmp_path: Path) -> None:
+def test_validate_repo_structure_has_no_in_process_sys_modules_exemption(tmp_path: Path) -> None:
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
@@ -504,7 +504,9 @@ def test_validate_repo_structure_keeps_in_process_sys_modules_exemption_green(tm
 
     report = validate_repo_structure(tmp_path)
 
-    assert report.errors == ()
+    assert report.errors == (
+        "astrid/core/runtime/in_process.py: sys.modules injection remains outside tests",
+    )
 
 
 def test_structure_report_ok_tracks_errors_only() -> None:
