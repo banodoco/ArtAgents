@@ -172,6 +172,9 @@ class ManagedTimeline:
     kernel_head_event_id: str | None = None
     kernel_head_hash: str | None = None
     kernel_source_event_id: str | None = None
+    runtime_config: dict[str, Any] | None = None
+    runtime_registry: dict[str, Any] | None = None
+    runtime_events: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -192,7 +195,7 @@ class KernelTimeline:
 
 
 def select_kernel_timelines(
-    project_dir: Path,
+    project_dir: Path | None,
     *,
     project_slug: str,
     slug: str | None = None,
@@ -208,6 +211,7 @@ def select_kernel_timelines(
     default vocabulary and defer materialization until an admitted run.
     """
 
+    del project_dir  # runtime client is the sole timeline authority
     diagnostics: list[str] = []
     if runtime_client is None:
         try:
@@ -369,21 +373,6 @@ def _identity_problem(timeline_dir: Path, identity: dict) -> str | None:
     return None
 
 
-def read_identity(timeline_dir: Path) -> dict | None:
-    """Raw identity read: ``json.load`` of ``assembly.identity.json``.
-
-    Returns ``None`` when the file is missing, unparseable, or not a JSON
-    object.  Never repairs.
-    """
-    identity_file = Path(timeline_dir) / _IDENTITY_FILE
-    try:
-        with identity_file.open("r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except (OSError, ValueError):
-        return None
-    return raw if isinstance(raw, dict) else None
-
-
 def _is_tombstoned(timeline_dir: Path) -> bool:
     """Evidence-based tombstone detection (see module docstring)."""
     manifest_file = Path(timeline_dir) / _MANIFEST_FILE
@@ -502,17 +491,6 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
     return timelines, diagnostics
 
 
-def discover_timelines(project_dir: Path) -> list[ManagedTimeline]:
-    """List managed timeline directories under ``project_dir/timelines/``.
-
-    Read-only: identity files are read via ``json.load`` directly.  Sorted
-    deterministically by ULID.  Malformed directories (no identity file) are
-    skipped; their diagnostics surface through :func:`select_timeline`.
-    """
-    timelines, _ = _discover(project_dir)
-    return timelines
-
-
 def _select_by_slug(
     timelines: list[ManagedTimeline], slug: str, diagnostics: list[str]
 ) -> tuple[list[ManagedTimeline], list[str]]:
@@ -575,37 +553,6 @@ def _select_default(
         f"no timeline marked default and {len(eligible)} timelines exist (expected exactly 1)"
     )
     return [], diagnostics
-
-
-def select_timeline(
-    project_dir: Path,
-    *,
-    slug: str | None = None,
-    all: bool = False,
-    default: bool = False,
-) -> tuple[list[ManagedTimeline], list[str]]:
-    """Deterministically select the managed timeline(s) a run targets.
-
-    Returns ``(selected, diagnostics)``.  Selection modes, in precedence order:
-
-    * ``slug`` — the single non-tombstoned timeline whose identity slug,
-      UUID, or ULID matches; ambiguous, missing, or tombstoned refs yield a
-      diagnostic and an empty selection.
-    * ``all`` — every non-tombstoned timeline.
-    * ``default`` (and the no-selector fallback) — the timeline whose identity
-      ``display.is_default`` is true; if none is marked, the single timeline
-      when exactly one exists; otherwise an error diagnostic.
-
-    Tombstoned timelines are excluded from every mode.  Pure and read-only:
-    no repair, no mutation.
-    """
-    timelines, diagnostics = _discover(project_dir)
-    if slug is not None:
-        return _select_by_slug(timelines, slug, diagnostics)
-    if all:
-        return [t for t in timelines if not t.is_tombstoned], diagnostics
-    # ``default`` (True) and the implicit no-selector case converge here.
-    return _select_default(timelines, diagnostics)
 
 
 def _manifest_timeline_identity(manifest: dict) -> dict | None:
@@ -1041,9 +988,6 @@ def select_from_manifest(manifest: dict) -> ManagedTimeline | None:
 __all__ = [
     "ManagedTimeline",
     "KernelTimeline",
-    "discover_timelines",
-    "select_timeline",
     "select_kernel_timelines",
     "select_from_manifest",
-    "read_identity",
 ]

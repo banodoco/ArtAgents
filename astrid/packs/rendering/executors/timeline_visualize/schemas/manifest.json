@@ -28,19 +28,12 @@
     "kind": {"type": "string", "const": "timeline_visualize"},
     "inputs": {
       "type": "object",
-      "required": ["timeline_source", "from_view", "focus", "scope", "layout", "formats"],
+      "required": ["source_mode", "resolved_project", "resolved_timelines", "from_view", "focus", "scope", "layout", "formats"],
       "properties": {
-        "timeline_source": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "minItems": 1,
-          "uniqueItems": true,
-          "description": "Frozen v1 compatibility locator containing the project slug, not the CLI/SDK timeline_source path. Do not infer source authority from this field; use source_mode and the resolved identity fields."
-        },
         "source_mode": {
           "type": "string",
-          "enum": ["kernel", "legacy", "frozen", "project"],
-          "description": "Resolved authority boundary: kernel selector, explicit legacy event log, or frozen view. The former project value remains accepted for existing v1 packs. Optional so existing frozen v1 packs remain valid."
+          "enum": ["kernel", "frozen"],
+          "description": "Resolved authority boundary: runtime-owned timeline document or frozen view."
         },
         "resolved_project": {
           "type": "object",

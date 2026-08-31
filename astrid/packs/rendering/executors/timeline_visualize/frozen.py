@@ -1042,7 +1042,8 @@ def _verify_run_ownership(
         if timeline_ulid not in kernel_info["timeline_ids"]:
             raise ContainmentError("kernel run does not own this timeline visualization pack")
     inputs = manifest.get("inputs")
-    if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project_slug]:
+    resolved_project = inputs.get("resolved_project") if isinstance(inputs, dict) else None
+    if not isinstance(resolved_project, dict) or resolved_project.get("slug") != project_slug:
         raise ContainmentError("manifest project identity disagrees with its owning run")
     _verify_runtime_output_binding(
         manifest_path,
@@ -1464,7 +1465,8 @@ def _load_frozen_view_impl(manifest_path: Path, *, project_root: Path) -> Frozen
     # 5. The pack must be owned by the exact completed project run.
     if managed_output:
         inputs = manifest.get("inputs")
-        if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project.name]:
+        resolved_project = inputs.get("resolved_project") if isinstance(inputs, dict) else None
+        if not isinstance(resolved_project, dict) or resolved_project.get("slug") != project.name:
             raise ContainmentError(
                 "managed visualization identity disagrees with its owning project"
             )

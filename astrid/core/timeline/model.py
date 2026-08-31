@@ -10,7 +10,10 @@ from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.foundation.project_paths import ProjectPathError, validate_run_id
 from astrid.core.timeline.banodoco_schema import canonical_timeline_config
 
-from .paths import validate_timeline_slug, validate_timeline_ulid
+from astrid.core.contracts.identifiers import (
+    validate_timeline_slug,
+    validate_timeline_ulid,
+)
 
 TIMELINE_SCHEMA_VERSION = 1
 

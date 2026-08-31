@@ -94,16 +94,16 @@
   "id": "rendering.render",
   "inputs": [
     {
-      "description": "",
+      "description": "Attempt-local runtime materialization consumed by the path-oriented renderer host; callers must supply timeline_ref instead of a source path.",
       "name": "timeline",
-      "required": false,
+      "required": true,
       "type": "file",
-      "artifact_type": "timeline"
+      "artifact_type": "timeline/document"
     },
     {
-      "description": "Explicit canonical kernel timeline slug, UUID, or ULID. Mutually exclusive with timeline file mode.",
+      "description": "Explicit canonical runtime timeline slug, UUID, or ULID.",
       "name": "timeline_ref",
-      "required": false,
+      "required": true,
       "type": "string",
       "artifact_type": null
     },

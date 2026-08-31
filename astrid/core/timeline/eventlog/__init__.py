@@ -1,15 +1,11 @@
-"""Timeline eventlog public exports."""
+"""Pure event-log contracts used by the runtime materialization boundary.
 
-from .local_fs import LocalFsBackend
+Filesystem event-log backends and selectors are not product runtime APIs.
+Offline migration code must import its reader directly; this package exports
+only backend-neutral protocol and value types.
+"""
 from .projector import DisplayProjection, project_display
 from .protocol import EventLogBackend
-from .selector import (
-    EventLogTarget,
-    build_timeline_backend,
-    resolve_event_log_target,
-    select_timeline_backend,
-    select_timeline_stream,
-)
 from .types import (
     AppendEventRequest,
     BackendName,
@@ -30,13 +26,7 @@ __all__ = [
     "EventLogStaleVersionError",
     "EventLogVerification",
     "DisplayProjection",
-    "EventLogTarget",
-    "LocalFsBackend",
     "project_display",
     "TimelineVersionConflict",
     "TimelineStreamRef",
-    "build_timeline_backend",
-    "resolve_event_log_target",
-    "select_timeline_backend",
-    "select_timeline_stream",
 ]

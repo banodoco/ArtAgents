@@ -295,10 +295,6 @@ def _build_manifest(
         "schema_version": 1,
         "kind": "timeline_visualize",
         "inputs": {
-            # ``timeline_source`` is a frozen v1 compatibility locator. Its
-            # one value is the project slug, not a timeline path; the additive
-            # authority and identity fields below make that explicit.
-            "timeline_source": [project_slug],
             "source_mode": source_mode,
             "resolved_project": dict(resolved_project or {"slug": project_slug}),
             "resolved_timelines": [deepcopy(timeline)],
@@ -485,7 +481,7 @@ def write_evidence_pack(
     from_view: str | None = None,  # project-relative exact parent manifest
     focus: str | None = None,  # qualified parent-resolved focus
     resolved_project: Mapping[str, Any] | None = None,
-    source_mode: str = "project",
+    source_mode: str = "kernel",
 ) -> PackLayout:
     """Assemble the complete self-contained evidence pack on disk."""
 

@@ -1,0 +1,228 @@
+"""Adversarial proof that live timeline consumers are runtime-only.
+
+These tests intentionally exercise the negative boundary as well as the happy
+path: old project-tree selectors must fail closed, and a runtime materialized
+timeline must remain entirely in memory until the renderer writes its own
+attempt outputs.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from astrid.core.rendering.service import RenderService
+from astrid.core.timeline.snapshot import snapshot_from_runtime
+from astrid.packs.rendering.executors.timeline_visualize import select
+from astrid.packs.rendering.executors.timeline_visualize.run import (
+    _materialize_kernel_timeline,
+)
+from astrid.packs.rendering.executors.timeline_visualize.select import KernelTimeline
+from astrid.sdk import invocation
+from astrid.sdk.exceptions import CapabilityValidationError
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_live_import_graph_does_not_load_project_timeline_authority() -> None:
+    probe = """
+import sys
+import astrid.sdk.invocation
+import astrid.packs.rendering.executors.timeline_visualize.select
+import astrid.core.timeline.snapshot
+for name in (
+    'astrid.core.timeline.crud',
+    'astrid.core.timeline.paths',
+    'astrid.core.timeline.repair',
+    'astrid.core.timeline.eventlog.local_fs',
+    'astrid.core.timeline.eventlog.selector',
+    'astrid.core.timeline._edit_helpers',
+):
+    assert name not in sys.modules, name
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    for relative in (
+        "astrid/core/timeline/crud.py",
+        "astrid/core/timeline/paths.py",
+        "astrid/core/timeline/repair.py",
+        "astrid/core/timeline/eventlog/local_fs.py",
+        "astrid/core/timeline/eventlog/selector.py",
+    ):
+        assert not (ROOT / relative).exists(), relative
+
+
+def test_filesystem_modes_are_rejected_without_touching_the_tree(tmp_path: Path) -> None:
+    with pytest.raises(CapabilityValidationError, match="timeline_source"):
+        invocation._validate_timeline_visualize_inputs(
+            {"timeline_source": str(tmp_path / "assembly.jsonl")},
+            project="demo",
+            project_root=tmp_path,
+        )
+    with pytest.raises(CapabilityValidationError, match="path-backed"):
+        invocation._prepare_managed_render_inputs(
+            {"timeline": str(tmp_path / "assembly.json")},
+            project="demo",
+            project_root=tmp_path,
+        )
+    assert not hasattr(select, "select_timeline")
+    assert not hasattr(select, "discover_timelines")
+    assert not list(tmp_path.rglob("display.json"))
+    assert not list(tmp_path.rglob("assembly.jsonl"))
+
+
+def test_runtime_materialization_projects_in_memory_and_never_repairs(tmp_path: Path) -> None:
+    pytest.importorskip("banodoco_timeline_schema")
+    row = KernelTimeline(
+        timeline_id="11111111-1111-4111-8111-111111111111",
+        timeline_ulid="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        slug="main",
+        name="Main",
+        is_default=True,
+        config={"tracks": [], "clips": []},
+        registry={"assets": {}},
+        config_version=3,
+        head_event_id="01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        head_hash="a" * 64,
+        head_created_at="2026-01-01T00:00:00+00:00",
+    )
+    destination = tmp_path / "would-be-timeline"
+    selected = _materialize_kernel_timeline(
+        row,
+        project_root=tmp_path,
+        project_slug="demo",
+        destination=destination,
+    )
+    assert selected.timeline_dir is None
+    assert selected.runtime_config == row.config
+    assert selected.runtime_events
+    assert not destination.exists()
+    snapshot = snapshot_from_runtime(
+        timeline_id=selected.timeline_id,
+        timeline_ulid=selected.timeline_ulid,
+        slug=selected.slug or "main",
+        project_slug="demo",
+        events=list(selected.runtime_events),
+    )
+    assert snapshot.head_version == 2
+    assert snapshot.assembly == {"tracks": [], "clips": []}
+    assert not list(tmp_path.rglob("display.json"))
+    assert not list(tmp_path.rglob("assembly.jsonl"))
+
+
+def test_runtime_timeline_create_read_version_and_cas(tmp_path: Path, monkeypatch) -> None:
+    """The supported timeline lifecycle is a runtime transaction, including CAS."""
+    runtime_root = Path(
+        os.environ.get(
+            "ASTRID_RUNTIME_CHECKOUT",
+            "/Users/peteromalley/Documents/reigh-workspace/"
+            "banodoco-workspace-runtime-stage1-convergence",
+        )
+    )
+    if not runtime_root.is_dir():
+        pytest.skip("workspace runtime checkout is not available")
+    sys.path.insert(0, str(runtime_root))
+    sys.path.insert(0, str(runtime_root / "packages" / "python"))
+    daemon_module = pytest.importorskip("runtime_protocol.daemon")
+    from astrid.sdk.client import AstridClient
+
+    daemon = daemon_module.RuntimeDaemon(
+        tmp_path / "realm", support_root=tmp_path / "support"
+    ).start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv(
+        "BANODOCO_RUNTIME_CREDENTIAL",
+        str(tmp_path / "support" / "credentials" / "owner.token"),
+    )
+    try:
+        with AstridClient.open(
+            endpoint=daemon.endpoint,
+            credential=tmp_path / "support" / "credentials" / "owner.token",
+            realm_id=daemon.service.realm["id"],
+            actor_id="owner",
+            client_name="astrid-stage1-test",
+            client_version="stage1",
+            protocol_version="workspace.v1",
+        ) as client:
+            created = client.projects.create(
+                slug="demo", name="Demo", idempotency_key="project"
+            )
+            assert created.ok and created.data
+            created_timeline = client.timelines.create(
+                project="demo",
+                slug="main",
+                config={"tracks": [], "clips": []},
+                registry={"assets": {}},
+                idempotency_key="timeline",
+            )
+            assert created_timeline.ok and created_timeline.data
+            timeline_id = created_timeline.data["timeline_id"]
+            shown = client.timelines.show("demo", timeline_id)
+            assert shown.ok and shown.data["config_version"] == 1
+            updated = client.timelines.save(
+                "demo",
+                timeline_id,
+                config={"tracks": [], "clips": []},
+                registry={"assets": {}},
+                expected_version=1,
+                idempotency_key="timeline-save",
+            )
+            assert updated.ok and updated.data["config_version"] == 2
+            stale = client.timelines.save(
+                "demo",
+                timeline_id,
+                config={"tracks": [], "clips": []},
+                registry={"assets": {}},
+                expected_version=1,
+                idempotency_key="timeline-stale",
+            )
+            assert not stale.ok and stale.error.code == "conflict"
+            assert stale.error.details == {"actual": 2, "expected": 1}
+            assert client.timelines.show("demo", timeline_id).data["config_version"] == 2
+    finally:
+        daemon.stop()
+
+
+def test_replay_capture_has_no_timeline_or_theme_file_authority() -> None:
+    assert RenderService._collect_replay_inputs(object(), object(), object()) == {}
+
+
+def test_supported_visualization_accepts_only_frozen_runtime_identity() -> None:
+    identity = {
+        "stable_id": "TL01",
+        "qualified_ref": "TL01",
+        "uuid": "11111111-1111-4111-8111-111111111111",
+        "ulid": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "slug": "main",
+    }
+    frozen = select.select_from_manifest(
+        {"schema_version": 1, "kind": "timeline_visualize", "timeline": identity}
+    )
+    assert frozen is not None
+    assert frozen.is_frozen_manifest and frozen.timeline_dir is None
+    assert select.select_from_manifest(
+        {
+            "schema_version": 1,
+            "kind": "timeline_visualize",
+            "timeline": {**identity, "timeline_source": "/tmp/assembly.jsonl"},
+        }
+    ) is None
+
+
+def test_legacy_eventlog_exports_are_not_product_api() -> None:
+    import astrid.core.timeline.eventlog as eventlog
+
+    for name in (
+        "LocalFsBackend",
+        "select_timeline_backend",
+        "select_timeline_stream",
+    ):
+        with pytest.raises(AttributeError):
+            getattr(eventlog, name)

@@ -10,6 +10,7 @@ that contain no display events.  ``assembly.head.json`` is diagnostic-only.
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,6 @@ from astrid.core.timeline.events.schema import (
     with_event_hash,
 )
 from astrid.core.timeline.model import Display
-from astrid.core.timeline.paths import validate_timeline_ulid
 from astrid.core.timeline.projection import project_to_assembly
 from astrid.core.timeline.resolution import resolve_asset_authorized_path
 from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
@@ -46,6 +46,14 @@ _DISPLAY_EVENT_KINDS = frozenset(
     }
 )
 _READ_CHUNK_SIZE = 1024 * 1024
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _validate_runtime_ulid(value: object) -> str:
+    """Validate the detached runtime identity without project-path helpers."""
+    if not isinstance(value, str) or _ULID_RE.fullmatch(value) is None:
+        raise ValueError("timeline ULID must be an uppercase canonical ULID")
+    return value
 
 
 class ConcurrentAppendError(RuntimeError):
@@ -107,6 +115,46 @@ class TimelineSnapshot:
         return sns_digest(fields)
 
 
+def snapshot_from_runtime(
+    *,
+    timeline_id: str,
+    timeline_ulid: str,
+    slug: str,
+    project_slug: str,
+    events: Sequence[dict[str, Any]],
+    project_root: Path | None = None,
+    runtime_client: Any | None = None,
+    media_snapshot: Any | None = None,
+) -> TimelineSnapshot:
+    """Build a read-only snapshot from a runtime materialization.
+
+    The generated-client timeline row is the authority.  ``events`` is an
+    attempt-local, in-memory normalization supplied by the visualization
+    adapter; this path never opens a project directory or repairs a sidecar.
+    """
+    if not isinstance(timeline_id, str) or not timeline_id:
+        raise SnapshotIntegrityError("runtime timeline_id must be a non-empty UUID")
+    if not isinstance(timeline_ulid, str) or _ULID_RE.fullmatch(timeline_ulid) is None:
+        raise SnapshotIntegrityError("runtime timeline_ulid must be an uppercase canonical ULID")
+    raw_events, parsed_events = _parse_events(list(events))
+    chain_errors = _chain_diagnostics(parsed_events, timeline_id=timeline_id)
+    if chain_errors:
+        raise SnapshotIntegrityError("; ".join(chain_errors))
+    return _build_snapshot(
+        raw_events,
+        parsed_events,
+        timeline_id=timeline_id,
+        timeline_ulid=timeline_ulid,
+        display={"schema_version": 1, "slug": slug, "name": slug, "is_default": False},
+        slug=slug,
+        project_slug=project_slug,
+        project_root=project_root,
+        diagnostics=(),
+        runtime_client=runtime_client,
+        media_snapshot=media_snapshot,
+    )
+
+
 def _dedupe_diagnostics(items: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(items))
 
@@ -148,7 +196,7 @@ def _read_identity(timeline_dir: Path) -> tuple[str, str, Any]:
 
     timeline_ulid = identity.get("timeline_ulid")
     try:
-        canonical_ulid = validate_timeline_ulid(timeline_ulid)
+        canonical_ulid = _validate_runtime_ulid(timeline_ulid)
     except ValueError as exc:
         raise SnapshotIntegrityError(
             "assembly.identity.json.timeline_ulid must be a canonical ULID"
@@ -614,139 +662,6 @@ def _build_snapshot(
     return snapshot
 
 
-def snapshot_from_events(
-    events: list[dict[str, Any]],
-    *,
-    timeline_dir: Path,
-    project_slug: str,
-) -> TimelineSnapshot:
-    """Project a snapshot from provided event dictionaries without writes.
-
-    This helper intentionally does not reject a bad hash chain; callers can
-    construct forensic fixtures and obtain exact diagnostics from
-    :func:`verify_frozen`.  Event schema, projection, display, and registry
-    shape are still validated.
-    """
-
-    timeline_dir = Path(timeline_dir)
-    timeline_id, timeline_ulid, identity_display = _read_identity(timeline_dir)
-    raw_events, parsed_events = _parse_events(events)
-    display, slug = _display_from_captured_events(
-        parsed_events,
-        timeline_dir=timeline_dir,
-        identity_display=identity_display,
-    )
-    head, diagnostics = _read_head_sidecar(timeline_dir)
-    head_diagnostics = _head_sidecar_diagnostics(
-        head,
-        timeline_id=timeline_id,
-        events=parsed_events,
-    )
-    return _build_snapshot(
-        raw_events,
-        parsed_events,
-        timeline_id=timeline_id,
-        timeline_ulid=timeline_ulid,
-        display=display,
-        slug=slug,
-        project_slug=project_slug,
-        project_root=None,
-        diagnostics=[*diagnostics, *head_diagnostics],
-    )
-
-
-def acquire_snapshot(
-    timeline_dir: Path,
-    *,
-    project_slug: str,
-    project_root: Path | None = None,
-    retries: int = 2,
-    runtime_client: Any | None = None,
-    media_snapshot: Any | None = None,
-) -> TimelineSnapshot:
-    """Acquire one verified, stable event-sourced timeline snapshot.
-
-    ``retries`` is the number of complete retries after the initial attempt.
-    Only a changed JSONL fingerprint discards an attempt.  Every head-sidecar
-    mismatch is diagnostic because the captured event tail is authoritative.
-    """
-
-    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
-        raise ValueError("retries must be a non-negative integer")
-
-    timeline_dir = Path(timeline_dir)
-    normalized_project_root = Path(project_root) if project_root is not None else None
-    events_path = timeline_dir / "assembly.jsonl"
-    attempts = retries + 1
-
-    for attempt in range(attempts):
-        before = _event_file_fingerprint(events_path)
-        try:
-            timeline_id, timeline_ulid, identity_display = _read_identity(timeline_dir)
-            raw_events = _read_event_dicts(events_path)
-            raw_events, parsed_events = _parse_events(raw_events)
-            chain_errors = _chain_diagnostics(
-                parsed_events,
-                timeline_id=timeline_id,
-            )
-            if chain_errors:
-                raise SnapshotIntegrityError("; ".join(chain_errors))
-
-            display, slug = _display_from_captured_events(
-                parsed_events,
-                timeline_dir=timeline_dir,
-                identity_display=identity_display,
-            )
-            head, diagnostics = _read_head_sidecar(timeline_dir)
-            head_diagnostics = _head_sidecar_diagnostics(
-                head,
-                timeline_id=timeline_id,
-                events=parsed_events,
-            )
-            snapshot = _build_snapshot(
-                raw_events,
-                parsed_events,
-                timeline_id=timeline_id,
-                timeline_ulid=timeline_ulid,
-                display=display,
-                slug=slug,
-                project_slug=project_slug,
-                project_root=normalized_project_root,
-                diagnostics=[*diagnostics, *head_diagnostics],
-                runtime_client=runtime_client,
-                media_snapshot=media_snapshot,
-            )
-        except SnapshotIntegrityError as exc:
-            after = _event_file_fingerprint(events_path)
-            if before != after:
-                if attempt + 1 < attempts:
-                    continue
-                raise ConcurrentAppendError(
-                    f"could not acquire a stable snapshot after {attempts} attempt(s): "
-                    "assembly.jsonl changed during acquisition"
-                ) from exc
-            raise
-
-        after = _event_file_fingerprint(events_path)
-        if before != after:
-            if attempt + 1 < attempts:
-                continue
-            raise ConcurrentAppendError(
-                f"could not acquire a stable snapshot after {attempts} attempt(s): "
-                "assembly.jsonl changed during acquisition"
-            )
-
-        try:
-            snapshot.sns()
-        except (TypeError, ValueError) as exc:
-            raise SnapshotIntegrityError(
-                f"snapshot identity is invalid: {exc}"
-            ) from exc
-        return snapshot
-
-    raise AssertionError("snapshot acquisition loop exited unexpectedly")
-
-
 def verify_frozen(
     snapshot: TimelineSnapshot,
     *,
@@ -847,7 +762,5 @@ __all__ = [
     "ConcurrentAppendError",
     "SnapshotIntegrityError",
     "TimelineSnapshot",
-    "acquire_snapshot",
-    "snapshot_from_events",
     "verify_frozen",
 ]

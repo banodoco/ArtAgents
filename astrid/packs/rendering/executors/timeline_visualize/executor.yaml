@@ -5,7 +5,7 @@
   "kind": "built_in",
   "version": "1.0",
   "short_description": "Build a deterministic, agent-navigable evidence pack from managed timeline event logs.",
-  "description": "Read one or more managed timeline event logs without repair or mutation, freeze source-normalized snapshots, and emit deterministic JSON, Markdown, PNG, and SVG evidence under the owning project run.",
+  "description": "Read runtime-owned timeline documents, freeze source-normalized snapshots, and emit deterministic JSON, Markdown, PNG, and SVG evidence under the owning run.",
   "keywords": [
     "timeline",
     "visualize",
@@ -20,13 +20,6 @@
       "type": "string",
       "required": false,
       "description": "Owning Astrid project slug. In a project-scoped SDK invocation this is derived from project=<slug>; pass it for a standalone runner invocation."
-    },
-    {
-      "name": "timeline_source",
-      "type": "path",
-      "required": false,
-      "artifact_type": null,
-      "description": "Optional repeatable explicit legacy path to a contained managed-timeline directory or a file inside one; otherwise timeline_slug, all, or the project default selects kernel state. The result manifest's inputs.timeline_source is a frozen-v1 project-slug compatibility field, not this raw path; use source_mode and resolved identities for provenance."
     },
     {
       "name": "timeline_slug",
@@ -168,12 +161,6 @@
     ],
     "input_args": [
       {
-        "input": "timeline_source",
-        "flag": "--timeline-source",
-        "repeatable": true,
-        "optional": true
-      },
-      {
         "input": "formats",
         "flag": "--format",
         "repeatable": true,
@@ -187,7 +174,7 @@
   "conditions": [],
   "graph": {
     "consumes": [
-      "timeline_event_logs"
+      "runtime_timeline_documents"
     ],
     "depends_on": [],
     "provides": [

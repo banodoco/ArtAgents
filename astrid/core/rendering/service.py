@@ -2085,48 +2085,18 @@ class RenderService:
         invocation: _InvocationContext,
         request: RenderRequest,
     ) -> dict[str, str]:
-        """Locate the exact input files the failing backend was given.
+        """Return no source paths: runtime documents are the authority.
 
-        Payload paths (the backend-visible request) win over the top-level
-        request so planned segment renders capture their materialized
-        timelines; a theme file referenced by the timeline is included when
-        it resolves to a real file.
+        Render requests contain attempt-local materializations so the backend
+        can use its path-oriented Node/FFmpeg interface.  A replay bundle is
+        diagnostic output, not a second timeline authority; copying those
+        paths (or discovering a theme by opening the timeline file) would make
+        the render service a live file reader.  Runtime request/settlement
+        metadata is already retained in ``payload`` and ``bundle.json``.
         """
 
-        payload = invocation.payload
-        payload_dict = (
-            payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
-        )
-        timeline_source = payload_dict.get("timeline_path") or request.timeline_path
-        assets_source = payload_dict.get("assets_registry_path") or (
-            request.assets_registry_path
-        )
-        inputs: dict[str, str] = {}
-        if timeline_source and Path(timeline_source).is_file():
-            inputs["timeline"] = str(Path(timeline_source))
-        if assets_source and Path(assets_source).is_file():
-            inputs["assets_registry"] = str(Path(assets_source))
-        theme = self._theme_file(timeline_source)
-        if theme is not None:
-            inputs["theme"] = theme
-        return inputs
-
-    @staticmethod
-    def _theme_file(timeline_source: str | None) -> str | None:
-        """Resolve a timeline's ``theme`` reference when it names a file."""
-
-        if not timeline_source:
-            return None
-        try:
-            data = json.loads(Path(timeline_source).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if not isinstance(data, Mapping):
-            return None
-        theme = data.get("theme")
-        if isinstance(theme, str) and theme and Path(theme).is_file():
-            return str(Path(theme))
-        return None
+        del invocation, request
+        return {}
 
     def _replay_logs(self, error: Any) -> dict[str, str]:
         """Collect the failing invocation's stdout/stderr diagnostics."""

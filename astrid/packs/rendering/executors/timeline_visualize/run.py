@@ -26,10 +26,9 @@ from typing import Any, Iterable, Mapping
 from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import StaticChoices
-from astrid.core.foundation.project_paths import project_dir
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.core.timeline.resolution import classify_registry
-from astrid.core.timeline.snapshot import TimelineSnapshot, acquire_snapshot
+from astrid.core.timeline.snapshot import TimelineSnapshot, snapshot_from_runtime
 from astrid.packs.rendering.executors.timeline_visualize.assets import (
     guard_sampling,
     verified_source_path,
@@ -79,9 +78,7 @@ from astrid.packs.rendering.executors.timeline_visualize.scope import select_sco
 from astrid.packs.rendering.executors.timeline_visualize.select import (
     KernelTimeline,
     ManagedTimeline,
-    discover_timelines,
     select_kernel_timelines,
-    select_timeline,
 )
 from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
     MAX_FRAMES_PER_PAGE,
@@ -338,32 +335,18 @@ def _verify_selected_execution_authority(
         return
     mode = authority.get("mode")
     expected_rows = authority.get("timelines")
-    if mode not in {"kernel", "legacy_file"} or not isinstance(expected_rows, list):
+    if mode != "kernel" or not isinstance(expected_rows, list):
         raise ValueError("timeline visualization authority mode changed before execution")
-    if mode == "kernel":
-        actual_rows = [
-            {
-                "timeline_id": row.timeline_id,
-                "head_version": row.kernel_head_version,
-                "head_event_id": row.kernel_source_event_id,
-                "head_hash": row.kernel_head_hash,
-            }
-            for row in selected
-        ]
-        sort_field = "timeline_id"
-    else:
-        actual_rows = []
-        for row in selected:
-            if row.timeline_dir is None:
-                raise ValueError("legacy timeline authority lost its managed directory")
-            eventlog = row.timeline_dir / "assembly.jsonl"
-            actual_rows.append(
-                {
-                    "timeline_ulid": row.timeline_ulid,
-                    "eventlog_sha256": hashlib.sha256(eventlog.read_bytes()).hexdigest(),
-                }
-            )
-        sort_field = "timeline_ulid"
+    actual_rows = [
+        {
+            "timeline_id": row.timeline_id,
+            "head_version": row.kernel_head_version,
+            "head_event_id": row.kernel_source_event_id,
+            "head_hash": row.kernel_head_hash,
+        }
+        for row in selected
+    ]
+    sort_field = "timeline_id"
     if sorted(expected_rows, key=itemgetter(sort_field)) != sorted(
         actual_rows, key=itemgetter(sort_field)
     ):
@@ -397,7 +380,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Owning project slug issued by the workspace runtime.",
     )
-    parser.add_argument("--timeline-source", action="append", type=Path, default=[])
     parser.add_argument("--timeline-slug")
     parser.add_argument("--all", action="store_true", dest="select_all")
     parser.add_argument(
@@ -505,8 +487,6 @@ def _validate_selectors(args: argparse.Namespace) -> None:
         raise ValueError(f"cold selectors are mutually exclusive: {', '.join(cold)}")
     if args.timeline_slug is not None and args.select_all:
         raise ValueError("--timeline-slug and --all are mutually exclusive")
-    if args.timeline_source and (args.timeline_slug is not None or args.select_all):
-        raise ValueError("--timeline-source cannot be combined with --timeline-slug or --all")
     if (args.from_view is None) != (args.focus is None):
         raise ValueError("--from-view and --focus must be supplied together")
     if args.refresh_root and args.from_view is None:
@@ -515,7 +495,6 @@ def _validate_selectors(args: argparse.Namespace) -> None:
         conflicts = [
             name
             for name, value in (
-                ("--timeline-source", bool(args.timeline_source)),
                 ("--timeline-slug", args.timeline_slug),
                 ("--all", args.select_all),
                 ("--shot", args.shot),
@@ -536,59 +515,6 @@ def _validate_selectors(args: argparse.Namespace) -> None:
         raise ValueError("--filmstrip rendered requires --rendered-video")
 
 
-def _contained_timeline_sources(
-    project_root: Path,
-    sources: Iterable[Path],
-) -> tuple[list[ManagedTimeline], list[str]]:
-    timelines_root = (project_root / "timelines").resolve()
-    discovered, diagnostics = select_timeline(project_root, all=True)
-    all_discovered = {
-        row.timeline_dir.resolve(): row
-        for row in discover_timelines(project_root)
-        if row.timeline_dir is not None
-    }
-    by_path = {
-        row.timeline_dir.resolve(): row for row in discovered if row.timeline_dir is not None
-    }
-    selected: list[ManagedTimeline] = []
-    missing: list[str] = []
-    for raw in sources:
-        candidate = raw.expanduser().resolve()
-        if not candidate.is_dir() and not candidate.is_file():
-            missing.append(str(candidate))
-            continue
-        if candidate.parent == timelines_root:
-            candidate_dir = candidate
-        else:
-            candidate_dir = next(
-                (
-                    row.timeline_dir.resolve()
-                    for row in discovered
-                    if row.timeline_dir is not None
-                    and candidate.is_relative_to(row.timeline_dir.resolve())
-                ),
-                None,
-            )
-        if candidate_dir is None or candidate_dir.parent != timelines_root:
-            raise ValueError(
-                f"timeline_source must be a managed timeline directory or a file "
-                f"inside one under {timelines_root}: {raw}"
-            )
-        row = by_path.get(candidate_dir)
-        if row is None:
-            tombstoned = all_discovered.get(candidate_dir)
-            if tombstoned is not None and tombstoned.is_tombstoned:
-                diagnostics.append(f"timeline source {raw!s} is tombstoned")
-            missing.append(str(candidate))
-            continue
-        selected.append(row)
-    if missing:
-        detail = "; ".join(diagnostics) if diagnostics else "not a live managed timeline"
-        raise ValueError(f"invalid timeline_source {', '.join(missing)}: {detail}")
-    deduped = {row.timeline_ulid: row for row in selected}
-    return [deduped[key] for key in sorted(deduped)], diagnostics
-
-
 def _materialize_kernel_timeline(
     row: KernelTimeline,
     *,
@@ -596,9 +522,9 @@ def _materialize_kernel_timeline(
     project_slug: str,
     destination: Path,
 ) -> ManagedTimeline:
-    """Project a kernel timeline row into the pack's private read boundary."""
+    """Normalize one runtime row into an attempt-local visualization input."""
 
-    destination.mkdir(parents=True, exist_ok=True)
+    del project_root, project_slug, destination
     timeline_ulid = row.timeline_ulid.upper()
     config = dict(row.config)
     if not isinstance(config.get("clips"), list) or not isinstance(config.get("tracks"), list):
@@ -635,42 +561,8 @@ def _materialize_kernel_timeline(
         )
         event = with_event_hash(event, prev_hash=events[-1].hash if events else None)
         events.append(event)
-    (destination / "assembly.identity.json").write_text(
-        json.dumps(
-            {
-                "backend": "astrid.kernel",
-                "created_at": timestamp,
-                "display": {
-                    "is_default": row.is_default,
-                    "name": row.name,
-                    "schema_version": 1,
-                    "slug": row.slug,
-                },
-                "schema_version": 1,
-                "timeline_id": row.timeline_id,
-                "timeline_ulid": timeline_ulid,
-            },
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    (destination / "display.json").write_text(
-        json.dumps(
-            {"is_default": row.is_default, "name": row.name, "schema_version": 1, "slug": row.slug},
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    (destination / "assembly.jsonl").write_text(
-        "\n".join(
-            json.dumps(event.to_json_obj(), sort_keys=True, separators=(",", ":"))
-            for event in events
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     return ManagedTimeline(
-        timeline_dir=destination,
+        timeline_dir=None,
         timeline_id=row.timeline_id,
         timeline_ulid=timeline_ulid,
         slug=row.slug,
@@ -680,6 +572,9 @@ def _materialize_kernel_timeline(
         kernel_head_event_id=_stable_kernel_event_ulid(f"kernel:{row.head_event_id}"),
         kernel_head_hash=row.head_hash,
         kernel_source_event_id=row.head_event_id,
+        runtime_config=config,
+        runtime_registry={"assets": registry},
+        runtime_events=tuple(event.to_json_obj() for event in events),
     )
 
 
@@ -689,27 +584,24 @@ def _select_timelines(
     *,
     kernel_materialization_root: Path | None = None,
 ) -> list[ManagedTimeline]:
-    if args.timeline_source:
-        selected, diagnostics = _contained_timeline_sources(project_root, args.timeline_source)
-    else:
-        kernel_rows, diagnostics = select_kernel_timelines(
-            project_root,
-            project_slug=args.project_slug,
-            slug=args.timeline_slug,
-            all=args.select_all,
-            default=not args.timeline_slug and not args.select_all,
-        )
-        selected = []
-        if kernel_rows and kernel_materialization_root is not None:
-            selected = [
-                _materialize_kernel_timeline(
-                    row,
-                    project_root=project_root,
-                    project_slug=args.project_slug,
-                    destination=kernel_materialization_root / row.timeline_ulid.upper(),
-                )
-                for row in kernel_rows
-            ]
+    kernel_rows, diagnostics = select_kernel_timelines(
+        project_root,
+        project_slug=args.project_slug,
+        slug=args.timeline_slug,
+        all=args.select_all,
+        default=not args.timeline_slug and not args.select_all,
+    )
+    selected = []
+    if kernel_rows and kernel_materialization_root is not None:
+        selected = [
+            _materialize_kernel_timeline(
+                row,
+                project_root=project_root,
+                project_slug=args.project_slug,
+                destination=kernel_materialization_root / row.timeline_ulid.upper(),
+            )
+            for row in kernel_rows
+        ]
     if not selected:
         detail = "; ".join(diagnostics) or "no eligible managed timeline was selected"
         raise ValueError(detail)
@@ -1236,9 +1128,7 @@ def _materialize_view(
                 from_view = str(parent_manifest)
             focus = args.focus
         resolved_project: dict[str, str] = {"slug": args.project_slug}
-        if args.timeline_source:
-            source_mode = "legacy"
-        elif args.from_view is not None or frozen_parent is not None:
+        if args.from_view is not None or frozen_parent is not None:
             source_mode = "frozen"
         else:
             source_mode = "kernel"
@@ -1370,28 +1260,17 @@ def _render_one(
     execution_authority: Mapping[str, Any] | None = None,
     media_snapshot: Any | None = None,
 ) -> PackLayout:
-    if selected.timeline_dir is None:
-        raise ValueError("cold visualization requires a managed timeline directory")
-    snapshot = acquire_snapshot(
-        selected.timeline_dir,
+    if selected.runtime_config is None or not selected.runtime_events:
+        raise ValueError("runtime timeline materialization is incomplete")
+    snapshot = snapshot_from_runtime(
+        timeline_id=selected.timeline_id,
+        timeline_ulid=selected.timeline_ulid,
+        slug=selected.slug or selected.timeline_ulid,
         project_slug=args.project_slug,
+        events=selected.runtime_events,
         project_root=project_root,
-        retries=2,
         media_snapshot=media_snapshot,
     )
-    if execution_authority is not None and execution_authority.get("mode") == "legacy_file":
-        expected = next(
-            (
-                row
-                for row in execution_authority.get("timelines", [])
-                if isinstance(row, Mapping) and row.get("timeline_ulid") == selected.timeline_ulid
-            ),
-            None,
-        )
-        eventlog = selected.timeline_dir / "assembly.jsonl"
-        actual_digest = hashlib.sha256(eventlog.read_bytes()).hexdigest()
-        if not isinstance(expected, Mapping) or expected.get("eventlog_sha256") != actual_digest:
-            raise ValueError("timeline authority changed while acquiring its snapshot; retry")
     if selected.kernel_head_version is not None:
         snapshot = replace(
             snapshot,
@@ -1411,7 +1290,7 @@ def _render_one(
         )
     attachment, snapshot = _discover_snapshot_attachment(
         project_root=project_root,
-        timeline_dir=selected.timeline_dir,
+        timeline_dir=project_root,
         snapshot=snapshot,
     )
     if attachment is not None and attachment.integrity == "ok":
@@ -1487,23 +1366,37 @@ def refresh_root(
 ) -> PackLayout:
     """The sole frozen-lineage transition to current managed timeline state."""
 
-    timelines_root = (project_root / "timelines").resolve(strict=True)
-    declared_timeline_dir = timelines_root / frozen.timeline_ulid
-    if declared_timeline_dir.is_symlink():
-        raise ValueError("the frozen timeline path must not be a symlink")
-    timeline_dir = declared_timeline_dir.resolve(strict=True)
-    if timeline_dir.parent != timelines_root or not timeline_dir.is_dir():
-        raise ValueError("the frozen timeline is no longer a contained managed timeline")
-    snapshot = acquire_snapshot(
-        timeline_dir,
+    kernel_rows, diagnostics = select_kernel_timelines(
+        project_root,
         project_slug=args.project_slug,
+        slug=frozen.timeline_uuid,
+    )
+    if len(kernel_rows) != 1:
+        raise ValueError(
+            "; ".join(diagnostics)
+            or "frozen timeline is unavailable in the workspace runtime"
+        )
+    timeline_dir = project_root / ".runtime-timelines" / kernel_rows[0].timeline_ulid.upper()
+    selected = _materialize_kernel_timeline(
+        kernel_rows[0],
         project_root=project_root,
-        retries=2,
+        project_slug=args.project_slug,
+        destination=timeline_dir,
+    )
+    if selected.runtime_config is None or not selected.runtime_events:
+        raise ValueError("runtime timeline materialization is incomplete")
+    snapshot = snapshot_from_runtime(
+        timeline_id=selected.timeline_id,
+        timeline_ulid=selected.timeline_ulid,
+        slug=selected.slug or selected.timeline_ulid,
+        project_slug=args.project_slug,
+        events=selected.runtime_events,
+        project_root=project_root,
         media_snapshot=media_snapshot,
     )
     attachment, snapshot = _discover_snapshot_attachment(
         project_root=project_root,
-        timeline_dir=timeline_dir,
+        timeline_dir=project_root,
         snapshot=snapshot,
     )
     if attachment is not None and attachment.integrity == "ok":
@@ -1717,15 +1610,16 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             "project is required: pass --project-slug <slug> or select a current "
             "project in the workspace runtime"
         )
-    project_root = project_dir(args.project_slug).resolve()
-    if not project_root.is_dir():
-        raise ValueError(f"project not found: {args.project_slug}")
+    # This process has no project-tree authority.  Runtime rows are selected
+    # below and materialized beneath the disposable output workspace.
+    out_root = args.out.expanduser().resolve()
+    project_root = out_root / args.project_slug
+    project_root.mkdir(parents=True, exist_ok=True)
     # The runtime is the only authority for managed media ownership.  Capture
     # one project-scoped snapshot for every selected timeline in this run;
     # local-source and offline migration callers remain unaffected when the
     # runtime is unavailable.
     media_snapshot = _runtime_media_snapshot(args.project_slug)
-    out_root = args.out.expanduser().resolve()
     pack_root = out_root / "agent-view"
     execution_authority = _execution_authority_context()
     if pack_root.exists() and any(pack_root.iterdir()):

@@ -8,14 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
-import shutil
-import stat
-import tempfile
-import warnings
 from collections.abc import Mapping
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -616,22 +610,15 @@ def _validate_timeline_visualize_inputs(
             "--out is not supported for project timeline visualization; "
             "omit it and use the returned durable manifest_path"
         )
-    source = values.get("timeline_source")
-    source_supplied = "timeline_source" in values and source is not None
-    if source_supplied and (
-        source == ""
-        or isinstance(source, (list, tuple, set))
-        and not source
-    ):
-        raise CapabilityValidationError("timeline_source must contain at least one path")
-    has_source = source_supplied
+    # Timeline files are authoring/migration inputs only.  A live product
+    # invocation must address a runtime-owned timeline by its stable ref.
+    if "timeline_source" in values:
+        raise CapabilityValidationError(
+            "timeline_source is not a supported product input; use timeline_slug "
+            "or the runtime-selected default"
+        )
     has_ref = values.get("timeline_slug") not in (None, "")
     select_all = bool(values.get("all", False))
-    if has_source and (has_ref or select_all):
-        raise CapabilityValidationError(
-            "timeline_source cannot be combined with timeline_slug or all; "
-            "choose a managed path, a timeline ref, or all"
-        )
     if has_ref and select_all:
         raise CapabilityValidationError(
             "timeline_slug and all are mutually exclusive; choose one timeline ref or all"
@@ -659,7 +646,6 @@ def _validate_timeline_visualize_inputs(
         conflicts = [
             name
             for name, present in (
-                ("timeline_source", has_source),
                 ("timeline_slug", has_ref),
                 ("all", select_all),
                 *((name, name in cold_selectors) for name in cold_selectors),
@@ -739,28 +725,22 @@ def _validate_timeline_visualize_inputs(
             "rendering.timeline_visualize requires project=<slug> to resolve a managed timeline"
         )
 
-    # Resolve the same project root the kernel will bind, without opening the
-    # ledger.  This keeps pre-admission ownership checks independent of the
-    # ambient workspace and makes foreign absolute paths fail closed.
-    from astrid.core.foundation.project_paths import ProjectPathError, project_dir
-    from astrid.core.project.ownership import ProjectOwnershipError, require_project_owned_artifact
+    # Timeline identity and content come from the neutral runtime.  The
+    # executor's local root is only a disposable materialization base for
+    # frozen result rehydration; it is never scanned for a project or timeline.
     from astrid.packs.rendering.executors.timeline_visualize.select import (
-        discover_timelines,
         select_kernel_timelines,
-        select_timeline,
     )
 
-    bound_root = _resolve_projects_root(project_root, project)
-    try:
-        managed_project = project_dir(project, root=bound_root).resolve()
-    except ProjectPathError as exc:
-        raise CapabilityValidationError(str(exc)) from exc
-    if not (managed_project / "project.json").is_file():
-        raise CapabilityValidationError(
-            f"project not found: {project!r}; create it before visualizing a timeline"
-        )
+    managed_project = (
+        Path(project_root).expanduser().resolve() if project_root is not None else None
+    )
 
     if from_view:
+        if managed_project is None:
+            raise CapabilityValidationError(
+                "from_view requires an explicit attempt-local project_root"
+            )
         raw_view = Path(str(values["from_view"])).expanduser()
         if not raw_view.is_absolute():
             raise CapabilityValidationError(
@@ -814,117 +794,28 @@ def _validate_timeline_visualize_inputs(
 
     selected: list[Any] = []
     diagnostics: list[str] = []
-    if not has_source:
-        selected, diagnostics = select_kernel_timelines(
-            managed_project,
-            project_slug=str(project),
-            slug=str(values["timeline_slug"]) if has_ref else None,
-            all=select_all,
-            default=not has_ref and not select_all,
-        )
-    if (has_ref or select_all or not has_source) and not selected:
+    selected, diagnostics = select_kernel_timelines(
+        managed_project,
+        project_slug=str(project),
+        slug=str(values["timeline_slug"]) if has_ref else None,
+        all=select_all,
+        default=not has_ref and not select_all,
+    )
+    if not selected:
         detail = "; ".join(diagnostics) or "no eligible managed timeline was selected"
         raise CapabilityValidationError(f"timeline selection failed: {detail}")
 
-    if not has_source:
-        return {
-            "mode": "kernel",
-            "timelines": [
-                {
-                    "timeline_id": row.timeline_id,
-                    "head_version": row.config_version,
-                    "head_event_id": row.head_event_id,
-                    "head_hash": row.head_hash,
-                }
-                for row in selected
-            ],
-        }
-    if isinstance(source, (str, Path)):
-        source_items = [source]
-    elif isinstance(source, (list, tuple, set)):
-        source_items = list(source)
-        if not source_items:
-            raise CapabilityValidationError("timeline_source must contain at least one path")
-    else:
-        raise CapabilityValidationError(
-            "timeline_source must be a path or a list of paths inside the project's managed timelines"
-        )
-
-    timelines, diagnostics = select_timeline(managed_project, all=True)
-    discovered_timelines = discover_timelines(managed_project)
-    timelines_root = (managed_project / "timelines").resolve()
-    legacy_heads: list[dict[str, str]] = []
-    selected_legacy_ids: set[str] = set()
-    for raw in source_items:
-        if not isinstance(raw, (str, Path)) or not str(raw).strip():
-            raise CapabilityValidationError(
-                f"timeline_source entries must be non-empty paths; got {raw!r}"
-            )
-        try:
-            candidate = require_project_owned_artifact(
-                project,
-                "timeline",
-                raw,
-                root=bound_root,
-            )
-        except ProjectOwnershipError as exc:
-            raise CapabilityValidationError(str(exc)) from exc
-        if not candidate.exists() or not (candidate.is_file() or candidate.is_dir()):
-            raise CapabilityValidationError(
-                f"timeline_source does not exist or is not a file/directory: {candidate}"
-            )
-        if not candidate.is_relative_to(timelines_root):
-            raise CapabilityValidationError(
-                f"timeline_source must be inside the project's managed timelines: {candidate}"
-            )
-        if not any(
-            row.timeline_dir is not None and candidate.is_relative_to(row.timeline_dir.resolve())
-            for row in timelines
-        ):
-            tombstoned = next(
-                (
-                    row
-                    for row in discovered_timelines
-                    if row.is_tombstoned
-                    and row.timeline_dir is not None
-                    and candidate.is_relative_to(row.timeline_dir.resolve())
-                ),
-                None,
-            )
-            if tombstoned is not None:
-                raise CapabilityValidationError(
-                    f"timeline_source belongs to tombstoned timeline "
-                    f"{tombstoned.timeline_ulid!r}: {candidate}"
-                )
-            detail = "; ".join(diagnostics) or "not a live managed timeline"
-            raise CapabilityValidationError(
-                f"timeline_source is not a managed timeline directory/file for project {project!r}: "
-                f"{candidate} ({detail})"
-            )
-        timeline_dir = next(
-            row.timeline_dir.resolve()
-            for row in timelines
-            if row.timeline_dir is not None and candidate.is_relative_to(row.timeline_dir.resolve())
-        )
-        eventlog = timeline_dir / "assembly.jsonl"
-        if not eventlog.is_file():
-            raise CapabilityValidationError(
-                f"legacy timeline_source has no assembly.jsonl event log: {timeline_dir}"
-            )
-        if timeline_dir.name in selected_legacy_ids:
-            raise CapabilityValidationError(
-                f"timeline_source selects timeline {timeline_dir.name!r} more than once"
-            )
-        selected_legacy_ids.add(timeline_dir.name)
-        legacy_heads.append(
-            {
-                "timeline_ulid": timeline_dir.name,
-                "eventlog_sha256": hashlib.sha256(eventlog.read_bytes()).hexdigest(),
-            }
-        )
     return {
-        "mode": "legacy_file",
-        "timelines": sorted(legacy_heads, key=lambda row: row["timeline_ulid"]),
+        "mode": "kernel",
+        "timelines": [
+            {
+                "timeline_id": row.timeline_id,
+                "head_version": row.config_version,
+                "head_event_id": row.head_event_id,
+                "head_hash": row.head_hash,
+            }
+            for row in selected
+        ],
     }
 
 
@@ -1083,60 +974,10 @@ def _prepare_managed_render_inputs(
     timeline_ref = values.get("timeline_ref")
     expected_version = values.get("expected_version")
     if timeline_ref in (None, ""):
-        if expected_version is not None:
-            raise CapabilityValidationError(
-                "expected_version is only valid with rendering.render timeline_ref"
-            )
-        if values.get("timeline") in (None, ""):
-            raise CapabilityValidationError(
-                "rendering.render requires exactly one input mode: timeline=<project-owned file> "
-                "or timeline_ref=<kernel slug/UUID/ULID>"
-            )
-        _validate_explicit_render_profile(values.get("profile"))
-        from astrid.core.project.ownership import (
-            ProjectOwnershipError,
-            require_project_owned_artifact,
+        raise CapabilityValidationError(
+            "rendering.render requires timeline_ref=<runtime timeline slug/UUID/ULID>; "
+            "path-backed timeline inputs are not supported"
         )
-        from astrid.core.rendering.output_policy import (
-            DEFAULT_RENDER_OUTPUT_NAME,
-            RenderOutputPolicyError,
-            validate_render_output_policy,
-        )
-
-        raw_timeline = values["timeline"]
-        timeline_path = Path(str(raw_timeline)).expanduser()
-        if project is not None and str(project).strip():
-            try:
-                timeline_path = require_project_owned_artifact(
-                    str(project),
-                    "timeline",
-                    timeline_path,
-                    root=_resolve_projects_root(project_root, project),
-                )
-            except ProjectOwnershipError as exc:
-                raise CapabilityValidationError(str(exc)) from exc
-        output_name = values.get("output_name", DEFAULT_RENDER_OUTPUT_NAME)
-        if output_name is None:
-            output_name = DEFAULT_RENDER_OUTPUT_NAME
-        try:
-            validate_render_output_policy(
-                output_name,
-                timeline=timeline_path,
-                profile=values.get("profile"),
-            )
-        except RenderOutputPolicyError as exc:
-            raise CapabilityValidationError(str(exc), details=exc.details) from exc
-        warnings.warn(
-            "rendering.render raw-file mode (timeline=<path>) keys idempotency by file "
-            "path, not timeline content: editing the timeline at the same path and "
-            "re-invoking returns the cached run without recomputing. Use the canonical "
-            "managed path for iteration instead: timelines create/save + timelines "
-            "render <timeline_ref>, or pass timeline_ref=<ref>, so renders are "
-            "content-hashed and never serve stale results.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return values, None
     if values.get("timeline") not in (None, ""):
         raise CapabilityValidationError(
             "timeline and timeline_ref are mutually exclusive; use timeline for explicit "
@@ -1189,7 +1030,6 @@ def _prepare_managed_render_inputs(
             expected_version=expected_version,
             client=_client,
         )
-        from astrid.core.timeline._edit_helpers import TimelineEditError
         from astrid.core.timeline.expand_shots import expand_shot_clips
 
         # Admission is intentionally split: the authoring parent may contain
@@ -1226,12 +1066,12 @@ def _prepare_managed_render_inputs(
         def load_child(ref: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
             child_result = _client.timelines.show(str(project), ref)
             if not child_result.ok or not child_result.data:
-                raise TimelineEditError(f"timeline {ref!r} was not found")
+                raise ValueError(f"timeline {ref!r} was not found")
             child = child_result.data
             child_config = child.get("config")
             child_registry = child.get("registry")
             if not isinstance(child_config, Mapping) or not isinstance(child_registry, Mapping):
-                raise TimelineEditError(f"timeline {ref!r} has an invalid snapshot")
+                raise ValueError(f"timeline {ref!r} has an invalid snapshot")
             child_records.append(
                 {
                     "timeline_id": str(child["timeline_id"]),
@@ -1249,7 +1089,7 @@ def _prepare_managed_render_inputs(
                 snapshot.registry,
                 load_timeline=load_child,
             )
-        except TimelineEditError as exc:
+        except ValueError as exc:
             raise CapabilityValidationError(str(exc)) from exc
         from dataclasses import replace
 
@@ -1311,7 +1151,6 @@ def _prepare_managed_render_inputs(
     # The public selector and CAS guard are admission-only controls. The
     # resolved authority object below is the durable run input/cache identity;
     # do not leak these two controls as undeclared renderer CLI flags.
-    values.pop("timeline_ref", None)
     values.pop("expected_version", None)
     return values, authority
 
@@ -1377,46 +1216,9 @@ def _invocation_outputs(
             # not the logical pack root.  Reuse the frozen loader's verified
             # task-output rehydration so the long-standing ``pack_root`` SDK
             # convenience remains an actually navigable directory.
-            if project_root is not None and not manifest.is_relative_to(project_root):
-                from astrid.packs.rendering.executors.timeline_visualize.frozen import (
-                    discard_rehydrated_pack,
-                    rehydrate_managed_pack,
-                )
-
-                rehydrated = rehydrate_managed_pack(
-                    manifest,
-                    project_root=project_root,
-                )
-                try:
-                    pack_root = _persist_visualization_pack(
-                        rehydrated,
-                        project_root=project_root,
-                        manifest=manifest,
-                    )
-                finally:
-                    discard_rehydrated_pack(rehydrated)
-            elif project_root is not None and capability_id == "rendering.timeline_visualize":
-                from astrid.packs.rendering.executors.timeline_visualize.frozen import (
-                    discard_rehydrated_pack,
-                    load_frozen_view,
-                )
-
-                frozen = load_frozen_view(
-                    manifest,
-                    project_root=project_root,
-                )
-                try:
-                    pack_root = _persist_visualization_pack(
-                        frozen.pack_root,
-                        project_root=project_root,
-                        manifest=manifest,
-                    )
-                finally:
-                    discard_rehydrated_pack(frozen.pack_root)
-            elif capability_id == "rendering.timeline_visualize":
-                raise CapabilityInvocationError(
-                    "timeline visualization result cannot be verified without a project root"
-                )
+            # The manifest is the runtime-owned result handle.  Rehydration,
+            # when needed for navigation, is attempt-local; Astrid never
+            # persists a project-side ``.astrid/views`` copy.
             outputs["pack_root"] = str(pack_root)
             outputs["manifest_path"] = str(manifest)
             outputs["pages"] = [
@@ -1432,160 +1234,6 @@ def _invocation_outputs(
                 if path.is_file()
             }
     return _json_safe_mapping(outputs)
-
-
-def _persist_visualization_pack(
-    source: Path,
-    *,
-    project_root: Path,
-    manifest: Path,
-) -> Path:
-    """Copy a verified CAS pack into a durable, non-authoritative view cache.
-
-    ``load_frozen_view`` deliberately rehydrates managed outputs in a private
-    temporary directory. Public SDK results routinely cross a CLI process
-    boundary, so returning that temporary path would immediately produce a
-    dangling ``pack_root``. The cache is keyed by the durable manifest bytes,
-    never linked to CAS, and remains a derived convenience: ``manifest_path``
-    is still the authoritative navigation handle.
-    """
-
-    project = Path(project_root).resolve(strict=True)
-    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    cache_parent = project
-    for part in (".astrid", "views", "timeline_visualize"):
-        cache_parent = cache_parent / part
-        if cache_parent.is_symlink():
-            raise CapabilityInvocationError(
-                f"visualization cache path must not contain symlinks: {cache_parent}"
-            )
-        cache_parent.mkdir(exist_ok=True)
-        if cache_parent.resolve() != cache_parent or not cache_parent.is_relative_to(project):
-            raise CapabilityInvocationError("visualization cache path escapes its owning project")
-    destination = cache_parent / digest
-
-    def _tree_state(root: Path) -> dict[str, str]:
-        paths = sorted(root.rglob("*"))
-        symlinks = [path for path in paths if path.is_symlink()]
-        if symlinks:
-            raise CapabilityInvocationError(
-                f"visualization cache tree must not contain symlinks: {symlinks[0]}"
-            )
-        state: dict[str, str] = {}
-        for path in paths:
-            relative = path.relative_to(root).as_posix()
-            if path.is_dir():
-                state[f"{relative}/"] = "directory"
-            elif path.is_file():
-                state[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
-            else:
-                raise CapabilityInvocationError(
-                    f"visualization cache tree contains a non-regular entry: {path}"
-                )
-        return state
-
-    source_state = _tree_state(source)
-    with _visualization_cache_lock(cache_parent / f".{digest}.lock"):
-        try:
-            destination_stat = destination.lstat()
-        except FileNotFoundError:
-            destination_stat = None
-        if destination_stat is not None and stat.S_ISLNK(destination_stat.st_mode):
-            raise CapabilityInvocationError(
-                f"visualization cache destination must not be a symlink: {destination}"
-            )
-        destination_identity: tuple[int, int] | None = None
-        destination_state: dict[str, str] | None = None
-        if destination_stat is not None and stat.S_ISDIR(destination_stat.st_mode):
-            destination_identity = (destination_stat.st_dev, destination_stat.st_ino)
-            destination_state = _tree_state(destination)
-            after = destination.lstat()
-            if (after.st_dev, after.st_ino) != destination_identity:
-                raise CapabilityInvocationError(
-                    "visualization cache destination changed during verification"
-                )
-            if destination_state == source_state:
-                return destination
-        if destination_stat is not None and not stat.S_ISDIR(destination_stat.st_mode):
-            raise CapabilityInvocationError(
-                f"visualization cache destination is not a directory: {destination}"
-            )
-
-        staging_parent = Path(tempfile.mkdtemp(prefix=f".{digest}.", dir=cache_parent)).resolve()
-        staging = staging_parent / "pack"
-        quarantined_original: Path | None = None
-        quarantine_parent: Path | None = None
-        try:
-            shutil.copytree(source, staging)
-            if _tree_state(staging) != source_state:
-                raise CapabilityInvocationError(
-                    "visualization cache source changed while it was being copied"
-                )
-            if destination.exists():
-                # This digest-keyed directory is generated cache, not project
-                # authority. Atomically quarantine the exact inode that was
-                # inspected. A concurrent replacement is restored and rejected
-                # rather than recursively deleted through a stale pathname.
-                if destination_identity is None:
-                    raise CapabilityInvocationError(
-                        "visualization cache destination appeared during repair"
-                    )
-                quarantine_parent = Path(
-                    tempfile.mkdtemp(prefix=f".corrupt-{digest}.", dir=cache_parent)
-                ).resolve()
-                quarantine = quarantine_parent / "pack"
-                os.replace(destination, quarantine)
-                quarantined = quarantine.lstat()
-                if (quarantined.st_dev, quarantined.st_ino) != destination_identity:
-                    if not destination.exists():
-                        os.replace(quarantine, destination)
-                        os.rmdir(quarantine_parent)
-                    raise CapabilityInvocationError(
-                        "visualization cache destination changed during repair; preserved replacement"
-                    )
-                # Keep the corrupt derived tree as a forensic quarantine. It
-                # is never authority and, crucially, Astrid does not path-delete
-                # it after a non-atomic identity check.
-                quarantined_original = quarantine
-            os.replace(staging, destination)
-        except Exception:
-            if quarantined_original is not None and not destination.exists():
-                os.replace(quarantined_original, destination)
-                if quarantine_parent is not None:
-                    os.rmdir(quarantine_parent)
-            raise
-        finally:
-            shutil.rmtree(staging_parent, ignore_errors=True)
-    return destination
-
-
-@contextmanager
-def _visualization_cache_lock(path: Path):
-    """Hold a persistent-inode exclusive lock for one cache digest."""
-
-    try:
-        import fcntl
-    except ImportError as exc:  # pragma: no cover - frozen release matrix is POSIX
-        raise CapabilityInvocationError(
-            "durable visualization cache requires POSIX file locking"
-        ) from exc
-    flags = os.O_CREAT | os.O_RDWR
-    if hasattr(os, "O_CLOEXEC"):
-        flags |= os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(path, flags, 0o600)
-    except OSError as exc:
-        raise CapabilityInvocationError(
-            f"cannot open visualization cache lock {path}: {exc}"
-        ) from exc
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
 
 
 def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:

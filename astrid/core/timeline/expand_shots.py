@@ -20,7 +20,11 @@ _LOGGER = logging.getLogger(__name__)
 _ShotRegistry = Mapping[str, object]
 _LoadTimelineFn = Callable[[str], tuple[Mapping[str, object], _ShotRegistry]]
 
-__all__ = ["expand_shot_clips", "_total_assets"]
+class ShotExpansionError(ValueError):
+    """A runtime-owned shot reference cannot be expanded safely."""
+
+
+__all__ = ["ShotExpansionError", "expand_shot_clips", "_total_assets"]
 
 
 def _total_assets(registry: Mapping[str, object]) -> int:
@@ -52,11 +56,9 @@ def expand_shot_clips(
     - A ``shot`` clip nested inside a sub-document fails closed (no recursion).
     - Unknown/missing timeline_document_id fails closed via the loader error.
     """
-    from astrid.core.timeline._edit_helpers import TimelineEditError
-
     raw_clips = config.get("clips", [])
     if not isinstance(raw_clips, list):
-        raise TimelineEditError("timeline clips must be a list")
+        raise ShotExpansionError("timeline clips must be a list")
     clips: list[object] = list(raw_clips)
     expanded_clips: list[dict[str, object]] = []
     merged_assets: dict[str, object] = {}
@@ -105,7 +107,7 @@ def expand_shot_clips(
                 and ("from" not in raw_clip or "to" not in raw_clip)
                 and _is_still_asset(raw_clip.get("asset"))
             ):
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"Image media clip {raw_clip.get('id', '?')} uses hold without "
                     "explicit from/to source bounds"
                 )
@@ -114,20 +116,20 @@ def expand_shot_clips(
 
     for clip in clips:
         if not isinstance(clip, Mapping):
-            raise TimelineEditError("timeline clips must be objects")
+            raise ShotExpansionError("timeline clips must be objects")
         if clip.get("clipType") != "shot":
             expanded_clips.append(dict(clip))
             continue
 
         params = clip.get("params")
         if not isinstance(params, dict):
-            raise TimelineEditError(
+            raise ShotExpansionError(
                 f"Shot clip {clip.get('id', '?')} missing valid params"
             )
         shot_id = params.get("shot_id")
         timeline_document_id = params.get("timeline_document_id")
         if shot_id is None or timeline_document_id is None:
-            raise TimelineEditError(
+            raise ShotExpansionError(
                 f"Shot clip {clip.get('id', '?')} missing shot_id or timeline_document_id in params"
             )
 
@@ -138,13 +140,13 @@ def expand_shot_clips(
         try:
             sub_config, sub_registry = load_timeline(timeline_document_id)
         except Exception as exc:
-            raise TimelineEditError(
+            raise ShotExpansionError(
                 f"Failed to load sub-timeline {timeline_document_id}: {exc}"
             ) from exc
 
         raw_sub_clips = sub_config.get("clips", [])
         if not isinstance(raw_sub_clips, list):
-            raise TimelineEditError(
+            raise ShotExpansionError(
                 f"sub-timeline {timeline_document_id} clips must be a list"
             )
         sub_clips: list[object] = list(raw_sub_clips)
@@ -154,7 +156,7 @@ def expand_shot_clips(
             else getattr(sub_registry, "assets", {})
         )
         if not isinstance(sub_assets, Mapping):
-            raise TimelineEditError(
+            raise ShotExpansionError(
                 f"sub-timeline {timeline_document_id} has an invalid asset registry"
             )
         # Parent entries are authoritative.  A child may add an asset, but it
@@ -169,17 +171,17 @@ def expand_shot_clips(
 
         for sub_clip in sub_clips:
             if not isinstance(sub_clip, Mapping):
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"sub-clip inside sub-timeline {timeline_document_id} must be an object"
                 )
             if sub_clip.get("clipType") == "shot":
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"nested shot clip detected inside sub-timeline {timeline_document_id}"
                 )
 
             sub_id = sub_clip.get("id")
             if not sub_id:
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"Sub-clip missing id inside sub-timeline {timeline_document_id}"
                 )
             asset_id = sub_clip.get("asset")
@@ -188,7 +190,7 @@ def expand_shot_clips(
                 and asset_id not in sub_assets
                 and asset_id not in merged_assets
             ):
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"Sub-clip {sub_id} references missing asset {asset_id!r} "
                     f"inside sub-timeline {timeline_document_id}"
                 )
@@ -199,7 +201,7 @@ def expand_shot_clips(
             sub_hold = float(sub_clip.get("hold", 0.0))
             speed = float(sub_clip.get("speed", 1.0))
             if speed <= 0.0:
-                raise TimelineEditError(
+                raise ShotExpansionError(
                     f"Sub-clip {sub_id} inside sub-timeline {timeline_document_id} has invalid speed"
                 )
             source_from = float(sub_clip.get("from", 0.0))
