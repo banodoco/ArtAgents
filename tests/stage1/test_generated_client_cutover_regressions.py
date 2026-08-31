@@ -22,8 +22,10 @@ class _RecordingClient:
         self.project_call = (args, kwargs)
         return {"project_id": "project-1"}
 
-    def list_capabilities(self) -> list[dict[str, str]]:
-        return [{"capability_id": "capability-1", "definition_digest": "digest-1"}]
+    def list_capabilities(self, *, cursor=None, limit=50):
+        assert cursor is None
+        assert limit == 50
+        return [[{"capability_id": "capability-1", "definition_digest": "digest-1"}], None]
 
     def admit_task(self, **kwargs: object) -> dict[str, str]:
         self.task_call = kwargs

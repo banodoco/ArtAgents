@@ -258,8 +258,8 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
 
         # Admission rejection is pre-ledger: no task, run, or execution event
         # exists for the unavailable capability.
-        assert generated.list_tasks(project.project_id)[0] == []
-        assert generated.list_runs(project.project_id)[0] == []
+        assert generated.list_project_tasks(project.project_id)[0] == []
+        assert generated.list_project_runs(project.project_id)[0] == []
         assert generated.list_events()[0] == []
 
         # Readiness changes only after the host receives the declared
@@ -268,7 +268,9 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
         host.preflight()
         assert host.capabilities[record.id].ready is True
         host.register(deliberate=True)
-        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        capability_page, capability_cursor = generated.list_capabilities()
+        assert capability_cursor is None
+        capability = next(item for item in capability_page if item.capability_id == record.id)
         assert capability.status == "ready"
         task = generated.admit_task(
             capability_id=record.id,

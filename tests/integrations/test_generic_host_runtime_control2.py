@@ -16,7 +16,7 @@ if RUNTIME.is_dir():
     sys.path.insert(0, str(RUNTIME))
 
 runtime_protocol = pytest.importorskip("runtime_protocol")
-from banodoco_workspace_client import WorkspaceClient  # noqa: E402
+from banodoco_workspace_client import ApiError, WorkspaceClient  # noqa: E402
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
 
 from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolClient  # noqa: E402
@@ -198,23 +198,18 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
         ]
 
         host.register()
-        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        capability_page, capability_cursor = generated.list_capabilities()
+        assert capability_cursor is None
+        capability = next(item for item in capability_page if item.capability_id == record.id)
         assert capability.status == "unavailable"
         assert capability.unavailable_reason == "credentials:missing=ASTRID_TEST_PROVIDER_KEY"
-        task = generated.admit_task(
-            capability_id=record.id,
-            capability_digest=record.capability_digest,
-            input_object_ids=[],
-            idempotency_key="provider-fixture-task",
-        )
-        blocked = generated.claim_task(
-            executor_id="provider-fixture-host",
-            capability_ids=[record.id],
-            idempotency_key="provider-fixture-claim-blocked",
-            runtime_epoch=generated.health().runtime_epoch,
-        )
-        assert blocked is not None and blocked["waiting_reason"] == "capability_unavailable"
-        assert generated.get_task(task.task_id).state == "queued"
+        with pytest.raises(ApiError, match="capability is not ready for admission"):
+            generated.admit_task(
+                capability_id=record.id,
+                capability_digest=record.capability_digest,
+                input_object_ids=[],
+                idempotency_key="provider-fixture-task",
+            )
 
         # Readiness changes only after the explicit credential is supplied;
         # the fixture command itself remains entirely offline.
@@ -222,8 +217,16 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
         host.preflight()
         assert host.capabilities[record.id].ready is True
         host.register(deliberate=True)
-        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        capability_page, capability_cursor = generated.list_capabilities()
+        assert capability_cursor is None
+        capability = next(item for item in capability_page if item.capability_id == record.id)
         assert capability.status == "ready"
+        task = generated.admit_task(
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            input_object_ids=[],
+            idempotency_key="provider-fixture-ready-task",
+        )
         settled = host.run(once=True)
         assert len(settled) == 1 and settled[0].state == "succeeded"
         digest = "sha256:" + hashlib.sha256(b"offline-provider").hexdigest()

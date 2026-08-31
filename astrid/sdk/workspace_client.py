@@ -12,6 +12,8 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .pagination import page_pair, paged_rows
+
 try:
     from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
 except ImportError:  # The SDK remains importable when the runtime package is absent.
@@ -23,103 +25,6 @@ class WorkspaceClientError(RuntimeError):
         super().__init__(message)
         self.status, self.code, self.message = status, code, message
         self.details = dict(details or {})
-
-
-def page_pair(value: Any) -> tuple[list[Any], str | None] | None:
-    """Decode the generated client's canonical list-page value.
-
-    The generated client returns ``(items, next_cursor)`` and
-    :meth:`WorkspaceClient._call_generated` converts that tuple to the
-    JSON-safe ``[items, next_cursor]`` pair.  A bare list (or a mapping-shaped
-    adapter response) is not a page and must never be treated as a terminal
-    page: doing so loses the pagination boundary and can silently truncate a
-    runtime read.
-    """
-
-    if not isinstance(value, list) or len(value) != 2:
-        return None
-    items, next_cursor = value
-    if not isinstance(items, list):
-        return None
-    if next_cursor is not None and (
-        not isinstance(next_cursor, str)
-        or not next_cursor
-        or any(
-            character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
-            for character in next_cursor
-        )
-    ):
-        return None
-    return items, next_cursor
-
-
-def paged_rows(
-    reader: Any,
-    *args: Any,
-    cursor: str | None = None,
-    limit: int = 50,
-    max_pages: int = 10_000,
-    **kwargs: Any,
-) -> list[Any] | None:
-    """Read every page from a canonical cursor-bearing runtime operation.
-
-    This is the one pagination boundary shared by product adapters and
-    runtime-backed packs.  A page is *only* the JSON-safe ``[items,
-    next_cursor]`` pair; bare lists, mappings, malformed cursors, failures,
-    and cursor cycles fail closed as ``None``.  ``max_pages`` is an explicit
-    safety bound so an unhealthy runtime cannot turn a read into an unbounded
-    loop.
-
-    ``reader`` is called with the canonical ``cursor`` and ``limit`` keyword
-    arguments on every request, including the first page.  The runtime
-    sibling's generated signatures are required to accept these arguments.
-    DomainResult-like values are unwrapped only through their explicit
-    ``ok``/``data`` contract; no alternate page shape is accepted.
-    """
-
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-        return None
-    if not isinstance(max_pages, int) or isinstance(max_pages, bool) or max_pages <= 0:
-        return None
-    rows: list[Any] = []
-    seen_cursors: set[str] = set()
-    current = cursor
-    for _ in range(max_pages):
-        call_kwargs = dict(kwargs)
-        call_kwargs.update(cursor=current, limit=limit)
-        try:
-            value = reader(*args, **call_kwargs)
-        except TypeError:
-            # Keep narrow test doubles and older generated clients usable for
-            # a terminal first page. A continuation still necessarily uses
-            # the canonical cursor-bearing call and therefore fails closed if
-            # the reader cannot accept it.
-            if current is not None or kwargs:
-                return None
-            try:
-                value = reader(*args)
-            except Exception:
-                return None
-        except Exception:
-            return None
-        if hasattr(value, "ok") and hasattr(value, "data"):
-            if not bool(value.ok):
-                return None
-            value = value.data
-        page = page_pair(value)
-        if page is None:
-            return None
-        page_rows, next_cursor = page
-        if len(page_rows) > limit:
-            return None
-        rows.extend(page_rows)
-        if next_cursor is None:
-            return rows
-        if next_cursor == current or next_cursor in seen_cursors:
-            return None
-        seen_cursors.add(next_cursor)
-        current = next_cursor
-    return None
 
 
 def _read_credential(path: Path) -> str:
@@ -591,8 +496,24 @@ class WorkspaceClient:
     def create_variant(self, generation_id: str, variant_id: str, *, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None) -> Any:
         return self._call_generated("create_variant", generation_id, variant_id, object_id=object_id, variant_type=variant_type, metadata=metadata)
 
-    def list_capabilities(self) -> Any:
-        return [asdict(item) if is_dataclass(item) else item for item in self._call_generated("list_capabilities")]
+    def list_capabilities(self, *, cursor: str | None = None, limit: int = 50) -> Any:
+        """Return one strict ``[items, next_cursor]`` capability page.
+
+        The sibling runtime's generated client is cursor-bearing.  Preserve
+        that boundary in the Astrid transport wrapper so callers can either
+        request a page explicitly or use the shared ``paged_rows`` helper to
+        exhaust the collection.  A bare list is never a valid response.
+        """
+        value = self._call_generated("list_capabilities", cursor=cursor, limit=limit)
+        page = page_pair(value)
+        if page is None:
+            raise WorkspaceClientError(
+                0,
+                "protocol_error",
+                "runtime capability listing returned an invalid page",
+            )
+        items, next_cursor = page
+        return [[asdict(item) if is_dataclass(item) else item for item in items], next_cursor]
 
     def register_capability(self, capability_id: str, definition_digest: str, *, required_resource_keys: list[str] | None = None, status: str = "ready", estimated_scratch_bytes: int = 0, estimated_output_bytes: int = 0, unavailable_reason: str | None = None, idempotency_key: str | None = None) -> Any:
         return self._call_generated("register_capability", capability_id, definition_digest, required_resource_keys=required_resource_keys, status=status, estimated_scratch_bytes=estimated_scratch_bytes, estimated_output_bytes=estimated_output_bytes, unavailable_reason=unavailable_reason, idempotency_key=idempotency_key)

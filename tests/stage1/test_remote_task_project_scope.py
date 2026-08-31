@@ -4,8 +4,8 @@ from astrid.sdk.remote import RemoteTasks
 
 
 class _Client:
-    def list_capabilities(self):
-        return [{"capability_id": "render.basic", "definition_digest": "sha256:" + "a" * 64}]
+    def list_capabilities(self, *, cursor=None, limit=50):
+        return [[{"capability_id": "render.basic", "definition_digest": "sha256:" + "a" * 64}], None]
 
     def admit_task(self, **kwargs):
         assert kwargs["project_id"] == "project-1"

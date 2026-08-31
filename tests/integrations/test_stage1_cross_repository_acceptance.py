@@ -152,7 +152,9 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         )
         assert host.register()["registration"]["executor_id"] == "acceptance-host"
         assert host.register()["registration"]["executor_id"] == "acceptance-host"
-        registered = {item.capability_id: item for item in generated.list_capabilities()}
+        capability_page, capability_cursor = generated.list_capabilities()
+        assert capability_cursor is None
+        registered = {item.capability_id: item for item in capability_page}
         assert registered[record.id].definition_digest == record.capability_digest
         task = generated.admit_task(
             capability_id=record.id,
@@ -192,8 +194,9 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert result.state == "succeeded"
         assert generated.get_task(task.task_id).state == "succeeded"
         assert generated.get_run(task.run_id)["task_ids"] == [task.task_id]
-        events = generated.list_run_events(task.run_id)
-        assert {event.event_type for event in events} >= {"task.admitted", "task.completed"}
+        event_page, event_cursor = generated.list_run_events(task.run_id)
+        assert event_cursor is None
+        assert {event.event_type for event in event_page} >= {"task.admitted", "task.completed"}
         assert generated.get_object("sha256:" + hashlib.sha256(b"hello").hexdigest()).data == b"hello"
 
         _stop_runtime(daemon)
