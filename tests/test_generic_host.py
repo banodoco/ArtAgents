@@ -623,7 +623,14 @@ def test_register_preserves_declared_dispositions_and_block_reasons(tmp_path, mo
     host.register()
     registered = {capability_id: payload for capability_id, payload in runtime.capability_registrations}
     assert registered["required.provider"]["status"] == "unavailable"
-    assert registered["required.provider"]["unavailable_reason"] == "credentials:missing=ASTRID_TEST_PROVIDER_KEY"
+    unavailable_reason = registered["required.provider"]["unavailable_reason"]
+    assert unavailable_reason
+    reason_by_check = {
+        component.split(":", 1)[0]: component
+        for component in unavailable_reason.split(";")
+    }
+    assert reason_by_check["credentials"] == "credentials:missing=ASTRID_TEST_PROVIDER_KEY"
+    assert reason_by_check["network"] == "network:reason=provider network_policy is missing"
     assert registered["optional.provider"]["status"] == "unavailable"
     assert registered["unsupported.provider"]["status"] == "unsupported"
     assert registered["unsupported.provider"]["unavailable_reason"] == "Provider is not shipped"
