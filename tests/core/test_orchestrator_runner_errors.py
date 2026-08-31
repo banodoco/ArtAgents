@@ -458,7 +458,7 @@ def test_orchestrator_out_only_requires_project(
     registry = _registry(orch)
     monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
 
-    with pytest.raises(OrchestratorRunnerError, match="project required"):
+    with pytest.raises(OrchestratorRunnerError, match="project is required"):
         run_orchestrator(
             OrchestratorRunRequest(orchestrator_id=orch.id, out=out_dir),
             registry,
