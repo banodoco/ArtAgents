@@ -8,7 +8,6 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_mai
 guard_canonical_entrypoint("iteration.experiment_prepare")
 import argparse  # noqa: E402
 import json  # noqa: E402
-import os  # noqa: E402
 import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
@@ -26,12 +25,6 @@ from astrid.core.experiments.schema import (  # noqa: E402
     validate_review,
 )
 from astrid.core.foundation.hash import sha256_file  # noqa: E402
-from astrid.core.project.schema import (  # noqa: E402
-    ProjectValidationError,
-    validate_run_record,
-)
-from astrid.core.env_vars import ASTRID_PROJECT_SLUG  # noqa: E402
-from astrid.core.project.ownership import require_project_owned_artifact  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,24 +74,6 @@ def main(argv: list[str] | None = None) -> int:
                 recovery_command="check the experiment.json against docs/contracts/experiment-contract.md",
             ) from exc
 
-        managed_project = os.environ.get(ASTRID_PROJECT_SLUG)
-        if managed_project:
-            require_project_owned_artifact(
-                managed_project, "experiment", experiment_path
-            )
-            require_project_owned_artifact(
-                managed_project, "experiment_runs", runs_dir
-            )
-            if experiment["project_slug"] != managed_project:
-                raise AstridError(
-                    f"experiment project_slug {experiment['project_slug']!r} does not "
-                    f"match managed project {managed_project!r}",
-                    recovery_command=(
-                        f"move the experiment under projects/{managed_project}/experiments/ "
-                        "and update project_slug"
-                    ),
-                )
-
         # Resolve case manifests.  Missing/invalid source evidence creates
         # first-class failed/unknown records with diagnostics — it does NOT
         # erase the rest of the experiment.  We only abort (raise) on an
@@ -120,22 +95,6 @@ def main(argv: list[str] | None = None) -> int:
                     (case, "manifest.json", runs_dir / run_id)
                 )
                 continue
-
-            run_ref: dict[str, Any] = {"path": "run.json", "verified": False}
-            run_json_path = run_dir / "run.json"
-            if run_json_path.is_file() and not run_json_path.is_symlink():
-                try:
-                    run_record = validate_run_record(
-                        json.loads(run_json_path.read_text(encoding="utf-8"))
-                    )
-                    if run_record.get("run_id") != run_id:
-                        raise ProjectValidationError("run_id does not match case")
-                    run_ref["verified"] = True
-                except (OSError, json.JSONDecodeError, ProjectValidationError) as exc:
-                    run_ref["error"] = f"Invalid run.json: {exc}"
-            else:
-                run_ref["error"] = "run.json missing; legacy/unmanaged run identity is unverified"
-            case["_run_record"] = run_ref
 
             expected_manifest = case.get("source_manifest")
             manifest_rel = (

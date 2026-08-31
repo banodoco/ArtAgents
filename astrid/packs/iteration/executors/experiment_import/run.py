@@ -38,7 +38,6 @@ from pathlib import Path  # noqa: E402
 from typing import Any, Mapping  # noqa: E402
 
 from astrid.core._shared.result_manifest import write_manifest  # noqa: E402
-from astrid.core.contracts.run_status import RunStatus  # noqa: E402
 from astrid.core.experiments.capture import (  # noqa: E402
     read_result_json,
     sanitize_portable,
@@ -51,7 +50,6 @@ from astrid.core.experiments.schema import (  # noqa: E402
     validate_import_report,
 )
 from astrid.core.foundation.hash import sha256_file  # noqa: E402
-from astrid.core.project.schema import build_run_record, validate_run_record  # noqa: E402
 
 _CASE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
@@ -495,76 +493,6 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     break
 
-            capture_status = str(case.get("status", "draft"))
-            if capture_status in {"completed", "partial"}:
-                run_status = RunStatus.COMPLETED
-            elif capture_status == "draft":
-                run_status = RunStatus.RUNNING
-            else:
-                run_status = RunStatus.FAILED
-            run_record = build_run_record(
-                project_slug,
-                run_id,
-                tool_id="iteration.experiment_import",
-                kind="executor",
-                status=run_status,
-                out=f"runs/{run_id}",
-                metadata={
-                    "legacy_import": True,
-                    "source_kind": case.get("source_kind"),
-                    "source_subdir": case.get("subdir"),
-                    "capture_status": capture_status,
-                    "epistemic_note": (
-                        "This ledger record indexes imported unmanaged evidence; "
-                        "it does not claim the historical provider invocation was managed by Astrid."
-                    ),
-                },
-                created_at=str(sanitized.get("created", "1970-01-01T00:00:00Z")),
-                invocation="cli",
-            )
-            run_record["manifest_path"] = f"runs/{run_id}/manifest.json"
-            run_record = validate_run_record(run_record)
-            # Kernel-first: imported runs are not kernel ledger entries — this
-            # run.json is non-authority import storage, not a status authority.
-            # If a kernel run exists for this project/run_id, stamp as derived
-            # projection (authority: kernel); otherwise stamp as import storage
-            # (authority: import). Never an authoritative ledger write.
-            # Keep load_run_record for historical dirs (read path unchanged).
-            _kernel_run_id: str | None = None
-            _kernel_task_id: str | None = None
-            try:
-                from astrid.core.foundation.project_paths import (
-                    resolve_projects_root as _resolve_root,  # noqa: E402
-                )
-                from astrid.core.kernel.read import (
-                    kernel_run_info as _kernel_run_info,  # noqa: E402
-                )
-
-                _root = _resolve_root(None)
-                _info = _kernel_run_info(project_slug, run_id, projects_root=_root)
-                if _info is not None:
-                    _kernel_run_id = str(_info["run_id"])
-                    if _info.get("task_id") is not None:
-                        _kernel_task_id = str(_info["task_id"])
-            except Exception:
-                pass
-            if _kernel_run_id is not None:
-                run_record["authority"] = "kernel"
-                run_record["kernel_run_id"] = _kernel_run_id
-                if _kernel_task_id is not None:
-                    run_record["kernel_task_id"] = _kernel_task_id
-            else:
-                run_record["authority"] = "import"
-                # Explicit non-authority marker for readers: this file is storage
-                # for legacy evidence, not the kernel status source.
-                run_record.setdefault("metadata", {})  # type: ignore[attr-defined]
-                if isinstance(run_record.get("metadata"), dict):
-                    run_record["metadata"]["non_authority"] = True  # type: ignore[index]
-                    run_record["metadata"]["storage_kind"] = "legacy_import"
-            (run_dir / "run.json").write_text(
-                json.dumps(run_record, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
         # Manifest pins were added only after their final bytes existed.
         experiment = validate_experiment(experiment)
 

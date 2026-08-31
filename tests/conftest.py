@@ -50,7 +50,7 @@ def seed_project() -> Callable[[Path, str], Path]:
 
     def _seed_project(projects_root: Path, slug: str) -> Path:
         from astrid.core import timeline as timeline_contract
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         pdir = projects_root / slug
         pdir.mkdir(parents=True, exist_ok=True)

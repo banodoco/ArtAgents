@@ -581,7 +581,7 @@ def test_invoke_rejects_elements_and_missing_executor_project(
         )
 
     monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
-    with pytest.raises(astrid.CapabilityValidationError, match="project required"):
+    with pytest.raises(astrid.CapabilityPreconditionError, match="project is required"):
         astrid.invoke(
             "editorial.arrange",
             kind="executor",
@@ -2567,9 +2567,10 @@ def test_generate_attached_project_resolution_image(
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
-    # The attached-session project (legacy session seed retired; the env
-    # slot is now the genuine attached-project carrier).
-    monkeypatch.setenv("ASTRID_PROJECT_SLUG", "autouse-session-demo")
+    invocation = importlib.import_module("astrid.sdk.invocation")
+    monkeypatch.setattr(
+        invocation, "_runtime_selected_project", lambda: "autouse-session-demo"
+    )
 
     result = astrid.generate.image(
         model="flux-dev",
@@ -2590,9 +2591,10 @@ def test_generate_attached_project_resolution_video(
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
-    # The attached-session project (legacy session seed retired; the env
-    # slot is now the genuine attached-project carrier).
-    monkeypatch.setenv("ASTRID_PROJECT_SLUG", "autouse-session-demo")
+    invocation = importlib.import_module("astrid.sdk.invocation")
+    monkeypatch.setattr(
+        invocation, "_runtime_selected_project", lambda: "autouse-session-demo"
+    )
 
     result = astrid.generate.video(
         model="wan-2.2",
@@ -2669,7 +2671,6 @@ from unittest.mock import patch
 
 astrid = importlib.import_module("astrid")
 sdk = importlib.import_module("astrid.sdk")
-import astrid.core.session.config as session_config
 
 # Capture stderr via a StringIO
 from io import StringIO
@@ -2699,8 +2700,7 @@ def fake_invoke(capability_id, **kwargs):
         }},
     )
 
-with patch.object(sdk, "invoke", fake_invoke), \\
-     patch.object(session_config, "resolve_default_project_for_sdk", return_value="default"):
+with patch.object(sdk, "invoke", fake_invoke):
     old_stderr = sys.stderr
     sys.stderr = stderr_capture
     try:
@@ -2769,7 +2769,6 @@ os.environ["ASTRID_SESSION_ID"] = "S-before-facade"
 
 astrid = importlib.import_module("astrid")
 sdk = importlib.import_module("astrid.sdk")
-import astrid.core.session.config as session_config
 
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends.base import GenerationResult

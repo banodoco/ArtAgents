@@ -1,7 +1,5 @@
-"""Session-layer package — retained config/paths only.
+"""Session package containing only non-authoritative pack path helpers.
 
-The task-mode session machinery (binding, lease, identity, lifecycle, writer)
-was retired with the legacy task runtime. This package now holds only the
-long-lived config facade (``config``) and filesystem path helpers (``paths``),
-which the kernel's preferences layer and the v10 suite still import.
+Runtime project and actor selection belong to the workspace service; this
+package has no session/config or project-preference authority.
 """

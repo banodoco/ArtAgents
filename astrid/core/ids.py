@@ -76,14 +76,23 @@ def is_lowercase_ulid(value: object) -> bool:
     return isinstance(value, str) and _ULID_RE.fullmatch(value) is not None
 
 
-def generate_ulid() -> str:
-    """Compatibility name for the kernel ULID generator.
+def generate_thread_id() -> str:
+    """Generate an opaque lineage identifier for runtime contracts."""
+    return generate_lowercase_ulid()
 
-    New code should prefer :func:`generate_lowercase_ulid`; this alias keeps
-    timeline-domain callers independent of the retired thread package.
-    """
-    # Timeline-domain files historically used uppercase IDs; preserve that
-    # storage spelling while the runtime-facing generator stays lowercase.
+
+def generate_run_id() -> str:
+    """Generate an opaque run identifier for runtime contracts."""
+    return generate_lowercase_ulid()
+
+
+def generate_group_id() -> str:
+    """Generate an opaque group identifier for runtime contracts."""
+    return generate_lowercase_ulid()
+
+
+def generate_ulid() -> str:
+    """Generate the uppercase ULID spelling used by legacy timeline storage."""
     return generate_lowercase_ulid().upper()
 
 
@@ -106,6 +115,9 @@ __all__ = [
     "generate_lowercase_ulid",
     "is_lowercase_ulid",
     "generate_ulid",
+    "generate_thread_id",
+    "generate_run_id",
+    "generate_group_id",
     "is_ulid",
     "require_ulid",
 ]

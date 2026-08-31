@@ -125,7 +125,6 @@ for historical or authoring purposes only; none is a live workspace authority.
 
 | Directory | Reason |
 |---|---|
-| `astrid/core/threads/` | Historical thread subsystem; not a Stage1 product surface. |
 | `astrid/core/audit/` | Separate concern; defines its own context (`ASTRID_AUDIT_*`). |
 | `astrid/packs/` | Executor `run.py` files that do not import astrid core. |
 
@@ -136,5 +135,3 @@ for historical or authoring purposes only; none is a live workspace authority.
 | `ASTRID_STATE_HOME` | `ASTRID_STATE_HOME` | `skills/state.py` | Overrides the skills state directory (default: `~/.local/share/astrid` or `~/Library/Application Support/astrid`). |
 | `ASTRID_AUDIT_DISABLED` | `ASTRID_AUDIT_DISABLED` | `audit/context.py` | Set to `1` to disable audit event recording. |
 | `ASTRID_AUDIT_RUN_DIR` | `ASTRID_AUDIT_RUN_DIR` | `audit/context.py` | Directory for the current audit run. |
-| `ASTRID_AGENT_VERSION` | `ASTRID_AGENT_VERSION` | `threads/record.py` | Agent version string injected into thread records. |
-| `ASTRID_REPO_ROOT` | `ASTRID_REPO_ROOT` | `threads/cli.py` | Absolute path to the repository root for relative-path display. |

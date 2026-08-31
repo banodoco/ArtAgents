@@ -11,24 +11,23 @@ Inspect first when provenance quality is uncertain (internal runner command;
 not a public entrypoint):
 
 ```bash
-ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect @active --no-content
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <runtime-run-id> --no-content
 ```
 
-Run through the SDK. The pack-level `--thread` is an optional lineage selector
-matched against runtime run metadata; it is not a generic Astrid session
-binding flag.
+Run through the SDK with the runtime-issued target run id. Its parent tasks,
+relations, and evidence are the only lineage inputs; no local thread/session
+state participates.
 
-The public default is resolved by the runtime: when no project is supplied,
-the route may use the sole project returned by `projects.list`; with multiple
-runtime projects callers must provide `--project`. Local `project.json`,
-`runs/*/run.json`, thread indexes, and event-log sidecars are never consulted.
+The project must be explicit or supplied by the runtime's actor-scoped current
+selection. Local `project.json`, `runs/*/run.json`, thread indexes, and
+event-log sidecars are never consulted.
 
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.iteration_video",
         kind="orchestrator", project="demo",
-    inputs={"thread": "@active"},
+        inputs={"target_run_id": "<runtime-run-id>"},
 )
 ```
 

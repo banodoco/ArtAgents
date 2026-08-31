@@ -96,7 +96,7 @@ def test_runner_is_the_canonical_theme_writer():
 def test_project_run_env_no_implicit_theme():
     """project_run_env with no project_slug returns only PROJECT_RUN_ENV."""
     from astrid.core.env_vars import ASTRID_PROJECT_RUN as PROJECT_RUN_ENV
-    from astrid.core.project.run import project_run_env
+    from astrid.core.project.runtime import project_run_env
 
     env = project_run_env(None)
     assert env == {PROJECT_RUN_ENV: "1"}, (

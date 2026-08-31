@@ -160,6 +160,10 @@ def _resolve_invoke_destination(
 
     selected, _source = selected_project(project)
     if selected is None:
+        from astrid.sdk.invocation import _runtime_selected_project
+
+        selected = _runtime_selected_project()
+    if selected is None:
         raise CapabilityPreconditionError(
             format_project_required_guidance(operation="generation")
         )

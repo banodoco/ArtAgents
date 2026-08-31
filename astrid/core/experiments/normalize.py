@@ -95,11 +95,6 @@ def normalize_case_from_manifest(
         "factors": dict(case.get("factors", {})),
         "relationship": dict(case.get("relationship", {})),
         "expected_input_roles": list(case.get("expected_input_roles", [])),
-        "run_record": dict(case.get("_run_record", {
-            "path": "run.json",
-            "verified": False,
-            "error": "run record was not resolved",
-        })),
         "included": case.get("included", True),
     }
 
@@ -119,16 +114,6 @@ def normalize_case_from_manifest(
     review_case.setdefault("warnings", [])
     review_case.setdefault("error", None)
     review_case.setdefault("capture_gaps", [])
-    if not review_case["run_record"].get("verified"):
-        review_case["capture_gaps"].append({
-            "kind": "ambiguous_provenance",
-            "detail": str(
-                review_case["run_record"].get(
-                    "error", "run.json could not be verified"
-                )
-            ),
-        })
-
     resolved_manifest, containment_error = resolve_manifest_path(
         run_path, manifest_path
     )
@@ -1150,11 +1135,6 @@ def _unreadable_manifest_case(
         "factors": dict(case.get("factors", {})),
         "relationship": dict(case.get("relationship", {})),
         "expected_input_roles": list(case.get("expected_input_roles", [])),
-        "run_record": dict(case.get("_run_record", {
-            "path": "run.json",
-            "verified": False,
-            "error": "run record was not resolved",
-        })),
         "status": "failed",
         "provider": "unknown",
         "backend": None,

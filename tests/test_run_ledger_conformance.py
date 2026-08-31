@@ -451,7 +451,7 @@ class TestOrchestratorCLIProject:
             OrchestratorRunRequest,
             run_orchestrator,
         )
-        from astrid.core.project.run import ProjectRunError
+        from astrid.core.project.runtime import ProjectRuntimeError as ProjectRunError
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
 

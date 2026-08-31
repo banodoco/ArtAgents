@@ -14,8 +14,7 @@ runtime client, derives lineage and quality, and passes those inputs to the
 assembler; no thread index or filesystem run projection is an authority.
 
 Project and run selection is runtime-only. The retired local project-run
-helpers (`prepare_project_run`, `finalize_project_run`, and `run.json` CRUD)
-must not be imported or invoked by this pack. Legacy files are accepted only
+surface must not be imported or invoked by this pack. Legacy files are accepted only
 by the explicitly provider-independent experiment import/prepare surfaces.
 
 Runtime output objects are also runtime-owned. When a run output has an

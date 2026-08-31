@@ -20,8 +20,6 @@ from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
-from astrid.core.ids import is_ulid
-
 SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
 
@@ -56,7 +54,6 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
     out_path = Path(request.out).expanduser().resolve()
     args = _parse_passthrough(tuple(getattr(request, "orchestrator_args", ()) or ()))
     repo_root = Path(args.repo_root or REPO_ROOT).expanduser().resolve()
-    thread_ref = str(request.inputs.get("thread") or getattr(request, "thread", None) or args.thread or "@active")
     target_run_id = request.inputs.get("target_run_id") or args.target_run_id
     if request.dry_run:
         return _dry_run_result(orchestrator.id, out_path=out_path)
@@ -71,7 +68,6 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
             result = run_iteration_video(
                 repo_root=repo_root,
                 out_path=out_path,
-                thread_ref=thread_ref,
                 target_run_id=str(target_run_id) if target_run_id else None,
                 max_iterations=args.max_iterations,
                 renderers=args.renderers,
@@ -108,7 +104,6 @@ def run_iteration_video(
     *,
     repo_root: Path,
     out_path: Path,
-    thread_ref: str,
     target_run_id: str | None = None,
     max_iterations: int | None = None,
     renderers: str | None = None,
@@ -130,7 +125,6 @@ def run_iteration_video(
     with _runtime_client_context(runtime_client) as client:
         target, records = resolve_target_run_id(
             repo_root,
-            thread_ref=thread_ref,
             target_run_id=target_run_id,
             project_slug=project_slug,
             runtime_client=client,
@@ -171,7 +165,6 @@ def run_iteration_video(
         step_id=render_step_id,
     )
     return {
-        "thread_id": target["thread_id"],
         "target_run_id": target["target_run_id"],
         "assemble": assemble_result,
         "outputs": {name: str(out_path / name) for name, _kind in OUTPUT_FILES},
@@ -238,10 +231,9 @@ def _attached_render_binding(request: Any) -> dict[str, str | None]:
     }
 
 
-def inspect_iteration_thread(
+def inspect_iteration_run(
     *,
     repo_root: Path,
-    thread_ref: str,
     target_run_id: str | None = None,
     summarizer_model_version: str = "runtime.runs.v1",
     cost_per_call: float = 0.0,
@@ -252,7 +244,6 @@ def inspect_iteration_thread(
     with _runtime_client_context(runtime_client) as client:
         target, records = resolve_target_run_id(
             repo_root,
-            thread_ref=thread_ref,
             target_run_id=target_run_id,
             project_slug=project_slug,
             runtime_client=client,
@@ -268,8 +259,6 @@ def inspect_iteration_thread(
     uncached = 0
     return {
         "schema_version": SCHEMA_VERSION,
-        "thread_id": target["thread_id"],
-        "thread_label": target["thread_label"],
         "target_run_id": target["target_run_id"],
         "run_count": len(nodes),
         "detected_modalities": sorted({item["kind"] for item in renderers if item.get("kind")}),
@@ -288,7 +277,6 @@ def inspect_iteration_thread(
 def format_inspection(report: Mapping[str, Any], *, no_content: bool = False) -> str:
     cost = report["cost_estimate"]
     lines = [
-        f"thread: {report['thread_id']} ({report.get('thread_label') or 'unlabeled'})",
         f"target_run_id: {report['target_run_id']}",
         f"runs: {report['run_count']}",
         f"data_quality: {report['quality']['data_quality']}",
@@ -316,27 +304,14 @@ def _runtime_client_context(client: Any | None = None):
 def _resolve_runtime_project(client: Any, project_slug: str | None) -> str:
     if project_slug:
         return str(project_slug)
-    # A worker receives ASTRID_PROJECT_SLUG from the canonical runner. Keep an
-    # explicit client selection hook for embedders that do not use that env.
-    env_project = os.environ.get("ASTRID_PROJECT_SLUG")
-    if env_project:
-        return env_project
     selected = getattr(client, "selected_project_ref", None)
     if callable(selected):
         value = selected()
         if value:
             return str(value)
-    projects = getattr(client, "projects", None)
-    current = getattr(projects, "current", None)
-    if callable(current):
-        result = current()
-        data = getattr(result, "data", result)
-        if isinstance(data, Mapping):
-            value = data.get("project_id") or data.get("slug") or data.get("project")
-            if value:
-                return str(value)
     raise IterationVideoError(
-        "iteration video requires a selected runtime project; pass --project or attach project context"
+        "iteration video requires a runtime project; pass --project <project> "
+        "or select a current project in the workspace runtime"
     )
 
 
@@ -399,13 +374,9 @@ def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[st
     # pack consumes the exact fields supplied at admission.
     if isinstance(spec.get("spec"), Mapping):
         spec = dict(spec["spec"])
-    metadata = source.get("metadata") if isinstance(source.get("metadata"), Mapping) else {}
     result = source.get("result") if isinstance(source.get("result"), Mapping) else {}
     record: dict[str, Any] = {**dict(spec), **source}
     record["run_id"] = run_id
-    record["thread_id"] = str(
-        source.get("thread_id") or metadata.get("thread_id") or spec.get("thread_id") or ""
-    )
     record["executor_id"] = str(
         source.get("executor_id") or source.get("capability") or source.get("capability_id")
         or spec.get("executor_id") or "runtime.run"
@@ -474,14 +445,6 @@ def _artifact_list(raw: Any) -> list[dict[str, Any]]:
     return result
 
 
-def _runtime_sort_key(record: Mapping[str, Any], run_id: str) -> tuple[str, str, str]:
-    return (
-        str(record.get("updated_at") or record.get("finished_at") or record.get("created_at") or ""),
-        str(record.get("started_at") or record.get("created_at") or ""),
-        run_id,
-    )
-
-
 def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id: str) -> list[RuntimeRunNode]:
     if target_run_id not in records:
         raise IterationVideoError(f"unknown runtime run: {target_run_id}")
@@ -496,12 +459,11 @@ def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id:
         if existing is not None and existing.depth >= depth:
             continue
         parents, unresolved = _runtime_parent_edges(record, records)
-        thread_id = str(records[target_run_id].get("thread_id") or "")
         nodes[run_id] = RuntimeRunNode(
             run_id=run_id,
             record=record,
             depth=depth,
-            label="in_thread" if str(record.get("thread_id") or "") == thread_id else "pulled_by_ancestry",
+            label="target" if run_id == target_run_id else "pulled_by_ancestry",
             parent_edges=parents,
             unresolved_parent_run_ids=unresolved,
         )
@@ -548,7 +510,6 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
     for node in nodes:
         runs.append({
             "run_id": node.run_id,
-            "thread_id": node.record.get("thread_id"),
             "label": node.label,
             "causal_depth": node.depth,
             "selection_order": node.selection_order,
@@ -564,7 +525,6 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "target_run_id": target_run_id,
-        "thread_id": target.record.get("thread_id") if target else None,
         "runs": runs,
         "quality": dict(quality),
         "summary_cache": {"hits": 0, "misses": 0},
@@ -577,8 +537,7 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
 def resolve_target_run_id(
     repo_root: Path,
     *,
-    thread_ref: str,
-    target_run_id: str | None = None,
+    target_run_id: str | None,
     project_slug: str | None = None,
     runtime_client: Any | None = None,
 ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
@@ -588,37 +547,19 @@ def resolve_target_run_id(
         raise IterationVideoError("runtime client is required for iteration-video run discovery")
     project = _resolve_runtime_project(client, project_slug)
     all_records = _load_runtime_records(client, project)
-    thread_id = None if thread_ref in {"", "@active", None} else thread_ref
-    if thread_id is not None and not is_ulid(thread_id):
-        raise IterationVideoError("thread must be a thread id or @active")
-    if target_run_id is not None:
-        if not _is_runtime_identifier(target_run_id):
-            raise IterationVideoError("target run id must be a non-empty runtime identifier")
-        if target_run_id not in all_records:
-            fetched = _runtime_run_show(client, project, target_run_id)
-            if fetched is not None:
-                all_records[target_run_id] = fetched
-        record = all_records.get(target_run_id)
-        if record is None:
-            raise IterationVideoError(f"unknown runtime run: {target_run_id}")
-        return ({
-            "thread_id": str(record.get("thread_id") if isinstance(record, Mapping) else thread_id or ""),
-            "thread_label": "",
-            "target_run_id": target_run_id,
-            "project_slug": project,
-        }, all_records)
-    candidates = [
-        run_id for run_id, record in all_records.items()
-        if thread_id is None or str(record.get("thread_id") or "") == thread_id
-    ]
-    if not candidates:
-        raise IterationVideoError(f"no runtime runs found for thread: {thread_id or '@active'}")
-    selected = max(candidates, key=lambda run_id: _runtime_sort_key(all_records[run_id], run_id))
-    record = all_records[selected]
+    if not target_run_id or not _is_runtime_identifier(target_run_id):
+        raise IterationVideoError(
+            "target_run_id is required; pass the runtime-issued run id explicitly"
+        )
+    if target_run_id not in all_records:
+        fetched = _runtime_run_show(client, project, target_run_id)
+        if fetched is not None:
+            all_records[target_run_id] = fetched
+    record = all_records.get(target_run_id)
+    if record is None:
+        raise IterationVideoError(f"unknown runtime run: {target_run_id}")
     return ({
-        "thread_id": str(record.get("thread_id") or thread_id or ""),
-        "thread_label": "",
-        "target_run_id": selected,
+        "target_run_id": target_run_id,
         "project_slug": project,
     }, all_records)
 
@@ -661,9 +602,8 @@ def main(argv: list[str] | None = None) -> int:
         parser = _inspect_parser()
         args = parser.parse_args(raw[1:])
         try:
-            report = inspect_iteration_thread(
+            report = inspect_iteration_run(
                 repo_root=Path(args.repo_root),
-                thread_ref=args.thread,
                 target_run_id=args.target_run_id,
                 cost_per_call=args.cost_per_call,
                 project_slug=args.project,
@@ -682,7 +622,6 @@ def main(argv: list[str] | None = None) -> int:
         result = run_iteration_video(
             repo_root=Path(args.repo_root),
             out_path=Path(args.out),
-            thread_ref=args.thread,
             target_run_id=args.target_run_id,
             max_iterations=args.max_iterations,
             renderers=args.renderers,
@@ -705,7 +644,6 @@ def main(argv: list[str] | None = None) -> int:
 def _parse_passthrough(argv: tuple[str, ...]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--repo-root", default=None)
-    parser.add_argument("--thread", default=None)
     parser.add_argument("--target-run-id", default=None)
     parser.add_argument("--max-iterations", type=int, default=None)
     parser.add_argument("--renderers", default=None)
@@ -724,8 +662,7 @@ def _parse_passthrough(argv: tuple[str, ...]) -> argparse.Namespace:
 
 
 def _run_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create an iteration video from a thread.")
-    parser.add_argument("--thread", default="@active", help="Thread id or @active.")
+    parser = argparse.ArgumentParser(description="Create an iteration video from a runtime run.")
     parser.add_argument("--target-run-id", default=None)
     parser.add_argument("--project", default=None, help="Runtime project id or slug (defaults to the selected project).")
     parser.add_argument("--out", required=True)
@@ -748,8 +685,7 @@ def _run_parser() -> argparse.ArgumentParser:
 
 def _inspect_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect an iteration video plan without render or summarize.")
-    parser.add_argument("thread", help="Thread id or @active.")
-    parser.add_argument("--target-run-id", default=None)
+    parser.add_argument("target_run_id", help="Runtime-issued target run id.")
     parser.add_argument("--project", default=None, help="Runtime project id or slug (defaults to the selected project).")
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     parser.add_argument("--cost-per-call", type=float, default=0.0)

@@ -27,7 +27,7 @@ from astrid.core.foundation import project_paths
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.project.project import create_project
-from astrid.core.project.run import step_dir_for
+from astrid.core.project.runtime import step_dir_for
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,

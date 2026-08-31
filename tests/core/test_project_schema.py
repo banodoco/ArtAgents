@@ -351,7 +351,7 @@ def test_default_timeline_id_round_trip_none() -> None:
 
 
 def test_default_timeline_id_round_trip_ulid() -> None:
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
 
     valid_ulid = generate_ulid()
     payload = build_project("demo", default_timeline_id=valid_ulid)
@@ -389,7 +389,7 @@ def test_legacy_project_json_without_default_timeline_id_still_validates() -> No
 def test_run_timeline_id_must_be_valid_ulid() -> None:
     """run.timeline_id stays a ULID-only field; non-ULID strings are rejected."""
 
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
 
     valid_ulid = generate_ulid()
     record = build_run_record("demo", "01HXYZ", timeline_id=valid_ulid)
@@ -438,7 +438,7 @@ def test_managed_binding_metadata_with_timeline_id_round_trip() -> None:
 
     from uuid import uuid4
 
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
 
     ulid = generate_ulid()
     event_stream_id = str(uuid4())

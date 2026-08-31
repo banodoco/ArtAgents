@@ -383,37 +383,13 @@ def run_product_family(
         raise ProductRegistryError(
             f"family {family!r} parser did not configure a handler"
         )
-    # Project-scoped product commands may omit ``--project`` when a
-    # workspace/user selection exists. Resolve only the preference here; the
-    # single SDK service call in the handler still resolves the selected ref
-    # against the bound kernel and therefore fails closed if it is stale.
+    # Project-scoped product commands may omit ``--project`` only when the
+    # connected runtime supplies an actor-scoped current project. No local
+    # preference, environment variable, cwd, or sole-project heuristic is
+    # consulted here.
     if hasattr(parsed, "project") and parsed.project is None:
         selected_project = getattr(client, "selected_project_ref", None)
-        try:
-            selected = selected_project() if callable(selected_project) else None
-        except ValueError as exc:
-            from astrid.core.cli.domain_output import print_result
-            from astrid.sdk.contracts import DomainResult, ErrorObject
-
-            details = {
-                "field": "project",
-                "reason": "invalid_selection_preference",
-                "recovery": "repair or remove the malformed preference, then run `astrid projects select <slug-or-id>`",
-            }
-            for key in ("scope", "path"):
-                value = getattr(exc, key, None)
-                if value is not None:
-                    details[key] = value
-            return print_result(
-                DomainResult.failure(
-                    ErrorObject(
-                        code="validation_error",
-                        message="the current project preference is invalid",
-                        details=details,
-                    )
-                ),
-                as_json=bool(getattr(parsed, "json", False)),
-            )
+        selected = selected_project() if callable(selected_project) else None
         if selected is None:
             # Task identity and event reads are globally unique kernel reads;
             # their SDK methods deliberately accept an omitted project and
@@ -428,7 +404,7 @@ def run_product_family(
             ):
                 parser.error(
                     "the following arguments are required: --project "
-                    "(or select a current project)"
+                    "(or select a current project in the workspace runtime)"
                 )
         parsed.project = selected
     return int(handler(parsed))

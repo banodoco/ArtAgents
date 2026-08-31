@@ -658,16 +658,16 @@ class TestMaterializationCompleteness:
 
 
 class TestGateG3LegacySafety:
-    def test_import_emits_honest_run_record_and_manifest_pin(self, tmp_path):
+    def test_import_emits_manifest_pin_without_run_sidecar(self, tmp_path):
         root = _poc_tree(tmp_path)
         out = tmp_path / "out"
         assert import_main(["--root", str(root), "--out", str(out)]) == 0
         experiment = json.loads((out / "experiment.json").read_text())
         case = experiment["cases"][0]
         run_dir = out / "runs" / case["run_id"]
-        record = json.loads((run_dir / "run.json").read_text())
-        assert record["run_id"] == case["run_id"]
-        assert record["metadata"]["legacy_import"] is True
+        assert not (run_dir / "run.json").exists()
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        assert manifest["schema_version"] >= 1
         assert case["source_manifest"]["content_hash"].startswith("sha256:")
 
     def test_symlinked_download_outside_source_is_not_imported(self, tmp_path):

@@ -7,9 +7,8 @@ Exception: ASTRID_AUTHOR_TEST_LEGACY — a backward-compat alias whose value
 does not equal its own constant name (keeps the legacy key for fallback). Documented below.
 
 Consumer modules should import from here rather than defining their own string
-literals. The allowlisted directories (astrid/threads/, astrid/audit/,
-astrid/packs/) are contract-locked and not required to import from this module;
-their env vars are catalogued here for documentation purposes only.
+literals. Allowlisted operational modules may define their own private process
+variables; product/runtime identity variables remain catalogued here.
 """
 
 from __future__ import annotations
@@ -154,13 +153,6 @@ ASTRID_AUDIT_DISABLED = "ASTRID_AUDIT_DISABLED"
 ASTRID_AUDIT_RUN_DIR = "ASTRID_AUDIT_RUN_DIR"
 """Directory for the current audit run. Set and read by audit/context.py."""
 
-ASTRID_AGENT_VERSION = "ASTRID_AGENT_VERSION"
-"""Agent version string injected into thread records. Read by threads/record.py."""
-
-ASTRID_REPO_ROOT = "ASTRID_REPO_ROOT"
-"""Absolute path to the repository root, used by thread CLI for relative-path
-display. Read by threads/cli.py."""
-
 # ---------------------------------------------------------------------------
 # Backward-compat alias
 # ---------------------------------------------------------------------------
@@ -195,7 +187,6 @@ def get_author_test_env() -> str | None:
 
 __all__ = [
     "ASTRID_ACTOR",
-    "ASTRID_AGENT_VERSION",
     "ASTRID_AUDIT_DISABLED",
     "ASTRID_AUDIT_RUN_DIR",
     "ASTRID_AUTHOR_TEST",
@@ -213,7 +204,6 @@ __all__ = [
     "ASTRID_NODE_EXECUTABLE",
     "ASTRID_REMOTION_PROJECT_DIR",
     "ASTRID_TIMELINE_SCHEMA_PYTHONPATH",
-    "ASTRID_REPO_ROOT",
     "ASTRID_SESSION_ID",
     "ASTRID_STATE_HOME",
     "ASTRID_STRICT_INSTRUCTION_SUBST",

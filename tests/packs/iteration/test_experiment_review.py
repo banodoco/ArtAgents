@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from astrid.core.project.schema import build_run_record
 from astrid.packs.iteration.executors.experiment_prepare.run import (
     main as prepare_main,
 )
@@ -803,18 +802,7 @@ class TestExperimentReviewIntegration:
                 json.dumps(manifest, indent=2, sort_keys=True) + "\n"
             ).encode()
             (run_dir / "manifest.json").write_bytes(manifest_bytes)
-            run_record = build_run_record(
-                "cross-provider-proof",
-                run_id,
-                tool_id="test.fixture",
-                kind="executor",
-                status="failed" if index == 3 else "completed",
-                out=f"runs/{run_id}",
-                created_at="2026-07-27T00:00:00Z",
-            )
-            (run_dir / "run.json").write_text(
-                json.dumps(run_record, indent=2, sort_keys=True) + "\n"
-            )
+            assert not (run_dir / "run.json").exists()
             manifest_pins.append(
                 "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
             )
@@ -872,11 +860,7 @@ class TestExperimentReviewIntegration:
         assert [case["provider"] for case in review["cases"]] == [
             "fal", "comfyui", "discord_browser", "discord_browser"
         ]
-        assert all(
-            case["source_manifest"]["verified"]
-            and case["run_record"]["verified"]
-            for case in review["cases"]
-        )
+        assert all(case["source_manifest"]["verified"] for case in review["cases"])
         html = (rendered / "review.html").read_text()
         assert html.count("<img ") == 3
         assert "provider_knob" in html

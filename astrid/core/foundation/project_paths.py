@@ -136,7 +136,3 @@ def experiment_json_path(
 
 def run_dir(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
     return runs_dir(slug, root=root) / validate_run_id(run_id)
-
-
-def run_json_path(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
-    return run_dir(slug, run_id, root=root) / "run.json"

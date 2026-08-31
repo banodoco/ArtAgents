@@ -94,7 +94,7 @@ class TestValidateTimelineSlug:
 
 class TestValidateTimelineUlid:
     def test_valid_ulid_passes(self) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         assert validate_timeline_ulid(ulid) == ulid
@@ -136,7 +136,7 @@ class TestPathConstructors:
             timeline_dir("demo", "not-a-ulid", root=str(tmp_projects_root))
 
     def test_assembly_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         ap = assembly_path("demo", ulid, root=str(tmp_projects_root))
@@ -145,35 +145,35 @@ class TestPathConstructors:
         assert ap.parent.parent.name == "timelines"
 
     def test_manifest_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         mp = manifest_path("demo", ulid, root=str(tmp_projects_root))
         assert mp.name == "manifest.json"
 
     def test_assembly_log_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         path = assembly_log_path("demo", ulid, root=str(tmp_projects_root))
         assert path.name == "assembly.jsonl"
 
     def test_assembly_head_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         path = assembly_head_path("demo", ulid, root=str(tmp_projects_root))
         assert path.name == "assembly.head.json"
 
     def test_assembly_identity_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         path = assembly_identity_path("demo", ulid, root=str(tmp_projects_root))
         assert path.name == "assembly.identity.json"
 
     def test_display_path(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         dp = display_path("demo", ulid, root=str(tmp_projects_root))
@@ -236,7 +236,7 @@ class TestFindTimelineBySlug:
 
 class TestFindTimelineSlugForUlid:
     def test_returns_none_when_display_json_absent(self, tmp_projects_root: Path) -> None:
-        from astrid.core.threads.ids import generate_ulid
+        from astrid.core.ids import generate_ulid
 
         ulid = generate_ulid()
         slug = find_timeline_slug_for_ulid("demo", ulid, root=str(tmp_projects_root))
@@ -263,7 +263,7 @@ def _seed_timeline(
     """Create a minimal timeline under *projects_root* and return its ULID."""
     import json
 
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
 
     ulid = generate_ulid()
     tdir = projects_root / project_slug / "timelines" / ulid

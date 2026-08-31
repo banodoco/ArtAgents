@@ -6,11 +6,12 @@ from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 
-THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV0"
 TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
@@ -61,7 +62,7 @@ def test_iteration_video_public_route_uses_runtime_authority(
                 project_was_auto_resolved=True,
                 run_root=out_dir,
                 execution_mode="in_process",
-                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
+                inputs={"target_run_id": TARGET_RUN_ID},
                 orchestrator_args=(
                     "--repo-root",
                     str(repo),
@@ -98,7 +99,6 @@ def test_iteration_video_public_route_uses_runtime_authority(
 
     assert not (out_dir / "run.json").exists()
     assert not (out_dir / ".astrid.variants.json").exists()
-    assert not (repo / ".astrid" / "threads" / THREAD_ID / "groups.json").exists()
 
 
 def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_content(tmp_path: Path, monkeypatch) -> None:
@@ -111,7 +111,7 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
     monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
     monkeypatch.setattr(iteration_video, "run_builtin_render", fail_render)
 
-    report = iteration_video.inspect_iteration_thread(repo_root=repo, thread_ref=THREAD_ID, target_run_id=TARGET_RUN_ID, project_slug="demo")
+    report = iteration_video.inspect_iteration_run(repo_root=repo, target_run_id=TARGET_RUN_ID, project_slug="demo", runtime_client=runtime)
     text = iteration_video.format_inspection(report, no_content=True)
 
     assert report["summary_cache"] == {"hits": 0, "misses": 0}
@@ -123,6 +123,7 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
 
 
 def test_iteration_video_public_route_materializes_runtime_output_object(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("banodoco_timeline_schema")
     payload = b"runtime-owned image bytes"
     digest = hashlib.sha256(payload).hexdigest()
 
@@ -137,7 +138,6 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
             self.calls.append(("list", project))
             return SimpleNamespace(ok=True, data=[{
                 "run_id": TARGET_RUN_ID,
-                "thread_id": THREAD_ID,
                 "status": "succeeded",
                 "output_artifacts": [{
                     "kind": "image",
@@ -175,7 +175,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
             project_was_auto_resolved=True,
             run_root=None,
             execution_mode="in_process",
-            inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
+            inputs={"target_run_id": TARGET_RUN_ID},
             orchestrator_args=("--repo-root", str(tmp_path), "--renderer", "rendering.fixture"),
         )
     )
@@ -244,7 +244,6 @@ def _record(
     return {
         "schema_version": 1,
         "run_id": run_id,
-        "thread_id": THREAD_ID,
         "parent_run_ids": parent_run_ids or [],
         "executor_id": "generation.generate_image_openai",
         "orchestrator_id": None,

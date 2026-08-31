@@ -97,10 +97,7 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
         "--project",
         required=False,
         default=None,
-        help=(
-            "Owning project id or slug (required unless ASTRID_PROJECT_SLUG "
-            "provides an attached project)."
-        ),
+        help="Owning project id or slug (required unless the workspace runtime selects one).",
     )
 
 

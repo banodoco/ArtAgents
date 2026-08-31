@@ -394,11 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument(
         "--project-slug",
-        default=os.environ.get("ASTRID_PROJECT_SLUG"),
-        help=(
-            "Owning project slug. Defaults to the managed project attached by "
-            "the SDK/runner (ASTRID_PROJECT_SLUG)."
-        ),
+        required=True,
+        help="Owning project slug issued by the workspace runtime.",
     )
     parser.add_argument("--timeline-source", action="append", type=Path, default=[])
     parser.add_argument("--timeline-slug")
@@ -1717,13 +1714,8 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
     _validate_selectors(args)
     if not args.project_slug:
         raise ValueError(
-            "project is required: pass --project-slug <slug>, attach "
-            "ASTRID_PROJECT_SLUG, or invoke the capability with project=<slug>"
-        )
-    env_project = os.environ.get("ASTRID_PROJECT_SLUG")
-    if env_project and env_project != args.project_slug:
-        raise ValueError(
-            f"project_slug {args.project_slug!r} does not match managed project {env_project!r}"
+            "project is required: pass --project-slug <slug> or select a current "
+            "project in the workspace runtime"
         )
     project_root = project_dir(args.project_slug).resolve()
     if not project_root.is_dir():

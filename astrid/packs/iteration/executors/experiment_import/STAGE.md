@@ -31,7 +31,6 @@ persisted — only the portable source subdirectory name survives.
 | `experiment.json` | Experiment definition referencing synthesized run ids. |
 | `import.report.json` | Honest report: counts, ambiguous/screenshot-only, dedup, gaps. |
 | `runs/<run_id>/manifest.json` | Synthesized universal manifest per submission. |
-| `runs/<run_id>/run.json` | Honest imported/unmanaged project-run ledger record. |
 | `runs/<run_id>/<media>` | Independent COW media clone (best-effort, no eager large copies). |
 | `manifest.json` | Universal result manifest (M1). |
 

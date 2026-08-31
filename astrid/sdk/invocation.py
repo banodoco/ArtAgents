@@ -26,6 +26,7 @@ from .exceptions import (
     AstridSDKError,
     CapabilityInvocationError,
     CapabilityMissingInputError,
+    CapabilityPreconditionError,
     CapabilityValidationError,
     UnsupportedCapabilityError,
     _error_payload_from_internal_error,
@@ -813,7 +814,12 @@ def _validate_timeline_visualize_inputs(
 
     if from_view:
         raw_view = Path(str(values["from_view"])).expanduser()
-        view_path = raw_view if raw_view.is_absolute() else Path.cwd() / raw_view
+        if not raw_view.is_absolute():
+            raise CapabilityValidationError(
+                "from_view must be an absolute path; cwd-relative visualization paths "
+                "are not accepted"
+            )
+        view_path = raw_view
         if not view_path.is_file():
             raise CapabilityValidationError(
                 f"from_view must name an existing visualization manifest: {view_path}"
@@ -1635,14 +1641,28 @@ def _visualization_cache_lock(path: Path):
 
 
 def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
-    from astrid.core.foundation.project_paths import resolve_projects_root
-
+    del project
     if project_root is not None:
         return Path(project_root).expanduser().resolve()
+    raise CapabilityPreconditionError(
+        "project_root is required for local project-file validation; "
+        "runtime project identity is supplied by the workspace service"
+    )
+
+
+def _runtime_selected_project() -> str | None:
+    """Read the actor-scoped project selection from the connected runtime."""
+
+    from astrid.sdk.client import AstridClient
+
     try:
-        return resolve_projects_root(None)
-    except Exception:
-        return Path.cwd().expanduser().resolve()
+        with AstridClient.open() as client:
+            selected = client.selected_project_ref()
+    except AstridSDKError:
+        # Runtime absence is a missing selection, never permission to infer a
+        # project from local state. The caller emits the stable recovery text.
+        return None
+    return selected if isinstance(selected, str) and selected.strip() else None
 
 
 def _kernel_invoke(
@@ -1650,7 +1670,7 @@ def _kernel_invoke(
     *,
     kind: Any,
     project: str | None,
-    projects_root: Path,
+    projects_root: Path | None,
     inputs: Mapping[str, Any] | None,
     outputs: Mapping[str, Any] | None,
     extra_pack_roots: tuple[str, ...] = (),
@@ -1794,6 +1814,17 @@ def invoke(
     if capability.capability_type == "element":
         raise UnsupportedCapabilityError(f"elements are not invokable via the SDK: {capability.id}")
 
+    if not dry_run and project is None:
+        project = _runtime_selected_project()
+        if project is None:
+            from astrid.core.project.guidance import format_project_required_guidance
+
+            raise CapabilityPreconditionError(
+                format_project_required_guidance(
+                    operation=f"{capability.capability_type} invocation"
+                )
+            )
+
     # Validate the public selector/format contract before the runner can
     # create a ledger row or spawn a subprocess.  The runner repeats these
     # checks for direct CLI callers, but SDK callers should get the same
@@ -1915,7 +1946,9 @@ def invoke(
         )
     # Use resolved project (handles auto-resolved via selected_project)
     project = resolved_project
-    projects_root = _resolve_projects_root(project_root, project)
+    projects_root = (
+        Path(project_root).expanduser().resolve() if project_root is not None else None
+    )
     kernel_capability_version: str | None = None
     if capability.capability_type == "executor":
         from astrid.core.io.cas import executor_definition_digest
@@ -1991,7 +2024,9 @@ def invoke(
             outputs=_invocation_outputs(
                 raw_result,
                 manifest_path=manifest_path,
-                project_root=(projects_root / project).resolve(),
+                project_root=(projects_root / project).resolve()
+                if projects_root is not None
+                else None,
                 capability_id=capability.id,
             ),
             executor_version=executor_version_raw

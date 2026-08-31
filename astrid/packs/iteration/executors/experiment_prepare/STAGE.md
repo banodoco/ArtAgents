@@ -30,7 +30,7 @@ review model. Produces `review.json` and `diagnostics.json`.
 
 1. Reads and validates `experiment.json` against the experiment contract.
 2. For each case, resolves the run directory and reads `manifest.json`.
-   - Validates a same-run `run.json` when present.
+   - Uses the synthesized `manifest.json` as the only local input projection.
    - Verifies an optional source-manifest SHA-256 pin from `experiment.json`
      against the exact bytes being parsed.
 3. Normalizes each manifest into a provider-independent review case.
