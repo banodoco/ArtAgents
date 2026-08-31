@@ -131,3 +131,17 @@ def test_installed_cli_consumes_exact_seed_directory_manifest(tmp_path: Path) ->
     receipt = load_receipt(output)
     assert receipt["pre_live_seed_payloads"][0]["media_type"] == "application/octet-stream"
     assert receipt["pre_live_seed_payloads"][0]["producer_id"] == "FIXTURE-PRODUCER"
+
+def test_b11_local_submodule_is_pinned_and_inside_source_root(tmp_path: Path) -> None:
+    sub = _repo(tmp_path, "submodule"); checkout = _repo(tmp_path, "Astrid")
+    subprocess.run(["git", "-C", str(checkout), "-c", "protocol.file.allow=always", "submodule", "add", str(sub), "vendor/sub"], check=True, stdout=subprocess.DEVNULL)
+    (checkout / "generator.py").write_text("import argparse, pathlib\np=argparse.ArgumentParser(); p.add_argument('--contract'); p.add_argument('--schema-manifest'); p.add_argument('--output-root'); a=p.parse_args(); pathlib.Path(a.output_root, 'out').write_bytes(b'ok')\n")
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True); subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "submodule generator"], check=True)
+    row = resolve_component("ASTRID-CLIENT", checkout)
+    observed = run_b11_1([row], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
+    assert observed[0]["generator_observation_rows"][0]["output_digests"]
+    outside = tmp_path.parent / "b11-outside-submodule"
+    subprocess.run(["git", "-C", str(checkout), "config", "-f", ".gitmodules", "submodule.vendor/sub.url", str(outside)], check=True)
+    subprocess.run(["git", "-C", str(checkout), "add", ".gitmodules"], check=True); subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "malicious submodule url"], check=True)
+    with pytest.raises(ReleaseIdentityError, match="approved source root"):
+        run_b11_1([resolve_component("ASTRID-CLIENT", checkout)], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")

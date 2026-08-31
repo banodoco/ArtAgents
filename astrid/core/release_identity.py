@@ -90,8 +90,24 @@ def git_identity(path: str | os.PathLike[str]) -> dict[str, Any]:
             subpath, subroot = match.group(2), root / match.group(2)
             initialized = subroot.is_dir() and (subroot / ".git").exists()
             subref = _git_text(subroot, "symbolic-ref", "-q", "--short", "HEAD", optional=True) if initialized else ""
-            subs.append({"path": subpath, "oid": match.group(1), "head_ref": subref or NONE, "detached": not bool(subref), "git_dir_relative": _git_text(subroot, "rev-parse", "--git-dir", optional=True) or NONE, "common_dir_relative": _git_text(subroot, "rev-parse", "--git-common-dir", optional=True) or NONE, "dirty_paths": _dirty_paths(subroot) if initialized else []})
+            subgit = _git_text(subroot, "rev-parse", "--git-dir", optional=True); subcommon = _git_text(subroot, "rev-parse", "--git-common-dir", optional=True)
+            subs.append({"path": subpath, "oid": match.group(1), "head_ref": subref or NONE, "detached": not bool(subref), "git_dir_relative": os.path.relpath(subgit, subcommon) if subgit and subcommon else NONE, "common_dir_relative": ".", "dirty_paths": _dirty_paths(subroot) if initialized else []})
     return {"repository_identity": _repo_identity(root), "head_oid": _git_text(root, "rev-parse", "HEAD"), "head_ref": ref or NONE, "detached": not bool(ref), "git_dir_kind": "worktree" if (root / ".git").is_file() else "directory", "git_dir_relative": os.path.relpath(git_dir, common) if git_dir and common else NONE, "common_dir_relative": ".", "submodules": sorted(subs, key=lambda x: x["path"])}
+
+def _submodule_sources(root: Path, approved_root: Path) -> list[dict[str, str]]:
+    lines = _git_text(root, "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.url$", optional=True).splitlines()
+    result = []
+    for line in lines:
+        key, url = line.split(None, 1); name = key.removeprefix("submodule.").removesuffix(".url"); parsed = urlparse(url)
+        if parsed.scheme in {"", "file"}:
+            candidate = Path(parsed.path if parsed.scheme == "file" else url)
+            if not candidate.is_absolute(): candidate = root / candidate
+            resolved = candidate.resolve()
+            try: resolved.relative_to(approved_root)
+            except ValueError as exc: raise ReleaseIdentityError("local submodule URL escapes the approved source root") from exc
+            result.append({"name": name, "url": resolved.as_uri()})
+        elif parsed.scheme not in {"https", "ssh", "git"}: raise ReleaseIdentityError("submodule URL scheme is not permitted")
+    return result
 
 def _dirty_paths(path: Path, *, exclude: str | os.PathLike[str] | None = None) -> list[str]:
     raw = _git_text(path, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
@@ -178,12 +194,19 @@ def _directory_inventory(root: Path) -> list[dict[str, str]]:
         data = path.read_bytes(); rows.append({"path": relative, "sha256": _sha256_bytes(data), "byte_length": len(data)})
     return rows
 
-def _clean_git_checkout(source: Path, destination: Path, expected_oid: str) -> None:
-    result = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "--recurse-submodules", str(source), str(destination)], capture_output=True, text=True, check=False, timeout=60)
+def _clean_git_checkout(source: Path, destination: Path, expected_oid: str, approved_root: Path | None = None) -> None:
+    source_identity = git_identity(source); local_submodules = _submodule_sources(source, (approved_root or source.parent).resolve())
+    result = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(source), str(destination)], capture_output=True, text=True, check=False, timeout=60)
     if result.returncode != 0: raise ReleaseIdentityError("B11.1 could not create a clean pinned checkout")
     subprocess.run(["git", "-C", str(destination), "checkout", "--quiet", "--detach", "HEAD"], check=True, timeout=30)
     if _git_text(destination, "rev-parse", "HEAD") != expected_oid: raise ReleaseIdentityError("B11.1 clone is not pinned to integrated_oid")
-    if git_identity(destination).get("submodules") != git_identity(source).get("submodules"): raise ReleaseIdentityError("B11.1 clone recursive submodule identity differs from reviewed source")
+    for item in local_submodules: subprocess.run(["git", "-C", str(destination), "config", f"submodule.{item['name']}.url", item["url"]], check=True, timeout=30)
+    if local_submodules and subprocess.run(["git", "-C", str(destination), "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"], check=False, timeout=120).returncode != 0: raise ReleaseIdentityError("B11.1 local submodule initialization failed")
+    for item in source_identity["submodules"]:
+        clone_sub = destination / item["path"]
+        if item["head_ref"] != NONE and clone_sub.is_dir(): subprocess.run(["git", "-C", str(clone_sub), "checkout", "--quiet", item["head_ref"]], check=True, timeout=30)
+    clone_identity = git_identity(destination)
+    if [{k: x[k] for k in ("path", "oid", "head_ref", "detached", "dirty_paths")} for x in clone_identity.get("submodules", [])] != [{k: x[k] for k in ("path", "oid", "head_ref", "detached", "dirty_paths")} for x in source_identity.get("submodules", [])]: raise ReleaseIdentityError("B11.1 clone recursive submodule identity differs from reviewed source")
     if _dirty_paths(destination): raise ReleaseIdentityError("B11.1 recursive checkout is not clean")
 
 def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions: Sequence[Mapping[str, Any]], *, contract_bytes: bytes, schema_manifest_bytes: bytes, output_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
@@ -210,7 +233,7 @@ def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions
             if not entrypoint.is_file() or entrypoint.is_symlink(): raise ReleaseIdentityError("B11.1 generator entrypoint is not a regular file")
             entrypoint_digest = _sha256_bytes(entrypoint.read_bytes()); inventories = []; receipts = []
             for ordinal in (1, 2):
-                run_root = base / gid / str(ordinal); checkout = run_root / "checkout"; _clean_git_checkout(source_checkout, checkout, by_component[cid]["integrated_oid"]); stage = run_root / "staging"; inputs = run_root / "inputs"; stage.mkdir(parents=True); inputs.mkdir()
+                run_root = base / gid / str(ordinal); checkout = run_root / "checkout"; _clean_git_checkout(source_checkout, checkout, by_component[cid]["integrated_oid"], Path(output_root).expanduser().resolve() if output_root else None); stage = run_root / "staging"; inputs = run_root / "inputs"; stage.mkdir(parents=True); inputs.mkdir()
                 contract_path, schema_path = inputs / "contract.json", inputs / "schema-manifest.json"; contract_path.write_bytes(contract_bytes); schema_path.write_bytes(schema_manifest_bytes)
                 executable = str(definition.get("interpreter_path") or definition.get("executable") or "python3")
                 argv = [executable, str(entrypoint), "--contract", str(contract_path), "--schema-manifest", str(schema_path), "--output-root", str(stage)]
@@ -480,6 +503,7 @@ def load_receipt(path: str | os.PathLike[str]) -> dict[str, Any]:
 def bind_remote_targets(receipt: Mapping[str, Any], targets: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     verify_receipt(receipt)
     if not isinstance(targets, Sequence) or isinstance(targets, (str, bytes)): raise ReleaseIdentityError("remote targets must be an array")
+    if not targets: raise ReleaseIdentityError("remote targets must be non-empty")
     result = copy.deepcopy(dict(receipt)); rows = []; seen: set[str] = set()
     if result.get("plan_registry_enforced") and (not isinstance(result.get("remote_target_locators"), list) or not result["remote_target_locators"]): raise ReleaseIdentityError("planned receipt requires non-empty remote locators")
     if result.get("remote_target_locators") and list(targets) != result["remote_target_locators"]: raise ReleaseIdentityError("remote target rows are not the plan-owned locator join")
