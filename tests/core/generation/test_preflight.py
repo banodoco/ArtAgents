@@ -13,7 +13,7 @@ from astrid.core.model_catalog.registry import ModelRegistry
 
 @pytest.fixture
 def z_image_entry() -> Any:
-    return ModelRegistry.load_default(include_installed=False).get("z-image")
+    return ModelRegistry.load_default().get("z-image")
 
 
 def test_missing_vibecomfy_is_actionable_and_does_not_probe_comfyui(
@@ -174,17 +174,12 @@ def test_video_flf_missing_end_frame_is_rejected_before_invoke(
 
 
 def test_generic_audio_matrix_rejects_local_before_dry_run_runner(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A cloud-only model/backend cell fails before generic admission too."""
 
     import astrid.sdk as sdk
 
-    def unexpected_runner(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("invalid matrix must not reach the dry-run runner")
-
-    monkeypatch.setattr(sdk, "run_executor", unexpected_runner)
     with pytest.raises(sdk.CapabilityValidationError, match="Available backends: cloud"):
         sdk.invoke(
             "generation.generate_audio",

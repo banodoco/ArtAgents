@@ -420,13 +420,30 @@ def _source_digest(root: Path) -> str:
     return _canonical_digest(entries)
 
 
-def _admitted_source_roots(root: Path, definition: "ExecutorDefinition") -> tuple[Path, ...]:
+def _admitted_source_roots(root: Path, definition: Any) -> tuple[Path, ...]:
     """Return every executable root admitted for one capability."""
     roots: list[Path] = [root.resolve()]
     pack_root = _pack_root_for_executor(root)
     if pack_root is not None and str(definition.kind) == "external":
         roots.append(pack_root.resolve())
     return tuple(dict.fromkeys(roots))
+
+
+def _admitted_python_roots(root: Path, definition: Any) -> tuple[Path, ...]:
+    """Return explicit import roots for non-builtin source packs.
+
+    A pack is itself the source root: its Python modules sit alongside the
+    manifest-owned ``executors``/``orchestrators`` trees.  Passing the pack
+    root (rather than an ancestor) keeps imports useful without admitting an
+    unrelated checkout or ambient directory.
+    """
+    pack_root = _pack_root_for_executor(root)
+    if pack_root is None or str(getattr(definition, "kind", "")) != "external":
+        return ()
+    builtin_packs = (Path(__file__).resolve().parents[3] / "astrid" / "packs").resolve()
+    if pack_root == builtin_packs or pack_root.is_relative_to(builtin_packs):
+        return ()
+    return (pack_root.resolve(),)
 
 
 def _source_digest_for_roots(roots: tuple[Path, ...] | list[Path]) -> str:
@@ -787,7 +804,14 @@ class GenericPackHost:
     """Discover, register, preflight, and execute pack capabilities."""
 
     def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None, capability_matrix: str | Path | None = None, credential_source: Mapping[str, str] | None = None):
-        self.pack_roots = tuple(Path(root).expanduser().resolve() for root in pack_roots)
+        configured_roots = [Path(root).expanduser().resolve() for root in pack_roots]
+        # ASTRID_PACKS_PATH is an explicit discovery input, never a fallback
+        # directory. Keep it in the same admitted root set so env-only packs
+        # receive identical discovery, digest, and child import treatment.
+        for raw_root in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep):
+            if raw_root:
+                configured_roots.append(Path(raw_root).expanduser().resolve())
+        self.pack_roots = tuple(dict.fromkeys(configured_roots))
         self.client = client
         self.executor_id = executor_id
         self.max_concurrency = max(1, int(max_concurrency))
@@ -916,6 +940,9 @@ class GenericPackHost:
                 "version": record.definition.version,
                 "source_root": str(record.source_root),
                 "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+                "python_path_roots": [
+                    str(root) for root in _admitted_python_roots(record.source_root, record.definition)
+                ],
             }
         if capability_kind == "orchestrator":
             from astrid.core.execution.orchestrator.folder import (
@@ -931,7 +958,8 @@ class GenericPackHost:
                         continue
                     if definition.id != capability_id:
                         continue
-                    source_roots = (orchestrator_root.resolve(),)
+                    definition = _attach_pack_metadata(definition, orchestrator_root)
+                    source_roots = _admitted_source_roots(orchestrator_root, definition)
                     source_digest = _source_digest_for_roots(source_roots)
                     capability_digest = _canonical_digest(definition.to_dict())
                     return definition.to_dict(), {
@@ -944,6 +972,9 @@ class GenericPackHost:
                         "version": definition.version,
                         "source_root": str(orchestrator_root),
                         "source_roots": [str(root) for root in source_roots],
+                        "python_path_roots": [
+                            str(root) for root in _admitted_python_roots(orchestrator_root, definition)
+                        ],
                     }
             raise HostError(f"capability not discovered: {capability_id}")
         raise HostError(f"unsupported capability kind {capability_kind!r}")
@@ -1695,20 +1726,29 @@ class GenericPackHost:
             explicit_env={ASTRID_INTERNAL_INVOCATION: "1"},
         ))
         env[ASTRID_INTERNAL_INVOCATION] = "1"
-        # The attempt directory is the child cwd; retain this checkout's
-        # package parent on ``PYTHONPATH`` so ``python -m`` can
-        # resolve the host worker regardless of where staging lives.
+        # The attempt directory is the child cwd; the host worker itself uses
+        # this checkout, while external source-pack imports use only the
+        # explicitly admitted import parents validated against source roots.
         package_parent = str(Path(__file__).resolve().parents[3])
-        existing_pythonpath = env.get("PYTHONPATH")
-        env["PYTHONPATH"] = (
-            package_parent
-            if not existing_pythonpath
-            else os.pathsep.join((package_parent, existing_pythonpath))
-        )
-        if self.pack_roots:
-            existing = [item for item in env.get("ASTRID_PACKS_PATH", "").split(os.pathsep) if item]
-            roots = [str(root) for root in (*self.pack_roots, *map(Path, existing))]
-            env["ASTRID_PACKS_PATH"] = os.pathsep.join(dict.fromkeys(roots))
+        import_roots: list[str] = []
+        if isinstance(admission, Mapping):
+            raw_import_roots = admission.get("python_path_roots")
+            if isinstance(raw_import_roots, (list, tuple)):
+                source_roots = tuple(
+                    Path(str(value)).expanduser().resolve()
+                    for value in admission.get("source_roots", ())
+                    if value
+                )
+                for raw_root in raw_import_roots:
+                    import_root = Path(str(raw_root)).expanduser().resolve()
+                    if not import_root.is_dir() or (
+                        source_roots
+                        and not any(source_root.is_relative_to(import_root) for source_root in source_roots)
+                    ):
+                        raise HostError("admitted Python import root is outside the source fence")
+                    import_roots.append(str(import_root))
+        env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys((package_parent, *import_roots)))
+        env["ASTRID_PACKS_PATH"] = os.pathsep.join(str(root) for root in self.pack_roots)
         broker_endpoint = str((child_env or {}).get("ASTRID_BROKER_PROXY") or "")
         process = popen_owned_group(
             _network_sandbox_argv([sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)], attempt_path, broker_endpoint),

@@ -95,8 +95,6 @@ __all__ = sorted(_EXPORTS)
 
 
 def __getattr__(name: str):
-    if name in {"run_executor", "run_orchestrator"}:
-        return getattr(importlib.import_module(".invocation", __name__), name)
     target = _EXPORTS.get(name) or _PRIVATE_EXPORTS.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

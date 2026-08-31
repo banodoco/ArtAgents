@@ -55,7 +55,6 @@ __all__ = [
     "load_folder_orchestrators",
     "load_orchestrator_manifest",
     "orchestrator",
-    "run_orchestrator",
     "to_capability_handle",
     "validate_orchestrator_definition",
 ]
@@ -68,7 +67,6 @@ _LAZY_EXPORTS = {
     "OrchestratorRunRequest": ("runner", "OrchestratorRunRequest"),
     "OrchestratorRunResult": ("runner", "OrchestratorRunResult"),
     "build_orchestrator_command": ("runner", "build_orchestrator_command"),
-    "run_orchestrator": ("runner", "run_orchestrator"),
 }
 
 

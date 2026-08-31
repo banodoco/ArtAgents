@@ -44,18 +44,6 @@ def _expanded_config_hash(config: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def run_executor(request: Any, registry: Any) -> Any:
-    from astrid.core.execution.executor.runner import run_executor as _run_executor
-
-    return _run_executor(request, registry)
-
-
-def run_orchestrator(request: Any, registry: Any) -> Any:
-    from astrid.core.execution.orchestrator.runner import run_orchestrator as _run_orchestrator
-
-    return _run_orchestrator(request, registry)
-
-
 def discover(
     *,
     project_root: str | Path | None = None,

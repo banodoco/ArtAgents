@@ -228,7 +228,7 @@ def test_sdk_error_mapping_failure_path_stays_local_authority_free() -> None:
     assert result.stdout.splitlines() == ["unavailable", "[]"]
 
 
-def test_discovery_does_not_load_executor_install_runner_or_project_runtime() -> None:
+def test_discovery_does_not_load_executor_catalog_runner_or_project_runtime() -> None:
     """Manifest-ledger discovery must stay clear of optional execution code."""
 
     root = Path(__file__).resolve().parents[2]
@@ -237,8 +237,8 @@ def test_discovery_does_not_load_executor_install_runner_or_project_runtime() ->
             sys.executable,
             "-c",
             (
-                "import sys; import astrid; astrid.discover(include_installed=False); "
-                "legacy = ('astrid.core.execution.executor.install', "
+                "import sys; import astrid; astrid.discover(); "
+                "legacy = ('astrid.core.execution.executor.catalog_source', "
                 "'astrid.core.execution.executor.runner', "
                 "'astrid.core.execution.orchestrator.runner', "
                 "'astrid.core.execution.executor.banodoco_catalog', "
@@ -268,7 +268,7 @@ def test_explicit_banodoco_catalog_api_loads_optional_catalog_code() -> None:
                 "print('astrid.core.execution.executor.banodoco_catalog' in sys.modules); "
                 "from astrid.core.execution.executor.registry import BanodocoCatalogConfig; "
                 "print(BanodocoCatalogConfig.__name__); "
-                "print('astrid.core.execution.executor.install' in sys.modules)"
+                "print('astrid.core.execution.executor.catalog_source' in sys.modules)"
             ),
         ],
         cwd=root,
@@ -292,7 +292,7 @@ def test_sdk_dry_run_is_manifest_only_and_does_not_load_runtime_authority(tmp_pa
                 "import sys; import astrid; from pathlib import Path; "
                 f"out = Path({str(preview_root)!r}); "
                 "preview = astrid.invoke('understanding.understand', kind='executor', "
-                "include_installed=False, project='not-a-local-project', "
+                "project='not-a-local-project', "
                 "inputs={'mode': 'audio', 'audio': 'clip.wav'}, out=out, dry_run=True); "
                 "legacy = ('astrid.core.execution.executor.runner', "
                 "'astrid.core.execution.orchestrator.runner', 'astrid.core.project.run', "
@@ -324,7 +324,7 @@ def test_sdk_orchestrator_dry_run_is_manifest_only(tmp_path: Path) -> None:
                 "import sys; import astrid; from pathlib import Path; "
                 f"out = Path({str(preview_root)!r}); "
                 "preview = astrid.invoke('video_editing.hype', kind='orchestrator', "
-                "include_installed=False, project='not-a-local-project', "
+                "project='not-a-local-project', "
                 "inputs={'video': 'clip.mp4', 'brief': 'brief.md'}, out=out, dry_run=True); "
                 "legacy = ('astrid.core.execution.executor.runner', "
                 "'astrid.core.execution.orchestrator.runner', 'astrid.core.project.run', "

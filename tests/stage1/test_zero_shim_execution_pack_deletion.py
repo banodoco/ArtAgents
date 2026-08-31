@@ -21,6 +21,7 @@ def test_in_process_runtime_and_pack_install_authority_are_absent() -> None:
         "astrid/core/pack/install_git.py",
         "astrid/core/pack/install_local.py",
         "astrid/core/pack/install_trust.py",
+        "astrid/core/execution/executor/install.py",
     ):
         assert not (ROOT / path).exists()
 
@@ -145,3 +146,86 @@ def test_python_orchestrator_always_uses_subprocess_worker(
 
     assert calls
     assert calls[0][0][0][0:3] == [runner.sys.executable, "-m", "astrid.core.execution.python_runtime_worker"]
+
+
+def test_generic_host_runs_external_python_orchestrator_from_admitted_pack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.execution.generic_host import GenericPackHost
+
+    pack_root = tmp_path / "external_pack"
+    orchestrator_root = pack_root / "orchestrators" / "demo"
+    module_root = pack_root / "external_pkg"
+    orchestrator_root.mkdir(parents=True)
+    module_root.mkdir()
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: external_pack\nname: External Pack\nversion: '1.0'\n"
+        "content:\n  orchestrators: orchestrators\n",
+        encoding="utf-8",
+    )
+    (orchestrator_root / "orchestrator.yaml").write_text(
+        "schema_version: 1\nid: external_pack.demo\nname: Demo\nkind: external\nversion: '1.0'\n"
+        "runtime:\n  kind: python\n  module: external_pkg.run\n  function: run\n",
+        encoding="utf-8",
+    )
+    (module_root / "__init__.py").write_text("", encoding="utf-8")
+    (module_root / "run.py").write_text(
+        "import os\n"
+        "def run(request, orchestrator):\n"
+        "    return {'returncode': 0, 'outputs': {'imported_from': os.path.dirname(__file__)}}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "ambient-that-must-not-be-used"))
+    host = GenericPackHost(pack_roots=[pack_root])
+    definition, admission = host.admit("orchestrator", "external_pack.demo")
+    result = host.invoke_capability(
+        capability_kind="orchestrator",
+        capability_id="external_pack.demo",
+        request={
+            "orchestrator_id": "external_pack.demo",
+            "project": "demo",
+            "project_was_auto_resolved": True,
+            "out": None,
+            "run_root": str(tmp_path / "attempt"),
+        },
+        attempt=tmp_path / "attempt",
+        definition=definition,
+        admission=admission,
+    )
+
+    assert result.ok
+    assert result.returncode == 0
+    assert str(module_root) in result.outputs["imported_from"]
+
+
+def test_removed_sdk_runner_facades_are_absent() -> None:
+    import astrid.sdk as sdk
+    from astrid.core.execution import executor, orchestrator
+
+    assert not hasattr(sdk, "run_executor")
+    assert not hasattr(sdk, "run_orchestrator")
+    assert not hasattr(executor, "run_executor")
+    assert not hasattr(orchestrator, "run_orchestrator")
+
+
+def test_generic_host_discovers_explicit_astrid_packs_path_without_default_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.execution.generic_host import GenericPackHost
+
+    env_root = tmp_path / "env-pack-root"
+    executor_root = env_root / "env_pack" / "executors" / "demo"
+    executor_root.mkdir(parents=True)
+    (env_root / "env_pack" / "pack.yaml").write_text(
+        "schema_version: 1\nid: env_pack\nname: Env Pack\nversion: '1.0'\ncontent:\n  executors: executors\n",
+        encoding="utf-8",
+    )
+    (executor_root / "executor.yaml").write_text(
+        "schema_version: 1\nid: env_pack.demo\nname: Demo\nkind: external\nversion: '1.0'\ncommand: [python3, -c, pass]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASTRID_PACKS_PATH", str(env_root))
+    host = GenericPackHost(pack_roots=[])
+    records = host.discover()
+
+    assert [record.id for record in records] == ["env_pack.demo"]

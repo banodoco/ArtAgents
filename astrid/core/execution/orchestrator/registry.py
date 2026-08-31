@@ -23,12 +23,6 @@ from astrid.core.pack import (
     iter_orchestrator_roots,
     validate_content_id_in_pack,
 )
-from astrid.core.pack.alias_resolver import (
-    AliasResolver,
-    _register_pack_aliases,
-    create_shared_alias_resolver,
-    extract_pack_aliases,
-)
 from astrid.core.pack.discovery import discover_packs_ordered
 from astrid.core.pack.manifest import (
     ManifestParseError,
@@ -64,10 +58,9 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
         orchestrators: Iterable[OrchestratorDefinition | dict[str, Any]] = (),
         *,
         executor_registry: ExecutorRegistry | None = None,
-        alias_resolver: AliasResolver | None = None,
         override_store: "OverrideStore | None" = None,
     ) -> None:
-        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
+        super().__init__(override_store=override_store)
         self._executor_registry = executor_registry
         #: Nested map: orchestrator_id → child_capability_id → frozenset of output artifact_type values.
         self._child_output_types: dict[str, dict[str, frozenset[str]]] = {}
@@ -88,18 +81,6 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_requested_id(self, orchestrator_id: str) -> str:
-        """Resolve *orchestrator_id* to a canonical registry key."""
-        resolver = self.alias_resolver
-        canonical_id = resolver.resolve(orchestrator_id) if resolver else orchestrator_id
-        if canonical_id in self._entries:
-            return canonical_id
-        if resolver is not None and orchestrator_id != canonical_id and resolver.is_alias(orchestrator_id):
-            raise KeyError(
-                f"alias {orchestrator_id!r} points to missing orchestrator {canonical_id!r}"
-            )
-        raise KeyError(f"unknown orchestrator id {orchestrator_id!r}")
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -114,7 +95,9 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
         return definition
 
     def get(self, orchestrator_id: str) -> OrchestratorDefinition:
-        canonical_id = self._resolve_requested_id(orchestrator_id)
+        canonical_id = orchestrator_id
+        if canonical_id not in self._entries:
+            raise KeyError(f"unknown orchestrator id {orchestrator_id!r}")
         definition = self._resolve_entry(self._entries[canonical_id])
 
         target_id = self._resolve_override_key("orchestrator", canonical_id)
@@ -151,26 +134,9 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
             validate_orchestrator_definition(orchestrator)
         self._validate_child_executors(
             executor_registry=executor_registry,
-            alias_resolver=self.alias_resolver,
         )
-        self._validate_child_orchestrators(alias_resolver=self.alias_resolver)
+        self._validate_child_orchestrators()
         self._strict_child_type_check()
-        if self.alias_resolver is not None:
-            self.alias_resolver.validate_no_cycles()
-            # Cross-check: every alias must resolve to a known orchestrator.
-            # Skip aliases whose resolved target is a known executor — those
-            # were registered as executor aliases (not orchestrator aliases)
-            # and live in this resolver only via test scaffolding or shared
-            # resolver setups.
-            exec_reg = executor_registry or self._executor_registry
-            exec_known = set(exec_reg.as_mapping()) if exec_reg else set()
-            for alias, record in self.alias_resolver._aliases.items():
-                target = self.alias_resolver.resolve(alias)
-                if target not in self._entries:
-                    if target not in exec_known:
-                        raise OrchestratorRegistryError(
-                            f"alias {alias!r} resolves to unknown orchestrator {target!r}"
-                        )
         return self.list()
 
     def to_dict(self, kind: str | None = None) -> dict[str, Any]:
@@ -193,32 +159,22 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
         result.  Returns an empty dict when the orchestrator has no
         annotated children or the id is unknown.
         """
-        canonical_id = self._resolve_requested_id(orchestrator_id)
+        canonical_id = orchestrator_id
         return dict(self._child_output_types.get(canonical_id, {}))
 
     def _validate_child_executors(
         self,
         *,
         executor_registry: ExecutorRegistry | None,
-        alias_resolver: AliasResolver | None = None,
     ) -> None:
         registry = executor_registry or self._executor_registry or load_default_executor_registry()
         known_executor_ids = set(registry.as_mapping())
-        # Resolve child executor references through the *executor* alias resolver
-        # when it is populated (the orchestrator's own alias resolver maps
-        # orchestrator ids, not executor ids).  Fall back to the orchestrator
-        # resolver when the executor resolver carries no aliases, which can
-        # happen in tests that register executor aliases on a shared resolver.
-        exec_alias_resolver: AliasResolver | None = getattr(registry, 'alias_resolver', None)
-        if exec_alias_resolver is not None and not exec_alias_resolver._aliases:
-            exec_alias_resolver = None
-        resolver = exec_alias_resolver or alias_resolver or self.alias_resolver
         # Build executor mapping for artifact_type collection.
         executor_mapping = registry.as_mapping()
         # Winners only.
         for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
             for child_executor in orchestrator.child_executors:
-                resolved = resolver.resolve(child_executor) if resolver else child_executor
+                resolved = child_executor
                 if resolved not in known_executor_ids:
                     raise OrchestratorRegistryError(
                         f"orchestrator {orchestrator.id!r} references unknown child executor {resolved!r}"
@@ -226,7 +182,7 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
             # Collect child executor output artifact types.
             child_map: dict[str, frozenset[str]] = {}
             for child_executor in orchestrator.child_executors:
-                resolved = resolver.resolve(child_executor) if resolver else child_executor
+                resolved = child_executor
                 if resolved in executor_mapping:
                     exec_def = executor_mapping[resolved]
                     output_types: set[str] = set()
@@ -240,16 +196,14 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
 
     def _validate_child_orchestrators(
         self,
-        alias_resolver: AliasResolver | None = None,
     ) -> None:
         known_orchestrator_ids = set(self._entries)  # keys are strings
-        resolver = alias_resolver or self.alias_resolver
         graph: dict[str, tuple[str, ...]] = {}
         # Winners only.
         for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
             children: list[str] = []
             for child_orchestrator in orchestrator.child_orchestrators:
-                resolved = resolver.resolve(child_orchestrator) if resolver else child_orchestrator
+                resolved = child_orchestrator
                 if resolved not in known_orchestrator_ids:
                     raise OrchestratorRegistryError(
                         f"orchestrator {orchestrator.id!r} references unknown child orchestrator {resolved!r}"
@@ -261,7 +215,7 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
             # Collect child orchestrator output artifact types.
             child_map = self._child_output_types.get(orchestrator.id, {})
             for child_orchestrator in orchestrator.child_orchestrators:
-                resolved = resolver.resolve(child_orchestrator) if resolver else child_orchestrator
+                resolved = child_orchestrator
                 child_def = self._resolve_entry(self._entries[resolved])
                 output_types: set[str] = set()
                 for output in child_def.outputs:
@@ -387,9 +341,8 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
             # Fork child executors via the attached ExecutorRegistry.
             executor_registry = self._executor_registry
             if executor_registry is not None and definition.child_executors:
-                resolver = self.alias_resolver
                 for child_id in definition.child_executors:
-                    resolved = resolver.resolve(child_id) if resolver else child_id
+                    resolved = child_id
                     if resolved not in already_forked_executors:
                         already_forked_executors.add(resolved)
                         try:
@@ -403,9 +356,8 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
 
             # Fork child orchestrators recursively through this registry.
             if definition.child_orchestrators:
-                resolver = self.alias_resolver
                 for child_id in definition.child_orchestrators:
-                    resolved = resolver.resolve(child_id) if resolver else child_id
+                    resolved = child_id
                     if resolved not in already_forked_orchestrators:
                         already_forked_orchestrators.add(resolved)
                         try:
@@ -428,11 +380,8 @@ def load_default_registry(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
     )
-    resolver = create_shared_alias_resolver()
-    _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="orchestrator"))
     registry = OrchestratorRegistry(
         executor_registry=active_executor_registry,
-        alias_resolver=resolver,
         override_store=OverrideStore(project_root),
     )
     for orchestrator in _load_pack_orchestrators_from_packs(packs):

@@ -203,7 +203,7 @@ def test_retired_filesystem_event_helpers_are_not_public_or_reachable() -> None:
 def test_discover_and_get_capability_expose_public_dtos() -> None:
     astrid = _import_public_module()
 
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
     assert tuple(astrid.__all__) == EXPECTED_PUBLIC_NAMES
     assert isinstance(inventory.executors, tuple)
     assert isinstance(inventory.orchestrators, tuple)
@@ -276,49 +276,40 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
         for permission_id in editorial_capability.handle.safety.permissions
     )
 
-    aliased_executor = astrid.get_capability(
+    canonical_executor = astrid.get_capability(
         "editorial.inspect_cut",
         kind="executor",
-        include_installed=False,
     )
-    aliased_orchestrator = astrid.get_capability(
+    canonical_orchestrator = astrid.get_capability(
         "video_editing.hype",
         kind="orchestrator",
-        include_installed=False,
     )
 
     executor = astrid.get_capability(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
     )
     kindless_executor = astrid.get_capability(
         "editorial.arrange",
-        include_installed=False,
     )
     orchestrator = astrid.get_capability(
         "video_editing.hype",
         kind="orchestrator",
-        include_installed=False,
     )
     kindless_orchestrator = astrid.get_capability(
         "video_editing.hype",
-        include_installed=False,
     )
     element = astrid.get_capability(
         "effects/text-card",
         kind="element",
-        include_installed=False,
     )
     explicit_element = astrid.get_capability(
         "text-card",
         kind="element",
         element_kind="effects",
-        include_installed=False,
     )
     kindless_element = astrid.get_capability(
         "effects/text-card",
-        include_installed=False,
     )
 
     assert executor.id == "editorial.arrange"
@@ -333,8 +324,7 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
     assert executor.defaults == {}
     json.dumps(executor.to_dict())
 
-    assert [alias.alias for alias in aliased_executor.handle.aliases] == ["builtin.inspect_cut"]
-    assert aliased_executor.handle.aliases[0].deprecated is True
+    assert canonical_executor.handle.aliases == ()
 
     assert orchestrator.id == "video_editing.hype"
     assert kindless_orchestrator.id == "video_editing.hype"
@@ -348,8 +338,7 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
     assert orchestrator.defaults == {}
     json.dumps(orchestrator.to_dict())
 
-    assert [alias.alias for alias in aliased_orchestrator.handle.aliases] == ["builtin.hype"]
-    assert aliased_orchestrator.handle.aliases[0].deprecated is True
+    assert canonical_orchestrator.handle.aliases == ()
 
     assert element.id == "effects/text-card"
     assert explicit_element.id == "effects/text-card"
@@ -434,7 +423,6 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
     inventory = astrid.discover(
         project_root=tmp_path,
         extra_pack_roots=("extra/packs",),
-        include_installed=False,
         banodoco_config=banodoco_config,
         active_theme=active_theme,
         include_missing_roots=True,
@@ -444,20 +432,17 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
     assert calls[0][1] == {
         "project_root": tmp_path,
         "extra_pack_roots": ("extra/packs",),
-        "include_installed": False,
         "banodoco_config": banodoco_config,
     }
     assert calls[1][1] == {
         "executor_registry": executor_registry,
         "project_root": tmp_path,
         "extra_pack_roots": ("extra/packs",),
-        "include_installed": False,
         "banodoco_config": banodoco_config,
     }
     assert calls[2][1] == {
         "project_root": tmp_path,
         "extra_pack_roots": ("extra/packs",),
-        "include_installed": False,
         "active_theme": active_theme,
         "include_missing_roots": True,
     }
@@ -483,20 +468,17 @@ def test_get_capability_raises_typed_lookup_errors() -> None:
         astrid.get_capability(
             "missing.capability",
             kind="executor",
-            include_installed=False,
         )
 
     with pytest.raises(astrid.CapabilityAmbiguousError):
         astrid.get_capability(
             "fade",
             kind="element",
-            include_installed=False,
         )
 
     with pytest.raises(astrid.CapabilityAmbiguousError, match="animations/fade.*transitions/fade"):
         astrid.get_capability(
             "fade",
-            include_installed=False,
         )
 
 
@@ -551,7 +533,6 @@ def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_er
         capability = astrid.get_capability(
             "widget/glow",
             kind="element",
-            include_installed=False,
             extra_pack_roots=(str(packs_root),),
         )
 
@@ -559,7 +540,6 @@ def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_er
             "glow",
             kind="element",
             element_kind="widget",
-            include_installed=False,
             extra_pack_roots=(str(packs_root),),
         )
 
@@ -575,7 +555,6 @@ def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_er
             astrid.get_capability(
                 "wigdet/glow",
                 kind="element",
-                include_installed=False,
                 extra_pack_roots=(str(packs_root),),
             )
 
@@ -589,7 +568,6 @@ def test_invoke_rejects_elements_and_missing_executor_project(
         astrid.invoke(
             "effects/text-card",
             kind="element",
-            include_installed=False,
         )
 
     monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
@@ -597,7 +575,6 @@ def test_invoke_rejects_elements_and_missing_executor_project(
         astrid.invoke(
             "editorial.arrange",
             kind="executor",
-            include_installed=False,
             )
 
 
@@ -679,10 +656,7 @@ def test_discover_exposes_pack_declared_extension_metadata() -> None:
             encoding="utf-8",
         )
 
-        inventory = astrid.discover(
-            include_installed=False,
-            extra_pack_roots=(str(packs_root),),
-        )
+        inventory = astrid.discover(extra_pack_roots=(str(packs_root),))
 
         demo_pack = next(pack for pack in inventory.packs if pack["id"] == "demo")
         studio_backend = next(
@@ -773,7 +747,6 @@ def test_invoke_executor_returns_manifest_preview_without_runner(tmp_path: Path)
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
         inputs={"brief": "demo"},
@@ -783,7 +756,6 @@ def test_invoke_executor_returns_manifest_preview_without_runner(tmp_path: Path)
         check_binaries=True,
         python_exec=sys.executable,
         verbose=True,
-        execution_mode="subprocess",
         argv=("executors", "run", "editorial.arrange"),
     )
 
@@ -822,7 +794,6 @@ def test_invoke_executor_prefers_universal_manifest_path_from_payload(
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -855,7 +826,6 @@ def test_invoke_executor_discovers_universal_manifest_from_out_dir(
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -889,7 +859,6 @@ def test_invoke_executor_ignores_domain_manifest_payload_paths(
     result = astrid.invoke(
         "iteration.assemble",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -903,7 +872,6 @@ def test_invoke_orchestrator_returns_manifest_preview_without_runner(tmp_path: P
     result = astrid.invoke(
         "video_editing.hype",
         kind="orchestrator",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
         inputs={"video": "input.mp4"},
@@ -912,7 +880,6 @@ def test_invoke_orchestrator_returns_manifest_preview_without_runner(tmp_path: P
         dry_run=True,
         python_exec=sys.executable,
         verbose=True,
-        execution_mode="subprocess",
         orchestrator_args=("--render",),
     )
 
@@ -927,7 +894,7 @@ def test_invoke_orchestrator_returns_manifest_preview_without_runner(tmp_path: P
     json.dumps(result.to_dict())
 
 
-def test_invoke_defaults_to_subprocess_execution_mode(
+def test_invoke_uses_kernel_execution_boundary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -940,7 +907,7 @@ def test_invoke_defaults_to_subprocess_execution_mode(
 
     def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         seen["project"] = project
-        # mimic execution_mode default check: if project was None, would have failed earlier
+        # The SDK admits through the kernel; execution mode is not caller data.
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -952,7 +919,6 @@ def test_invoke_defaults_to_subprocess_execution_mode(
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -984,7 +950,6 @@ def test_invoke_executor_allows_project_without_explicit_out(
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         project="demo-project",
     )
 
@@ -1033,7 +998,6 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
         astrid.invoke(
             "editorial.arrange",
             kind="executor",
-            include_installed=False,
             out=tmp_path,
             project="demo-project",
         )
@@ -1066,7 +1030,6 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
             astrid.invoke(
                 "editorial.arrange",
                 kind="executor",
-                include_installed=False,
                 out=tmp_path,
                 project="demo-project",
             )
@@ -1090,7 +1053,6 @@ def test_invoke_missing_input_runner_errors_raise_sdk_missing_input(
         astrid.invoke(
             "editorial.arrange",
             kind="executor",
-            include_installed=False,
             out=tmp_path,
             project="demo-project",
         )
@@ -1136,7 +1098,6 @@ def test_invoke_maps_executor_result_error_into_public_taxonomy(
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -1153,7 +1114,7 @@ def test_discover_packs_all_have_permissions_and_trust_metadata() -> None:
     """Every pack record returned by discover().to_dict() must carry
     ``permissions``, ``permission_ids``, and the v1 trust block."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     assert inventory.packs, "discover() returned zero packs"
     for pack in inventory.packs:
@@ -1193,7 +1154,7 @@ def test_discover_pack_permission_objects_have_expected_shape() -> None:
     """Every permission object inside a pack record must be a dict with
     string ``id`` and ``reason`` keys (no structured sub-objects)."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     for pack in inventory.packs:
         permissions = pack.get("permissions", [])
@@ -1234,7 +1195,7 @@ def test_discover_permission_ids_match_permissions_list() -> None:
     """For every pack, ``permission_ids`` must be a list of strings that
     corresponds 1:1 with the ``id`` fields in ``permissions``."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     for pack in inventory.packs:
         permission_ids = pack.get("permission_ids", [])
@@ -1256,7 +1217,7 @@ def test_capability_safety_permissions_are_only_string_ids() -> None:
     """Every capability in discovery must have ``SafetyDeclaration.permissions``
     as a tuple of plain strings — no structured permission objects leak in."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     assert inventory.capabilities, "discover() returned zero capabilities"
     for capability in inventory.capabilities:
@@ -1276,7 +1237,7 @@ def test_capability_safety_permissions_mirror_pack_permission_ids() -> None:
     that pack must have its ``safety.permissions`` equal to the pack's
     ``permission_ids``."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     pack_permission_ids: dict[str, list[str]] = {}
     for pack in inventory.packs:
@@ -1298,7 +1259,7 @@ def test_discover_to_dict_roundtrip_preserves_trust_metadata() -> None:
     """``discover().to_dict()`` must round-trip through json and still
     carry pack-level trust metadata."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     payload = inventory.to_dict()
     reencoded = json.loads(json.dumps(payload))
@@ -1317,7 +1278,7 @@ def test_capability_to_dict_preserves_safety_permissions_as_strings() -> None:
     """Every individual capability ``to_dict()`` must serialize
     ``safety.permissions`` as a list of strings."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     for capability in inventory.capabilities:
         d = capability.to_dict()
@@ -1338,7 +1299,7 @@ def test_discover_empty_permissions_pack_has_empty_lists_and_trust() -> None:
     """A pack that declares no permissions must still have empty
     ``permissions``/``permission_ids`` lists and the trust block."""
     astrid = _import_public_module()
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     # The builtin (deprecated) meta-pack should have empty permissions
     builtin_pack = next(
@@ -1382,7 +1343,6 @@ def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(
     result = astrid.invoke(
         "video_editing.hype",
         kind="orchestrator",
-        include_installed=False,
         out=tmp_path,
         project="demo-project",
     )
@@ -1437,7 +1397,7 @@ def test_generate_image_reconstructs_typed_result_from_generation_payload(
     assert result.path == tmp_path / "image.png"
     assert result.run_dir == tmp_path
     assert seen["capability_id"] == "generation.generate_image"
-    assert seen["kwargs"]["execution_mode"] == "subprocess"
+    assert "execution_mode" not in seen["kwargs"]
     assert seen["kwargs"]["kind"] == "executor"
     assert seen["kwargs"]["inputs"]["prompt"] == "a lantern in fog"
 
@@ -1657,7 +1617,7 @@ def test_generate_video_reconstructs_typed_result_from_generation_payload(
     assert result.run_dir == tmp_path
     assert result.model_actual == "wan-2.2"
     assert seen["capability_id"] == "generation.generate_video"
-    assert seen["kwargs"]["execution_mode"] == "subprocess"
+    assert "execution_mode" not in seen["kwargs"]
     assert seen["kwargs"]["kind"] == "executor"
     assert seen["kwargs"]["inputs"]["prompt"] == "a cat playing piano"
     assert seen["kwargs"]["inputs"]["duration"] == 5

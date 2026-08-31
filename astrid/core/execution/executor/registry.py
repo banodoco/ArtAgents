@@ -18,12 +18,6 @@ from astrid.core.pack import (
     iter_executor_roots,
     validate_content_id_in_pack,
 )
-from astrid.core.pack.alias_resolver import (
-    AliasResolver,
-    _register_pack_aliases,
-    create_shared_alias_resolver,
-    extract_pack_aliases,
-)
 from astrid.core.pack.discovery import discover_packs_ordered
 from astrid.core.pack.manifest import (
     ManifestParseError,
@@ -75,10 +69,9 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
         self,
         executors: Iterable[ExecutorDefinition | dict[str, Any]] = (),
         *,
-        alias_resolver: AliasResolver | None = None,
         override_store: "OverrideStore | None" = None,
     ) -> None:
-        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
+        super().__init__(override_store=override_store)
         for executor in executors:
             self.register(executor)
 
@@ -96,18 +89,6 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_requested_id(self, executor_id: str) -> str:
-        """Resolve *executor_id* to a canonical registry key."""
-        resolver = self.alias_resolver
-        canonical_id = resolver.resolve(executor_id) if resolver else executor_id
-        if canonical_id in self._entries:
-            return canonical_id
-        if resolver is not None and executor_id != canonical_id and resolver.is_alias(executor_id):
-            raise KeyError(
-                f"alias {executor_id!r} points to missing executor {canonical_id!r}"
-            )
-        raise KeyError(f"unknown executor id {executor_id!r}")
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -122,7 +103,9 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
         return definition
 
     def get(self, executor_id: str) -> ExecutorDefinition:
-        canonical_id = self._resolve_requested_id(executor_id)
+        canonical_id = executor_id
+        if canonical_id not in self._entries:
+            raise KeyError(f"unknown executor id {executor_id!r}")
         definition = self._resolve_entry(self._entries[canonical_id])
 
         target_id = self._resolve_override_key("executor", canonical_id)
@@ -154,15 +137,6 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
         for executor in (self._resolve_entry(entry) for entry in self._entries.values()):
             validate_executor_definition(executor)
         self._validate_graph_references()
-        if self.alias_resolver is not None:
-            self.alias_resolver.validate_no_cycles()
-            # Cross-check: every alias must resolve to a known executor.
-            for alias, record in self.alias_resolver._aliases.items():
-                target = self.alias_resolver.resolve(alias)
-                if target not in self._entries:
-                    raise ExecutorRegistryError(
-                        f"alias {alias!r} resolves to unknown executor {target!r}"
-                    )
         return self.list()
 
     def to_dict(self, kind: str | None = None) -> dict[str, Any]:
@@ -179,11 +153,10 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
 
     def _validate_graph_references(self) -> None:
         known_ids = set(self._entries)  # keys are strings, unchanged
-        resolver = self.alias_resolver
         # Winners only.
         for executor in (self._resolve_entry(entry) for entry in self._entries.values()):
             for dependency in executor.graph.depends_on:
-                resolved = resolver.resolve(dependency) if resolver else dependency
+                resolved = dependency
                 if resolved not in known_ids:
                     raise ExecutorRegistryError(f"executor {executor.id!r} depends on unknown executor {resolved!r}")
                 if resolved == executor.id:
@@ -238,10 +211,9 @@ class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
 
         # Deep fork: recursively fork all depends_on executors.
         if deep:
-            resolver = self.alias_resolver
             already_forked: set[str] = {executor_id}
             for dep_id in definition.graph.depends_on:
-                resolved = resolver.resolve(dep_id) if resolver else dep_id
+                resolved = dep_id
                 if resolved not in already_forked:
                     already_forked.add(resolved)
                     self.fork(resolved, project_root=project_root, overwrite=overwrite, deep=True)
@@ -259,10 +231,7 @@ def load_default_registry(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
     )
-    resolver = create_shared_alias_resolver()
-    _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="executor"))
     registry = ExecutorRegistry(
-        alias_resolver=resolver,
         override_store=OverrideStore(project_root),
     )
     for executor in _load_pack_executors_from_packs(packs):

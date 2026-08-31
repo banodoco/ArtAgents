@@ -180,7 +180,7 @@ def test_hivemind_without_clean_pinned_source_is_optional_unavailable(tmp_path: 
     host.preflight()
     assert host.capabilities[record.id].ready is False
     assert host.capabilities[record.id].preflight["pack_source"]["ok"] is False
-    assert "not pinned" in host.capabilities[record.id].preflight["pack_source"]["reason"]
+    assert "not a Git checkout" in host.capabilities[record.id].preflight["pack_source"]["reason"]
 
 
 def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> None:

@@ -25,7 +25,6 @@ from astrid.core.execution.executor.schema import (
     ExecutorValidationError,
     GraphMetadata,
 )
-from astrid.core.pack.alias_resolver import AliasResolver
 from astrid.core.pack.override import OverrideStore
 from astrid.core.contracts.schema import CachePolicy, CommandSpec
 
@@ -178,31 +177,18 @@ class ExecutorRegistrySnapshotTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             registry.get("nonexistent.exec")
 
-    def test_get_via_alias(self):
-        """get() resolves aliases through alias_resolver."""
-        resolver = AliasResolver()
-        resolver.register_alias("builtin.legacy", "editorial.shots")
-        registry = ExecutorRegistry(alias_resolver=resolver)
-        registry.register(_make_executor("editorial.shots", priority=30))
-
-        result = registry.get("builtin.legacy")
-        self.assertEqual(result.id, "editorial.shots")
-
     def test_get_with_override_store(self):
         """get() applies override_store redirect."""
-        resolver = AliasResolver()
-        resolver.register_alias("builtin.legacy", "editorial.shots")
         with tempfile.TemporaryDirectory() as tmp:
             override_store = OverrideStore(project_root=tmp)
             override_store.set_override("executor", "editorial.shots", "local.shots")
             registry = ExecutorRegistry(
-                alias_resolver=resolver,
                 override_store=override_store,
             )
             registry.register(_make_executor("editorial.shots", name="Original Shots", priority=30))
             registry.register(_make_executor("local.shots", name="Local Shots", priority=10))
 
-            result = registry.get("builtin.legacy")
+            result = registry.get("editorial.shots")
             self.assertEqual(result.id, "local.shots")
             self.assertEqual(result.name, "Local Shots")
 
