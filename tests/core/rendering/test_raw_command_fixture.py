@@ -9,8 +9,8 @@ These tests lock the pack's static discovery surface (no code import), drive
 both ``render`` and ``support`` through :class:`CommandTransport`, verify the
 generated artifact (real sha256, duration, workspace containment), assert no
 ``run.json`` is ever created, and prove the pack works from an explicit extra
-pack root and from a trusted install (mirroring the discovery fixture patterns
-in ``test_registry_matrix.py``).
+pack root. Installed revisions are intentionally excluded from public
+discovery.
 """
 
 from __future__ import annotations
@@ -25,13 +25,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs, load_pack_manifest
 from astrid.core.pack.store import InstallRecord, InstalledPackStore
 from astrid.core.pack.validate import extract_trust_summary, validate_pack
 from astrid.core.rendering import RenderResult, SupportReport
 from astrid.core.rendering import registry as rendering_registry_module
-from astrid.core.rendering.registry import load_default_registries
+from astrid.core.rendering.registry import RendererRegistryError, load_default_registries
 from astrid.core.rendering.transport import CommandTransport
 
 

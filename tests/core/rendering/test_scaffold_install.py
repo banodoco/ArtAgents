@@ -5,13 +5,11 @@ End-to-end proof that a scaffolded renderer works from a fresh directory:
 * ``create_renderer_scaffold`` writes the four-file pack into a temp dir;
 * static validation passes (``validate_pack`` + canonical manifest checks);
 * the generated ``test_renderer.py`` passes when run on the scaffold output;
-* the pack is installed into a temp ``ASTRID_PACKS_PATH`` root and registry
+* the pack is installed into a temp ``ASTRID_PACKS_PATH`` root and explicit
   discovery finds ``rendering.<name>``;
 * a deterministic smoke render produces a byte-stable, valid output in under
   two seconds (no timestamps, no random ids); and
-* a trusted install (temp ``ASTRID_HOME`` + accepted install record) makes the
-  discovered candidate execution-eligible, and the same smoke render works
-  from the installed revision.
+* an installed revision is intentionally not a public discovery authority.
 
 The installed-wheel leg of the golden path (same flow against the wheel's
 ``astrid.core.rendering.scaffold`` module inside the wheel venv) is wired into
@@ -32,6 +30,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs
 from astrid.core.pack.manifest import load_manifest_mapping
@@ -39,7 +39,7 @@ from astrid.core.pack.store import InstalledPackStore
 from astrid.core.pack.validate import validate_pack
 from astrid.core.rendering import RenderResult
 from astrid.core.rendering import registry as rendering_registry_module
-from astrid.core.rendering.registry import load_default_registries
+from astrid.core.rendering.registry import RendererRegistryError, load_default_registries
 from astrid.core.rendering.scaffold import SCAFFOLD_FILES, create_renderer_scaffold
 from astrid.core.rendering.transport import CommandTransport
 
