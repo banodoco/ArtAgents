@@ -120,16 +120,7 @@ class WorkspaceClient:
     def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""
         try:
-            try:
-                value = getattr(self._generated, operation)(*args, **kwargs)
-            except TypeError as exc:
-                # Older pinned generated clients predate optional update
-                # idempotency headers; preserve their timeline compatibility.
-                if "idempotency_key" not in kwargs or "unexpected keyword" not in str(exc):
-                    raise
-                retry_kwargs = dict(kwargs)
-                retry_kwargs.pop("idempotency_key", None)
-                value = getattr(self._generated, operation)(*args, **retry_kwargs)
+            value = getattr(self._generated, operation)(*args, **kwargs)
         except Exception as exc:  # generated ApiError has stable fields
             raise WorkspaceClientError(
                 int(getattr(exc, "status", 0)),

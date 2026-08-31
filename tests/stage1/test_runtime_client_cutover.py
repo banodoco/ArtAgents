@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -41,6 +42,48 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         assert task.ok and task.data["capability_id"] == "render.basic"
         assert client.tasks.show(task.data["task_id"]).ok
         client.close()
+    finally:
+        daemon.stop()
+
+
+def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monkeypatch, capsys):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        with AstridClient.open() as client:
+            assert gateway_main(["projects", "create", "cold", "--name", "Cold", "--idempotency-key", "cold-project", "--json"]) == 0
+            created = json.loads(capsys.readouterr().out)
+            assert created["ok"] and created["receipt"]["command_kind"] == "project.create"
+            project_id = created["data"]["project_id"]
+            replay = client.projects.create(slug="cold", name="Cold", idempotency_key="cold-project")
+            assert replay.ok and replay.receipt is not None
+            assert replay.receipt.as_dict() == created["receipt"]
+
+            assert gateway_main(["projects", "select", project_id, "--scope", "workspace", "--json"]) == 0
+            selected = json.loads(capsys.readouterr().out)
+            assert selected["ok"] and selected["receipt"]["command_kind"] == "project.select"
+            sdk_selected = client.projects.select(project_id, scope="workspace", idempotency_key=selected["idempotency_key"])
+            assert sdk_selected.ok and sdk_selected.receipt is not None
+            assert sdk_selected.receipt.as_dict() == selected["receipt"]
+
+            assert gateway_main(["tasks", "create", "--project", project_id, "--capability", "render.basic", "--spec", "{}", "--idempotency-key", "cold-task", "--json"]) == 0
+            admitted = json.loads(capsys.readouterr().out)
+            assert admitted["ok"] and admitted["receipt"]["command_kind"] == "task.create"
+            sdk_task = client.tasks.create(project=project_id, capability="render.basic", spec={}, idempotency_key="cold-task")
+            assert sdk_task.ok and sdk_task.receipt is not None
+            assert sdk_task.receipt.as_dict() == admitted["receipt"]
+
+            before = daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            daemon.service.register_capability({
+                "capability_id": "cold.gpu",
+                "definition_digest": "sha256:" + hashlib.sha256(b"cold.gpu").hexdigest(),
+                "status": "unavailable",
+                "unavailable_reason": "gpu_not_configured",
+            })
+            failed = client.tasks.create(project=project_id, capability="cold.gpu", spec={}, idempotency_key="cold-gpu")
+            assert not failed.ok and failed.receipt is None and failed.error.code == "unavailable"
+            assert daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before
     finally:
         daemon.stop()
 
