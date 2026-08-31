@@ -177,6 +177,8 @@ class RemoteTasks(_RemoteFamily):
         return self._typed("register_capability", capability_id, definition_digest, key=idempotency_key, idempotency_key=idempotency_key, **kwargs)
     def create(self, *, project_id=None, capability, spec, input_manifest=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project_id is None:
+            project_id = kwargs.pop("project", None)
         try:
             match = next((item for item in self._client.list_capabilities() if item.get("capability_id") == capability), None)
             if project_id is not None and callable(getattr(self._client, "get_project", None)):

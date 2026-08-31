@@ -18,7 +18,7 @@ class _Client:
 
 def test_task_create_resolves_project_slug_before_admission():
     result = RemoteTasks(_Client()).create(
-        project_id="cold",
+        project="cold",
         capability="render.basic",
         spec={"message": "hello"},
         idempotency_key="task-1",
