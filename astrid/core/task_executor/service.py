@@ -130,10 +130,10 @@ class TaskHandler(Protocol):
 def resolve_task_handler(binding: str) -> TaskHandler:
     """Resolve the one registered handler for *binding*.
 
-    Reigh bindings are runtime-owned and are registered by the explicit
-    integration composition before execution.  The kernel resolver never
-    imports a concrete integration, preserving the one-way kernel/pack
-    dependency and making missing registration fail closed.
+    Bindings are runtime-owned and are registered by explicit composition
+    before execution. The kernel resolver never imports a concrete binding,
+    preserving the one-way kernel/pack dependency and making missing
+    registration fail closed.
     """
     handler = resolve_registered_task_handler(binding)
     if handler is None:

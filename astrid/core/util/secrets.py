@@ -26,7 +26,7 @@ from typing import Literal, Protocol
 
 from astrid.core.contracts.errors import AstridError
 
-EnvSearchProfile = Literal["default", "reigh"]
+EnvSearchProfile = Literal["default"]
 
 _RECOVERY_HINTS: dict[str, str] = {
     "GIPHY_API_KEY": "Get a GIPHY API key at https://developers.giphy.com/dashboard/.",
@@ -112,9 +112,7 @@ def candidate_env_files(
 
     Broad cwd/repository/workspace/home env-file scavenging was removed in m4:
     an env file is consulted **only** when the caller names it explicitly. The
-    ``profile`` argument is retained for call-site compatibility
-    (``astrid.core.integrations.reigh.env``); both profiles behave identically
-    and add no implicit paths.
+    ``profile`` is a no-op label and never changes the path set.
     """
     if env_file is None:
         return []

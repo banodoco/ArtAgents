@@ -148,7 +148,7 @@ def test_ci_retains_m8_failure_evidence_and_blocks_publication_on_all_floors():
     # the workflow rather than being replaced by the packaged gate.
     assert "compare_ruff_baseline.py" in (REPO_ROOT / ".github/workflows/ci.yml").read_text()
     assert "compare_mypy_baseline.py" in (REPO_ROOT / ".github/workflows/ci.yml").read_text()
-    assert "test_m7_bridge_contention.py" in (REPO_ROOT / ".github/workflows/ci.yml").read_text()
+    assert "test_reigh_authority_absence.py" in (REPO_ROOT / ".github/workflows/ci.yml").read_text()
     assert "test_pack_factoring.py" in (REPO_ROOT / ".github/workflows/ci.yml").read_text()
 
 

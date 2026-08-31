@@ -139,9 +139,9 @@ python3 -m astrid doctor [--json]   # runtime health check
 python3 -m astrid backup             # unavailable until a runtime route exists
 ```
 
-There is no public `astrid serve` command in Stage1. Start the separate
-workspace runtime with `banodoco-local up --profile astrid`. Backup and restore
-are runtime-owned operations; do not copy or edit a local SQLite/CAS tree.
+Start the separate workspace runtime with `banodoco-local up --profile astrid`.
+Backup and restore are runtime-owned operations; do not copy or edit a local
+SQLite/CAS tree.
 
 ## The SDK is the pack surface
 
@@ -538,10 +538,6 @@ orchestrator, or element manifests.
 | `media.gif_search` | Search GIPHY for GIF or sticker assets and optionally download a selected rendition. |
 | `media.speech_repair_lavasr` | Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass. |
 | `moirae.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
-| `reigh.open_in_reigh` | Copy or stage generated timeline+assets for handoff into a Reigh project. |
-| `reigh.publish` | Publish a finished timeline + assets pair into a Reigh project via API. |
-| `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
-| `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
 | `rendering.render` | Render a hype timeline to opaque MP4 or explicitly stamped alpha MOV through the selected backend. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
@@ -566,7 +562,7 @@ orchestrator, or element manifests.
 | `understanding.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
 | `vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
 | `vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
-| `video_editing.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
+| `video_editing.cut` | Build the hype timeline + assets + metadata JSON triple from arrangement. |
 | `youtube.upload` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
 | `youtube.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
 

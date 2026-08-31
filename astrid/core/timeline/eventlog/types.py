@@ -12,7 +12,7 @@ from astrid.core.timeline.events.schema import TimelineActor
 if TYPE_CHECKING:
     from astrid.core.timeline.events.schema.types import TimelineEvent
 
-BackendName = Literal["local_fs", "supabase"]
+BackendName = Literal["local_fs"]
 
 
 class EventLogError(_EventLogErrorBase):
@@ -103,24 +103,6 @@ class TimelineStreamRef:
     timeline_id: str
     home: Path | None = None
     source: str = "timeline_home"
-    supabase_options: "SupabaseEventLogOptions | None" = None
-
-
-@dataclass(frozen=True)
-class SupabaseEventLogOptions:
-    """Optional transport/auth context for the Supabase eventlog backend.
-
-    The LocalFs backend ignores this structure entirely. It exists so callers
-    can pass one narrow context object through backend selection without
-    fanning separate Supabase kwargs across edit and CRUD call sites.
-    """
-
-    url: str | None = None
-    auth_token: str | None = None
-    verified_subject: str | None = None
-    actor_id: str | None = None
-    actor_display: str | None = None
-    rpc_append_name: str = "append_timeline_event"
 
 
 class EventLogIdempotentError(EventLogError):
@@ -166,7 +148,7 @@ class ResolvedTarget:
     timeline_ulid: str
     timeline_home: Path
     slug: str
-    backend_name_display: str  # e.g. "local_fs" or "supabase"
+    backend_name_display: str  # local_fs
 
 
 @dataclass(frozen=True)

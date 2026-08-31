@@ -745,8 +745,8 @@ def project_to_assembly(
     """Replay an ordered sequence of *events* into a projected assembly dict.
 
     The projector is **backend-agnostic**: it accepts ``TimelineEvent``
-    objects regardless of whether they came from ``LocalFsBackend``,
-    ``SupabaseBackend``, or a test fixture.
+    objects regardless of whether they came from ``LocalFsBackend``
+    or a test fixture.
 
     Parameters
     ----------

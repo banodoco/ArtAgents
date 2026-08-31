@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 
 from astrid.core import timeline
-from astrid.core.integrations.reigh import remotion_runtime
+from astrid.core.rendering import remotion_runtime
 from astrid.packs.rendering.backends.remotion import run as render_remotion
 from astrid.packs.rendering.executors.render import legacy_engine
 from astrid.packs.rendering.executors.render import run as render_facade

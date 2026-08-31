@@ -16,7 +16,7 @@ import yaml
 
 from astrid.core import timeline
 from astrid.core.element.schema import ElementAsset, ElementDefinition
-from astrid.core.integrations.reigh import remotion_runtime
+from astrid.core.rendering import remotion_runtime
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,

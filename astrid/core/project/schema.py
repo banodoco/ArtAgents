@@ -1,13 +1,4 @@
-"""Project file schemas and validators (project / source / run only).
-
-The parallel placement schema (build_project_timeline / build_placement /
-validate_project_timeline / validate_placement / validate_reference / REF_KINDS
-/ source_ref / run_ref / TIMELINE_SCHEMA_VERSION) was removed when AA collapsed
-onto reigh-app's canonical ``timelines`` rows. Timeline reads/writes now go
-through ``astrid.core.integrations.reigh.SupabaseDataProvider`` as a legacy compatibility
-bridge; the local provenance cache (sources/, runs/, project.json) is what
-survives.
-"""
+"""Project file schemas and validators (project / source / run only)."""
 
 from __future__ import annotations
 

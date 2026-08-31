@@ -9,7 +9,7 @@ The runtime checkout is intentionally explicit for the beta's editable-source
 composition.  A normal launch may therefore be configured with
 ``BANODOCO_RUNTIME_CHECKOUT`` (or a pre-existing
 ``BANODOCO_LOCAL_SOURCE_MANIFEST``), but never guesses among sibling
-checkouts or starts the retired ``astrid serve`` bridge.
+checkouts or starts the neutral Astrid runtime.
 """
 
 from __future__ import annotations

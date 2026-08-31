@@ -76,7 +76,7 @@ GA_SELECTORS: dict[int, tuple[str, ...]] = {
     4: ("tests/v10/test_fanout.py",),
     5: ("tests/v10/test_task_races.py", "tests/v10/test_m7_hardening.py"),
     6: (
-        "tests/v10/test_m7_bridge_contention.py",
+        "tests/stage1/test_reigh_authority_absence.py",
     ),
     7: ("tests/v10/test_media_pipeline.py",),
     8: ("tests/v10/test_reference_conformance.py", "tests/v10/test_shot_conformance.py"),
@@ -778,7 +778,7 @@ def _defects_after_gate(path: Path, *, admission_hash: str, findings: Sequence[s
         disposition.extend(["", *[f"- {finding}" for finding in findings]])
     disposition.extend(
         [
-            "- Item 6 external Reigh proof remains distinct and unresolved without an authorized pinned checkout.",
+            "- Item 6 legacy bridge authority absence is covered by the Stage1 census.",
             "- Installed-artifact proof for items 11 and 12 remains pending m8.",
         ]
     )
@@ -923,11 +923,6 @@ def run_gate(
         errors.append("GA item 12 retained m3 source/test evidence is incomplete")
 
     unresolved = [
-        {
-            "id": "external-reigh-editor",
-            "status": "unresolved",
-            "reason": "authorized pinned external Reigh checkout was not supplied; in-tree bridge evidence is distinct",
-        },
         {
             "id": "installed-artifact-items-11-12",
             "status": "deferred",

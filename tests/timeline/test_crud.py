@@ -11,12 +11,6 @@ import pytest
 from astrid.core.timeline.eventlog import (
     EventLogBackend,
     LocalFsBackend,
-    SupabaseBackend,
-)
-from astrid.core.timeline.eventlog.types import (
-    EventLogMissingConfigError,
-    EventLogUnsupportedRpcError,
-    SupabaseEventLogOptions,
 )
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.crud import (
@@ -377,76 +371,6 @@ class TestRenameTimeline:
 
         with pytest.raises(TimelineCrudError, match="malformed backend"):
             rename_timeline("demo", "alpha", "beta")
-
-    def test_rename_rejects_explicit_supabase_backend_without_config(
-        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        result = create_timeline("demo", "alpha")
-        ulid = result["ulid"]
-        identity = json.loads(
-            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
-        )
-
-        def fake_select(
-            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None
-        ) -> tuple[object, EventLogBackend]:
-            assert timeline_id == identity["timeline_id"]
-            return (
-                type("Stream", (), {"backend": "supabase"})(),
-                SupabaseBackend(timeline_id=timeline_id),
-            )
-
-        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
-
-        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
-            rename_timeline("demo", "alpha", "beta")
-
-    def test_rename_rejects_configured_supabase_backend_without_transport(
-        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        result = create_timeline("demo", "alpha")
-        ulid = result["ulid"]
-        identity = json.loads(
-            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
-        )
-
-        def fake_select(
-            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None,
-            supabase_options: SupabaseEventLogOptions | None = None
-        ) -> tuple[object, EventLogBackend]:
-            assert timeline_id == identity["timeline_id"]
-            assert supabase_options is not None
-            return (
-                type("Stream", (), {"backend": "supabase"})(),
-                SupabaseBackend(
-                    timeline_id=timeline_id,
-                    supabase_url=supabase_options.url,
-                    auth_token=supabase_options.auth_token,
-                    enabled=True,
-                    verified_subject=supabase_options.verified_subject,
-                    actor_id=supabase_options.actor_id,
-                    actor_display=supabase_options.actor_display,
-                    rpc_append_name=supabase_options.rpc_append_name,
-                ),
-            )
-
-        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
-
-        with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event_v2"):
-            rename_timeline(
-                "demo",
-                "alpha",
-                "beta",
-                supabase_options=SupabaseEventLogOptions(
-                    url="https://example.supabase.co",
-                    auth_token="pat-token",
-                    verified_subject="user-1",
-                    actor_id="agent:codex",
-                    actor_display="Codex",
-                    rpc_append_name="append_timeline_event_v2",
-                ),
-            )
-
 
 # ---------------------------------------------------------------------------
 # Finalize

@@ -1,8 +1,6 @@
 # Foley Map Orchestrator
 
-Use `foley.foley_map` to turn one video into a spatial Foley soundscape: the
-original video plays in the browser, with N Foley tracks anchored to spatial
-regions of the frame, mixed by viewport position.
+Use `foley.foley_map` to turn one video into a Foley soundscape for review.
 
 Pipeline:
 
@@ -16,7 +14,6 @@ Pipeline:
    tile.
 5. **`foley.foley_review`** → static review page for sense-checking. Pause
    here, eyeball the tracks, optionally re-run with `--retry-flagged`.
-6. **`reigh.spatial_audio_page`** → final viewer page.
 
 Dry-run (no API calls; writes the plan + tile crops + frames):
 
@@ -48,7 +45,7 @@ result = sdk.invoke(
 )
 ```
 
-Stop after Foley + review (skip the final viewer):
+Stop after Foley + review:
 
 ```python
 import astrid.sdk as sdk
@@ -87,5 +84,4 @@ frames/global.png       # global first frame
 prompts.json            # global context + per-tile prompts
 audio/<r>_<c>.wav       # per-tile Foley audio
 review.html             # sense-check page
-page/index.html         # final spatial-audio viewer
 ```

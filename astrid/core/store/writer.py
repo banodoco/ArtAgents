@@ -487,7 +487,7 @@ class DatabaseWriter:
                             "the database WAL was replaced beneath the live "
                             "writer (a foreign process closed a writable "
                             "connection); writes cannot be durable — restart "
-                            "astrid serve"
+                            "the Astrid runtime"
                         )
                     session = WriterSession(self._connection)
                     item.result = item.callback(session)
@@ -513,7 +513,7 @@ class DatabaseWriter:
                         raise WriterSidecarError(
                             "the database WAL was replaced during a live "
                             "callback; writes cannot be durable — restart "
-                            "astrid serve"
+                            "the Astrid runtime"
                         )
                     self._wal_identity = after_identity
                 except sqlite3.OperationalError as exc:
@@ -538,7 +538,7 @@ class DatabaseWriter:
                         item.error = WriterSidecarError(
                             "the database WAL was replaced during a live "
                             "callback; writes cannot be durable — restart "
-                            "astrid serve"
+                            "the Astrid runtime"
                         )
                         item.error.__cause__ = exc
                     elif "locked" in str(exc).lower():

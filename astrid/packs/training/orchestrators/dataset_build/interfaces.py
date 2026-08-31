@@ -210,7 +210,7 @@ class SourceProvider(Protocol):
     """Acquire candidate media items from a source.
 
     First concrete provider: YouTube/video acquisition.
-    Placeholders: local_folder, reigh_asset, stock_api, generated,
+    Placeholders: local_folder, stock_api, generated,
                   image, audio, paired.
     """
     def acquire(self, config: dict[str, Any]) -> Iterator[CandidateItem]:

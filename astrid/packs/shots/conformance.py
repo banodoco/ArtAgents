@@ -774,44 +774,10 @@ def shot_command_specs(
 # Public command-spec surface; capability fixtures below are test-only data.
 __all__ = ["shot_command_specs"]
 
-# ---------------------------------------------------------------------------
-# Capability conformance fixtures (doc 27 §3.6 — phase-B B3 fan-out)
-#
-# One representative fixture per shipped Reigh capability, covering the five
-# contracted dimensions: accepted input, completion-manifest file
-# count/media shape, required admission provenance, error-category mapping,
-# and truthful unavailability when a prerequisite is removed. The fixture
-# SHAPE is frozen at the B3 checkpoint: it is the per-capability payload B6's
-# dual-scope boot digest hashes and B8's probe table completes. Changes after
-# cumulative Review 1 require re-approval.
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class CapabilityConformance:
-    """One shipped capability's representative conformance fixture.
-
-    Data-carried dimensions:
-
-    - ``accepted_input`` — family + input that must admit cleanly through
-      :func:`resolve_family_capability` (or the executor child gate for
-      ``child_only`` rows).
-    - ``manifest`` — completion-manifest expectation ``{"files", "media"}``
-      per unit run. Template-backed rows are verified against a census of
-      the pinned workflow bytes (:func:`manifest_census`); WGP rows carry
-      the declared contract until the B7 binding lands its handler.
-    - ``provenance`` — dotted spec keys admission must pin
-      (``workflow.sha256`` for template-backed rows, per doc 27 §3.2).
-    - ``invalid_input`` — input that must map to the ``400 invalid_input``
-      error category. Child-only rows are publicly inadmissible instead
-      (``403 child_admission_forbidden``) and leave this ``None``.
-
-    The fifth dimension — truthful unavailability — is executed by the
-    driver against the entry's registered probe: removing the prerequisite
-    artifact flips the entry to unavailable with named
-    ``missing_prerequisites`` and zero code changes, while the entry stays
-    registered (advertised-gated, never removed).
-    """
+    """One capability's representative conformance fixture."""
 
     capability_id: str
     family: str
@@ -823,272 +789,39 @@ class CapabilityConformance:
 
 
 _TEMPLATE_PROVENANCE: tuple[str, ...] = (
-    "family",
-    "source_task_type",
-    "output_policy",
-    "params",
-    "workflow.path",
-    "workflow.sha256",
+    "family", "source_task_type", "output_policy", "params",
+    "workflow.path", "workflow.sha256",
 )
-"""Provenance pinned for template-backed (workflow-snapshotting) rows."""
-
 _BINDING_PROVENANCE: tuple[str, ...] = (
-    "family",
-    "source_task_type",
-    "output_policy",
-    "params",
+    "family", "source_task_type", "output_policy", "params",
 )
-"""Provenance pinned for rows whose binding carries no workflow snapshot."""
-
 _PROMPT = {"id": "p", "fullPrompt": "conformance"}
-"""One deterministic prompt element for batch image-generation inputs."""
 
 
 def manifest_census(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Derive the completion-manifest expectation from pinned graph bytes.
-
-    Census rule over Comfy API-format nodes: every ``SaveImage`` node
-    yields one image file per run; every ``VHS_VideoCombine`` node yields
-    one video file per run (``save_output`` selects the subfolder, not
-    whether bytes are produced). Image presence wins the media kind.
-    """
+    """Derive completion-manifest expectations from graph bytes."""
     classes = [node.get("class_type") for node in workflow.values() if isinstance(node, dict)]
     images = sum(1 for c in classes if c == "SaveImage")
     videos = sum(1 for c in classes if isinstance(c, str) and c.startswith("VHS_VideoCombine"))
-    if images:
-        media = "image"
-    elif videos:
-        media = "video"
-    else:
-        media = "none"
-    return {"files": images + videos, "media": media}
+    return {"files": images + videos, "media": "image" if images else "video" if videos else "none"}
 
 
 def _capability_fixtures() -> tuple[CapabilityConformance, ...]:
-    """The per-capability fixture rows, in registry declaration order."""
+    """Fixtures for capabilities retained in the normal registry."""
     return (
-        # -- image_generation family (model_name switch, doc 16 §3.1) -------
         CapabilityConformance(
-            "reigh.wan_2_2_t2i",
-            "image_generation",
-            {"prompts": [_PROMPT]},
-            {"files": 1, "media": "image"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.qwen_image",
-            "image_generation",
-            {"prompts": [_PROMPT], "model_name": "qwen-image"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.qwen_image_style",
-            "image_generation",
-            {
-                "prompts": [_PROMPT],
-                "model_name": "qwen-image",
-                "style_reference_image": "style.png",
-            },
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.qwen_image_2512",
-            "image_generation",
-            {"prompts": [_PROMPT], "model_name": "qwen-image-2512"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.z_image_turbo",
-            "image_generation",
-            {"prompts": [_PROMPT], "model_name": "z-image"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        # -- upscale ---------------------------------------------------------
-        CapabilityConformance(
-            "reigh.image_upscale",
-            "image_upscale",
-            {"image_url": "input.png"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        # -- travel / join orchestrators and worker children -----------------
-        CapabilityConformance(
-            "reigh.individual_travel_segment",
-            "individual_travel_segment",
-            {"start_image_url": "start.png"},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.join_clips_orchestrator",
-            "join_clips",
-            {"clip_source": "clips"},
-            {"files": 0, "media": "none"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.travel_orchestrator",
-            "travel_between_images",
-            {"image_urls": ["a.png", "b.png"]},
-            {"files": 0, "media": "none"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.wan_2_2_i2v",
-            "travel_between_images",
-            {"image_urls": ["a.png", "b.png"], "turbo_mode": True},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.travel_stitch",
-            "crossfade_join",
-            {"image_urls": ["a.png", "b.png"]},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.edit_video_orchestrator",
-            "edit_video_orchestrator",
-            {"clip_source": "clips"},
-            {"files": 0, "media": "none"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.join_clips_segment",
-            "join_clips_segment",
-            {},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            child_only=True,
-        ),
-        CapabilityConformance(
-            "reigh.join_final_stitch",
-            "join_final_stitch",
-            {},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            child_only=True,
-        ),
-        CapabilityConformance(
-            "reigh.travel_segment",
-            "travel_segment",
-            {},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            child_only=True,
-        ),
-        # -- video enhance ----------------------------------------------------
-        CapabilityConformance(
-            "reigh.video_enhance",
-            "video_enhance",
-            {"video_url": "clip.mp4", "enable_upscale": True},
-            {"files": 1, "media": "video"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={"video_url": "clip.mp4"},
-        ),
-        # -- i2i / edit families ----------------------------------------------
-        CapabilityConformance(
-            "reigh.z_image_turbo_i2i",
-            "z_image_turbo_i2i",
-            {"image_url": "input.png"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.qwen_image_edit",
-            "magic_edit",
-            {"prompt": "make it night", "image_url": "input.png"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={"prompt": "make it night"},
-        ),
-        CapabilityConformance(
-            "reigh.image_inpaint",
-            "masked_edit",
-            {"image_url": "u.png", "mask_url": "m.png", "prompt": "p"},
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={"image_url": "u.png", "mask_url": "m.png"},
-        ),
-        CapabilityConformance(
-            "reigh.annotated_image_edit",
-            "masked_edit",
-            {
-                "image_url": "u.png",
-                "mask_url": "m.png",
-                "prompt": "p",
-                "task_type": "annotated_image_edit",
-            },
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={"image_url": "u.png", "task_type": "annotated_image_edit"},
-        ),
-        CapabilityConformance(
-            "reigh.animate_character",
-            "character_animate",
-            {"image_url": "character.png"},
-            {"files": 3, "media": "video"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
-        ),
-        CapabilityConformance(
-            "reigh.flux_klein_edit",
-            "klein_edit",
-            {"image_url": "u.png", "prompt": "p"},
-            {"files": 2, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={"image_url": "u.png"},
-        ),
-        # -- render export -----------------------------------------------------
-        CapabilityConformance(
-            "rendering.render",
-            "render_export",
+            "rendering.render", "render_export",
             {"timeline_ref": "tl-1", "expected_version": 0},
-            {"files": 1, "media": "video"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
+            {"files": 1, "media": "video"}, _BINDING_PROVENANCE, invalid_input={},
         ),
-        # Historical visualization is a direct evidence-pack executor, not a
-        # video-producing Remotion workflow.  It remains registered for the
-        # compatibility surface, but its conformance manifest must not claim
-        # a rendered video or a workflow-file output.
         CapabilityConformance(
-            "rendering.timeline_visualize",
-            "render_export",
+            "rendering.timeline_visualize", "render_export",
             {"timeline_ref": "tl-1", "expected_version": 0},
-            {"files": 0, "media": "none"},
-            _BINDING_PROVENANCE,
-            invalid_input={},
+            {"files": 0, "media": "none"}, _BINDING_PROVENANCE, invalid_input={},
         ),
-        # -- generic declared-custom-workflow row (doc 27 §3.3) ----------------
         CapabilityConformance(
-            "local.workflow.run",
-            "local.workflow.run",
-            {"id": "smoke_red"},
-            # Declared rows snapshot their own bytes; the census is taken
-            # from the admitted declaration at admission time, so the
-            # generic row pins the canonical weightless smoke shape only.
-            {"files": 1, "media": "image"},
-            _TEMPLATE_PROVENANCE,
-            invalid_input={},
+            "local.workflow.run", "local.workflow.run", {"id": "smoke_red"},
+            {"files": 1, "media": "image"}, _TEMPLATE_PROVENANCE, invalid_input={},
         ),
     )
 

@@ -56,17 +56,15 @@ def resolve_timeline_target(
             identity = _read_identity(tdir)
             timeline_id = identity.get("timeline_id") if isinstance(identity, dict) else None
             if isinstance(timeline_id, str):
-                backend = identity.get("backend", "local_fs") if isinstance(identity, dict) else "local_fs"
-                if not isinstance(backend, str) or backend not in ("local_fs", "supabase"):
-                    backend = "local_fs"
+                backend = "local_fs"
                 slug = _read_slug(tdir)
                 return ResolvedTarget(
-                    backend=backend,  # type: ignore[arg-type]
+                    backend=backend,
                     timeline_id=timeline_id,
                     timeline_ulid=slug_or_id,
                     timeline_home=tdir,
                     slug=slug if slug is not None else slug_or_id,
-                    backend_name_display=backend,
+                    backend_name_display="local_fs",
                 )
         raise ValueError(
             f"timeline with ULID '{slug_or_id}' not found in project '{project_slug}'"
@@ -100,17 +98,15 @@ def resolve_timeline_target(
         ulid, tdir = found
         identity = _read_identity(tdir)
         timeline_id = identity.get("timeline_id") if isinstance(identity, dict) else None
-        backend = identity.get("backend", "local_fs") if isinstance(identity, dict) else "local_fs"
-        if not isinstance(backend, str) or backend not in ("local_fs", "supabase"):
-            backend = "local_fs"
+        backend = "local_fs"
         if isinstance(timeline_id, str):
             return ResolvedTarget(
-                backend=backend,  # type: ignore[arg-type]
+                backend=backend,
                 timeline_id=timeline_id,
                 timeline_ulid=ulid,
                 timeline_home=tdir,
                 slug=slug_or_id,
-                backend_name_display=backend,
+                backend_name_display="local_fs",
             )
         raise ValueError(
             f"timeline '{slug_or_id}' has no identity sidecar in project '{project_slug}'"

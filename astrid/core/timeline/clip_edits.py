@@ -5,10 +5,8 @@ constructs a typed payload from the canonical event schema, emits the
 event through ``EventLogBackend.append_event(...)``, and returns the
 ``TimelineEvent``.
 
-**No function imports ``LocalFsBackend`` directly.**  The backend is
-always obtained via ``select_timeline_backend`` so that the same code
-works with ``LocalFsBackend``, the provisional ``SupabaseBackend``
-contract, or any future backend.
+**No function imports ``LocalFsBackend`` directly.** The backend is always
+obtained via ``select_timeline_backend``.
 
 Pass-through keyword arguments ``actor``, ``expected_version``, and
 ``txn_id`` are forwarded unchanged so callers can drive authentication

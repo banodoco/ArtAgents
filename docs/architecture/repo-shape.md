@@ -68,7 +68,7 @@ and their purposes:
 | `core/element/` | Element schema, registry, catalog, CLI, install |
 | `core/executor/` | Executor schema, registry, runner, folder loader, CLI, banodoco catalog |
 | `core/generation/` | Generation backends (base, codex, fal, vibecomfy), feature registry, verb dispatch |
-| `core/integrations/` | External-service integrations (Reigh, RunPod, worker bridges) |
+| `core/integrations/` | External-service integrations (RunPod and other approved neutral adapters) |
 | `core/model_catalog/` | Model registry, schema, CLI |
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
 | `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
@@ -76,7 +76,7 @@ and their purposes:
 | `core/runtime/` | In-process runtime invoker, log capture |
 | `core/session/` | Session identity, binding, lease, lifecycle, discovery, writer |
 | `core/task/` | Task kernel: event stream, run store, run audit, gate, lifecycle, CAS, inbox, claim, plan verbs, managed binding |
-| `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, track, transition), erasure, integrity, migration, projection, undo, observability, event log (local FS, Supabase, projector), banodoco schema |
+| `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, track, transition), erasure, integrity, migration, projection, undo, observability, local event log, banodoco schema |
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 
 Loose `.py` files at `astrid/core/` are kernel helpers such as `scaffold.py`,
@@ -187,7 +187,7 @@ contain:
 ### 5.2 Current Shipped Packs
 
 The shipped packs are: `rendering`, `understanding`, `generation`, `editorial`,
-`video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`,
+`video_editing`, `foley`, `training`, `youtube`, `fal`, `vibecomfy`,
 `runpod`, `moirae`, `iteration`, `media`, `stream_content`, and `comfy_wrap`.
 
 A gitignored `local` pack at `astrid/packs/local/` is created on first use and

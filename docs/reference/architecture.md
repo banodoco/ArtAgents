@@ -7,8 +7,8 @@ Astrid has three canonical public concepts:
 - **Elements** are render/custom building blocks such as effects, animations, and transitions.
 
 Canonical packages and commands are first-class. `python3 -m astrid` is the
-executable package gateway for the eight families (projects, timelines, media,
-tasks, runs, serve, doctor, backup) and the two nested mounts (`timelines
+executable package gateway for the product families (projects, timelines, media,
+tasks, runs, doctor, backup) and the two nested mounts (`timelines
 shots`, `media references`). Capabilities (executors, orchestrators, elements)
 are not gateway commands; they run through the SDK
 (`astrid.sdk.invoke` / `astrid.sdk.client.AstridClient`).
@@ -18,7 +18,7 @@ are not gateway commands; they run through the SDK
 From a cold checkout the gateway census and health check come first:
 
 ```bash
-python3 -m astrid --help          # the complete eight-family census
+python3 -m astrid --help          # the complete product-family census
 python3 -m astrid doctor --json   # read-only health check
 python3 -m astrid projects list --json
 ```
@@ -43,7 +43,7 @@ top-level Astrid skill first, then open only the specific folder-level
 `STAGE.md` needed for the selected registry item. Do not package every
 executor and orchestrator stage into one merged runtime prompt.
 
-Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, `blender`, `discord_local`, and `seedance_local`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` holds user-edited element forks. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
+Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, `blender`, `discord_local`, and `seedance_local`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` holds user-edited element forks. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
 
 Executor and orchestrator ids are always qualified — `<pack>.<name>` (for example `video_editing.cut`, `vibecomfy.run`). Bare lookups such as `cut` are rejected at the schema and CLI boundaries. Element ids stay bare and are scoped by `kind`, so `animation/fade` and `transition/fade` coexist without collision.
 
@@ -71,8 +71,8 @@ For a step-by-step tutorial on building your first agentic UX, see
 
 | Module or entry point | Classification | Notes |
 | --- | --- | --- |
-| `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for the eight CLI families. |
-| `astrid/core/gateway/` | System command and dispatcher | Routes the eight families and the two nested mounts; one verb = one SDK call. No capability dispatch. |
+| `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for the product CLI families. |
+| `astrid/core/gateway/` | System command and dispatcher | Routes the product families and the two nested mounts; one verb = one SDK call. No capability dispatch. |
 | `astrid/packs/video_editing/orchestrators/hype/` | Orchestrator | Canonical hype video editing orchestrator. |
 | `astrid/packs/video_editing/orchestrators/event_talks/` | Orchestrator | Canonical event-talk discovery and rendering workflow. |
 | `astrid/packs/video_editing/orchestrators/thumbnail_maker/` | Orchestrator | Canonical source-evidence thumbnail workflow. |
@@ -86,8 +86,8 @@ Every runnable tool is a built-in or external executor exposed from exactly one 
 | --- | --- | --- |
 | Hype pipeline stages | `astrid/packs/{editorial,video_editing,rendering,understanding,foley}/*` | `STEP_ORDER` stages used by `video_editing.hype` (legacy alias: `builtin.hype`). |
 | Understanding tools | `astrid/packs/understanding/{audio_understand,visual_understand,video_understand,understand}` | Concrete media understanding tools, plus a thin `understand` dispatcher executor that selects modality via `--mode`. |
-| Standalone/service tools | `astrid/packs/{training,editorial,reigh,generation,rendering}/*` | Standalone executor capabilities across domain packs. `generate_image` is the multi-backend (local + cloud) image executor in `generation`; `generate_image_openai` is the OpenAI DALL-E executor, also in `generation`. |
-| External tools | `astrid/packs/{moirae,vibecomfy,fal,runpod,youtube,reigh}/*` | `moirae.moirae`, `vibecomfy.run`, `vibecomfy.validate`, `fal.fal_foley`, `runpod.*`, `youtube.*`, `reigh.*`. Each adapter pack wraps a third-party substrate. Legacy `external.*` ids are deprecated pack-level aliases. |
+| Standalone/service tools | `astrid/packs/{training,editorial,generation,rendering}/*` | Standalone executor capabilities across domain packs. `generate_image` is the multi-backend (local + cloud) image executor in `generation`; `generate_image_openai` is the OpenAI DALL-E executor, also in `generation`. |
+| External tools | `astrid/packs/{moirae,vibecomfy,fal,runpod,youtube}/*` | `moirae.moirae`, `vibecomfy.run`, `vibecomfy.validate`, `fal.fal_foley`, `runpod.*`, `youtube.*`. Each adapter pack wraps a third-party substrate. Legacy `external.*` ids are deprecated pack-level aliases. |
 | Iteration tools | `astrid/packs/iteration/assemble` | Runtime-owned project runs are read through the generated client; `iteration_video` invokes `iteration.assemble` and `rendering.render`. The retired `iteration.prepare` executor is not declared or invoked. |
 | Upload tools | `astrid/packs/youtube/` | `youtube.upload` and `youtube.youtube_audio`. Legacy `upload.youtube` is a deprecated alias. |
 
@@ -104,7 +104,7 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | `astrid/core/element/catalog.py` | Element support | Effect, animation, and transition catalog support used by render validation. |
 | `scripts/gen_effect_registry.py` | Element support | Generates Remotion registries from the element registry; emits `@pack-<pack>-elements-<kind>/...` imports. |
 | `scripts/gen_capability_index.py` | Capability discovery | Regenerates the capability index block in `astrid/packs/_core/skill/SKILL.md` from executor, orchestrator, and element manifests. |
-| `astrid/timeline.py` | Shared library and element validator | Reigh-compatible timeline schema and effect/animation/transition validation. |
+| `astrid/timeline.py` | Shared library and element validator | Timeline schema and effect/animation/transition validation. |
 | `remotion/*` | Element runtime support | TypeScript renderer consuming generated element registries via `@pack-builtin-elements-*` and `@pack-local-elements-*` aliases. |
 
 ## Shared Libraries

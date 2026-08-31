@@ -56,46 +56,6 @@ def run_orchestrator(request: Any, registry: Any) -> Any:
     return _run_orchestrator(request, registry)
 
 
-def dispatch_retried_task(
-    *,
-    writer: Any,
-    task_repo: Any,
-    media_repo: Any,
-    projects_root: str | Path,
-    task: Any,
-    attempt: Any,
-    idempotency_key: str,
-    registry: FrozenSchemaPackRegistry | None = None,
-    runtime: Any | None = None,
-    executor_id: str = "astrid-sdk-retry",
-    capability_ids: list[str] | None = None,
-) -> tuple[Any, Any]:
-    """Bridge a legacy retry callback to the neutral runtime claim seam.
-
-    Retry admission is owned by the task/run repositories.  Execution belongs
-    to a runtime worker, which claims queued work and settles the fenced
-    attempt through the runtime protocol.  This compatibility entry point is
-    intentionally inert for the old local-service callers; they already
-    created the retry attempt and must return its admission result without
-    opening a second writer or running a capability in-process.
-
-    A caller that has an explicit runtime client may pass it to perform the
-    canonical claim operation.  The SDK itself does not construct one here:
-    product clients obtain it through :class:`AstridClient` and workers own
-    execution/settlement.  The remaining legacy parameters are accepted only
-    to keep old injected call sites source-compatible.
-    """
-    del writer, task_repo, media_repo, projects_root, task, attempt, registry
-    if runtime is None:
-        return None, None
-    claim = runtime.claim_next(
-        executor_id=executor_id,
-        capability_ids=list(capability_ids or []),
-        idempotency_key=f"{idempotency_key}:claim",
-    )
-    return claim, None
-
-
 def discover(
     *,
     project_root: str | Path | None = None,
@@ -566,8 +526,8 @@ def _manifest_preview_command(
     # avoiding accidental flags for SDK-only controls such as ``verbose``.
     # Explicit-command executors may opt out when their entrypoint accepts a
     # deliberately narrower CLI than the manifest's SDK input surface (for
-    # example ``reigh.open_in_reigh`` accepts ``--timeline`` from its command
-    # template but has no ``--assets`` flag).  Keep this in lockstep with the
+    # an explicit command template may have a narrower CLI than the manifest's
+    # SDK input surface. Keep this in lockstep with the
     # runtime runner's metadata.auto_forward_inputs contract.
     metadata = definition.get("metadata", {})
     if isinstance(metadata, Mapping) and metadata.get("auto_forward_inputs") is False:

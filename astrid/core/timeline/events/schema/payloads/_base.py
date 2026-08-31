@@ -15,7 +15,7 @@ from astrid.core.contracts.schema_validators import require_uuid_str
 from ..ulid import is_event_ulid
 
 ActorType = Literal["agent", "human", "system"]
-TimelineImportSource = Literal["legacy_local", "supabase_config", "editor_save", "other"]
+TimelineImportSource = Literal["legacy_local", "editor_save", "other"]
 # Event-level clip classification.  Mirrors a subset of the built-in clip
 # catalog (catalog=\"clip\") in ``astrid.core.pack``; the catalog also carries
 # \"video\", \"image\", \"effect\", and \"opaque\" which are element-kind

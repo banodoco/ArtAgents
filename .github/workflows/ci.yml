@@ -95,7 +95,7 @@ jobs:
         run: timeout 120 python3 -m pytest tests/v10/test_m7_hardening.py -q
 
       - name: Focused m7 contention lane
-        run: timeout 120 python3 -m pytest tests/v10/test_m7_bridge_contention.py -q
+        run: timeout 120 python3 -m pytest tests/stage1/test_reigh_authority_absence.py -q
 
       - name: Focused m7 dogfood lane
         run: timeout 120 python3 -m pytest tests/v10/test_m7_dogfood.py -q
@@ -159,8 +159,7 @@ jobs:
       - name: Publish m7 GA evidence atomically
         # m7_gate.py revalidates the same hash immediately before replacing
         # acceptance.json and defects.md. Items 11/12 stay provisional or
-        # retained, and item 6 external Reigh proof is not substituted by the
-        # in-tree bridge lane.
+        # retained pending their separately authorized evidence.
         run: make m7-gate
 
       - name: Assert honest non-substitutable m7 dispositions
@@ -174,7 +173,6 @@ jobs:
               item["id"]: item
               for item in acceptance["unresolved_external_manual_gates"]
           }
-          assert unresolved["external-reigh-editor"]["status"] == "unresolved"
           assert unresolved["installed-artifact-items-11-12"]["status"] == "deferred"
           assert unresolved["performance-budget"]["status"] == "unresolved"
           assert acceptance["ga_items"]["11"]["label"] == "provisional"
@@ -337,8 +335,7 @@ jobs:
         # 13 retained focused lanes + live authority lint + forbidden
         # authority/schema/surface drift rejection + Python matrix + the
         # present-accepted feasibility admission (fails closed when the
-        # admission is missing or rejected). The external Reigh editor lane
-        # is reporting-only (SD1) and runs in the dedicated job below.
+        # admission is missing or rejected).
         env:
           ASTRID_CI_SKIP_COVERAGE: "1"
         run: make m4-gate
@@ -403,32 +400,6 @@ jobs:
         # editor-lane evidence, not a silent gap.
         working-directory: scripts/reshape/editor_browser_smoke
         run: npm run smoke
-
-      - name: Fetch pinned Reigh checkout (reporting-only)
-        # The external editor repo is observed, never modified (SD1). A
-        # fetch failure is retained evidence, not an m4 admission input.
-        continue-on-error: true
-        run: |
-          git clone --filter=blob:none --no-checkout \
-            https://github.com/banodoco/reigh-app.git /tmp/reigh-app
-          cd /tmp/reigh-app
-          git fetch --depth 1 origin bc2d8b0327c1c7dbdcd7b7445440d8ca180dd677
-          git checkout FETCH_HEAD
-
-      - name: Run pinned Reigh disposition lane (reporting-only)
-        # Always runs and retains schema-validated disposition evidence;
-        # external incompatibility is a hard named follow-up, never a
-        # success prerequisite for make m4-gate (SD1).
-        continue-on-error: true
-        run: python scripts/reigh_disposition_report.py --reigh-repo /tmp/reigh-app
-
-      - name: Upload Reigh disposition evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: m4-reigh-disposition
-          path: artifacts/m4/reigh-external-gate-disposition.json
-          if-no-files-found: ignore
 
   pack-recoverability-exhaustive:
     name: Pack recoverability exhaustive (opt-in)

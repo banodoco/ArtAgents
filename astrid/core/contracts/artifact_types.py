@@ -112,7 +112,7 @@ class ArtifactTypeRegistry:
         """Resolve an alias or canonical id to its canonical form.
 
         Returns ``None`` when *name* is unknown — callers use this for the
-        opaque fallthrough contract (Reigh / open-string).
+        opaque fallthrough contract for open-string callers.
         """
         name = name.strip()
         if name in self._descriptors:

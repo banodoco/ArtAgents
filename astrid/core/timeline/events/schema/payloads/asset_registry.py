@@ -34,12 +34,11 @@ class AssetRegistryReplacedPayload:
         _validate_jsonable(self.registry, "payload.registry")
         if self.source is not None and self.source not in {
             "legacy_local",
-            "supabase_config",
             "editor_save",
             "other",
         }:
             raise TimelineEventSchemaError(
-                "payload.source must be legacy_local, supabase_config, editor_save, or other"
+                "payload.source must be legacy_local, editor_save, or other"
             )
 
     def to_json_obj(self) -> dict[str, Any]:

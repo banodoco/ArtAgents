@@ -159,9 +159,10 @@ def test_gate_publishes_complete_matrix_with_honest_deferred_items(tmp_path: Pat
     assert accepted["ga_items"]["11"]["label"] == "provisional"
     assert accepted["ga_items"]["12"]["label"] == "retained"
     assert accepted["finalizer_admission"]["hash"] == record["content_hash"]
-    assert "external-reigh-editor" in {
-        gate["id"] for gate in accepted["unresolved_external_manual_gates"]
-    }
+    assert all(
+        gate["id"] != "external-reigh-editor"
+        for gate in accepted["unresolved_external_manual_gates"]
+    )
     assert "M7 gate disposition" in defects_path.read_text(encoding="utf-8")
 
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -18,11 +17,7 @@ from astrid.core.timeline.audio_edits import audio_bind, audio_unbind
 from astrid.core.timeline.clip_edits import add_clip
 from astrid.core.timeline.crud import create_timeline
 from astrid.core.timeline.effect_edits import effect_add, effect_remove, effect_tune
-from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
-from astrid.core.timeline.eventlog.types import (
-    EventLogMissingConfigError,
-    EventLogUnsupportedRpcError,
-)
+from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
     AudioUnboundPayload,
@@ -601,49 +596,3 @@ def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]
     _assert_last_event(demo_timeline, unbind_event, kind="audio.unbound", payload_type=AudioUnboundPayload)
     assembly = _read_assembly_json(tdir)
     assert "asset" not in assembly["clips"][0]
-
-
-def test_secondary_supabase_paths_raise_missing_config_explicitly(
-    demo_timeline: dict[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
-        return (
-            SimpleNamespace(backend="supabase", source="preferred_backend"),
-            SupabaseBackend(timeline_id=timeline_id),
-        )
-
-    monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
-
-    ops = [
-        lambda: transition_set("demo", "primary", left_clip_id="a", right_clip_id="b", actor=_actor(), root=demo_timeline["root"]),
-        lambda: effect_add("demo", "primary", clip_id="a", effect_id="glow", actor=_actor(), root=demo_timeline["root"]),
-        lambda: theme_set("demo", "primary", theme_id="banodoco-default", actor=_actor(), root=demo_timeline["root"]),
-        lambda: track_add("demo", "primary", track_id="track-1", kind="visual", label="Main", actor=_actor(), root=demo_timeline["root"]),
-        lambda: audio_bind("demo", "primary", clip_id="a", asset_id="asset-1", actor=_actor(), root=demo_timeline["root"]),
-    ]
-
-    for op in ops:
-        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
-            op()
-
-
-def test_secondary_supabase_paths_raise_unsupported_rpc_when_configured(
-    demo_timeline: dict[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
-        return (
-            SimpleNamespace(backend="supabase", source="preferred_backend"),
-            SupabaseBackend(
-                timeline_id=timeline_id,
-                supabase_url="https://example.supabase.co",
-                auth_token="pat-token",
-                enabled=True,
-            ),
-        )
-
-    monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
-
-    with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event"):
-        theme_set("demo", "primary", theme_id="banodoco-default", actor=_actor(), root=demo_timeline["root"])

@@ -4,7 +4,7 @@
 **Status**: implemented  
 **Pipeline step**: 10
 
-Assembles the editorial arrangement into a Reigh-compatible triple of JSON
+Assembles the editorial arrangement into a canonical triple of JSON
 files: **timeline**, **assets**, and **metadata**. This is the bridge between
 the editorial pipeline and the Remotion renderer — `cut` consumes the
 arrangement from `editorial.arrange`, the merged pool from
@@ -73,7 +73,7 @@ result = sdk.invoke(
 
 | Name     | Type | Path                            | Description              |
 |----------|------|---------------------------------|--------------------------|
-| timeline | file | `{brief_out}/hype.timeline.json` | Reigh-compatible timeline |
+| timeline | file | `{brief_out}/hype.timeline.json` | Canonical timeline |
 | assets   | file | `{brief_out}/hype.assets.json`   | Asset registry           |
 | metadata | file | `{brief_out}/hype.metadata.json` | Render metadata          |
 

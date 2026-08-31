@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Timeline schema mirroring reigh-app's TimelineConfig.
+"""Timeline schema mirroring the shared Banodoco TimelineConfig.
 
 TimelineConfig / TimelineClip / ThemeOverrides / TimelineOutput / AssetEntry /
 Theme are re-exported from `banodoco_timeline_schema` (the Python package in
@@ -9,7 +9,7 @@ this file (pool/arrangement/metadata/registry types, transition validation,
 effect-id registry checks) is Banodoco-only.
 """
 
-# Validator exports intentionally remain below the fallback schema import.
+# Validator exports intentionally remain below the optional schema import.
 # ruff: noqa: E402, I001
 
 from __future__ import annotations
@@ -200,8 +200,8 @@ class TrackDefinition(_TrackDefinitionRequired, total=False):
     volume: float
     muted: bool
     blendMode: TrackBlendMode
-    # Reigh/editor extension metadata is intentionally opaque to Astrid but
-    # must round-trip through the shared timeline contract.
+    # Editor extension metadata is intentionally opaque to Astrid but must
+    # round-trip through the shared timeline contract.
     app: dict[str, Any]
 
 class ClipEntrance(TypedDict, total=False):
@@ -478,7 +478,7 @@ def _known_timeline_payload(config: Mapping[str, Any]) -> dict[str, Any]:
     """Build the shared-schema view without editor-owned opaque metadata.
 
     The canonical Banodoco schema intentionally has no ``app`` extension
-    fields, while the Reigh editor persists opaque application metadata at
+    fields, while editors persist opaque application metadata at
     the timeline, clip, and track levels.  Astrid must retain those fields in
     the returned timeline, but must not ask the upstream validator to accept
     them as part of its stricter wire contract.  Keep this projection local

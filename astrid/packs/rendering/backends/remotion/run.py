@@ -39,7 +39,7 @@ from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.integrations.reigh.remotion_runtime import (
+from astrid.core.rendering.remotion_runtime import (
     TIMELINE_SCHEMA_PYTHONPATH_ENV,
     RemotionRuntimeTools,
     resolve_remotion_runtime_tools,

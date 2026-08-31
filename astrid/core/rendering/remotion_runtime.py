@@ -1,4 +1,4 @@
-"""Server-owned Remotion runtime discovery for Reigh render admission.
+"""Server-owned Remotion runtime discovery for Astrid render admission.
 
 The Python package does not contain a Node checkout.  A release deployment
 must point ``ASTRID_REMOTION_PROJECT_DIR`` at its separately provisioned,

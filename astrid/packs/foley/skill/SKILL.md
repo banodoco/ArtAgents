@@ -44,14 +44,8 @@ tile_video → (per-tile Foley generation via fal.fal_foley) → foley_review �
 
 4. **`foley.foley_map` orchestrator** — Coordinates the full pipeline:
    tiles the video, dispatches VLM scene descriptions, generates Foley
-   per tile, runs the review gate, and emits the final viewer. This is
+   per tile, and runs the review gate. This is
    the single entry point for the end-to-end spatial Foley workflow.
-
-5. **`reigh.spatial_audio_page`** — Build a self-contained static page
-   that plays the original video with N Foley tracks anchored to spatial
-   rectangles, mixed live by viewport position via the Web Audio API.
-   This lives in the `reigh` pack but is the final step of the Foley
-   pipeline.
 
 ## When to use
 
@@ -60,7 +54,7 @@ tile_video → (per-tile Foley generation via fal.fal_foley) → foley_review �
 - Use `foley.foley_review` standalone when you have generated Foley audio
   that needs human sense-checking against the tile clips.
 - Use `foley.foley_map` as the single entry point for the full spatial
-  Foley pipeline — from source video to interactive viewer.
+  Foley pipeline — from source video to a reviewable audio manifest.
 
 ## Credentials
 

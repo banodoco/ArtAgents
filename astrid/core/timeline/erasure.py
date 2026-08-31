@@ -304,24 +304,6 @@ def apply_erasure(
         )
         replaced_count = repair_result["replaced_count"]
         downstream_count = repair_result["downstream_count"]
-    elif backend_name == "supabase":
-        # Supabase repair via transport/RPC
-        # The backend.repair_erasure should be called on the transport
-        try:
-            # Access the transport-level repair through the SupabaseBackend
-            backend.repair_erasure(
-                timeline_id=timeline_id,
-                target_event_ids=matched_ids,
-                reason=reason,
-                erased_by=actor.id,
-                policy_ref=policy_ref,
-            )
-            replaced_count = len(matched_ids)
-            downstream_count = 0  # Supabase handles recompute internally
-        except AttributeError:
-            raise ValueError(
-                "Supabase backend does not support erasure repair"
-            )
     else:
         raise ValueError(f"unsupported backend for erasure: {backend_name}")
 

@@ -19,12 +19,7 @@ gate / produces-check rejection tail        ``BLOCKED``
 ``run_started`` with no terminal follow-up  ``RUNNING``
 ==========================================  =====================
 
-Wire / serialization formats live ONLY at their boundaries, never in core:
-
-* the external reigh task queue uses Title-Case tokens
-  (``Queued``/``In Progress``/``Complete``/``Failed``/``Cancelled``) — convert
-  with :meth:`to_reigh_wire` / :meth:`from_reigh_wire` at the reigh client only;
-* the project-run record schema uses ``success``/``failed``/``skipped`` — convert
+The project-run record schema uses ``success``/``failed``/``skipped`` — convert
   with :meth:`to_project_record_status` at the executor/orchestrator finalize
   boundary only.
 """
@@ -123,37 +118,6 @@ class RunStatus(StrEnum):
             ) from None
 
     # ------------------------------------------------------------------ #
-    # reigh wire boundary (Title-Case) — used ONLY by the reigh task client.
-    # ------------------------------------------------------------------ #
-    def to_reigh_wire(self) -> str:
-        """Title-Case token the reigh task queue expects.
-
-        ``BLOCKED`` and ``SKIPPED`` are internal-only states with no reigh wire
-        analog and raise.
-        """
-        try:
-            return _RUN_STATUS_TO_REIGH[self]
-        except KeyError:
-            raise ValueError(
-                f"{self!r} has no reigh wire representation; it is an internal-only status"
-            ) from None
-
-    @classmethod
-    def from_reigh_wire(cls, wire: str) -> "RunStatus":
-        """Parse a Title-Case reigh status token into a canonical RunStatus.
-
-        ``Queued`` is a pre-dispatch wire state with no internal analog yet and
-        raises (provisional — pending a canonical pending/queued state).
-        """
-        try:
-            return _REIGH_TO_RUN_STATUS[wire]
-        except KeyError:
-            raise ValueError(
-                f"unmapped reigh wire status {wire!r}; expected one of "
-                f"{sorted(_REIGH_TO_RUN_STATUS)!r}"
-            ) from None
-
-    # ------------------------------------------------------------------ #
     # Project-run record boundary — used ONLY at executor/orchestrator finalize.
     # ------------------------------------------------------------------ #
     def to_project_record_status(self) -> str:
@@ -184,17 +148,6 @@ def _is_blocked_tail(events: Sequence[Mapping[str, Any]]) -> bool:
         return ev.get("kind") in {"cursor_rewind", "iteration_failed"}
     return False
 
-
-_RUN_STATUS_TO_REIGH: dict[RunStatus, str] = {
-    RunStatus.RUNNING: "In Progress",
-    RunStatus.COMPLETED: "Complete",
-    RunStatus.FAILED: "Failed",
-    RunStatus.ABORTED: "Cancelled",
-}
-
-_REIGH_TO_RUN_STATUS: dict[str, RunStatus] = {
-    wire: status for status, wire in _RUN_STATUS_TO_REIGH.items()
-}
 
 _RUN_STATUS_TO_PROJECT_RECORD: dict[RunStatus, str] = {
     RunStatus.COMPLETED: "success",

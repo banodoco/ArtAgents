@@ -16,7 +16,7 @@
     "source_type": {
       "type": "string",
       "description": "Type of source this candidate was acquired from.",
-      "enum": ["youtube", "local_folder", "reigh_asset", "stock_api", "generated", "image", "audio", "paired"]
+      "enum": ["youtube", "local_folder", "stock_api", "generated", "image", "audio", "paired"]
     },
     "source_id": {
       "type": "string",

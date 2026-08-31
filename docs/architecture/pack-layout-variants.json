@@ -143,18 +143,6 @@
       "notes": "Single-executor pack for Moirae integration."
     },
     {
-      "id": "reigh",
-      "variant": "executor_pack",
-      "has_pack_yaml": true,
-      "executor_count": 4,
-      "orchestrator_count": 0,
-      "element_count": 0,
-      "has_skill": true,
-      "has_agents_md": false,
-      "has_init_py": false,
-      "notes": "Executor pack with 4 executors for Reigh data platform integration. Includes skill/."
-    },
-    {
       "id": "rendering",
       "variant": "mixed_executor_element",
       "has_pack_yaml": true,
@@ -287,7 +275,6 @@
       "iteration",
       "media",
       "moirae",
-      "reigh",
       "runpod",
       "understanding",
       "vibecomfy",

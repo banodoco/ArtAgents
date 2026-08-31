@@ -45,7 +45,6 @@ from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.store.writer import DatabaseWriter
 
 from .eventlog import EventLogBackend, select_timeline_backend
-from .eventlog.types import SupabaseEventLogOptions
 from .events.schema import TimelineActor, TimelineEvent
 from .paths import (
     assembly_identity_path,
@@ -124,7 +123,6 @@ def _resolve_or_bootstrap_backend(
     *,
     root: str | Path | None = None,
     actor: TimelineActor | None = None,
-    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> tuple[str, Path, EventLogBackend, bool]:
     """Resolve the event-log backend for an identity-backed timeline.
 
@@ -168,8 +166,6 @@ def _resolve_or_bootstrap_backend(
             "timeline_home": tdir,
             "preferred_backend": preferred_backend,
         }
-        if supabase_options is not None:
-            select_kwargs["supabase_options"] = supabase_options
         _stream, backend = select_timeline_backend(**select_kwargs)
         return timeline_id, tdir, backend, False
 
@@ -189,7 +185,6 @@ def _resolve_backend(
     slug: str,
     *,
     root: str | Path | None = None,
-    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> tuple[str, Path, EventLogBackend, bool]:
     """Look up *slug* in *project_slug*, read the identity sidecar, and
     return ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
@@ -205,7 +200,6 @@ def _resolve_backend(
         project_slug,
         slug,
         root=root,
-        supabase_options=supabase_options,
     )
 
 
@@ -302,7 +296,6 @@ def pack_write_gateway(
     actor_display: str | None = None,
     actor_via: TimelineActor | None = None,
     root: str | Path | None = None,
-    supabase_options: SupabaseEventLogOptions | None = None,
     writer: DatabaseWriter | None = None,
     timeline_repository: Any | None = None,
     timeline_stream_type: str | None = None,
@@ -425,20 +418,13 @@ def pack_write_gateway(
             timeline_slug,
             root=root,
             actor=actor,
-            supabase_options=supabase_options,
         )
     effective_stream_id = resolved_timeline_id
 
-    # 2.5 Append-capability preflight: prove the resolved backend can
-    #     actually append BEFORE any kernel mutation. Resolution alone does
-    #     not imply capability — e.g. a Supabase-preferred identity without
-    #     Supabase options resolves cleanly and then fails at append time
-    #     with ``EventLogMissingConfigError``, which would orphan an
-    #     already-committed kernel receipt. The preflight runs the same
-    #     deterministic checks the append path runs (config/transport,
-    #     identity sidecar, tombstone, writability, live-transport kind
-    #     support) with zero side effects, so an append-incapable backend
-    #     raises here with zero mutation on either side.
+    # 2.5 Append-capability preflight: prove the resolved local backend can
+    #     actually append BEFORE any kernel mutation. The preflight runs the
+    #     same deterministic checks the append path runs with zero side
+    #     effects, so an append-incapable backend raises before mutation.
     backend.preflight_append(actor=actor, kinds=[spec["kind"] for spec in events])
 
     # 3. Kernel replace_config commit (m2): when the caller supplies a

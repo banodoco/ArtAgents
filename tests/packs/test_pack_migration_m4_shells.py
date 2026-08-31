@@ -104,17 +104,6 @@ EXPECTED_PACKS = {
             "builtin.dataset_build": "training.dataset_build",
         },
     },
-    "reigh": {
-        "origin": "builtin",
-        "domain": "integration",
-        "content": {"executors": "executors"},
-        "aliases": {
-            "builtin.reigh_data": "reigh.reigh_data",
-            "builtin.open_in_reigh": "reigh.open_in_reigh",
-            "builtin.spatial_audio_page": "reigh.spatial_audio_page",
-            "builtin.publish": "reigh.publish",
-        },
-    },
     "youtube": {
         "origin": "builtin",
         "domain": "integration",

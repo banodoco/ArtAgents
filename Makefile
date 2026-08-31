@@ -101,13 +101,13 @@ ci-mirror:
 
 # --- m1 S1 gate (plan step 23): the twelve focused m1 lanes, one command ---
 # Runs the complete fresh-database, conformance, crash, contention, lint,
-# bridge, and provider lane hermetically (fresh ASTRID_PROJECTS_ROOT /
+# runtime, and provider lane hermetically (fresh ASTRID_PROJECTS_ROOT /
 # ASTRID_HOME, scrubbed task env) and retains a machine-readable summary plus
 # per-lane logs and JUnit XML under out/s1-gate/latest (gitignored). CI uploads
 # that directory with `if: always()` so evidence survives failures. This is the
 # SAME target the local CI mirror (run_ci_checks.sh) and GitHub Actions invoke,
 # keeping both entry points in lockstep. PY overrides the interpreter (e.g. a
-# runtime venv that provides banodoco_timeline_schema for the bridge lanes).
+# runtime venv that provides banodoco_timeline_schema for schema lanes).
 s1-gate:
 	@rm -rf out/s1-gate/latest
 	@$(PY) scripts/reshape/s1_gate.py --out-dir out/s1-gate/latest
@@ -115,7 +115,7 @@ s1-gate:
 
 # --- m4 Step 1 baseline (plan step 1 / task T1) ---
 # Runs the pre-change selectors (v10 contract, writer/UoW, timeline
-# repository, media pipeline, bridge server) and retains schema-versioned
+# repository, media pipeline) and retains schema-versioned
 # evidence at artifacts/m4/baseline.json with the git SHA, tool versions,
 # per-selector pass/fail, and timestamps. The script fails closed: a failed,
 # absent, or malformed baseline exits non-zero, which blocks Step 2 onward.
@@ -126,13 +126,12 @@ m4-baseline:
 
 # --- m4 Step 33 finalizer gate (plan step 33 / task T37) ---
 # The final m4 admission boundary: 13 retained focused lanes (contracts,
-# composition, owner lock, services, CLI, bridge, media/task/run/pack
+# composition, owner lock, services, CLI, media/task/run/pack
 # conformance, crash/contention, secrets, platform, authority lint), the
 # live-tree authority lint, forbidden authority/schema/surface drift
 # rejection, the Python 3.11/3.12 matrix, and the present-accepted
 # feasibility admission. Fails closed on any missing/rejected admission,
-# drift, or lane failure; the external Reigh editor lane stays
-# reporting-only (SD1) and is never an input to success. Evidence: per-lane
+# drift, or lane failure. Evidence: per-lane
 # logs/JUnit in out/m4-gate/latest (gitignored) and the schema-versioned
 # admission at artifacts/m4/finalizer-admission.json. PY overrides the
 # interpreter (same convention as the other gates).

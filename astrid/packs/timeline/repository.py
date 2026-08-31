@@ -57,7 +57,7 @@ from typing import Any, List, cast
 
 from astrid.core.events.service import ACTOR_KINDS, EventAppendService
 from astrid.core.ids import generate_lowercase_ulid, is_lowercase_ulid
-from astrid.core.integrations.reigh.timeline_bundle import (
+from astrid.core.timeline.bundle import (
     BUNDLE_MISSING,
     validate_timeline_bundle,
 )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Foley Map orchestrator: tile → VLM → Foley → review → spatial-audio page."""
+"""Foley Map orchestrator: tile → VLM → Foley → review."""
 
 
 from __future__ import annotations
@@ -202,17 +202,6 @@ def step_review(out: Path, enriched: dict[str, Any]) -> Path:
     return review_path
 
 
-def step_page(out: Path) -> Path:
-    page_dir = out / "page"
-    cmd = [
-        sys.executable, "-m", "astrid.packs.reigh.executors.spatial_audio_page.run",
-        "--manifest", str(out / "tiles.json"),
-        "--out", str(page_dir),
-    ]
-    run_subprocess(cmd, label="spatial_audio_page", orchestrator="foley_map")
-    return page_dir / "index.html"
-
-
 def _parse_grid(value: str) -> tuple[int, int]:
     match = re.fullmatch(r"\s*([1-9][0-9]*)\s*[xX]\s*([1-9][0-9]*)\s*", value)
     if not match:
@@ -227,7 +216,7 @@ def _load_flagged(path: Path) -> set[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Spatial Foley pipeline: tile → VLM → Foley → review → page.")
+    p = argparse.ArgumentParser(description="Spatial Foley pipeline: tile → VLM → Foley → review.")
     p.add_argument("--video", type=Path, required=True, help="Source video.")
     p.add_argument("--out", type=Path, required=True, help="Output directory.")
     p.add_argument("--grid", type=_parse_grid, default=(4, 4), help="COLSxROWS, default 4x4.")
@@ -240,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to flagged.json (downloaded from review.html); only re-run tiles flagged 'bad'.")
     p.add_argument("--force-prompts", action="store_true", help="Re-run VLM prompts even if prompts.json exists.")
     p.add_argument("--force-foley", action="store_true", help="Re-run Foley calls even when audio file exists.")
-    add_choice_arg(p, "--stop-after", values=("tile", "prompts", "foley", "review", "page"), default="page",
+    add_choice_arg(p, "--stop-after", values=("tile", "prompts", "foley", "review"), default="review",
                    help="Stop after the named stage.")
     p.add_argument("--dry-run", action="store_true",
                    help="Plan everything; tile_video runs (cheap), VLM and Foley are stubbed.")
@@ -278,9 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.stop_after == "review":
         return 0
 
-    print("[foley_map] step 5/5: spatial_audio_page")
-    page_path = step_page(out)
-    print(f"open file://{page_path}")
+    print(f"[foley_map] review complete: {review_path}")
     return 0
 
 

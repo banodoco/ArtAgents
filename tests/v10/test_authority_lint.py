@@ -683,23 +683,6 @@ def test_removed_authority_import_in_dispatch_route_fails(tmp_path: Path) -> Non
     ), errors
 
 
-def test_removed_authority_import_in_pack_fails(tmp_path: Path) -> None:
-    """A pack module importing a removed authority fails."""
-    _bootstrap(tmp_path)
-    _write(
-        tmp_path,
-        "astrid/packs/timeline/evil.py",
-        "from astrid.core.integrations.reigh.supabase_client import client\n",
-    )
-    errors = lint_removed_authorities(tmp_path)
-    assert any(
-        "astrid/packs/timeline/evil.py: removed-authority import "
-        "'astrid.core.integrations.reigh.supabase_client' from a product path"
-        in error
-        for error in errors
-    ), errors
-
-
 def test_product_path_importing_kernel_currency_stays_clean(
     tmp_path: Path,
 ) -> None:

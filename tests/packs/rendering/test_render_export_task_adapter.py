@@ -19,8 +19,8 @@ import pytest
 from astrid.core.events.registry import core_only_registry
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
-from astrid.core.integrations.reigh import remotion_runtime
-from astrid.core.integrations.reigh.remotion_runtime import (
+from astrid.core.rendering import remotion_runtime
+from astrid.core.rendering.remotion_runtime import (
     NODE_EXECUTABLE_ENV,
     REMOTION_CLI_RELATIVE_PATH,
     TIMELINE_SCHEMA_PYTHONPATH_ENV,

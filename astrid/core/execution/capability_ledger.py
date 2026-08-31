@@ -1,9 +1,8 @@
 """Canonical reconciliation of Astrid capability source projections.
 
-Pack manifests, the result-contract snapshot, and the older Reigh registry
-describe different projections of the capability surface.  This module joins
-those projections into one JSON-shaped, read-only ledger consumed before host
-readiness is evaluated.
+Pack manifests and the result-contract snapshot describe the capability
+surface. This module joins those projections into one JSON-shaped, read-only
+ledger consumed before host readiness is evaluated.
 """
 
 from __future__ import annotations
@@ -82,18 +81,6 @@ def _executor_inventory(repo_root: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _legacy_ids(repo_root: Path) -> list[dict[str, Any]]:
-    """Return the 19 retained legacy IDs, excluding worker-child rows."""
-    from astrid.core.integrations.reigh.capabilities import REGISTRY
-
-    source = repo_root / "astrid" / "core" / "integrations" / "reigh" / "capabilities.py"
-    return [
-        {"id": capability_id, "disposition": "legacy", "binding": entry.binding, "source": str(source.relative_to(repo_root))}
-        for capability_id, entry in REGISTRY.items()
-        if capability_id.startswith("reigh.") and not entry.child_only
-    ]
-
-
 def _model_inventory(repo_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     source = repo_root / "astrid" / "core" / "model_catalog" / "models.yaml"
     raw = _load_manifest_payload(source)
@@ -140,7 +127,6 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
     historical_labels = [row for row in labels if row["pack"] != "fal"]
     aliases = _aliases(repo_root)
     executors = _executor_inventory(repo_root)
-    legacy = _legacy_ids(repo_root)
     models, model_backends = _model_inventory(repo_root)
     rendering_backends = _render_backend_inventory(repo_root)
     current_ids = {str(row.get("id")) for row in capabilities}
@@ -165,10 +151,9 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
             row["discovery_status"] = "historical_only"
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
     coverage = {
-        "source_labels": {"source": 82, "ledger": len(labels), "missing": [], "complete": len(labels) == 82},
-        "historical_source_labels": {"source": 80, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 80},
-        "executor_inventory": {"source": 73, "ledger": len(executors), "missing": [], "complete": len(executors) == 73},
-        "legacy_ids": {"source": 19, "ledger": len(legacy), "missing": [], "complete": len(legacy) == 19},
+        "source_labels": {"source": 78, "ledger": len(labels), "missing": [], "complete": len(labels) == 78},
+        "historical_source_labels": {"source": 76, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 76},
+        "executor_inventory": {"source": 69, "ledger": len(executors), "missing": [], "complete": len(executors) == 69},
     }
     if not all(section["complete"] for section in coverage.values()):
         raise CapabilityLedgerError(f"capability source census drifted: {coverage}")
@@ -177,14 +162,13 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         "historical_pack_labels": historical_labels,
         "aliases": aliases,
         "executor_inventory": executors,
-        "legacy_ids": legacy,
         "providers": _provider_inventory(capabilities),
         "models": models,
         "generation_backends": model_backends,
         "rendering_backends": rendering_backends,
         "hivemind": {"disposition": "optional_external", "executor_ids": expected_hivemind},
         "coverage": coverage,
-        "counts": {"pack_labels": len(labels), "historical_pack_labels": len(historical_labels), "executor_inventory": len(executors), "legacy_ids": len(legacy), "aliases": len(aliases), "models": len(models), "rendering_backends": len(rendering_backends)},
+        "counts": {"pack_labels": len(labels), "historical_pack_labels": len(historical_labels), "executor_inventory": len(executors), "aliases": len(aliases), "models": len(models), "rendering_backends": len(rendering_backends)},
     }
 
 

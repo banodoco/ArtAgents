@@ -23,7 +23,7 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Create Reigh-compatible timeline, assets, and metadata JSON.",
+  "description": "Create a timeline, assets, and metadata JSON.",
   "graph": {
     "consumes": [],
     "depends_on": [
@@ -136,6 +136,6 @@
     "arrangement",
     "pool"
   ],
-  "short_description": "Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement.",
+  "short_description": "Build a hype timeline, assets, and metadata JSON triple from arrangement.",
   "version": "1.0"
 }

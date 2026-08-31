@@ -1,11 +1,4 @@
-"""Core Project local-cache support (project.json + sources/ + runs/).
-
-The parallel placement schema (timeline.py, materialize.py, build_placement,
-validate_project_timeline, etc.) was collapsed in T10. Live timeline state now
-lives on reigh-app's ``timelines`` rows; Astrid currently reaches that surface
-through the legacy compatibility bridge in
-``astrid.core.integrations.reigh.SupabaseDataProvider``.
-"""
+"""Core project local-cache support (project.json + sources/ + runs/)."""
 
 from astrid.core.foundation.project_paths import (
     DEFAULT_PROJECTS_ROOT,

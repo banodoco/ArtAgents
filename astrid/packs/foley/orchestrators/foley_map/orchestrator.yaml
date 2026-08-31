@@ -7,11 +7,10 @@
     "foley.tile_video",
     "understanding.visual_understand",
     "fal.fal_foley",
-    "foley.foley_review",
-    "reigh.spatial_audio_page"
+    "foley.foley_review"
   ],
   "child_orchestrators": [],
-  "description": "Spatial Foley pipeline: tile a video, ask a VLM for a global scene description and per-tile prompts, score each tile via fal Hunyuan-Foley, render a sense-check page, and emit a static viewer that mixes the tracks by viewport position.",
+  "description": "Spatial Foley pipeline: tile a video, ask a VLM for a global scene description and per-tile prompts, and score each tile via fal Hunyuan-Foley.",
   "id": "foley.foley_map",
   "isolation": {
     "mode": "subprocess",
@@ -50,6 +49,6 @@
     "kind": "command"
   },
   "scoped_configs": ["credentials.fal"],
-  "short_description": "Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer.",
+  "short_description": "Spatial Foley pipeline: tile a video, prompt a VLM, and score Foley per tile.",
   "version": "0.1"
 }

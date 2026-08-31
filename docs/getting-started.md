@@ -11,7 +11,7 @@ state; the Astrid checkout is a client and pack source, not the state store.
 
 Install Astrid from the checkout and point the client at the neutral runtime
 checkout. The first product command starts or reconnects that runtime through
-the neutral launcher; no database service or `astrid serve` process is needed:
+the neutral launcher; no separate database service is needed:
 
 ```bash
 pip install -e .
@@ -55,7 +55,7 @@ attempting that handoff.
 
 The seven top-level gateway families are `projects`, `timelines`, `media`,
 `tasks`, `runs`, `doctor`, and `backup`; `timelines shots` and `media
-references` are nested mounts. There is no public `serve` command. `doctor`
+references` are nested mounts. `doctor`
 and `backup` use runtime routes and report a typed `unavailable` result until
 the runtime exposes the requested operation.
 

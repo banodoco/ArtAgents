@@ -1,4 +1,4 @@
-"""Fail-closed validation for the Reigh TimelineBundle wire envelope.
+"""Fail-closed validation for the Astrid TimelineBundle wire envelope.
 
 The editor owns the canonical TypeScript schema.  Astrid mirrors its small,
 stable v1 vocabulary here so the bridge can reject malformed or future data
@@ -16,7 +16,7 @@ BUNDLE_MISSING = object()
 
 
 class TimelineBundleValidationError(ValueError):
-    """A bundle issue suitable for the bridge's typed 422 envelope."""
+    """A bundle issue suitable for the typed 422 envelope."""
 
     def __init__(self, pointer: str, message: str) -> None:
         self.pointer = pointer

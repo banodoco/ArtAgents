@@ -1,5 +1,4 @@
 """Executable m4 contract tests (plan Step 2 / task T2).
-
 These tests assert that the four frozen contract documents and the executable
 surface agree **exactly** on:
 
@@ -126,17 +125,6 @@ def test_sdk_doc_freezes_receipt_shape() -> None:
         assert f'"{key}"' in text, f"receipt key {key!r} not documented"
     assert "read-only" in text
 
-
-def test_bridge_never_exposes_receipts_in_either_doc() -> None:
-    sdk = _doc(SDK_DOC)
-    bridge = _doc(BRIDGE_DOC)
-    # SDK doc: explicit prohibition on the bridge side.
-    assert "Bridge responses never expose receipts" in sdk
-    assert "no receipt field, no idempotency key" in sdk
-    # Bridge doc: receipt secrecy section lists the prohibited fields.
-    assert "Receipt secrecy" in bridge
-    for field in ("txn_id", "request_hash", "idempotency_key", "event_ids_json"):
-        assert field in bridge, f"bridge receipt-secrecy field {field!r} missing"
 
 
 # ---------------------------------------------------------------------------
@@ -266,21 +254,6 @@ def test_reigh_disposition_is_reporting_only_and_authority_denied() -> None:
     assert "never" in text and "m4-gate" in text
 
 
-def test_reigh_disposition_matches_bridge_contract_authority() -> None:
-    decisions = _doc(DECISIONS_DOC)
-    bridge = _doc(BRIDGE_DOC).lower()
-    # The bridge contract remains authoritative; the decisions artifact records
-    # that no compatibility behavior is added to Astrid.
-    assert "frozen Astrid bridge contract remains authoritative" in decisions
-    assert "No compatibility" in decisions
-    assert "any other path returns 404" in bridge
-
-
-# ---------------------------------------------------------------------------
-# 6. Temporary owner-lock deviation and m6 closure
-# ---------------------------------------------------------------------------
-
-
 def test_owner_lock_deviation_documented_with_m6_closure() -> None:
     text = _doc(DECISIONS_DOC)
     assert "exclusive-owner lock" in text
@@ -292,63 +265,6 @@ def test_owner_lock_deviation_documented_with_m6_closure() -> None:
     assert "removed in m6" in text
 
 
-# ---------------------------------------------------------------------------
-# 7. Reserved save-as-copy route
-# ---------------------------------------------------------------------------
-
-
-def test_bridge_doc_has_reserved_copy_section() -> None:
-    text = _doc(BRIDGE_DOC)
-    assert "Reserved route" in text
-    assert "planned m6, NOT implemented in m4" in text
-    assert "POST /projects/:slug/timelines/:ref/copy" in text
-    assert "not registered" in text
-    assert "optional target name" in text
-    assert "deterministic derived key" in text
-    assert "source head" in text
-    assert "409 timeline_version_conflict" in text
-    assert "fresh id" in text
-    assert "config_version" in text and "0" in text
-    assert "copied_from" in text
-    assert "404/409/422" in text
-    assert "never exposes a receipt or idempotency key" in text
-
-
-def test_decisions_doc_records_reserved_copy_semantics() -> None:
-    text = _doc(DECISIONS_DOC)
-    assert "Reserved save-as-copy route" in text
-    assert "planned m6, not implemented in m4" in text
-    assert "timelines copy" in text
-    assert "not implemented" in text
-
-
-def test_reserved_copy_route_is_not_in_implemented_route_table() -> None:
-    text = _doc(BRIDGE_DOC)
-    # The implemented route table (section 1) must not list the copy route.
-    table = text.split("## 1. Routes and methods")[1].split("## 2.")[0]
-    assert "/copy" not in table
-    assert "copy" not in table
-
-
-def test_no_timelines_copy_cli_verb_registered() -> None:
-    """No ``timelines copy`` verb is registered anywhere in m6.
-
-    Asserts both the frozen documents and the executable CLI parser surface.
-    """
-    bridge = _doc(BRIDGE_DOC)
-    decisions = _doc(DECISIONS_DOC)
-    assert "No `timelines copy` CLI verb is registered" in bridge
-    assert "`timelines copy` CLI verb" in decisions
-
-    from astrid.packs.timeline.cli import build_parser
-
-    parser = build_parser(object())
-    verbs: list[str] = []
-    for action in parser._actions:
-        if getattr(action, "choices", None):
-            verbs = list(action.choices.keys())
-    assert verbs, "timeline CLI parser exposes no subcommands"
-    assert "copy" not in verbs
 
 
 # ---------------------------------------------------------------------------
@@ -364,18 +280,6 @@ def test_documents_agree_on_error_taxonomy() -> None:
 
 def test_documents_agree_on_envelope_and_identity_rules() -> None:
     decisions = _doc(DECISIONS_DOC)
-    # The decisions artifact must point at the SDK contract as the authority
-    # for the envelope, receipt, and taxonomy values.
     assert "docs/contracts/astrid-sdk-v10.md" in decisions
     for key in ENVELOPE_KEYS:
         assert f"`{key}`" in decisions, f"decisions doc missing envelope key {key!r}"
-
-
-def test_sdk_doc_matches_bridge_doc_on_boundary() -> None:
-    sdk = _doc(SDK_DOC)
-    bridge = _doc(BRIDGE_DOC)
-    # The bridge derives a hidden deterministic save key; the SDK accepts
-    # caller/generated keys; both share one atomic command (frozen boundary).
-    assert "hidden deterministic bridge-derived save key" in sdk
-    assert "No `idempotency_key` field exists on this route" in bridge
-    assert "derives an internal idempotency key" in bridge

@@ -262,7 +262,7 @@ ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.
 
 Step 12 — the terminal step of the editorial pipeline. Runs after
 `video_editing.cut` and produces the final rendered video. This is the
-last step before optional YouTube upload or Reigh publish.
+last step before optional YouTube upload.
 
 ## Depends on
 

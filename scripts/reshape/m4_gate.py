@@ -1,12 +1,12 @@
 """m4 finalizer admission gate (plan Step 33 / task T37).
 
-The m4 gate is the final admission boundary for the bridge, SDK, and CLI
-domains sprint. It composes already-focused lanes rather than changing any
+The m4 gate is the final admission boundary for the SDK and CLI domains
+sprint. It composes already-focused lanes rather than changing any
 runtime semantics:
 
 - **retained focused lanes** (whole test files, never individual nodes) for
   contracts, application composition, the exclusive-owner lock, SDK services,
-  CLI surface/help, bridge/provider, media/task/run/pack conformance,
+  CLI surface/help, authority absence, media/task/run/pack conformance,
   crash/contention, secrets, the platform matrix, and the authority lint;
 - **authority lint** over the live tree (kernel-to-pack imports,
   pack-to-pack imports, writers outside the kernel store, legacy
@@ -29,9 +29,6 @@ runtime semantics:
   3.11 or 3.12; when a secondary interpreter is discoverable (``python3.12``
   first, then ``python3.13``), a cheap matrix lane runs under it. CI's
   matrix job is the authoritative 3.12 execution;
-- **Reigh editor lane**: retained disposition evidence only (SD1) — the
-  external compatibility report is referenced and validated when present but
-  is never an input to gate success.
 
 Evidence: every lane keeps a log and JUnit XML under ``out/m4-gate/latest``
 (gitignored, same convention as ``out/s1-gate/latest``), and the gate retains
@@ -85,8 +82,6 @@ DEFAULT_FEASIBILITY = (
 )
 
 BASELINE_SCHEMA = "astrid.m4_baseline.v1"
-DISPOSITION_SCHEMA = "astrid.reigh_external_gate_disposition.v1"
-
 # Sentinel value the secrets lane proves never persists or prints (frozen by
 # tests/core/util/test_secrets.py). The gate additionally scans every
 # retained m4 evidence artifact for it.
@@ -199,10 +194,9 @@ LANES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "bridge",
+        "authority",
         (
-            "tests/integrations/reigh/test_repository_provider.py",
-            "tests/v10/test_shared_service_authority.py",
+            "tests/stage1/test_reigh_authority_absence.py",
         ),
     ),
     (
@@ -849,39 +843,6 @@ def _check_baseline_reference() -> dict[str, object]:
     }
 
 
-def _check_reigh_disposition() -> dict[str, object]:
-    """Reference the retained Reigh disposition (SD1, reporting-only)."""
-    disposition_path = (
-        REPO_ROOT / "artifacts" / "m4" / "reigh-external-gate-disposition.json"
-    )
-    if not disposition_path.is_file():
-        return {
-            "present": False,
-            "reason": "artifacts/m4/reigh-external-gate-disposition.json "
-            "absent; the T24 disposition lane owns that evidence",
-        }
-    try:
-        data = json.loads(disposition_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return {"present": True, "parseable": False, "reason": str(exc)}
-    if not isinstance(data, dict):
-        return {"present": True, "parseable": False, "reason": "not an object"}
-    authority = data.get("authority")
-    schema_ok = (
-        data.get("schema") == DISPOSITION_SCHEMA
-        and isinstance(authority, dict)
-        and authority.get("decision") == "DENIED"
-    )
-    return {
-        "present": True,
-        "parseable": True,
-        "schema_ok": schema_ok,
-        "schema": data.get("schema"),
-        "overall_status": data.get("overall_status"),
-        "authority_decision": (authority or {}).get("decision"),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Admission document
 # ---------------------------------------------------------------------------
@@ -1186,10 +1147,8 @@ def run_gate(
     # --- Retained evidence references (reporting-only) ---------------------
     retained_reference: dict[str, object] = {
         "baseline": _check_baseline_reference(),
-        "reigh_disposition": _check_reigh_disposition(),
         "note": (
-            "baseline and Reigh disposition are retained evidence; Reigh "
-            "compatibility is reporting-only (SD1) and never an admission input"
+            "baseline is retained evidence and never an admission input"
         ),
     }
 

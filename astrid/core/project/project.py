@@ -1,12 +1,4 @@
-"""Project persistence APIs.
-
-After the placement-schema collapse (T10), local ``project.json`` keeps an
-opaque ``project_id`` that points at the canonical reigh-app row. Local
-``timeline.json`` is no longer the source of truth — timeline reads/writes go
-through ``astrid.core.integrations.reigh.SupabaseDataProvider`` as a legacy compatibility
-bridge. The local provenance cache (``sources/`` and ``runs/`` directories)
-survives.
-"""
+"""Project persistence APIs and local provenance cache."""
 
 from __future__ import annotations
 
@@ -139,14 +131,7 @@ def require_project(slug: str, *, root: str | Path | None = None) -> dict[str, A
 
 
 def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]:
-    """Return a cache-only view of the project tree.
-
-    Live timeline state (clip count, theme, etc.) lives on the canonical
-    reigh-app row keyed by ``project.project_id``. Callers that need it should
-    use ``astrid.core.integrations.reigh.SupabaseDataProvider.load_timeline`` directly;
-    this helper deliberately stays offline so ``projects show`` works without
-    network access.
-    """
+    """Return a cache-only view of the project tree."""
 
     project = require_project(slug, root=root)
     # Run identity belongs to the runtime/kernel.  This cache view intentionally

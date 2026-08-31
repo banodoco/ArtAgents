@@ -1,6 +1,6 @@
 """Deterministic pack, writer, schema, and authority lint (m1 plan step 22).
 
-This module enforces the architecture the repository-backed bridge depends
+This module enforces the architecture the runtime-backed Astrid client depends
 on, with **no** legacy false positives and **no** second-authority false
 negatives. Every rule is a pure function over source text, migration SQL,
 and the declared schema-pack manifests, so the lint is deterministic and
@@ -11,8 +11,7 @@ Rules:
 ``import_boundaries``
     - kernel-to-pack: nothing under ``astrid/core/`` may import
       ``astrid.packs`` except the single documented application-composition
-      exemption (``astrid/core/gateway/dispatch.py``, the serve root that
-      composes the standard bridge).
+      exemption (``astrid/core/gateway/dispatch.py``, the generic pack host).
     - pack-to-pack: no pack may import another pack's modules. The timeline
       pack's own ``bridge.py`` and repository compose only kernel services.
 
@@ -22,21 +21,17 @@ Rules:
     other writer is a second write authority and a lint error.
 
 ``legacy_authorities``
-    The supported v10 entry paths (bridge DTOs, the timeline adapter, the
-    standard composition, the gateway serve root) must never import the
-    legacy file/JSONL/FSA/Supabase authorities. The m1-m6 legacy files stay
-    in-tree; the rule is scoped to the supported entry paths, and the
-    legacy save/asset routes in ``local_bridge_server.py`` are the
-    documented teardown bridge (owned by later tasks), not a fallback.
+    Supported entry paths must never import retired file/JSONL/FSA or remote
+    authorities. The rule is scoped to the supported entry paths.
 
 ``removed_authorities``
-    The eight-family product paths (dispatch routes, SDK modules, the
-    application composition, the bridge composition, and the pack modules)
+    Product paths (dispatch routes, SDK modules, the application composition,
+    and the pack modules)
     must never import a removed authority module: the legacy
     ``astrid.core.timeline.eventlog`` / ``astrid.core.threads`` /
     ``astrid.core.session`` authorities, the deleted
     ``astrid.core.cli.{timeline,project,session}`` CLI modules, and the
-    removed ``reigh.supabase_client`` / ``reigh.data_provider`` integrations.
+    retired provider integrations.
     The legacy modules stay in-tree as dead code for non-product consumers;
     only their import from a product path is forbidden (m6 plan step 8).
 
@@ -82,15 +77,13 @@ from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 COMPOSITION_EXEMPTION = "astrid/core/gateway/dispatch.py"
-"""The one documented kernel-to-pack composition exemption (serve root)."""
+"""The one documented kernel-to-pack composition exemption (generic host)."""
 
 SUPPORTED_ENTRY_PATHS = (
     "astrid/packs/timeline/bridge.py",
     "astrid/packs/__init__.py",
     COMPOSITION_EXEMPTION,
-    # Eight-family dispatch paths (m6): the gateway entrypoint and the
-    # product-family dispatch boundary route the five product families plus
-    # serve/doctor/backup. They must never import a legacy/removed authority.
+    # Product dispatch paths must never import a legacy/removed authority.
     "astrid/core/gateway/__init__.py",
     "astrid/core/cli/domain_product.py",
     "astrid/core/cli/domain_projects.py",
@@ -112,8 +105,6 @@ LEGACY_AUTHORITY_MARKERS = (
     "astrid.core.cli.timeline",
     "astrid.core.cli.project",
     "astrid.core.cli.session",
-    "astrid.core.integrations.reigh.supabase_client",
-    "astrid.core.integrations.reigh.data_provider",
 )
 """Legacy authority markers (capitalized/qualified so the absence
 declarations in docstrings — e.g. 'no FSA/Supabase fallback' — never trip
@@ -126,8 +117,6 @@ REMOVED_AUTHORITY_MODULES = (
     "astrid.core.cli.timeline",
     "astrid.core.cli.project",
     "astrid.core.cli.session",
-    "astrid.core.integrations.reigh.supabase_client",
-    "astrid.core.integrations.reigh.data_provider",
 )
 """Removed authority modules forbidden from the eight-family product paths.
 
@@ -357,7 +346,7 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 continue
             errors.append(
                 f"{rel}: kernel-to-pack import {module!r} "
-                "(only the serve composition root is exempt)"
+                "(only the generic pack host is exempt)"
             )
     schema_pack_dirs = [
         path
@@ -393,7 +382,7 @@ def lint_writer_authority(root: Path) -> list[str]:
     of the store, never a second write authority; and
     ``astrid/packs/__init__.py`` is the standard composition root itself,
     the single place that constructs the standard database/writer at the
-    gateway serve composition root. Read-only URI probes (``mode=ro``) and the
+    generic composition root. Read-only URI probes (``mode=ro``) and the
     canonical ``read_only_uri`` helper are not writers and are never flagged.
     """
     errors: list[str] = []
@@ -471,8 +460,7 @@ def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
 
     The product surface is exactly: the eight-family dispatch routes
     (``astrid/core/gateway/``), the SDK modules (``astrid/sdk/``), the
-    application composition (``astrid/application.py``), the bridge
-    composition (``astrid/core/integrations/reigh/bridge_service.py``), and
+    application composition (``astrid/application.py``), and
     the standard schema-pack modules (``astrid/packs/<schema-pack>``).
     Everything else in the tree is non-product (legacy dead code that may
     stay in-tree), including the m1-m6 legacy capability packs.
@@ -488,7 +476,7 @@ def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
 def lint_removed_authorities(root: Path) -> list[str]:
     """Removed-authority imports from the eight-family product paths.
 
-    The m6 cutover removes the legacy file/JSONL/FSA/Supabase authorities and
+    The cutover removes the legacy file/JSONL/FSA and remote authorities and
     the legacy timeline/project/session CLI modules from the product surface.
     Any product path (dispatch route, SDK module, application composition,
     bridge composition, or pack module) that imports one of the removed

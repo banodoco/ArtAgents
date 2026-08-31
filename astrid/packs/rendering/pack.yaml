@@ -35,7 +35,7 @@ capabilities:
 - scaffold_html_canvas_effect
 agent:
   purpose: Choose this pack to turn a brief timeline into a finished video (hype.mp4), inspect managed timeline event logs as deterministic evidence, generate/slice GPT Image sprite sheets, or wrap content in a canvas/WebGL post-processing effect.
-  do_not_use_for: Not for publishing the rendered output to the Reigh platform; use the reigh pack for handoff after rendering.
+  do_not_use_for: Publishing rendered output to external services.
   normal_entrypoints:
   - rendering.render
   - rendering.timeline_visualize

@@ -280,7 +280,7 @@ class RenderExportTaskAdapter:
         context = context or RenderExportExecutionContext.bounded()
         context.report("admit", 0)
         project_slug, config, registry, params = _decode_spec(task)
-        from astrid.core.integrations.reigh.remotion_runtime import (
+        from astrid.core.rendering.remotion_runtime import (
             remotion_runtime_status,
             timeline_requires_remotion,
         )

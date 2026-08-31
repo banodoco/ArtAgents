@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from astrid.core.integrations.reigh.remotion_runtime import RemotionRuntimeTools
+from astrid.core.rendering.remotion_runtime import RemotionRuntimeTools
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion
 from scripts import gen_effect_registry, gen_remotion_types

@@ -190,7 +190,7 @@ def _timeline_fps(config: dict[str, Any]) -> float:
 def validate_timeline(config: Any, *, strict: bool = True) -> None:
     """Validate a Banodoco timeline.
 
-    `clipType` is an open string for Reigh compatibility. Built-in media/text
+    `clipType` is an open string for editor compatibility. Built-in media/text
     clips and registered effects get semantic checks where Astrid knows how;
     unknown clip types stay valid and classify as opaque at runtime.
 

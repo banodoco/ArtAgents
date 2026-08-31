@@ -1077,37 +1077,6 @@ def test_public_import_and_shim_smoke() -> None:
     )
 
 
-def test_reigh_smoke_imports() -> None:
-    """Import every direct Python submodule under astrid.core.integrations.reigh.
-
-    The test is import-only: it must not resolve environment variables,
-    secrets, or network connections.  No Reigh behavior is exercised.
-    """
-    # Direct submodules listed in the M0 architecture gate (T8).
-    # Prove every listed submodule landed in sys.modules.
-    import sys
-
-    import astrid.core.integrations.reigh.data_provider  # noqa: F401
-    import astrid.core.integrations.reigh.env  # noqa: F401
-    import astrid.core.integrations.reigh.errors  # noqa: F401
-    import astrid.core.integrations.reigh.supabase_client  # noqa: F401
-    import astrid.core.integrations.reigh.task_client  # noqa: F401
-    import astrid.core.integrations.reigh.timeline_io  # noqa: F401
-    import astrid.core.integrations.reigh.worker_jwt  # noqa: F401
-
-    expected = {
-        "astrid.core.integrations.reigh.data_provider",
-        "astrid.core.integrations.reigh.env",
-        "astrid.core.integrations.reigh.errors",
-        "astrid.core.integrations.reigh.supabase_client",
-        "astrid.core.integrations.reigh.task_client",
-        "astrid.core.integrations.reigh.timeline_io",
-        "astrid.core.integrations.reigh.worker_jwt",
-    }
-    missing = expected - set(sys.modules)
-    assert not missing, f"Reigh submodules not in sys.modules: {sorted(missing)}"
-
-
 # ── M4 giant-file inventory contract ─────────────────────────────────────
 
 

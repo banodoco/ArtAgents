@@ -8,8 +8,6 @@ from pathlib import Path
 import pytest
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.integrations.reigh.env import _candidate_env_files as reigh_candidate_env_files
-from astrid.core.integrations.reigh.env import read_env_value as reigh_read_env_value
 from astrid.core.util.secrets import (
     NullKeychainProvider,
     OSKeychainProvider,
@@ -85,26 +83,8 @@ def test_candidate_env_files_are_empty_without_an_explicit_file(
 
     assert candidate_env_files() == []
     assert candidate_env_files(None) == []
-    # The legacy profiles add no implicit paths either.
+    # Profiles add no implicit paths either.
     assert candidate_env_files(None, profile="default") == []
-    assert candidate_env_files(None, profile="reigh") == []
-
-
-def test_reigh_profile_returns_only_the_explicit_file(tmp_path: Path) -> None:
-    explicit = tmp_path / "custom.env"
-
-    candidates = candidate_env_files(explicit, profile="reigh")
-
-    assert candidates == reigh_candidate_env_files(explicit)
-    assert candidates == [explicit.resolve()]
-
-
-def test_reigh_and_secrets_wrappers_share_env_parser(tmp_path: Path) -> None:
-    env_file = tmp_path / ".env"
-    env_file.write_text("export TOKEN='shared'\n", encoding="utf-8")
-
-    assert read_env_value(env_file, "TOKEN") == "shared"
-    assert reigh_read_env_value(env_file, "TOKEN") == "shared"
 
 
 # ---------------------------------------------------------------------------

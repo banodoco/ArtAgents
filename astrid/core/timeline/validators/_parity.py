@@ -37,7 +37,7 @@ def is_effect_clip(clip_type: str, theme: str | None) -> bool:
     - parity: runs both paths, asserts identical verdict, returns new result.
 
     SD3 branches b/c (resolved→non-clip/visual or unresolved) produce False;
-    the Reigh opaque-fallback contract is preserved by callers acting on the
+    the opaque-fallback contract is preserved by callers acting on the
     returned boolean.
     """
     from astrid.core.timeline.banodoco_schema import _effect_ids as _legacy_effect_ids

@@ -97,10 +97,10 @@ GA_ITEM_SELECTOR_MAP: dict[int, dict[str, Any]] = {
         "evidence_class": "crash_contention",
     },
     6: {
-        "description": "bridge CAS and contention",
+        "description": "legacy bridge authority absence",
         "installed_selector": "installed-journey:ga-item-6",
         "source_selectors": (
-            "tests/v10/test_m7_bridge_contention.py",
+            "tests/stage1/test_reigh_authority_absence.py",
         ),
         "evidence_class": "crash_contention",
     },

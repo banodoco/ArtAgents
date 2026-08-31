@@ -22,7 +22,6 @@ from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .eventlog import select_timeline_backend
-from .eventlog.types import SupabaseEventLogOptions
 from .events.schema import TimelineActor
 from .integrity import compute_sha256, file_size
 from .model import (
@@ -347,7 +346,6 @@ def rename_timeline(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
-    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> dict[str, Any]:
     """Rewrite ``display.json`` so *old_slug* becomes *new_slug*.
 
@@ -382,8 +380,6 @@ def rename_timeline(
         "timeline_home": tdir,
         "preferred_backend": preferred_backend,
     }
-    if supabase_options is not None:
-        select_kwargs["supabase_options"] = supabase_options
     stream, backend = select_timeline_backend(**select_kwargs)
     rename_actor = actor or TimelineActor(
         type="system",

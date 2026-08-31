@@ -37,7 +37,7 @@
           "provider": {
             "type": "string",
             "description": "Source provider id. First concrete: 'youtube'.",
-            "enum": ["youtube", "local_folder", "reigh_asset", "stock_api", "generated", "image", "audio", "paired"]
+            "enum": ["youtube", "local_folder", "stock_api", "generated", "image", "audio", "paired"]
           },
           "config": {
             "type": "object",

@@ -79,9 +79,9 @@ class TimelineImportedPayload:
     source: TimelineImportSource
 
     def __post_init__(self) -> None:
-        if self.source not in {"legacy_local", "supabase_config", "editor_save", "other"}:
+        if self.source not in {"legacy_local", "editor_save", "other"}:
             raise TimelineEventSchemaError(
-                "payload.source must be legacy_local, supabase_config, editor_save, or other"
+                "payload.source must be legacy_local, editor_save, or other"
             )
         _validate_jsonable(self.snapshot, "payload.snapshot")
 

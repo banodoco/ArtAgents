@@ -1,7 +1,7 @@
 """Neutral registry for explicitly composed task-handler bindings.
 
 The registry is deliberately outside both the kernel execution service and
-the Reigh integration package. Concrete bindings can register themselves
+optional integrations. Concrete bindings can register themselves
 without making ``astrid.core.integrations`` import the execution service;
 the service only resolves factories already installed by composition.
 """
