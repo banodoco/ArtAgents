@@ -24,7 +24,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIAL_PATH = ROOT / "docs" / "guides" / "build-your-first-agentic-ux.md"
-FIXTURE_DIR = ROOT / "examples" / "agentic_ux" / "fixtures"
 
 pytestmark = [
     pytest.mark.opt_in,
@@ -41,8 +40,7 @@ _SDK_EXPORT_NAMES: frozenset[str] = frozenset(
         "discover",
         "get_capability",
         "invoke",
-        "read_events",
-        "subscribe_events",
+        "AstridClient",
         "Capability",
         "DiscoveryResult",
         "EventStreamRecord",
@@ -159,10 +157,10 @@ def test_tutorial_mentions_dry_run() -> None:
     assert "dry_run=True" in content, "Tutorial does not mention dry_run=True"
 
 
-def test_tutorial_mentions_read_events() -> None:
-    """The tutorial must mention ``read_events``."""
+def test_tutorial_mentions_runtime_events() -> None:
+    """The tutorial must show runtime-owned event observation."""
     content = TUTORIAL_PATH.read_text(encoding="utf-8")
-    assert "read_events" in content, "Tutorial does not mention read_events"
+    assert "client.runs.events" in content, "Tutorial does not use runtime event resources"
 
 
 def test_tutorial_mentions_no_api_keys() -> None:
@@ -386,27 +384,6 @@ def test_get_capability_ambiguous_raises_capability_ambiguous_error() -> None:
         sdk.get_capability(
             "fade",
             kind="element",
-        )
-
-
-# ---------------------------------------------------------------------------
-# read_events and subscribe_events
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.timeout(60)
-def test_read_events_bad_slug_raises_validation_error(tmp_path: Path) -> None:
-    """``read_events()`` with an invalid project slug must raise an
-    ``AstridSDKError`` subclass (the SDK maps project-path validation
-    errors to ``CapabilityValidationError``)."""
-    import astrid as sdk
-
-    with pytest.raises(sdk.AstridSDKError):
-        sdk.read_events(
-            "bad/slug",
-            "demo-run-001",
-            projects_root=tmp_path / "projects",
-            verify=False,
         )
 
 

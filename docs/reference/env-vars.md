@@ -51,6 +51,11 @@ falls back to the legacy key with a deprecation warning.  Use
 Astrid Stage1 has no session-binding or home-directory state authority. Do not
 set session identifiers or project-root overrides to configure a product
 command; project and actor context come from the runtime request.
+
+## Renderer and subprocess context
+
+| Constant | Env var | Who sets | Who reads | Effect |
+|---|---|---|---|---|
 | `ASTRID_REMOTION_PROJECT_DIR` | `ASTRID_REMOTION_PROJECT_DIR` | Release operator | Remotion renderer | Absolute server-owned Remotion project with `node_modules`; never accepted from task input. |
 | `ASTRID_NODE_EXECUTABLE` | `ASTRID_NODE_EXECUTABLE` | Release operator | Remotion renderer | Absolute server-owned executable Node path. Readiness performs a bounded `--version` probe; never resolved from `PATH` or accepted from task input. |
 | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | Release operator | Remotion renderer | Absolute server-owned install root containing `banodoco_timeline_schema`; validated by module origin before Remotion-only admission. |

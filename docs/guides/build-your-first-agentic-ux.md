@@ -6,7 +6,7 @@ This tutorial walks you through the complete Astrid SDK loop —
 discovers capabilities, inspects schemas, dry-runs an executor, and
 observes a verified event stream.
 
-The code in this tutorial mirrors the checked-in example at
+The preview portion of this tutorial is mirrored by the checked-in example at
 [`examples/agentic_ux/agentic_ux.py`](../../examples/agentic_ux/agentic_ux.py).
 Every API call shown here uses the public SDK surface — no internal
 imports, no private modules.
@@ -21,8 +21,9 @@ cd /path/to/Astrid
 pip install -e .
 ```
 
-- No API keys, network access, or hosted services are required.
-  Everything runs locally.
+- The dry-run preview requires no API keys, network access, or hosted services.
+  Live invocation and event observation require an explicitly configured
+  Banodoco workspace runtime.
 
 ## Step 1 — Import the SDK
 
@@ -173,68 +174,44 @@ except CapabilityInvocationError as e:
     original = e.__cause__  # The exception raised by the runner
 ```
 
-## Step 5 — Read Events from a Run
+## Step 5 — Observe runtime state
 
 The workspace runtime owns event storage, ordering, integrity, and recovery.
-The SDK's generated-client-backed `read_events()` reads a live runtime
-snapshot; Astrid does not read event files or local databases.
+Open an explicit runtime client and use its generated resources; Astrid does
+not read event files or local databases.
 
 ```python
+from astrid import AstridClient
+
 PROJECT_SLUG = "demo-agentic-ux"
 RUN_ID = "demo-run-001"
-events = astrid.read_events(PROJECT_SLUG, RUN_ID)
+with AstridClient.open(endpoint=RUNTIME_ENDPOINT, credential=RUNTIME_CREDENTIAL) as client:
+    events = client.runs.events(PROJECT_SLUG, RUN_ID)
 
-print(f"Event count: {len(events)}")
-for event in events:
-    print(f"  [{event.source}:{event.line}] {event.kind} @ {event.timestamp}")
+for event in events.data:
+    print(f"[{event['event_type']}] {event['occurred_at']}")
 ```
 
-Each `EventStreamRecord` contains the runtime `source`, sequence `line`,
-`timestamp`, `kind`, `hash`, and event `payload`. Runtime integrity and replay
-checks happen at the service boundary; failures raise typed SDK exceptions.
-
-### Live event observation
-
-For in-progress runs, use `subscribe_events()` with `follow=True`:
-
-```python
-for event in astrid.subscribe_events(
-    PROJECT_SLUG,
-    RUN_ID,
-    follow=True,
-    poll_interval=0.5,
-):
-    print(f"[{event.kind}] {event.payload.get('command', '')}")
-```
-
-The generator yields events as they are appended.  It polls every
-`poll_interval` seconds and stops after `idle_polls` consecutive empty
-polls (default: no limit — the generator blocks until you break).
-
-### Event stream errors
-
-```python
-from astrid import CapabilityPreconditionError, CapabilityEventLogError
-
-# Invalid project slug
-try:
-    astrid.read_events("bad/slug", RUN_ID)
-except CapabilityPreconditionError as e:
-    print(f"Precondition: {e}")
-```
+For in-progress runs, poll the same runtime resource (or use the runtime's
+subscription facility). Runtime integrity and replay checks happen at the
+service boundary; failures are returned as typed runtime errors. The endpoint
+and credential must be supplied explicitly or through the documented
+`BANODOCO_RUNTIME_*` configuration.
 
 ## Step 6 — Run the Complete Example
 
-The checked-in example at
+The checked-in preview example at
 [`examples/agentic_ux/agentic_ux.py`](../../examples/agentic_ux/agentic_ux.py)
-bundles Steps 1–5 into a single argparse-driven script.  It runs
-the full **discover → inspect → invoke → read-events** loop against
-`editorial.arrange` and prints a deterministic JSON summary with four keys
-(`discovery`, `inspection`, `invocation`, `events`) to stdout.
+bundles Steps 1–4 into a single argparse-driven script. It runs the
+no-side-effect **discover → inspect → dry-run invoke** loop against
+`editorial.arrange` and prints a deterministic JSON summary with three keys
+(`discovery`, `inspection`, `invocation`) to stdout. It does not fabricate a
+local project or event file. For live execution and event observation, open
+an explicit `AstridClient` against the workspace runtime and call
+`client.invoke_result(...)` followed by `client.runs.events(project, run_id)`.
 
 ```bash
 python3 examples/agentic_ux/agentic_ux.py \
-    --projects-root /tmp/astrid-demo-projects \
     --capability-id editorial.arrange
 ```
 
@@ -260,9 +237,9 @@ user-facing workflows.
   user permissions.  Only invoke capabilities from packs you trust.
   Check `capability.handle.safety` for the `SafetyDeclaration` (network,
   API keys, external binaries, project-file access).
-- **Runtime event access**: `read_events()` and `subscribe_events()` are
-  read-only generated-client calls to the workspace runtime; no local event
-  file, database, or cache is consulted.
+- **Runtime event access**: `client.runs.events(...)` is a read-only generated
+  client call to the workspace runtime; no local event file, database, or cache
+  is consulted.
 - **Capability provenance**: inspect `capability.handle.provenance`
   (`.source`, `.pack_id`, `.manifest_path`) before invoking in production.
 

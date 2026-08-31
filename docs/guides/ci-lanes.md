@@ -16,14 +16,9 @@ export ASTRID_PROJECTS_ROOT
 ```
 
 Both variables are `export`ed so subprocesses (pytest, ruff, mypy, npm typecheck, etc.)
-inherit them automatically.
-
-**Ordering matters.** `ASTRID_HOME` is exported *first*, then a minimal CI agent identity
-is seeded so first-run bootstrap never fires:
-
-```bash
-"$PYTHON_BIN" -c 'from astrid.core.session.identity import Identity, write_identity; write_identity(Identity(agent_id="ci", created_at="2026-01-01T00:00:00Z"))'
-```
+inherit them automatically. The current runtime-backed test harness supplies any
+request identity through the runtime boundary; CI does not seed a local session
+or identity file.
 
 An `EXIT` trap ensures both temporary directories are cleaned up when the script exits,
 whether by success, failure, or signal:

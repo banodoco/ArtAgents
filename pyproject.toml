@@ -151,8 +151,6 @@ include = [
     "astrid/**/*.py",
     "scripts/reshape/**/*.py",
     "tests/reshape/**/*.py",
-    "tests/concurrency/two_tab_harness.py",
-    "tests/concurrency/test_two_tab_harness_smoke.py",
 ]
 
 [tool.ruff.lint]

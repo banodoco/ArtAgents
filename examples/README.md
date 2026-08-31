@@ -6,15 +6,14 @@ Generated media does not belong here.
 
 ## Agentic UX Example
 
-A complete external-application walkthrough of the public Astrid SDK:
-**discover → inspect → invoke → read-events**.
+A complete external-application walkthrough of the public Astrid SDK's
+no-side-effect preview surface: **discover → inspect → dry-run invoke**.
 
 - **Source**: [`agentic_ux/agentic_ux.py`](agentic_ux/agentic_ux.py)
 - **Tutorial**: [`docs/guides/build-your-first-agentic-ux.md`](../docs/guides/build-your-first-agentic-ux.md)
 
 ```bash
 python examples/agentic_ux/agentic_ux.py \
-    --projects-root /tmp/astrid-demo-projects \
     --capability-id editorial.arrange
 ```
 

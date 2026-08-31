@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
-"""External example: full Astrid SDK loop (discover → inspect → invoke → read-events).
+"""External example: the manifest-only Astrid SDK preview loop.
 
 This script demonstrates the public SDK surface from an external application.
 It imports only ``astrid`` plus standard-library modules, performs a complete
 capability lifecycle against the canonical ``editorial.arrange`` executor, and
-prints a deterministic JSON summary to stdout.
+prints a deterministic JSON summary to stdout.  Live execution and event
+observation require an explicitly opened runtime client; this no-side-effect
+example deliberately does not fabricate a local project or event stream.
 
 Usage::
 
     python examples/agentic_ux/agentic_ux.py \
-        --projects-root /tmp/astrid-demo-projects \
         --capability-id editorial.arrange
-
-The committed golden events fixture (≤3 JSONL records) is copied into a
-temporary project layout so that ``astrid.read_events()`` can observe it
-without needing a live executor run.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,19 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# The public SDK's invoke() path for built-in executors (e.g. editorial.arrange)
-# may import pack runtime modules that carry a guard against direct invocation.
-# Setting ASTRID_INTERNAL_INVOCATION tells the guard "this is a legitimate
-# programmatic SDK call" and prevents a spurious SystemExit(2).
-os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
-
-import astrid
-
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
-GOLDEN_EVENTS = FIXTURE_DIR / "golden_events.jsonl"
-
-PROJECT_SLUG = "demo-agentic-ux"
-RUN_ID = "demo-run-001"
+import astrid  # noqa: E402  (repo root is added above for direct script execution)
 
 
 def _build_summary(
@@ -52,7 +34,6 @@ def _build_summary(
     discovery: astrid.DiscoveryResult,
     capability: astrid.Capability,
     invocation: astrid.InvocationResult,
-    events: tuple[astrid.EventStreamRecord, ...],
 ) -> dict[str, Any]:
     """Build a deterministic JSON-safe summary dict from the SDK results."""
 
@@ -82,20 +63,7 @@ def _build_summary(
             "ok": invocation.ok,
             "dry_run": invocation.raw_result.get("dry_run", False),
         },
-        "events": {
-            "count": len(events),
-            "kinds": [e.kind for e in events],
-        },
     }
-
-
-def _setup_temp_project(projects_root: Path) -> Path:
-    """Create a minimal project run directory with the golden events fixture."""
-
-    run_dir = projects_root / PROJECT_SLUG / "runs" / RUN_ID
-    run_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(GOLDEN_EVENTS, run_dir / "events.jsonl")
-    return run_dir
 
 
 def _port_to_dict(port: astrid.Port) -> dict[str, Any]:
@@ -123,13 +91,7 @@ def _output_to_dict(output: astrid.Output) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Astrid SDK external example: discover → inspect → invoke → read-events"
-    )
-    parser.add_argument(
-        "--projects-root",
-        required=True,
-        type=Path,
-        help="Base directory for temporary project structure (e.g., /tmp/astrid-demo-projects)",
+        description="Astrid SDK external example: discover → inspect → invoke preview"
     )
     parser.add_argument(
         "--capability-id",
@@ -138,7 +100,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    projects_root: Path = args.projects_root
     capability_id: str = args.capability_id
 
     # ── 1. Discover ──────────────────────────────────────────────────────
@@ -151,37 +112,24 @@ def main() -> None:
     )
 
     # ── 3. Dry-run invoke ────────────────────────────────────────────────
-    with tempfile.TemporaryDirectory(prefix="astrid-agentic-ux-") as tmp_out:
-        invocation = astrid.invoke(
-            capability_id,
-            kind="executor",
-            out=Path(tmp_out),
-            inputs={
-                "brief": "example brief for agentic UX demo",
-                "pool": "default",
-                "theme": "default",
-                "target_duration": 60,
-            },
-            dry_run=True,
-            verbose=False,
-        )
-
-    # ── 4. Read events from the committed golden fixture ─────────────────
-    _setup_temp_project(projects_root)
-
-    events = astrid.read_events(
-        PROJECT_SLUG,
-        RUN_ID,
-        projects_root=projects_root,
-        verify=True,
+    invocation = astrid.invoke(
+        capability_id,
+        kind="executor",
+        inputs={
+            "brief": "example brief for agentic UX demo",
+            "pool": "default",
+            "theme": "default",
+            "target_duration": 60,
+        },
+        dry_run=True,
+        verbose=False,
     )
 
-    # ── 5. Print deterministic JSON summary ──────────────────────────────
+    # ── 4. Print deterministic JSON summary ───────────────────────────────
     summary = _build_summary(
         discovery=discovery,
         capability=capability,
         invocation=invocation,
-        events=events,
     )
     json.dump(summary, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")

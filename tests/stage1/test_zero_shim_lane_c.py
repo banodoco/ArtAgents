@@ -11,14 +11,16 @@ from astrid.core.contracts.identifiers import generate_run_id, is_ulid
 from astrid.core.project.guidance import selected_project
 from astrid.sdk.invocation import _resolve_projects_root
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_retired_thread_package_and_preferences_are_not_importable() -> None:
     assert importlib.util.find_spec("astrid.core.threads") is None
     assert importlib.util.find_spec("astrid.core.preferences") is None
-    assert importlib.util.find_spec("astrid.core.session.config") is None
+    # The empty session package is retired as a whole.  Asking importlib for
+    # a child of a missing parent raises ModuleNotFoundError, so assert the
+    # package boundary directly.
+    assert importlib.util.find_spec("astrid.core.session") is None
 
 
 def test_lineage_ids_live_in_neutral_contracts() -> None:
