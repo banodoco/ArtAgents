@@ -54,6 +54,9 @@ dev = [
     # never wedge the suite for callers (CI, the megaplan baseline capture,
     # humans). This is the architectural guard against the "hung suite" class.
     "pytest-timeout>=2.4",
+    # QUIC provider fixtures use the maintained aioquic implementation to
+    # prove a real handshake; UDP-shaped payloads are not sufficient evidence.
+    "aioquic>=1.2,<2",
     "ruff==0.12.0",
     "build==1.4.0",
     # sisypy backs the migrated tests/agentic/ suite (agentic scenario testing).

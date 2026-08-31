@@ -16,6 +16,7 @@ import ipaddress
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -88,6 +89,8 @@ def _allowed_destination(host: str, port: int | None) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         ip = None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        aliases.add(str(ip.ipv4_mapped))
     for candidate in allowed:
         candidate_host, candidate_port = _endpoint_parts(candidate)
         if candidate_host in {"*", host} or candidate_host in aliases:
@@ -199,6 +202,85 @@ def _patch_redirects() -> None:
     HTTPRedirectHandler.redirect_request = redirect_request  # type: ignore[method-assign]
 
 
+def _validated_descendant_owner() -> bool:
+    """Return whether a manifest names a real native-network owner.
+
+    Python hooks cannot observe sockets opened by a native descendant.  The
+    only honest escape hatch is an explicitly validated proxy/broker or an OS
+    network sandbox that owns that descendant and emits evidence itself.
+    """
+    raw = _POLICY.get("descendant_enforcement", _POLICY.get("native_descendants"))
+    if not isinstance(raw, Mapping):
+        return False
+    kind = str(raw.get("kind", raw.get("owner", ""))).lower()
+    return kind in {"proxy", "broker", "os", "os_firewall", "sandbox"} and bool(raw.get("validated")) and bool(raw.get("observable"))
+
+
+def _command_label(command: Any) -> str:
+    if isinstance(command, (list, tuple)):
+        return " ".join(str(part) for part in command[:3])
+    return str(command)
+
+
+def _patch_native_descendants() -> None:
+    """Fail closed when a Python provider tries to escape via a native child."""
+    original_popen = subprocess.Popen
+
+    def guarded_popen(*args: Any, **kwargs: Any):
+        command = args[0] if args else kwargs.get("args", "")
+        allowed = _validated_descendant_owner()
+        _record("native_descendant", allowed=allowed, detail=_command_label(command))
+        if not allowed:
+            raise NetworkPolicyError(
+                "network policy denied native descendant; use a validated observable proxy or OS broker"
+            )
+        return original_popen(*args, **kwargs)
+
+    _ORIGINALS[(subprocess, "Popen")] = original_popen
+    subprocess.Popen = guarded_popen  # type: ignore[assignment]
+
+    for name in ("execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp", "execlpe"):
+        original = getattr(os, name, None)
+        if original is None:
+            continue
+
+        def guarded_exec(*args: Any, _name: str = name, _original: Any = original, **kwargs: Any):
+            allowed = _validated_descendant_owner()
+            _record("native_descendant", allowed=allowed, detail=f"os.{_name}")
+            if not allowed:
+                raise NetworkPolicyError(
+                    "network policy denied native exec; use a validated observable proxy or OS broker"
+                )
+            return _original(*args, **kwargs)
+
+        _ORIGINALS[(os, name)] = original
+        setattr(os, name, guarded_exec)
+
+
+def _broker_handshake() -> None:
+    """Perform the live admission handshake for an explicitly configured proxy."""
+    raw_proxy = _POLICY.get("proxy")
+    if not isinstance(raw_proxy, str) or not raw_proxy:
+        return
+    parsed = urlsplit(raw_proxy)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.port is None:
+        raise NetworkPolicyError("network policy proxy must be an explicit host:port URL")
+    admission_digest = hashlib.sha256(
+        json.dumps(_ADMISSION, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    try:
+        with socket.create_connection((parsed.hostname, parsed.port), timeout=3) as connection:
+            connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest}\n".encode("ascii"))
+            response = connection.recv(64).decode("ascii", "replace").strip()
+    except OSError as exc:
+        _record("broker_handshake", host=parsed.hostname, port=parsed.port, allowed=False, detail=str(exc))
+        raise NetworkPolicyError("network policy broker handshake failed") from exc
+    allowed = response == "ASTRID-BROKER/1 OK"
+    _record("broker_handshake", host=parsed.hostname, port=parsed.port, allowed=allowed)
+    if not allowed:
+        raise NetworkPolicyError("network policy broker rejected admission")
+
+
 def install(policy: Mapping[str, Any], evidence_path: str | Path, *, admission: Mapping[str, Any] | None = None, evidence_key: str = "") -> None:
     """Install hooks in a child process and arrange structured evidence output."""
     global _INSTALLED, _POLICY, _EVIDENCE, _EVIDENCE_KEY, _ADMISSION
@@ -211,6 +293,8 @@ def install(policy: Mapping[str, Any], evidence_path: str | Path, *, admission: 
     _INSTALLED = True
     _patch_socket()
     _patch_redirects()
+    _patch_native_descendants()
+    _broker_handshake()
     atexit.register(_write_evidence)
 
 

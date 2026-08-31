@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import hashlib
+import textwrap
 import os
 import socket
 import subprocess
 import sys
+import sysconfig
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.execution.generic_host import GenericPackHost, HostError, RuntimeProtocolClient
+from astrid.core.execution.network_broker import ObservableNetworkBroker
 
 RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
 if RUNTIME.is_dir():
@@ -191,7 +194,10 @@ def test_provider_credentials_are_manifest_scoped_and_redacted(tmp_path: Path, p
         ]},
         "outputs": [],
         "isolation": {"mode": "subprocess", "network": True, "secrets_required": [provider_env]},
-        "metadata": {"adapter_family": "provider"},
+        "metadata": {"adapter_family": "provider", "network_policy": {
+            "allowed_protocols": ["dns", "tcp"], "allowed_destinations": [],
+            "allow_redirects": False, "proxy": None,
+        }},
     }), encoding="utf-8")
     credential_source = {"FAL_KEY": "fal-ambient-secret", "GIPHY_API_KEY": "giphy-ambient-secret", "OPENAI_API_KEY": "openai-ambient-secret"}
     credential_source[provider_env] = "declared-fixture-secret"
@@ -314,6 +320,102 @@ def test_provider_network_policy_records_and_allows_quic_over_udp_fixture(tmp_pa
         udp.close()
 
 
+def test_provider_network_policy_proves_real_aioquic_handshake(tmp_path: Path) -> None:
+    """The UDP evidence must come from a real QUIC handshake, not a label."""
+    pytest.importorskip("aioquic")
+    package_root = tmp_path / "quic_provider"
+    package_root.mkdir()
+    (package_root / "__init__.py").write_text("\n", encoding="utf-8")
+    (package_root / "run.py").write_text(textwrap.dedent("""
+        import asyncio, datetime, ipaddress, sys
+        from pathlib import Path
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from aioquic.asyncio import connect, serve
+        from aioquic.quic.configuration import QuicConfiguration
+
+        def certificate():
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'localhost')])
+            now = datetime.datetime.now(datetime.timezone.utc)
+            cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+                    .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                    .not_valid_before(now - datetime.timedelta(days=1))
+                    .not_valid_after(now + datetime.timedelta(days=1))
+                    .add_extension(x509.SubjectAlternativeName([
+                        x509.DNSName('localhost'),
+                        x509.IPAddress(ipaddress.ip_address('127.0.0.1')),
+                    ]), critical=False).sign(key, hashes.SHA256()))
+            cert_path = Path(sys.argv[2] + '.crt')
+            key_path = Path(sys.argv[2] + '.key')
+            cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+            key_path.write_bytes(key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption()))
+            return cert_path, key_path
+
+        async def echo(reader, writer):
+            writer.write(await reader.read(1024))
+            await writer.drain()
+            writer.close()
+
+        def stream_handler(reader, writer):
+            asyncio.create_task(echo(reader, writer))
+
+        async def main():
+            cert_path, key_path = certificate()
+            server_config = QuicConfiguration(is_client=False, alpn_protocols=['hq-29'])
+            server_config.load_cert_chain(str(cert_path), str(key_path))
+            server = await serve('127.0.0.1', 0, configuration=server_config,
+                                 stream_handler=stream_handler)
+            port = server._transport.get_extra_info('sockname')[1]
+            client_config = QuicConfiguration(is_client=True, alpn_protocols=['hq-29'])
+            client_config.verify_mode = 0
+            message = b'astrid-real-quic-handshake'
+            async with connect('127.0.0.1', port, configuration=client_config) as protocol:
+                reader, writer = await protocol.create_stream()
+                writer.write(message)
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(len(message)), 5)
+                writer.close()
+            server.close()
+            if response != message:
+                raise RuntimeError('QUIC stream echo did not complete')
+            Path(sys.argv[1]).write_text('quic handshake complete', encoding='utf-8')
+
+        asyncio.run(main())
+    """), encoding="utf-8")
+    pack_root = tmp_path / "quic_pack"
+    executor_root = pack_root / "executors" / "handshake"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: quic_pack\nname: QUIC Pack\nversion: 1.0\n"
+        "content:\n  executors: executors\n", encoding="utf-8"
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "quic_pack.handshake", "name": "QUIC Handshake",
+        "kind": "external", "version": "1.0",
+            "command": {"argv": ["{python_exec}", "-m", "quic_provider.run", "{out}/proof.txt", str(tmp_path / "cert")], "env": {"PYTHONPATH": os.pathsep.join((sysconfig.get_paths()["purelib"], str(Path(__file__).resolve().parents[2])))}},
+        "outputs": [{"name": "proof", "type": "file", "path_template": "{out}/proof.txt"}],
+        "isolation": {"mode": "subprocess", "network": True},
+        "metadata": {"adapter_family": "provider", "network_policy": {
+            "allowed_protocols": ["dns", "udp"], "allowed_destinations": ["127.0.0.1"],
+            "allow_redirects": False, "proxy": None,
+        }},
+    }), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+    record = host.discover()[0]
+    host.preflight()
+    assert host.capabilities[record.id].ready
+    host.run_task({"task": {"id": "quic-real", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+    assert (tmp_path / "attempt" / "outputs" / "proof.txt").read_text(encoding="utf-8") == "quic handshake complete"
+    evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
+    assert any(event["kind"] == "udp" and event["allowed"] for event in evidence["events"])
+
+
 def test_native_network_command_is_unready_without_enforceable_observable_gateway(tmp_path: Path) -> None:
     pack_root = tmp_path / "native_provider"
     executor_root = pack_root / "executors" / "native"
@@ -389,3 +491,79 @@ def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Pat
         assert generated.get_task(task.task_id).state == "succeeded"
     finally:
         daemon.stop()
+
+
+def test_python_provider_cannot_spawn_unobserved_native_network_descendant(tmp_path: Path) -> None:
+    """A curl/yt-dlp-shaped escape hatch fails closed inside the child."""
+    pack_root = tmp_path / "native_escape_provider"
+    executor_root = pack_root / "executors" / "escape"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: native_escape_provider\nname: Native Escape Provider\n"
+        "version: 1.0\ncontent:\n  executors: executors\n", encoding="utf-8"
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "native_escape_provider.fetch", "name": "Native Escape",
+        "kind": "external", "version": "1.0",
+        "command": {"argv": ["{python_exec}", "-c", "import subprocess; subprocess.run(['curl', 'https://example.invalid'], check=False)"]},
+        "outputs": [], "isolation": {"mode": "subprocess", "network": True},
+        "metadata": {"adapter_family": "provider", "network_policy": {
+            "allowed_protocols": ["dns", "tcp"], "allowed_destinations": ["127.0.0.1:9"],
+            "allow_redirects": False, "proxy": None,
+        }},
+    }), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+    record = host.discover()[0]
+    host.preflight()
+    with pytest.raises(HostError, match="exited"):
+        host.run_task({"task": {"id": "native-escape", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+    evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
+    assert any(event["kind"] == "native_descendant" and not event["allowed"] for event in evidence["events"])
+
+
+def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Path) -> None:
+    """A provider must use the live broker and cannot bypass its route."""
+    broker = ObservableNetworkBroker(response_body=b"brokered-response").start()
+    try:
+        port = int(broker.endpoint.rsplit(":", 1)[1])
+        pack_root = tmp_path / "broker_provider"
+        executor_root = pack_root / "executors" / "fetch"
+        executor_root.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            "schema_version: 1\nid: broker_provider\nname: Broker Provider\n"
+            "version: 1.0\ncontent:\n  executors: executors\n", encoding="utf-8"
+        )
+        code = (
+            "from pathlib import Path\n"
+            "from urllib.request import urlopen, build_opener, ProxyHandler\n"
+            "body = urlopen('http://example.invalid/through-broker', timeout=2).read()\n"
+            "Path('{out}/body').write_bytes(body)\n"
+            "try:\n"
+            "    build_opener(ProxyHandler({{}})).open('http://127.0.0.1:1/bypass', timeout=1)\n"
+            "except Exception:\n"
+            "    pass\n"
+        ).format(out="{out}")
+        (executor_root / "executor.yaml").write_text(json.dumps({
+            "schema_version": 1, "id": "broker_provider.fetch", "name": "Broker Fetch",
+            "kind": "external", "version": "1.0",
+            "command": {"argv": ["{python_exec}", "-c", code]},
+            "outputs": [{"name": "body", "type": "file", "path_template": "{out}/body"}],
+            "isolation": {"mode": "subprocess", "network": True},
+            "metadata": {"adapter_family": "provider", "network_policy": {
+                "allowed_protocols": ["dns", "tcp"],
+                "allowed_destinations": [f"127.0.0.1:{port}"],
+                "allow_redirects": False, "proxy": broker.endpoint,
+            }},
+        }), encoding="utf-8")
+        host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+        record = host.discover()[0]
+        host.preflight()
+        assert host.capabilities[record.id].ready
+        host.run_task({"task": {"id": "broker-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        assert (tmp_path / "attempt" / "outputs" / "body").read_bytes() == b"brokered-response"
+        assert {event.kind for event in broker.events} >= {"handshake", "route"}
+        evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
+        assert any(event["kind"] == "broker_handshake" and event["allowed"] for event in evidence["events"])
+        assert any(event["kind"] == "tcp" and not event["allowed"] for event in evidence["events"])
+    finally:
+        broker.stop()

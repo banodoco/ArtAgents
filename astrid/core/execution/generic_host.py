@@ -900,6 +900,12 @@ class GenericPackHost:
             policy = _network_policy(record)
             if adapter.requires_network and not record.definition.isolation.network:
                 checks["network"] = {"ok": False, "reason": "adapter_requires_network"}
+            elif record.definition.isolation.network and adapter.family == "provider" and policy is None:
+                # Provider capabilities must declare their concrete egress
+                # contract.  A boolean ``network: true`` is not an admission
+                # policy: without destinations/protocols/redirect handling we
+                # cannot observe or constrain the child honestly.
+                checks["network"] = {"ok": False, "reason": "provider network_policy is missing"}
             elif _native_network_command(record) and record.definition.isolation.network and not _enforceable_network_gateway(policy):
                 checks["network"] = {"ok": False, "reason": "native network requires an enforceable observable proxy or broker"}
             else:
