@@ -188,6 +188,18 @@ def test_retired_compatibility_submodule_imports_do_not_resolve() -> None:
             importlib.import_module(module_name)
 
 
+def test_retired_filesystem_event_helpers_are_not_public_or_reachable() -> None:
+    sdk = importlib.import_module("astrid.sdk")
+    for name in (
+        "_resolve_event_stream_run_dir",
+        "_read_task_event_stream",
+        "_subscribe_task_event_stream",
+    ):
+        assert name not in sdk.__dict__
+        with pytest.raises(AttributeError):
+            getattr(sdk, name)
+
+
 def test_discover_and_get_capability_expose_public_dtos() -> None:
     astrid = _import_public_module()
 

@@ -56,18 +56,20 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
             admitted = client.tasks.create(
                 project_id="demo",
                 capability="render.basic",
-                spec={"thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FV0"},
+                spec={},
                 idempotency_key="iteration-run",
             )
             assert admitted.ok
             runtime_run_id = admitted.data["run_id"]
+            observed_quality: dict[str, object] = {}
 
             def fake_assemble(**kwargs):
                 out = kwargs["out_path"]
+                observed_quality.update(kwargs["input_quality"])
                 out.mkdir(parents=True, exist_ok=True)
                 for name, payload in (
-                    ("iteration.manifest.json", {"runs": [], "quality": {"data_quality": 1.0}}),
-                    ("iteration.quality.json", {"data_quality": 1.0}),
+                    ("iteration.manifest.json", {"runs": [], "quality": kwargs["input_quality"]}),
+                    ("iteration.quality.json", kwargs["input_quality"]),
                     ("hype.timeline.json", {}),
                     ("hype.assets.json", {}),
                 ):
@@ -86,10 +88,9 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
                 SimpleNamespace(
                     out=tmp_path / "out",
                     orchestrator_args=("--repo-root", str(tmp_path)),
-                    inputs={"thread": "@active"},
+                    inputs={"target_run_id": runtime_run_id},
                     # Public iteration-video requires an explicit runtime
-                    # project; it must never infer one from a sole-project
-                    # fallback.
+                    # project and runtime-issued target run.
                     project="demo",
                     run_root=None,
                     dry_run=False,
@@ -101,6 +102,10 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
         assert result["outputs"]["iteration.mp4"]
         assert result["planned_commands"][0][0] == "runtime.runs.list/show"
         assert result["planned_commands"][0][2] == runtime_run_id
+        assert result["planned_commands"][0][1] == "demo"
+        assert result["outputs"]["iteration.mp4"]
+        assert float(observed_quality["data_quality"]) < 1.0
+        assert "missing_evidence" in observed_quality
         assert (tmp_path / "out" / "iteration.mp4").read_bytes() == b"runtime-backed-video"
         assert not list(tmp_path.glob("**/run.json"))
     finally:

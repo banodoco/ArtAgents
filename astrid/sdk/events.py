@@ -179,24 +179,6 @@ def subscribe_events(
     return _owned_iter()
 
 
-# Kept as private import names for callers that introspect the old SDK facade.
-# Filesystem event streams are retired and must never be resolved by normal SDK
-# operation.
-def _resolve_event_stream_run_dir(*args: Any, **kwargs: Any) -> None:
-    del args, kwargs
-    raise CapabilityInvocationError("filesystem event streams are retired; use the workspace runtime")
-
-
-def _read_task_event_stream(*args: Any, **kwargs: Any) -> None:
-    del args, kwargs
-    raise CapabilityInvocationError("filesystem event streams are retired; use the workspace runtime")
-
-
-def _subscribe_task_event_stream(*args: Any, **kwargs: Any) -> None:
-    del args, kwargs
-    raise CapabilityInvocationError("filesystem event streams are retired; use the workspace runtime")
-
-
 __all__ = [
     "read_events",
     "subscribe_events",

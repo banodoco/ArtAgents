@@ -42,11 +42,6 @@ platform contract is the final authority.
   fields, kind vocabulary, output entry hashing, directory tree hashing,
   optional partial outputs, and domain-manifest coexistence.
 
-- **[run-ledger-contract.md](run-ledger-contract.md)** — Ledger
-  invariant that every in-band execution produces exactly one truthful
-  `run.json` entry: three-record taxonomy, exemption catalog, cost
-  source precedence, log capture rules, cleanup verbs, and external
-  `out=` semantics.
 
 ## Timeline & Event Contracts
 

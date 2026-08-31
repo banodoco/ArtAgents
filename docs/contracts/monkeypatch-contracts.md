@@ -128,9 +128,6 @@ in `tests/test_sdk_public_surface.py`.
 | `run_executor` | 337, 348, 353, 358, 558, 764, 836, 870, 905, 996, 1028, 1203, 1238, 1260, 1295 | `tests/test_sdk_public_surface.py` |
 | `run_orchestrator` | 932, 1548 | `tests/test_sdk_public_surface.py` |
 | `invoke` | 1598, 1645, 1671, 1812, 1878, 1909, 1940, 1993, 2047, 2087, 2147, 2169, 2206, 2246, 2283, 2324, 2364, 2387, 2407, 2449, 2527, 2635, 2657, 2681, 2703, 2728, 2771, 2814, 2837 | `tests/test_sdk_public_surface.py` |
-| `_resolve_event_stream_run_dir` | 1070, 1093, 1105, 1143 | `tests/test_sdk_public_surface.py` |
-| `_read_task_event_stream` | 1071, 1106 | `tests/test_sdk_public_surface.py` |
-| `_subscribe_task_event_stream` | 1144, 1172 | `tests/test_sdk_public_surface.py` |
 | `_infer_image_mode` | 2486 | `tests/test_sdk_public_surface.py` |
 
 ## 10. Registry discover_packs (cross-cutting)

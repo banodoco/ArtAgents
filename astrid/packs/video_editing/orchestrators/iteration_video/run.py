@@ -346,7 +346,7 @@ def _runtime_run_show(client: Any, project: str, run_id: str) -> dict[str, Any] 
     method = getattr(runs, "show", None)
     try:
         value = _unwrap_runtime_result(method(project, run_id)) if callable(method) else client.get_run(run_id)
-    except Exception:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
     return _normalize_runtime_record(value, client=client, project=project)
 
@@ -358,7 +358,223 @@ def _load_runtime_records(client: Any, project: str) -> dict[str, dict[str, Any]
         run_id = str(record.get("run_id") or "")
         if run_id:
             records[run_id] = record
+    _attach_runtime_lineage(records, client=client, project=project)
     return records
+
+
+def _attach_runtime_lineage(
+    records: dict[str, dict[str, Any]], *, client: Any, project: str
+) -> None:
+    """Attach only runtime-owned lineage reads to each run resource.
+
+    The generated workspace client currently exposes runs/tasks, their event
+    streams, and project media relations.  Evidence and command receipts are
+    not yet read operations in that client; those fields therefore remain
+    explicitly unavailable instead of being reconstructed from local files or
+    inferred from parent ids.
+    """
+
+    tasks, tasks_available = _runtime_task_records(client, project)
+    relations, relations_available = _runtime_relations(client, project)
+    for run_id, record in records.items():
+        run_tasks = tasks.get(run_id, [])
+        record["task_records"] = run_tasks
+        if run_tasks:
+            record["task_ids"] = [
+                str(item["task_id"]) for item in run_tasks if item.get("task_id")
+            ]
+        else:
+            record["task_ids"] = [
+                str(value)
+                for value in record.get("task_ids", [])
+                if isinstance(value, (str, int)) and str(value)
+            ]
+        if not record.get("output_artifacts"):
+            record["output_artifacts"] = [
+                artifact
+                for task in run_tasks
+                for artifact in task.get("output_artifacts", [])
+            ]
+        record["runtime_relations"] = relations
+        record["runtime_relations_available"] = relations_available
+        record["runtime_tasks_available"] = tasks_available
+        record["runtime_run_events"], run_events_available = _runtime_run_events(
+            client, project, run_id
+        )
+        record["runtime_run_events_available"] = run_events_available
+        task_events: dict[str, list[dict[str, Any]]] = {}
+        task_events_available = tasks_available
+        for task in run_tasks:
+            task_id = str(task.get("task_id") or "")
+            if not task_id:
+                continue
+            events, available = _runtime_task_events(client, project, task_id)
+            task_events[task_id] = events
+            task_events_available = task_events_available and available
+        record["runtime_task_events"] = task_events
+        record["runtime_task_events_available"] = task_events_available
+        record["runtime_evidence"] = _runtime_attached_values(
+            record, run_tasks, "evidence", "evidence_items"
+        )
+        record["runtime_receipts"] = _runtime_attached_values(
+            record, run_tasks, "receipt", "receipts", "command_receipt"
+        )
+        record["runtime_lineage_gaps"] = _lineage_gaps(record)
+
+
+def _runtime_task_records(
+    client: Any, project: str
+) -> tuple[dict[str, list[dict[str, Any]]], bool]:
+    tasks_family = getattr(client, "tasks", None)
+    method = getattr(tasks_family, "list", None)
+    if not callable(method):
+        method = getattr(client, "list_project_tasks", None)
+    if not callable(method):
+        return {}, False
+    try:
+        value = _unwrap_runtime_result(
+            method(project) if tasks_family is not None and hasattr(tasks_family, "list") else method(project)
+        )
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return {}, False
+    if isinstance(value, Mapping):
+        value = value.get("items", ())
+    if not isinstance(value, (list, tuple)):
+        return {}, False
+    by_run: dict[str, list[dict[str, Any]]] = {}
+    for raw in value:
+        item = _as_mapping(raw)
+        if item is None:
+            continue
+        task_id = str(item.get("task_id") or item.get("id") or "")
+        run_id = str(item.get("run_id") or "")
+        if not task_id or not run_id:
+            continue
+        task = dict(item)
+        task["task_id"] = task_id
+        output_raw = task.get("output_artifacts") or task.get("outputs")
+        if not output_raw and isinstance(task.get("result"), Mapping):
+            result = task["result"]
+            output_raw = result.get("output_artifacts") or result.get("outputs")
+        task["output_artifacts"] = _artifact_list(output_raw)
+        by_run.setdefault(run_id, []).append(task)
+    return by_run, True
+
+
+def _runtime_relations(client: Any, project: str) -> tuple[list[dict[str, Any]], bool]:
+    media = getattr(client, "media", None)
+    method = getattr(media, "list_relations", None)
+    if not callable(method):
+        method = getattr(client, "list_media_relations", None)
+    if not callable(method):
+        return [], False
+    try:
+        value = _unwrap_runtime_result(method(project))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return [], False
+    if isinstance(value, Mapping):
+        value = value.get("items", ())
+    if not isinstance(value, (list, tuple)):
+        return [], False
+    return [item for raw in value if (item := _as_mapping(raw)) is not None], True
+
+
+def _runtime_run_events(
+    client: Any, project: str, run_id: str
+) -> tuple[list[dict[str, Any]], bool]:
+    runs = getattr(client, "runs", None)
+    method = getattr(runs, "events", None)
+    if not callable(method):
+        method = getattr(client, "list_run_events", None)
+    if not callable(method):
+        return [], False
+    try:
+        value = _unwrap_runtime_result(method(project, run_id)) if runs is not None and hasattr(runs, "events") else _unwrap_runtime_result(method(run_id))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return [], False
+    return _event_list(value), True
+
+
+def _runtime_task_events(
+    client: Any, project: str, task_id: str
+) -> tuple[list[dict[str, Any]], bool]:
+    tasks = getattr(client, "tasks", None)
+    method = getattr(tasks, "events", None)
+    if not callable(method):
+        method = getattr(client, "list_events", None)
+    if not callable(method):
+        return [], False
+    try:
+        value = _unwrap_runtime_result(method(task_id, project)) if tasks is not None and hasattr(tasks, "events") else _unwrap_runtime_result(method(aggregate_id=task_id))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return [], False
+    return _event_list(value), True
+
+
+def _event_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, Mapping):
+        value = value.get("items", ())
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for raw in value if (item := _as_mapping(raw)) is not None]
+
+
+def _as_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if hasattr(value, "__dict__"):
+        return dict(vars(value))
+    return None
+
+
+def _runtime_attached_values(
+    run: Mapping[str, Any], tasks: list[Mapping[str, Any]], *keys: str
+) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    for resource in (run, *tasks):
+        for key in keys:
+            value = resource.get(key)
+            if key == "receipt" and value is not None and not isinstance(value, (list, tuple)):
+                value = [value]
+            if isinstance(value, Mapping):
+                value = [value]
+            if isinstance(value, (list, tuple)):
+                found.extend(item for raw in value if (item := _as_mapping(raw)) is not None)
+        events = list(resource.get("runtime_run_events", ()) or ())
+        task_events = resource.get("runtime_task_events", {})
+        if isinstance(task_events, Mapping):
+            events.extend(event for values in task_events.values() for event in values or ())
+        for event in events:
+            payload = event.get("payload") if isinstance(event, Mapping) else None
+            if isinstance(payload, Mapping):
+                for key in keys:
+                    value = payload.get(key)
+                    if isinstance(value, Mapping):
+                        found.append(dict(value))
+                    elif isinstance(value, (list, tuple)):
+                        found.extend(item for raw in value if (item := _as_mapping(raw)) is not None)
+    return found
+
+
+def _lineage_gaps(record: Mapping[str, Any]) -> list[str]:
+    gaps: list[str] = []
+    if not record.get("runtime_tasks_available"):
+        gaps.append("tasks_unavailable")
+    if not record.get("runtime_relations_available"):
+        gaps.append("relations_unavailable")
+    if not record.get("runtime_run_events_available"):
+        gaps.append("run_events_unavailable")
+    if not record.get("runtime_task_events_available"):
+        gaps.append("task_events_unavailable")
+    if not record.get("runtime_evidence"):
+        gaps.append("evidence_unavailable")
+    if not record.get("runtime_receipts"):
+        gaps.append("receipts_unavailable")
+    if not record.get("output_artifacts") and not any(
+        task.get("output_artifacts") for task in record.get("task_records", ())
+    ):
+        gaps.append("task_outputs_unavailable")
+    return gaps
 
 
 def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[str, Any]:
@@ -498,12 +714,56 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
         {"run_id": node.run_id, "missing_parent_run_ids": node.unresolved_parent_run_ids}
         for node in nodes if node.unresolved_parent_run_ids
     ]
+    missing_task_outputs = [
+        node.run_id
+        for node in nodes
+        if not node.record.get("runtime_tasks_available")
+        or not node.record.get("task_records")
+        or not node.record.get("output_artifacts")
+    ]
+    missing_evidence = [node.run_id for node in nodes if not node.record.get("runtime_evidence")]
+    missing_receipts = [node.run_id for node in nodes if not node.record.get("runtime_receipts")]
+    missing_relations = [node.run_id for node in nodes if not node.record.get("runtime_relations_available")]
+    missing_events = [
+        node.run_id
+        for node in nodes
+        if not node.record.get("runtime_run_events_available")
+        or not node.record.get("runtime_task_events_available")
+    ]
+    dimensions = {
+        "lineage": not unresolved,
+        "task_outputs": not missing_task_outputs,
+        "evidence": not missing_evidence,
+        "relations": not missing_relations,
+        "receipts": not missing_receipts,
+        "events": not missing_events,
+    }
+    # A complete score requires every canonical runtime source.  In
+    # particular, resolved parent IDs alone never imply complete lineage.
+    data_quality = round(sum(dimensions.values()) / len(dimensions), 3) if total else 0.0
+    unavailable_sources = sorted({gap for node in nodes for gap in node.record.get("runtime_lineage_gaps", [])})
     quality = {
         "schema_version": SCHEMA_VERSION,
         "target_run_id": target_run_id,
         "total_runs": total,
-        "data_quality": 1.0 if total and not unresolved else (0.8 if total else 0.0),
+        "data_quality": data_quality,
+        "dimensions": dimensions,
         "unresolved_producer_runs": unresolved,
+        "missing_task_outputs": missing_task_outputs,
+        "missing_evidence": missing_evidence,
+        "missing_relations": missing_relations,
+        "missing_receipts": missing_receipts,
+        "missing_events": missing_events,
+        "unavailable_sources": unavailable_sources,
+        "relation_count": sum(len(node.record.get("runtime_relations", [])) for node in nodes),
+        "evidence_count": sum(len(node.record.get("runtime_evidence", [])) for node in nodes),
+        "receipt_count": sum(len(node.record.get("runtime_receipts", [])) for node in nodes),
+        "run_event_count": sum(len(node.record.get("runtime_run_events", [])) for node in nodes),
+        "task_event_count": sum(
+            len(events)
+            for node in nodes
+            for events in (node.record.get("runtime_task_events", {}) or {}).values()
+        ),
         "authority": {"kind": "runtime", "project": project_slug},
     }
     runs = []
@@ -519,6 +779,13 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
             "executor_id": node.record.get("executor_id"),
             "orchestrator_id": node.record.get("orchestrator_id"),
             "output_artifacts": node.record.get("output_artifacts", []),
+            "task_ids": list(node.record.get("task_ids", [])),
+            "relations": list(node.record.get("runtime_relations", [])),
+            "evidence": list(node.record.get("runtime_evidence", [])),
+            "receipts": list(node.record.get("runtime_receipts", [])),
+            "run_events": list(node.record.get("runtime_run_events", [])),
+            "task_events": dict(node.record.get("runtime_task_events", {})),
+            "lineage_gaps": list(node.record.get("runtime_lineage_gaps", [])),
             "summary": None,
         })
     target = next((node for node in nodes if node.run_id == target_run_id), None)
@@ -555,6 +822,7 @@ def resolve_target_run_id(
         fetched = _runtime_run_show(client, project, target_run_id)
         if fetched is not None:
             all_records[target_run_id] = fetched
+            _attach_runtime_lineage(all_records, client=client, project=project)
     record = all_records.get(target_run_id)
     if record is None:
         raise IterationVideoError(f"unknown runtime run: {target_run_id}")

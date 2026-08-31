@@ -1,4 +1,4 @@
-"""Project / source / run schema tests (T10 collapsed the placement schema).
+"""Project / source schema tests (T10 collapsed the placement schema).
 
 The pre-T10 file also covered build_placement / source_ref / run_ref /
 validate_project_timeline / add_placement / remove_placement. Those symbols
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import (
     create_project,
@@ -24,14 +23,11 @@ from astrid.core.project.project import (
 )
 from astrid.core.project.schema import (
     PROJECT_SCHEMA_VERSION,
-    RUN_SCHEMA_VERSION,
     SOURCE_KINDS,
     SOURCE_SCHEMA_VERSION,
     ProjectValidationError,
     build_project,
-    build_run_record,
     validate_project,
-    validate_run_record,
 )
 from astrid.core.project.source import add_source, require_source
 
@@ -234,101 +230,9 @@ def test_source_validation_rejects_bad_state(
     assert require_source("demo", "intro")["asset"]["url"] == "https://example.com/a.mp4"
 
 
-def test_build_and_validate_run_record_round_trip() -> None:
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        tool_id="my-tool",
-        kind="custom",
-        status=RunStatus.RUNNING,
-        argv=["--flag", "value"],
-        metadata={"baseline_snapshot": "abc"},
-        session_id="session-123",
-        auto_bound=True,
-        invocation="sdk",
-    )
-    normalized = validate_run_record(record)
-    assert normalized["status"] == "running"
-    assert normalized["argv"] == ["--flag", "value"]
-    assert normalized["session_id"] == "session-123"
-    assert normalized["auto_bound"] is True
-    assert normalized["invocation"] == "sdk"
-    assert normalized["metadata"]["baseline_snapshot"] == "abc"
-    assert normalized["schema_version"] == RUN_SCHEMA_VERSION
-
-
-def test_run_record_status_must_be_known() -> None:
-    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
-    record["status"] = "garbage"
-    with pytest.raises(ProjectValidationError, match="unmapped run-record status"):
-        validate_run_record(record)
-
-
-def test_run_record_provenance_defaults_round_trip() -> None:
-    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
-
-    assert record["session_id"] is None
-    assert record["auto_bound"] is False
-    assert record["invocation"] == "cli"
-
-    normalized = validate_run_record(record)
-    assert normalized["session_id"] is None
-    assert normalized["auto_bound"] is False
-    assert normalized["invocation"] == "cli"
-
-
-def test_run_record_invocation_must_be_known() -> None:
-    record = build_run_record("demo", "01HXYZ")
-    record["invocation"] = "garbage"
-
-    with pytest.raises(ProjectValidationError, match="run.invocation"):
-        validate_run_record(record)
-
-
-def test_legacy_auto_resolved_metadata_populates_canonical_auto_bound() -> None:
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        metadata={"project_was_auto_resolved": True},
-    )
-
-    assert record["auto_bound"] is True
-    assert record["metadata"]["project_was_auto_resolved"] is True
-
-    legacy = dict(record)
-    legacy.pop("auto_bound", None)
-    normalized = validate_run_record(legacy)
-    assert normalized["auto_bound"] is True
-    assert normalized["metadata"]["project_was_auto_resolved"] is True
-
-
-def test_explicit_auto_bound_does_not_duplicate_legacy_metadata() -> None:
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        auto_bound=True,
-        metadata={"project_was_auto_resolved": True, "baseline_snapshot": "abc"},
-    )
-
-    assert record["auto_bound"] is True
-    assert "project_was_auto_resolved" not in record["metadata"]
-    assert record["metadata"]["baseline_snapshot"] == "abc"
-
-
-def test_explicit_auto_bound_wins_over_legacy_metadata_on_validate() -> None:
-    record = build_run_record("demo", "01HXYZ")
-    record["auto_bound"] = False
-    record["metadata"]["project_was_auto_resolved"] = True
-
-    normalized = validate_run_record(record)
-    assert normalized["auto_bound"] is False
-    assert normalized["metadata"]["project_was_auto_resolved"] is True
-
-
 def test_schema_constants_are_versioned() -> None:
     assert isinstance(PROJECT_SCHEMA_VERSION, int)
     assert isinstance(SOURCE_SCHEMA_VERSION, int)
-    assert isinstance(RUN_SCHEMA_VERSION, int)
     assert {"audio", "image", "other", "video"} == SOURCE_KINDS
 
 
@@ -383,139 +287,6 @@ def test_legacy_project_json_without_default_timeline_id_still_validates() -> No
     assert validated["slug"] == "demo"
 
 
-# ── T3: run-record ULID contract and new metadata keys ────────────────────
-
-
-def test_run_timeline_id_must_be_valid_ulid() -> None:
-    """run.timeline_id stays a ULID-only field; non-ULID strings are rejected."""
-
-    from astrid.core.ids import generate_ulid
-
-    valid_ulid = generate_ulid()
-    record = build_run_record("demo", "01HXYZ", timeline_id=valid_ulid)
-    assert record["timeline_id"] == valid_ulid
-
-    # Invalid shapes must raise (ProjectPathError from validate_timeline_ulid,
-    # wrapped via build_run_record → validate_timeline_ulid).
-    from astrid.core.foundation.project_paths import ProjectPathError
-
-    with pytest.raises(ProjectPathError, match="timeline ULID"):
-        build_run_record("demo", "01HXYZ", timeline_id="not-a-ulid")
-    with pytest.raises(ProjectPathError, match="timeline ULID"):
-        build_run_record("demo", "01HXYZ", timeline_id="")
-
-
-def test_managed_binding_metadata_round_trip() -> None:
-    """metadata.timeline_slug, timeline_event_stream_id, timeline_binding_mode round-trip."""
-
-    from uuid import uuid4
-
-    event_stream_id = str(uuid4())
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        timeline_slug="my-cut-v1",
-        timeline_event_stream_id=event_stream_id,
-        timeline_binding_mode="managed",
-    )
-    meta = record["metadata"]
-    assert meta["timeline_slug"] == "my-cut-v1"
-    assert meta["timeline_event_stream_id"] == event_stream_id
-    assert meta["timeline_binding_mode"] == "managed"
-
-    # Round-trip through validate_run_record.
-    validated = validate_run_record(record)
-    assert validated["metadata"]["timeline_slug"] == "my-cut-v1"
-    assert validated["metadata"]["timeline_event_stream_id"] == event_stream_id
-    assert validated["metadata"]["timeline_binding_mode"] == "managed"
-
-    # timeline_id is still absent (ULID-only, not required).
-    assert "timeline_id" not in validated
-
-
-def test_managed_binding_metadata_with_timeline_id_round_trip() -> None:
-    """Both timeline_id (ULID) and binding metadata coexist correctly."""
-
-    from uuid import uuid4
-
-    from astrid.core.ids import generate_ulid
-
-    ulid = generate_ulid()
-    event_stream_id = str(uuid4())
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        timeline_id=ulid,
-        timeline_slug="my-cut-v2",
-        timeline_event_stream_id=event_stream_id,
-        timeline_binding_mode="managed",
-    )
-    assert record["timeline_id"] == ulid
-    meta = record["metadata"]
-    assert meta["timeline_slug"] == "my-cut-v2"
-    assert meta["timeline_event_stream_id"] == event_stream_id
-    assert meta["timeline_binding_mode"] == "managed"
-
-
-def test_legacy_run_without_binding_metadata_validates() -> None:
-    """Runs written before m3.5 lack timeline_slug/event_stream_id/binding_mode in metadata."""
-
-    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
-    assert "timeline_slug" not in record["metadata"]
-    assert "timeline_event_stream_id" not in record["metadata"]
-    assert "timeline_binding_mode" not in record["metadata"]
-    validated = validate_run_record(record)
-    assert validated["status"] == "running"
-
-
-def test_legacy_run_status_normalizes_in_memory_without_rewrite(tmp_path: Path) -> None:
-    run_json = tmp_path / "run.json"
-    legacy = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
-    legacy["status"] = "prepared"
-    encoded = json.dumps(legacy, sort_keys=True, indent=2) + "\n"
-    run_json.write_text(encoded, encoding="utf-8")
-
-    loaded = validate_run_record(json.loads(run_json.read_text(encoding="utf-8")))
-
-    assert loaded["status"] == "running"
-    assert run_json.read_text(encoding="utf-8") == encoded
-
-
-def test_managed_binding_mode_must_be_known() -> None:
-    """timeline_binding_mode must be 'managed' or 'unmanaged'."""
-
-    from uuid import uuid4
-
-    event_stream_id = str(uuid4())
-    record = build_run_record(
-        "demo",
-        "01HXYZ",
-        timeline_slug="my-cut-v3",
-        timeline_event_stream_id=event_stream_id,
-        timeline_binding_mode="unmanaged",
-    )
-    assert record["metadata"]["timeline_binding_mode"] == "unmanaged"
-
-    # Invalid mode via direct metadata injection (bypass build for validation-only test).
-    record_bad = build_run_record("demo", "01HXYZ")
-    record_bad["metadata"]["timeline_binding_mode"] = "garbage"
-    record_bad["metadata"]["timeline_slug"] = "my-cut-v3"
-    record_bad["metadata"]["timeline_event_stream_id"] = event_stream_id
-    with pytest.raises(ProjectValidationError, match="timeline_binding_mode"):
-        validate_run_record(record_bad)
-
-
-def test_managed_binding_event_stream_id_must_be_valid_uuid() -> None:
-    """timeline_event_stream_id must be a valid UUID string."""
-
-    record = build_run_record("demo", "01HXYZ")
-    record["metadata"]["timeline_slug"] = "my-cut-v4"
-    record["metadata"]["timeline_event_stream_id"] = "not-a-uuid"
-    record["metadata"]["timeline_binding_mode"] = "managed"
-    with pytest.raises(ProjectValidationError, match="timeline_event_stream_id"):
-        validate_run_record(record)
-
-
 # ── P1a: duration validation in _normalize_asset ──────────────────────────
 
 
@@ -546,7 +317,6 @@ def test_asset_duration_non_positive_raises(tmp_path: Path) -> None:
         with pytest.raises(ProjectValidationError, match="duration"):
             build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": bad})
 
-
 def test_asset_duration_non_finite_raises(tmp_path: Path) -> None:
     from astrid.core.project.schema import build_source
 
@@ -565,18 +335,3 @@ def test_asset_duration_non_number_raises(tmp_path: Path) -> None:
     for bad in ("3.5", True, None, [], {}):
         with pytest.raises(ProjectValidationError, match="duration"):
             build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": bad})
-
-
-def test_managed_binding_slug_must_be_valid() -> None:
-    """timeline_slug must pass validate_timeline_slug."""
-
-    from uuid import uuid4
-
-    from astrid.core.foundation.project_paths import ProjectPathError
-
-    record = build_run_record("demo", "01HXYZ")
-    record["metadata"]["timeline_slug"] = "NOT VALID"
-    record["metadata"]["timeline_event_stream_id"] = str(uuid4())
-    record["metadata"]["timeline_binding_mode"] = "managed"
-    with pytest.raises(ProjectPathError):
-        validate_run_record(record)

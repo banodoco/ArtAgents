@@ -264,7 +264,6 @@ contract documents:
 | `docs/contracts/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
 | `docs/contracts/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
 | `docs/reference/sdk.md` | User-facing SDK walkthrough |
-| `docs/contracts/run-ledger-contract.md` | Run ledger contract |
 | `docs/contracts/integration_contracts.md` | Integration contracts |
 | `docs/contracts/output-result-contract.md` | Output result contract |
 
@@ -291,7 +290,6 @@ structure enforcement. It exposes:
 - `validate_repo_structure()` — top-level entry check, pack layout, import layering, migration completion (returns `StructureReport`)
 - `validate_import_layering()` — core→packs import prohibition
 - `validate_migration_completion()` — DEPRECATED markers, sys.modules injections, dangling `__all__` aliases, compatibility shim detection
-- `validate_run_record_status_boundary()` — legacy run-record status token detection
 
 ### 10.2 Exemption Lists
 

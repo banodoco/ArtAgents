@@ -6,7 +6,7 @@ derived pack artifacts, not as a ledger.
 
 The registry below is the canonical ledger-perimeter reference.  Every entry
 corresponds to a row in the invocation-surfaces table in
-``docs/contracts/run-ledger-contract.md``.
+the workspace runtime's canonical run/task contract.
 
 Meta-tests guard the built-in ``GenerationFacade`` methods so that
 unintentional drift is caught before it breaks ledgering.
@@ -18,7 +18,7 @@ unintentional drift is caught before it breaks ledgering.
    are covered by the SDK ``out=`` ledger fix.  Plugins registered via
    ``astrid.core.generation.verbs.register_verb`` are resolved through
    ``__getattr__`` on ``GenerationFacade`` and are documented as an M1 static
-   coverage gap (see ``docs/contracts/run-ledger-contract.md`` limits table).
+   coverage gap.
 """
 
 from __future__ import annotations

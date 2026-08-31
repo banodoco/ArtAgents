@@ -13,8 +13,6 @@ admit → claim → start → execute → complete|fail — with events, receipt
 attempts, and leases recording each transition. Callers poll the kernel,
 not files: `python3 -m astrid tasks show <task_id> --project <slug> --json`
 or `python3 -m astrid runs show <run_id> --project <slug> --json`. The
-filesystem `run.json` under the project is a write-once finalize-time
-projection of that kernel state, stamped `"authority": "kernel"` — see
-[the run ledger contract](../contracts/run-ledger-contract.md). See
+runtime run/task resource. See
 [CLI journeys](cli-journeys.md) and
 [docs/reference/sdk.md](../reference/sdk.md) for the supported flows.

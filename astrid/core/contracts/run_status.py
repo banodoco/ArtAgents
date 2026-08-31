@@ -19,9 +19,6 @@ gate / produces-check rejection tail        ``BLOCKED``
 ``run_started`` with no terminal follow-up  ``RUNNING``
 ==========================================  =====================
 
-The project-run record schema uses ``success``/``failed``/``skipped`` — convert
-  with :meth:`to_project_record_status` at the executor/orchestrator finalize
-  boundary only.
 """
 
 from __future__ import annotations
@@ -101,39 +98,6 @@ class RunStatus(StrEnum):
             return cls.BLOCKED
         return cls.RUNNING
 
-    @classmethod
-    def from_run_record_status(cls, raw: str) -> "RunStatus":
-        """Parse a persisted run-record status token.
-
-        Accepts canonical persisted tokens and a read-through set of legacy
-        spellings used by older project/thread records. Callers must only
-        serialize canonical tokens back to disk via ``RunStatus.value``.
-        """
-        try:
-            return _RUN_RECORD_STATUS_TO_RUN_STATUS[raw]
-        except KeyError:
-            raise ValueError(
-                f"unmapped run-record status {raw!r}; expected one of "
-                f"{sorted(_RUN_RECORD_STATUS_TO_RUN_STATUS)!r}"
-            ) from None
-
-    # ------------------------------------------------------------------ #
-    # Project-run record boundary — used ONLY at executor/orchestrator finalize.
-    # ------------------------------------------------------------------ #
-    def to_project_record_status(self) -> str:
-        """Translate to the project-run record status vocabulary.
-
-        The persisted ``run.json`` record uses ``success``/``failed``/``skipped``
-        (validated by ``validate_run_record``); this keeps that boundary token
-        derived from the canonical enum rather than a bare literal.
-        """
-        try:
-            return _RUN_STATUS_TO_PROJECT_RECORD[self]
-        except KeyError:
-            raise ValueError(
-                f"{self!r} has no project-run record representation"
-            ) from None
-
 
 def _is_blocked_tail(events: Sequence[Mapping[str, Any]]) -> bool:
     """Whether the run's terminal tail is a gate/produces-check rejection.
@@ -147,24 +111,3 @@ def _is_blocked_tail(events: Sequence[Mapping[str, Any]]) -> bool:
             continue
         return ev.get("kind") in {"cursor_rewind", "iteration_failed"}
     return False
-
-
-_RUN_STATUS_TO_PROJECT_RECORD: dict[RunStatus, str] = {
-    RunStatus.COMPLETED: "success",
-    RunStatus.FAILED: "failed",
-    RunStatus.SKIPPED: "skipped",
-}
-
-_RUN_RECORD_STATUS_TO_RUN_STATUS: dict[str, RunStatus] = {
-    RunStatus.RUNNING.value: RunStatus.RUNNING,
-    RunStatus.COMPLETED.value: RunStatus.COMPLETED,
-    RunStatus.FAILED.value: RunStatus.FAILED,
-    RunStatus.BLOCKED.value: RunStatus.BLOCKED,
-    RunStatus.ABORTED.value: RunStatus.ABORTED,
-    RunStatus.SKIPPED.value: RunStatus.SKIPPED,
-    "prepared": RunStatus.RUNNING,
-    "success": RunStatus.COMPLETED,
-    "succeeded": RunStatus.COMPLETED,
-    "error": RunStatus.FAILED,
-    "orphaned": RunStatus.FAILED,
-}

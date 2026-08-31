@@ -28,8 +28,8 @@ def test_iteration_video_public_route_uses_runtime_authority(
         forwarded["input_manifest"] = kwargs["input_manifest"]
         out = kwargs["out_path"]
         out.mkdir(parents=True, exist_ok=True)
-        _write_json(out / "iteration.manifest.json", {"runs": [], "quality": {"data_quality": 1.0}})
-        _write_json(out / "iteration.quality.json", {"data_quality": 1.0})
+        _write_json(out / "iteration.manifest.json", {"runs": [], "quality": kwargs["input_quality"]})
+        _write_json(out / "iteration.quality.json", kwargs["input_quality"])
         _write_json(out / "hype.timeline.json", {})
         _write_json(out / "hype.assets.json", {})
         return {"manifest_path": str(out / "iteration.manifest.json")}
@@ -61,7 +61,6 @@ def test_iteration_video_public_route_uses_runtime_authority(
                 project="demo",
                 project_was_auto_resolved=True,
                 run_root=out_dir,
-                execution_mode="in_process",
                 inputs={"target_run_id": TARGET_RUN_ID},
                 orchestrator_args=(
                     "--repo-root",
@@ -81,6 +80,7 @@ def test_iteration_video_public_route_uses_runtime_authority(
     assert result.ok
     assert runtime.calls == [("list", "demo")]
     assert forwarded["input_manifest"]["authority"] == {"kind": "runtime", "project": "demo", "run_ids": [TARGET_RUN_ID]}
+    assert forwarded["input_manifest"]["quality"]["data_quality"] == 1.0
     assert Path(forwarded["render_timeline"]).name == "hype.timeline.json"
     assert Path(forwarded["render_assets"]).name == "hype.assets.json"
     assert Path(forwarded["render_output"]).name == "iteration.mp4"
@@ -120,6 +120,38 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
     assert "Estimated cost: ~$0.000" in text
     assert "content: suppressed" in text
     assert "SECRET prompt" not in text
+
+
+def test_iteration_lineage_quality_is_conservative_when_parent_ids_resolve() -> None:
+    parent = iteration_video.RuntimeRunNode(
+        run_id=ROOT_RUN_ID,
+        record={"output_artifacts": [{"kind": "image"}]},
+        depth=1,
+        label="pulled_by_ancestry",
+    )
+    target = iteration_video.RuntimeRunNode(
+        run_id=TARGET_RUN_ID,
+        record={
+            "output_artifacts": [{"kind": "image"}],
+            "runtime_tasks_available": True,
+            "task_records": [{"task_id": "task-target", "output_artifacts": [{"kind": "image"}]}],
+            "runtime_relations_available": True,
+            "runtime_run_events_available": True,
+            "runtime_task_events_available": True,
+            "runtime_evidence": [],
+            "runtime_receipts": [],
+            "runtime_lineage_gaps": ["evidence_unavailable", "receipts_unavailable"],
+        },
+        depth=0,
+        label="target",
+        parent_edges=[{"run_id": ROOT_RUN_ID, "kind": "causal"}],
+    )
+    _manifest, quality = iteration_video._build_runtime_inputs(
+        [parent, target], target_run_id=TARGET_RUN_ID, project_slug="demo"
+    )
+    assert quality["data_quality"] < 1.0
+    assert quality["missing_evidence"] == [ROOT_RUN_ID, TARGET_RUN_ID]
+    assert quality["missing_receipts"] == [ROOT_RUN_ID, TARGET_RUN_ID]
 
 
 def test_iteration_video_public_route_materializes_runtime_output_object(tmp_path: Path, monkeypatch) -> None:
@@ -174,7 +206,6 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
             project="demo",
             project_was_auto_resolved=True,
             run_root=None,
-            execution_mode="in_process",
             inputs={"target_run_id": TARGET_RUN_ID},
             orchestrator_args=("--repo-root", str(tmp_path), "--renderer", "rendering.fixture"),
         )
@@ -184,7 +215,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
     assert runtime.calls == [("list", "demo")]
     assert runtime.objects == [("demo", "object-image-1")]
     assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
-    assert _read_json(out_dir / "iteration.quality.json")["data_quality"] == 1.0
+    assert _read_json(out_dir / "iteration.quality.json")["data_quality"] < 1.0
     assert not (out_dir / "run.json").exists()
 
 
@@ -230,7 +261,24 @@ def _runtime_client(*, include_root: bool = False):
             calls.append(("list", project))
             return type("Result", (), {"ok": True, "data": records})()
 
-    runtime = type("Runtime", (), {"runs": Runs()})()
+        def events(self, project, run_id):
+            return [{"event_id": f"event-{run_id}", "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}]
+
+    class Tasks:
+        def list(self, project):
+            return type("Result", (), {"ok": True, "data": [{
+                "task_id": f"task-{TARGET_RUN_ID}", "run_id": TARGET_RUN_ID,
+                "output_artifacts": [_artifact("image", "d" * 64)],
+            }]})()
+
+        def events(self, task_id, project=None):
+            return [{"event_id": f"event-{task_id}", "event_type": "task.completed", "payload": {}}]
+
+    class Media:
+        def list_relations(self, project):
+            return [{"from_object_id": "d", "to_object_id": "e", "kind": "derived"}]
+
+    runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks(), "media": Media()})()
     runtime.calls = calls
     return runtime
 

@@ -1,4 +1,4 @@
-"""Project file schemas and validators (project / source / run only)."""
+"""Project and source file schemas and validators."""
 
 from __future__ import annotations
 
@@ -6,22 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.identifiers import validate_timeline_slug, validate_timeline_ulid
+from astrid.core.contracts.identifiers import validate_timeline_ulid
 from astrid.core.contracts.project_theme import validate_theme_identifier
-from astrid.core.contracts.run_status import RunStatus
-from astrid.core.contracts.schema_validators import require_uuid_str
 from astrid.core.foundation.project_paths import (
     validate_project_slug,
-    validate_run_id,
     validate_source_id,
 )
 from astrid.core.util.time import utc_now_seconds
 
 PROJECT_SCHEMA_VERSION = 1
 SOURCE_SCHEMA_VERSION = 1
-RUN_SCHEMA_VERSION = 1
 SOURCE_KINDS = {"audio", "image", "other", "video"}
-RUN_INVOCATIONS = {"cli", "sdk", "scratch", "task"}
 
 
 class ProjectValidationError(AstridError, ValueError):
@@ -29,6 +24,8 @@ class ProjectValidationError(AstridError, ValueError):
 
     def __init__(self, cause: str) -> None:
         super().__init__(cause)
+
+
 def build_project(
     slug: str,
     *,
@@ -84,65 +81,6 @@ def build_source(
     }
 
 
-def build_run_record(
-    project_slug: str,
-    run_id: str,
-    *,
-    tool_id: str | None = None,
-    kind: str | None = None,
-    status: str | RunStatus = RunStatus.RUNNING,
-    out: str | Path | None = None,
-    argv: list[str] | None = None,
-    metadata: dict[str, Any] | None = None,
-    artifacts: dict[str, Any] | None = None,
-    created_at: str | None = None,
-    session_id: str | None = None,
-    auto_bound: bool | None = None,
-    invocation: str = "cli",
-    timeline_id: str | None = None,
-    timeline_slug: str | None = None,
-    timeline_event_stream_id: str | None = None,
-    timeline_binding_mode: str | None = None,
-) -> dict[str, Any]:
-    now = created_at or utc_now_seconds()
-    merged_metadata = dict(metadata or {})
-    legacy_auto_bound = merged_metadata.get("project_was_auto_resolved")
-    if auto_bound is None and legacy_auto_bound is not None:
-        auto_bound = _require_bool(legacy_auto_bound, "run.metadata.project_was_auto_resolved")
-    elif auto_bound is not None:
-        merged_metadata.pop("project_was_auto_resolved", None)
-    if timeline_slug is not None:
-        merged_metadata["timeline_slug"] = timeline_slug
-    if timeline_event_stream_id is not None:
-        merged_metadata["timeline_event_stream_id"] = timeline_event_stream_id
-    if timeline_binding_mode is not None:
-        merged_metadata["timeline_binding_mode"] = timeline_binding_mode
-    payload: dict[str, Any] = {
-        "auto_bound": bool(auto_bound) if auto_bound is not None else False,
-        "artifacts": dict(artifacts or {}),
-        "created_at": now,
-        "invocation": _validate_run_invocation(invocation),
-        "metadata": merged_metadata,
-        "project_slug": validate_project_slug(project_slug),
-        "run_id": validate_run_id(run_id),
-        "schema_version": RUN_SCHEMA_VERSION,
-        "session_id": _optional_string(session_id, "run.session_id"),
-        "status": _normalize_run_record_status(status),
-        "updated_at": now,
-    }
-    if tool_id is not None:
-        payload["tool_id"] = _require_string(tool_id, "run.tool_id")
-    if kind is not None:
-        payload["kind"] = _require_string(kind, "run.kind")
-    if out is not None:
-        payload["out"] = str(out)
-    if argv is not None:
-        payload["argv"] = [_require_string(item, "run.argv[]") for item in argv]
-    if timeline_id is not None:
-        payload["timeline_id"] = validate_timeline_ulid(timeline_id)
-    return validate_run_record(payload)
-
-
 def validate_project(raw: Any) -> dict[str, Any]:
     data = _require_mapping(raw, "project")
     _require_version(data, PROJECT_SCHEMA_VERSION, "project")
@@ -195,93 +133,6 @@ def validate_source(raw: Any) -> dict[str, Any]:
     payload.setdefault("created_at", utc_now_seconds())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
-
-
-def validate_run_record(raw: Any) -> dict[str, Any]:
-    data = _require_mapping(raw, "run")
-    _require_version(data, RUN_SCHEMA_VERSION, "run")
-    status = _normalize_run_record_status(data.get("status"))
-    payload = dict(data)
-    metadata = _optional_mapping(data.get("metadata", {}), "run.metadata")
-    legacy_auto_bound = metadata.get("project_was_auto_resolved")
-    auto_bound = data.get("auto_bound")
-    if auto_bound is None and legacy_auto_bound is not None:
-        auto_bound = _require_bool(legacy_auto_bound, "run.metadata.project_was_auto_resolved")
-    payload.update(
-        {
-            "auto_bound": _require_bool(auto_bound if auto_bound is not None else False, "run.auto_bound"),
-            "artifacts": _optional_mapping(data.get("artifacts", {}), "run.artifacts"),
-            "invocation": _validate_run_invocation(data.get("invocation", "cli")),
-            "metadata": metadata,
-            "project_slug": validate_project_slug(_require_string(data.get("project_slug"), "run.project_slug")),
-            "run_id": validate_run_id(_require_string(data.get("run_id"), "run.run_id")),
-            "schema_version": RUN_SCHEMA_VERSION,
-            "session_id": _optional_string(data.get("session_id"), "run.session_id"),
-            "status": status,
-        }
-    )
-    if "argv" in payload:
-        argv = payload["argv"]
-        if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
-            raise ProjectValidationError("run.argv must be a list of strings")
-    if "manifest_path" in payload:
-        manifest_path = payload["manifest_path"]
-        if manifest_path is None:
-            payload.pop("manifest_path")
-        else:
-            payload["manifest_path"] = _require_string(manifest_path, "run.manifest_path")
-    if "timeline_id" in payload:
-        tid = payload["timeline_id"]
-        if tid is None:
-            payload.pop("timeline_id")
-        else:
-            payload["timeline_id"] = validate_timeline_ulid(tid)
-    # Validate managed timeline binding metadata sub-keys (m3.5).
-    meta = payload.get("metadata", {})
-    if isinstance(meta, dict):
-        if "timeline_slug" in meta:
-            meta["timeline_slug"] = validate_timeline_slug(meta["timeline_slug"])
-        if "timeline_event_stream_id" in meta:
-            meta["timeline_event_stream_id"] = _require_uuid_str(
-                meta["timeline_event_stream_id"], "run.metadata.timeline_event_stream_id"
-            )
-        if "timeline_binding_mode" in meta:
-            mode = meta["timeline_binding_mode"]
-            if mode not in ("managed", "unmanaged"):
-                raise ProjectValidationError(
-                    f"run.metadata.timeline_binding_mode must be 'managed' or 'unmanaged', got {mode!r}"
-                )
-        if "timeline_ids" in meta:
-            raw_timeline_ids = meta["timeline_ids"]
-            if not isinstance(raw_timeline_ids, list):
-                raise ProjectValidationError("run.metadata.timeline_ids must be a list")
-            timeline_ids = [validate_timeline_ulid(item) for item in raw_timeline_ids]
-            canonical = sorted(set(timeline_ids))
-            if timeline_ids != canonical:
-                raise ProjectValidationError(
-                    "run.metadata.timeline_ids must be sorted canonical unique ULIDs"
-                )
-            meta["timeline_ids"] = timeline_ids
-        if "evidence" in meta:
-            meta["evidence"] = _require_bool(meta["evidence"], "run.metadata.evidence")
-        if "executor_version" in meta:
-            meta["executor_version"] = _require_string(
-                meta["executor_version"], "run.metadata.executor_version"
-            )
-        payload["metadata"] = meta
-    payload.setdefault("created_at", utc_now_seconds())
-    payload.setdefault("updated_at", payload["created_at"])
-    return payload
-
-
-def _normalize_run_record_status(raw: Any) -> str:
-    if isinstance(raw, RunStatus):
-        return raw.value
-    status = _require_string(raw, "run.status")
-    try:
-        return RunStatus.from_run_record_status(status).value
-    except ValueError as exc:
-        raise ProjectValidationError(str(exc)) from None
 
 
 def validate_source_kind(raw: Any, *, path: str = "source.kind") -> str:
@@ -357,37 +208,7 @@ def _optional_mapping(raw: Any, path: str) -> dict[str, Any]:
         raise ProjectValidationError(f"{path} must be an object")
     return dict(raw)
 
-
 def _require_string(raw: Any, path: str) -> str:
     if not isinstance(raw, str) or not raw:
         raise ProjectValidationError(f"{path} must be a non-empty string")
     return raw
-
-
-def _require_number(raw: Any, path: str) -> int | float:
-    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
-        raise ProjectValidationError(f"{path} must be a number")
-    return raw
-
-
-def _require_bool(raw: Any, path: str) -> bool:
-    if not isinstance(raw, bool):
-        raise ProjectValidationError(f"{path} must be a boolean")
-    return raw
-
-
-def _optional_string(raw: Any, path: str) -> str | None:
-    if raw is None:
-        return None
-    return _require_string(raw, path)
-
-
-def _validate_run_invocation(raw: Any) -> str:
-    invocation = _require_string(raw, "run.invocation")
-    if invocation not in RUN_INVOCATIONS:
-        raise ProjectValidationError(f"run.invocation must be one of {sorted(RUN_INVOCATIONS)}")
-    return invocation
-
-
-def _require_uuid_str(value: object, field: str) -> str:
-    return require_uuid_str(value, field, ProjectValidationError)
