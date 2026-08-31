@@ -5,7 +5,7 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 import uuid
-from typing import Any
+from typing import Any, Mapping
 
 from .contracts import DomainResult, ErrorObject
 from .workspace_client import WorkspaceClient, WorkspaceClientError
@@ -177,7 +177,14 @@ class RemoteTasks(_RemoteFamily):
         return self._typed("register_capability", capability_id, definition_digest, key=idempotency_key, idempotency_key=idempotency_key, **kwargs)
     def create(self, *, project_id=None, capability, spec, input_manifest=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
-        try: match = next((item for item in self._client.list_capabilities() if item.get("capability_id") == capability), None)
+        try:
+            match = next((item for item in self._client.list_capabilities() if item.get("capability_id") == capability), None)
+            if project_id is not None and callable(getattr(self._client, "get_project", None)):
+                project = self._client.get_project(project_id)
+                if isinstance(project, Mapping):
+                    project_id = project.get("project_id") or project.get("id") or project_id
+                else:
+                    project_id = getattr(project, "project_id", None) or getattr(project, "id", None) or project_id
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         if match is None: return DomainResult.failure(ErrorObject("not_found", "capability is not registered", {"capability_id": capability}), idempotency_key=key)
         return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec)
