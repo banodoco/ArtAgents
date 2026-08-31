@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 WORKSPACE = Path(__file__).parents[3]
 RUNTIME = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
@@ -23,12 +24,12 @@ from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolC
 from astrid.sdk.client import AstridClient  # noqa: E402
 
 
-def _start_runtime(realm: Path, support: Path) -> tuple[subprocess.Popen[str], dict[str, str]]:
+def _start_runtime(realm: Path, support: Path, runtime: Path = RUNTIME) -> tuple[subprocess.Popen[str], dict[str, str]]:
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME), str(RUNTIME / "packages" / "python"), env.get("PYTHONPATH", "")))
+    env["PYTHONPATH"] = os.pathsep.join((str(runtime), str(runtime / "packages" / "python"), env.get("PYTHONPATH", "")))
     process = subprocess.Popen(
         [sys.executable, "-m", "runtime_protocol", "start", "--root", str(realm), "--support-root", str(support)],
-        cwd=RUNTIME,
+        cwd=runtime,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -187,6 +188,69 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert reopened.timelines.show(project_id, timeline_id).ok
         assert restarted_generated.get_task(task.task_id).state == "succeeded"
         assert restarted_generated.get_object(object_id).data == b"managed-media"
+        reopened.close()
+    finally:
+        _stop_runtime(daemon)
+
+
+def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypatch):
+    runtime = Path(os.environ.get("BANODOCO_RUNTIME_CHECKOUT") or RUNTIME).expanduser().resolve()
+    realm, support = tmp_path / "realm", tmp_path / "support"
+    daemon, metadata = _start_runtime(realm, support, runtime)
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(support / "credentials" / "owner.token"))
+    monkeypatch.setenv("BANODOCO_RUNTIME_CHECKOUT", str(runtime))
+    try:
+        for module_name in list(sys.modules):
+            if module_name == "banodoco_workspace_client" or module_name.startswith("banodoco_workspace_client."):
+                sys.modules.pop(module_name, None)
+        astrid = AstridClient.open()
+        if not hasattr(astrid._remote.shots._client._generated, "create_project_shot"):
+            astrid.close()
+            pytest.skip("runtime contract does not expose project shot operations")
+        project = astrid.projects.create(slug="b71", name="B71", idempotency_key="b71-project")
+        other = astrid.projects.create(slug="b71-other", name="B71 Other", idempotency_key="b71-other")
+        assert project.ok and other.ok
+        project_id = project.data["project_id"]
+        other_id = other.data["project_id"]
+        source = tmp_path / "b71.bin"
+        source.write_bytes(b"b71-media")
+        media = astrid.media.import_file(project=project_id, path=source, idempotency_key="b71-media")
+        assert media.ok
+        shot = astrid.shots.create(project=project_id, shot={"shot_id": "b71-shot", "name": "B71 Shot"}, idempotency_key="b71-shot")
+        reference = astrid.references.create(project=project_id, reference_id="b71-reference", kind="character", name="B71", media_id=media.data["object_id"], idempotency_key="b71-reference")
+        assert shot.ok and reference.ok
+        assert astrid.shots.create(project=project_id, shot={"shot_id": "b71-shot", "name": "B71 Shot"}, idempotency_key="b71-shot").data["shot_id"] == "b71-shot"
+        assert astrid.shots.list(project_id).data[0]["shot_id"] == "b71-shot"
+        assert astrid.shots.list(other_id).data == []
+        source2 = tmp_path / "b71-2.bin"
+        source2.write_bytes(b"b71-media-2")
+        media2 = astrid.media.import_file(project=project_id, path=source2, idempotency_key="b71-media-2")
+        first_items = astrid.shots.add_item(project_id, "b71-shot", media_id=media.data["object_id"], position=0, idempotency_key="b71-item-1")
+        second_items = astrid.shots.add_item(project_id, "b71-shot", media_id=media2.data["object_id"], position=1, idempotency_key="b71-item-2")
+        item_ids = [item["item_id"] for item in second_items.data["items"]]
+        reordered = astrid.shots.reorder(project_id, "b71-shot", item_ids=list(reversed(item_ids)), expected_version=second_items.data["version"], idempotency_key="b71-reorder")
+        removed = astrid.shots.remove_item(project_id, "b71-shot", item_ids[0], expected_version=reordered.data["version"], idempotency_key="b71-remove")
+        assert first_items.ok and media2.ok and removed.ok and len(removed.data["items"]) == 1
+        updated = astrid.shots.update(project_id, "b71-shot", expected_version=1, name="B71 Updated", idempotency_key="b71-shot-update")
+        assert updated.ok is False and updated.error.code == "conflict"
+        updated = astrid.shots.update(project_id, "b71-shot", expected_version=removed.data["version"], name="B71 Updated", idempotency_key="b71-shot-update")
+        assert updated.ok and updated.data["name"] == "B71 Updated"
+        archived = astrid.shots.archive(project_id, "b71-shot", expected_version=updated.data["version"], idempotency_key="b71-shot-archive")
+        recovered = astrid.shots.recover(project_id, "b71-shot", expected_version=archived.data["version"], idempotency_key="b71-shot-recover")
+        assert archived.ok and recovered.ok and recovered.data["archived"] is False
+        association = astrid.references.associate(project_id, "b71-reference", media_id=media2.data["object_id"], role="depicts", idempotency_key="b71-associate")
+        secondary = astrid.references.create(project=project_id, reference_id="b71-reference-2", kind="object", name="Prop", media_id=media.data["object_id"], idempotency_key="b71-reference-2")
+        primary = astrid.references.set_primary(project_id, "b71-reference", association_id=association.data["media_references"][-1]["association_id"], expected_version=association.data["version"], idempotency_key="b71-primary")
+        link = astrid.references.link(project=project_id, from_reference_id="b71-reference", to_reference_id="b71-reference-2", kind="associated_with", idempotency_key="b71-link")
+        assert association.ok and secondary.ok and primary.ok and link.ok
+        astrid.close()
+        _stop_runtime(daemon)
+        daemon, metadata = _start_runtime(realm, support, runtime)
+        monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])
+        reopened = AstridClient.open()
+        assert reopened.shots.show(project_id, "b71-shot").ok
+        assert reopened.references.show(project_id, "b71-reference").ok
         reopened.close()
     finally:
         _stop_runtime(daemon)

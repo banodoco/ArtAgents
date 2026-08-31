@@ -88,8 +88,11 @@ def _ensure_generated_client_path() -> None:
     if checkout is None:
         return
     client_root = checkout / "packages" / "python"
-    if client_root.is_dir() and str(client_root) not in sys.path:
-        sys.path.insert(0, str(client_root))
+    if client_root.is_dir():
+        client_root_str = str(client_root)
+        if client_root_str in sys.path:
+            sys.path.remove(client_root_str)
+        sys.path.insert(0, client_root_str)
 
 
 class WorkspaceClient:
@@ -117,7 +120,16 @@ class WorkspaceClient:
     def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""
         try:
-            value = getattr(self._generated, operation)(*args, **kwargs)
+            try:
+                value = getattr(self._generated, operation)(*args, **kwargs)
+            except TypeError as exc:
+                # Older pinned generated clients predate optional update
+                # idempotency headers; preserve their timeline compatibility.
+                if "idempotency_key" not in kwargs or "unexpected keyword" not in str(exc):
+                    raise
+                retry_kwargs = dict(kwargs)
+                retry_kwargs.pop("idempotency_key", None)
+                value = getattr(self._generated, operation)(*args, **retry_kwargs)
         except Exception as exc:  # generated ApiError has stable fields
             raise WorkspaceClientError(
                 int(getattr(exc, "status", 0)),
@@ -296,6 +308,30 @@ class WorkspaceClient:
         )
         return {"items": list(items), "next_cursor": next_cursor}
 
+    def create_project_shot(self, project_id: str, shot: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("create_project_shot", project_id, shot, idempotency_key=idempotency_key)
+
+    def get_project_shot(self, project_id: str, shot_id: str) -> Any:
+        return self._call_generated("get_project_shot", project_id, shot_id)
+
+    def update_project_shot(self, project_id: str, shot_id: str, *, expected_version: int, name=None, metadata=None, idempotency_key: str | None = None) -> Any:
+        return self._call_generated("update_project_shot", project_id, shot_id, expected_version=expected_version, name=name, metadata=metadata, idempotency_key=idempotency_key or "")
+
+    def archive_project_shot(self, project_id: str, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("archive_project_shot", project_id, shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def recover_project_shot(self, project_id: str, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("recover_project_shot", project_id, shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def add_shot_item(self, project_id: str, shot_id: str, item: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("add_shot_item", project_id, shot_id, item, idempotency_key=idempotency_key)
+
+    def remove_shot_item(self, project_id: str, shot_id: str, item_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("remove_shot_item", project_id, shot_id, item_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def reorder_shot_items(self, project_id: str, shot_id: str, item_ids: list[str], *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("reorder_shot_items", project_id, shot_id, item_ids, expected_version=expected_version, idempotency_key=idempotency_key)
+
     def update_shot(
         self,
         shot_id: str,
@@ -304,6 +340,7 @@ class WorkspaceClient:
         start_ms: int | None = None,
         duration_ms: int | None = None,
         reference_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
     ) -> Any:
         return self._call_generated(
             "update_shot",
@@ -312,6 +349,7 @@ class WorkspaceClient:
             start_ms=start_ms,
             duration_ms=duration_ms,
             reference_ids=reference_ids,
+            idempotency_key=idempotency_key,
         )
 
     def archive_shot(self, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
@@ -343,6 +381,30 @@ class WorkspaceClient:
         )
         return {"items": list(items), "next_cursor": next_cursor}
 
+    def create_project_reference(self, project_id: str, reference: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("create_project_reference", project_id, reference, idempotency_key=idempotency_key)
+
+    def get_project_reference(self, project_id: str, reference_id: str) -> Any:
+        return self._call_generated("get_project_reference", project_id, reference_id)
+
+    def update_project_reference(self, project_id: str, reference_id: str, *, expected_version: int, name=None, description=None, metadata=None, idempotency_key: str | None = None) -> Any:
+        return self._call_generated("update_project_reference", project_id, reference_id, expected_version=expected_version, name=name, description=description, metadata=metadata, idempotency_key=idempotency_key or "")
+
+    def archive_project_reference(self, project_id: str, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("archive_project_reference", project_id, reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def recover_project_reference(self, project_id: str, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("recover_project_reference", project_id, reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def associate_reference(self, project_id: str, reference_id: str, association: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("associate_reference", project_id, reference_id, association, idempotency_key=idempotency_key)
+
+    def set_primary_reference(self, project_id: str, reference_id: str, association_id: str, *, expected_version: int, idempotency_key: str) -> Any:
+        return self._call_generated("set_primary_reference", project_id, reference_id, association_id, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def link_references(self, project_id: str, link: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("link_references", project_id, link, idempotency_key=idempotency_key)
+
     def update_reference(
         self,
         reference_id: str,
@@ -350,6 +412,7 @@ class WorkspaceClient:
         expected_version: int,
         object_id: str | None = None,
         role: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Any:
         return self._call_generated(
             "update_reference",
@@ -357,6 +420,7 @@ class WorkspaceClient:
             expected_version=expected_version,
             object_id=object_id,
             role=role,
+            idempotency_key=idempotency_key,
         )
 
     def archive_reference(self, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
