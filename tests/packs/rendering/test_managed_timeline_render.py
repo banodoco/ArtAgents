@@ -123,8 +123,12 @@ def test_runtime_media_admission_requires_terminal_canonical_page(page) -> None:
 def test_runtime_media_identity_mismatch_fails_closed() -> None:
     runtime = _Runtime(media=[{"media_id": "media-1", "digest": "a" * 64}])
     runtime.timeline["registry"] = {"assets": {"hero": {"media_id": "media-1", "content_sha256": "b" * 64}}}
-    with pytest.raises(ManagedRenderValidationError, match="does not match"):
+    with pytest.raises(ManagedRenderValidationError, match="claims digest.*runtime admitted") as error:
         _snapshot(runtime)
+    assert error.value.details["validator"] == "managed_media_runtime_admission"
+    assert error.value.details["reason"] == (
+        "authored media identity does not match project runtime admission"
+    )
 
 
 @pytest.mark.parametrize("timeline_ref", [
