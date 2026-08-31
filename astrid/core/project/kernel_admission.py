@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.run import ProjectRunError
+from astrid.core.project.runtime import ProjectRuntimeError
 
 
 @dataclass(frozen=True)
@@ -26,10 +26,10 @@ class KernelAdmissionContext:
     project_slug: str
 
 
-def _runtime_failure(result: Any) -> ProjectRunError:
+def _runtime_failure(result: Any) -> ProjectRuntimeError:
     error = getattr(result, "error", None)
     message = str(getattr(error, "message", "workspace runtime rejected task admission"))
-    return ProjectRunError(message)
+    return ProjectRuntimeError(message)
 
 
 def _workspace_root(project: str, tool_id: str) -> Path:
@@ -55,9 +55,9 @@ def admit_orchestrator_project_run(
     """
     del projects_root
     if not isinstance(project, str) or not project.strip():
-        raise ProjectRunError("project is required for runtime admission")
+        raise ProjectRuntimeError("project is required for runtime admission")
     if not isinstance(tool_id, str) or not tool_id.strip():
-        raise ProjectRunError("tool id is required for runtime admission")
+        raise ProjectRuntimeError("tool id is required for runtime admission")
 
     spec: dict[str, Any] = {
         "tool_id": tool_id,
@@ -84,7 +84,7 @@ def admit_orchestrator_project_run(
     tasks = getattr(_client, "tasks", None)
     create = getattr(tasks, "create", None)
     if not callable(create):
-        raise ProjectRunError("workspace runtime client does not expose task admission")
+        raise ProjectRuntimeError("workspace runtime client does not expose task admission")
     result = create(
         project_id=project,
         capability=tool_id,
@@ -99,10 +99,10 @@ def admit_orchestrator_project_run(
     else:
         data = result
     if not isinstance(data, dict):
-        raise ProjectRunError("workspace runtime returned an invalid task resource")
+        raise ProjectRuntimeError("workspace runtime returned an invalid task resource")
     run_id = str(data.get("run_id") or "")
     if not run_id:
-        raise ProjectRunError("workspace runtime returned an admission without a run id")
+        raise ProjectRuntimeError("workspace runtime returned an admission without a run id")
     return KernelAdmissionContext(
         run_id=run_id,
         run_root=_workspace_root(project, tool_id),

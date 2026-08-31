@@ -19,7 +19,7 @@ guard_canonical_entrypoint('video_editing.hype')
 import os
 import sys
 
-from astrid.core.project.run import ProjectRunError
+from astrid.core.project.runtime import ProjectRuntimeError
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         try:
             project_context, effective_argv = _prepare_project_main(effective_argv)
-        except ProjectRunError as exc:
+        except ProjectRuntimeError as exc:
             raise AstridError(
                 str(exc),
                 recovery_command="Check project configuration and retry: astrid status",

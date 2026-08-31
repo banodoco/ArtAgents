@@ -27,8 +27,8 @@ from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
 )
-from astrid.core.project.run import (
-    ProjectRunContext,
+from astrid.core.project.runtime import (
+    ProjectRuntimeError,
     _project_subprocess_env,
     reject_project_with_out,
 )
@@ -174,7 +174,7 @@ class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, Orch
 
     def prepare_project(
         self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
-    ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
+    ) -> tuple[object | None, OrchestratorRunRequest]:
         return _prepare_project_request(request, definition)
 
     def resolve_project_request(
@@ -195,7 +195,7 @@ class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, Orch
 
     def finalize_project(
         self,
-        context: ProjectRunContext,
+        context: object,
         request: OrchestratorRunRequest,
         *,
         status: RunStatus,
@@ -701,7 +701,7 @@ def _placeholder_values(orchestrator: OrchestratorDefinition, request: Orchestra
 def _prepare_project_request(
     request: OrchestratorRunRequest,
     orchestrator: OrchestratorDefinition,
-) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
+    ) -> tuple[object | None, OrchestratorRunRequest]:
     # Single-ledger cut: project runs are kernel-owned (RunRepository fan-out).
     # The runner retains output as staging only; no run.json is written here.
     # The kernel admission path (sdk.invoke / CapabilityTaskHandler) owns the
@@ -723,9 +723,7 @@ def _prepare_project_request(
     # The unified execution path requires a kernel run for every invocation;
     # storage-only run directories without a kernel row are not created.
     if request.out in (None, ""):
-        from astrid.core.project.run import ProjectRunError
-
-        raise ProjectRunError(
+        raise ProjectRuntimeError(
             f"orchestrator {orchestrator.id!r} requires --out or a kernel run"
         )
     return None, request
@@ -775,7 +773,7 @@ def _project_status_for_result(result: OrchestratorRunResult) -> RunStatus:
 
 
 def _finalize_project_orchestrator(
-    context: ProjectRunContext,
+    context: object,
     request: OrchestratorRunRequest,
     *,
     status: RunStatus,

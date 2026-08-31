@@ -56,7 +56,7 @@ falls back to the legacy key with a deprecation warning.  Use
 
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
-| `ASTRID_PROJECT_RUN` | `ASTRID_PROJECT_RUN` | `project/run.py` (`project_run_env`) | Child processes | Set to `1` inside a project-run subprocess to distinguish a harness-driven invocation from a bare CLI call. |
+| `ASTRID_PROJECT_RUN` | `ASTRID_PROJECT_RUN` | `project/runtime.py` (`project_run_env`) | Child processes | Set to `1` inside a runtime-bound subprocess to distinguish a harness-driven invocation from a bare CLI call. |
 
 ## Task run context
 

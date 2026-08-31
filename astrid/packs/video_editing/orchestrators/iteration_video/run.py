@@ -215,9 +215,13 @@ def _attached_render_binding(request: Any) -> dict[str, str | None]:
         }
     project_slug = getattr(request, "project", None)
     run_root = getattr(request, "run_root", None)
-    if bool(project_slug) != bool(run_root):
+    # A runtime-selected project without a parent run is a valid public route;
+    # only an orphaned run-root is an invalid binding. The render helper will
+    # use its unbound service path while the outer invocation remains runtime
+    # admitted.
+    if run_root and not project_slug:
         raise IterationVideoError(
-            "iteration render requires both the parent project and run context"
+            "iteration render received a run context without a parent project"
         )
     if project_slug and run_root:
         return {
@@ -388,6 +392,11 @@ def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[st
     source = dict(raw)
     run_id = str(source.get("run_id") or source.get("id") or "")
     spec = source.get("spec") if isinstance(source.get("spec"), Mapping) else {}
+    # The runtime run resource wraps the admitted capability spec in a
+    # transport envelope (`spec.spec`).  Normalize that envelope once so the
+    # pack consumes the exact fields supplied at admission.
+    if isinstance(spec.get("spec"), Mapping):
+        spec = dict(spec["spec"])
     metadata = source.get("metadata") if isinstance(source.get("metadata"), Mapping) else {}
     result = source.get("result") if isinstance(source.get("result"), Mapping) else {}
     record: dict[str, Any] = {**dict(spec), **source}
@@ -508,7 +517,7 @@ def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[
     for raw in raw_edges:
         value = raw if isinstance(raw, Mapping) else {"run_id": raw}
         run_id = value.get("run_id") if isinstance(value, Mapping) else None
-        if not isinstance(run_id, str) or not is_ulid(run_id) or run_id in seen:
+        if not isinstance(run_id, str) or not _is_runtime_identifier(run_id) or run_id in seen:
             continue
         seen.add(run_id)
         edge = {"run_id": run_id, "kind": str(value.get("kind") or "causal")}
@@ -581,8 +590,8 @@ def resolve_target_run_id(
     if thread_id is not None and not is_ulid(thread_id):
         raise IterationVideoError("thread must be a thread id or @active")
     if target_run_id is not None:
-        if not is_ulid(target_run_id):
-            raise IterationVideoError("target run id must be a 26-character Crockford ULID")
+        if not _is_runtime_identifier(target_run_id):
+            raise IterationVideoError("target run id must be a non-empty runtime identifier")
         if target_run_id not in all_records:
             fetched = _runtime_run_show(client, project, target_run_id)
             if fetched is not None:
@@ -610,6 +619,14 @@ def resolve_target_run_id(
         "target_run_id": selected,
         "project_slug": project,
     }, all_records)
+
+
+def _is_runtime_identifier(value: object) -> bool:
+    """Validate opaque runtime ids without imposing a local ULID dialect."""
+
+    if not isinstance(value, str) or not value or len(value) > 128:
+        return False
+    return all(char.isalnum() or char in "_-" for char in value)
 
 
 def renderer_decisions(nodes: list[RuntimeRunNode]) -> list[dict[str, Any]]:

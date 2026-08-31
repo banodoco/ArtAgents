@@ -40,8 +40,7 @@ from astrid.core.project.guidance import (
     selected_project,
 )
 from astrid.core.project.ownership import require_project_owned_artifact
-from astrid.core.project.run import (
-    ProjectRunContext,
+from astrid.core.project.runtime import (
     _project_subprocess_env,
     reject_project_with_out,
 )
@@ -232,7 +231,7 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
 
     def prepare_project(
         self, request: ExecutorRunRequest, definition: ExecutorDefinition
-    ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
+    ) -> tuple[object | None, ExecutorRunRequest]:
         return _prepare_project_request(request, definition)
 
     def resolve_project_request(
@@ -253,7 +252,7 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
 
     def finalize_project(
         self,
-        context: ProjectRunContext,
+        context: object,
         request: ExecutorRunRequest,
         *,
         status: RunStatus,
@@ -894,7 +893,7 @@ def _is_truthy_flag(value: Any) -> bool:
 def _prepare_project_request(
     request: ExecutorRunRequest,
     executor: ExecutorDefinition,
-) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
+    ) -> tuple[object | None, ExecutorRunRequest]:
     # Single-ledger cut: project runs are kernel-owned (RunRepository fan-out).
     # The runner retains the output directory as staging only; no run.json is
     # written here. The kernel admission path (sdk.invoke / CapabilityTaskHandler)
@@ -1008,7 +1007,7 @@ def _project_status_for_result(result: ExecutorRunResult) -> RunStatus:
 
 
 def _finalize_project_executor(
-    context: ProjectRunContext,
+    context: object,
     request: ExecutorRunRequest,
     *,
     status: RunStatus,

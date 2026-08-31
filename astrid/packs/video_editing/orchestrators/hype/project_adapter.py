@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
-from astrid.core.project.run import (
-    ProjectRunError,
+from astrid.core.project.runtime import (
     project_run_env,
     reject_project_with_out,
 )

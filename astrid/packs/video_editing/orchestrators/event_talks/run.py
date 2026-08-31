@@ -20,7 +20,7 @@ from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.media import ffprobe_duration_seconds
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
-from astrid.core.project.run import reject_project_with_out
+from astrid.core.project.runtime import reject_project_with_out
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
     build_plan_v2,
     emit_plan_json,

@@ -23,10 +23,10 @@ python3 -m astrid doctor --json   # read-only health check
 python3 -m astrid projects list --json
 ```
 
-There is no session-binding step and no `setup` command: product commands run
-directly against the local SQLite kernel at
-`$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` (created lazily by the first
-product command).
+There is no session-binding step and no `setup` command: product commands use
+the selected workspace runtime. Project/run identity comes only from its
+generated client (`projects.list/show`, `runs.list/show`); local project and
+run JSON files are output/provenance artifacts, never selection authority.
 
 Canonical discovery is the SDK; the `--json` CLI reads are the shell
 equivalents:

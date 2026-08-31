@@ -23,11 +23,10 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from astrid.core._shared.jsonio import ProjectJsonError, read_json, write_json_atomic
+from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.foundation.project_paths import project_dir
-from astrid.core.project.schema import validate_run_record
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.core.timeline.resolution import classify_registry
 from astrid.core.timeline.snapshot import TimelineSnapshot, acquire_snapshot
@@ -1239,11 +1238,7 @@ def _materialize_view(
             except ValueError:
                 from_view = str(parent_manifest)
             focus = args.focus
-        project_record = _read_mapping(project_root / "project.json") or {}
         resolved_project: dict[str, str] = {"slug": args.project_slug}
-        project_id = project_record.get("project_id")
-        if isinstance(project_id, str) and project_id:
-            resolved_project["id"] = project_id
         if args.timeline_source:
             source_mode = "legacy"
         elif args.from_view is not None or frozen_parent is not None:
@@ -1318,90 +1313,15 @@ def _pipeline_metadata_for_timeline(
     project_root: Path,
     timeline_dir: Path,
 ) -> tuple[Mapping | None, Path | None, Path | None]:
-    """Load one run-declared, run-contained hype metadata artifact.
+    """Return no legacy run-file metadata.
 
-    Only timeline ``contributing_runs`` and each run record's explicit
-    ``artifacts.metadata.path`` are consulted.  No filename or directory scan
-    participates in authority selection.
+    Producer artifacts must be obtained from the runtime result API.  That API
+    does not yet expose transcript attachments, so the old ``runs/*/run.json``
+    walk is retired instead of becoming a second authority.
     """
 
-    manifest = _read_mapping(timeline_dir / "manifest.json")
-    run_ids = manifest.get("contributing_runs") if manifest is not None else None
-    if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
-        return None, None, None
-
-    project_base = project_root.resolve()
-    runs_root = (project_base / "runs").resolve()
-    candidates: list[tuple[Mapping, Path, Path]] = []
-    for run_id in run_ids:
-        declared_run_root = runs_root / run_id
-        run_root = declared_run_root.resolve()
-        if (
-            declared_run_root.is_symlink()
-            or run_root.parent != runs_root
-            or run_root.name != run_id
-        ):
-            continue
-        run_path = (run_root / "run.json").resolve()
-        if run_path.parent != run_root:
-            continue
-        record = _read_mapping(run_path)
-        if record is None:
-            continue
-
-        raw_out = record.get("out")
-        if isinstance(raw_out, str) and raw_out.strip():
-            out_path = Path(raw_out).expanduser()
-            resolved_out = (
-                out_path.resolve()
-                if out_path.is_absolute()
-                else (project_base / out_path).resolve()
-            )
-            if not resolved_out.is_relative_to(run_root):
-                continue
-
-        artifacts = record.get("artifacts")
-        metadata_artifact = artifacts.get("metadata") if isinstance(artifacts, Mapping) else None
-        if not isinstance(metadata_artifact, Mapping):
-            continue
-        raw_path = metadata_artifact.get("path")
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            raw_path = metadata_artifact.get("source_path")
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            continue
-        artifact_path = Path(raw_path).expanduser()
-        metadata_path = (
-            artifact_path.resolve()
-            if artifact_path.is_absolute()
-            else (project_base / artifact_path).resolve()
-        )
-        if not metadata_path.is_relative_to(run_root):
-            continue
-        metadata_base = metadata_path.parent
-        raw_source_path = metadata_artifact.get("source_path")
-        if isinstance(raw_source_path, str) and raw_source_path.strip():
-            source_path = Path(raw_source_path).expanduser()
-            resolved_source = (
-                source_path.resolve()
-                if source_path.is_absolute()
-                else (project_base / source_path).resolve()
-            )
-            if resolved_source.is_relative_to(run_root):
-                metadata_base = resolved_source.parent
-        metadata = _read_mapping(metadata_path)
-        if metadata is not None:
-            candidates.append((metadata, metadata_base, run_root))
-
-    authorities = [
-        candidate for candidate in candidates if _has_pipeline_transcript_reference(candidate[0])
-    ]
-    if len(authorities) > 1:
-        # Preserve the higher-priority pipeline level and fail closed in
-        # discover_attachment instead of falling through to sources.json.
-        return {"transcript": None}, project_base, project_base
-    if len(authorities) != 1:
-        return None, None, None
-    return authorities[0]
+    del project_root, timeline_dir
+    return None, None, None
 
 
 def _has_pipeline_transcript_reference(metadata: Mapping) -> bool:
@@ -1708,16 +1628,10 @@ def _write_project_index(
 
 
 def _mark_run_metadata(out_root: Path, project_slug: str, timeline_ids: list[str]) -> None:
-    run_path = out_root / "run.json"
-    if not run_path.is_file():
-        return
-    record = validate_run_record(read_json(run_path))
-    if record.get("project_slug") != project_slug:
-        raise ValueError("managed run project does not match project_slug input")
-    metadata = dict(record.get("metadata", {}))
-    metadata.update({"evidence": True, "timeline_ids": timeline_ids})
-    record["metadata"] = metadata
-    write_json_atomic(run_path, validate_run_record(record))
+    # Run metadata is settled through the runtime task result.  The
+    # visualization pack is an output projection and must not mutate a local
+    # run.json ledger after admission.
+    del out_root, project_slug, timeline_ids
 
 
 def _execute_from_frozen(

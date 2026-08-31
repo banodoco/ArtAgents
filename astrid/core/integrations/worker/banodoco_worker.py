@@ -58,7 +58,6 @@ from astrid.core.integrations.reigh.worker_jwt import (
     VerifiedJwt,
     verify_user_jwt,
 )
-from astrid.core.project.run import write_run_record
 
 logger = logging.getLogger(__name__)
 
@@ -177,53 +176,14 @@ def _write_baseline_snapshot(
     run_id: str,
     payload: Any,
 ) -> str | None:
-    """Write SD-008 ``runs/<run_id>.json#metadata.baseline_snapshot`` and return the hash.
+    """Return the baseline digest for runtime settlement metadata.
 
-    Kernel-first: if a kernel run exists for this project/run_id, stamp as derived
-    projection (authority: kernel); otherwise stamp as import storage
-    (authority: import). Never an authoritative ledger write. Load path retains
-    FS fallback for historical dirs.
-
-    Single-write: authority + kernel ids determined before the write and
-    passed atomically to ``write_run_record`` — no read-modify-write patch.
+    The worker used to write ``run.json`` as a local ledger projection.  That
+    path was a second run authority and is retired; callers must include this
+    digest in the runtime task settlement instead.
     """
     digest = sha256_hex(canonical_json(payload))
-    if not project_slug:
-        return None
-    _kernel_run_id: str | None = None
-    _kernel_task_id: str | None = None
-    try:
-        import sqlite3 as _sqlite
-        from astrid.core.kernel.read import kernel_run_info
-
-        _info = kernel_run_info(project_slug, run_id)
-        if _info is not None:
-            _kernel_run_id = str(_info["run_id"])
-            _kernel_task_id = str(_info["task_id"]) if _info.get("task_id") else None
-    except _sqlite.Error:
-        pass
-    if _kernel_run_id is not None:
-        run_record = write_run_record(
-            project_slug,
-            run_id,
-            tool_id="astrid.core.integrations.worker.banodoco_worker",
-            kind="banodoco_timeline_generate",
-            metadata={"baseline_snapshot": digest},
-            authority="kernel",
-            kernel_run_id=_kernel_run_id,
-            **({"kernel_task_id": _kernel_task_id} if _kernel_task_id is not None else {}),
-        )
-    else:
-        run_record = write_run_record(
-            project_slug,
-            run_id,
-            tool_id="astrid.core.integrations.worker.banodoco_worker",
-            kind="banodoco_timeline_generate",
-            metadata={"baseline_snapshot": digest, "non_authority": True, "storage_kind": "legacy_import"},
-            authority="import",
-        )
-    if not isinstance(run_record.get("metadata"), dict) or run_record["metadata"].get("baseline_snapshot") != digest:
-        logger.warning("baseline_snapshot did not round-trip into run record for %s", run_id)
+    del project_slug, run_id
     return digest
 
 # ---------------------------------------------------------------------------

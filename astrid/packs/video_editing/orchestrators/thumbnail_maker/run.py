@@ -20,7 +20,7 @@ from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
-from astrid.core.project.run import reject_project_with_out
+from astrid.core.project.runtime import reject_project_with_out
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
     build_plan_v2,

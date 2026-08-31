@@ -6,9 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.project import create_project
-from astrid.core.project.run import write_run_record
 from astrid.core.rendering import attached
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
@@ -40,15 +38,37 @@ class _Service:
         return output
 
 
-def _seed_parent(root: Path, *, run_id: str = "parent-run") -> None:
+def _seed_parent(root: Path) -> None:
     create_project("demo", root=root)
-    write_run_record(
-        "demo",
-        run_id,
-        root=root,
-        tool_id="demo.parent",
-        kind="orchestrator",
-        status=RunStatus.RUNNING,
+
+
+class _RuntimeClient:
+    def __init__(self, *, run_id: str = "parent-run", valid: bool = True) -> None:
+        self.run_id = run_id
+        self.valid = valid
+        self.runs = self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+    def show(self, project: str, run_id: str):
+        if not self.valid or project != "demo" or run_id != self.run_id:
+            return SimpleNamespace(ok=False, data=None)
+        return SimpleNamespace(
+            ok=True,
+            data={"project_id": project, "run_id": run_id, "status": "running"},
+        )
+
+
+def _patch_runtime_parent(
+    monkeypatch: pytest.MonkeyPatch, *, run_id: str = "parent-run", valid: bool = True
+) -> None:
+    monkeypatch.setattr(
+        "astrid.sdk.client.AstridClient.open",
+        classmethod(lambda cls: _RuntimeClient(run_id=run_id, valid=valid)),
     )
 
 
@@ -74,6 +94,7 @@ def test_attached_invocation_records_unique_child_step_and_outputs(
 ) -> None:
     projects_root = tmp_path / "projects"
     _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     calls: list[object] = []
     monkeypatch.setattr(attached, "run_executor", _fake_success(calls))
     output = tmp_path / "chosen" / "preview.mp4"
@@ -92,8 +113,8 @@ def test_attached_invocation_records_unique_child_step_and_outputs(
     assert result == output.resolve()
     produces = (
         projects_root
+        / ".astrid-runtime-staging"
         / "demo"
-        / "runs"
         / "parent-run"
         / "steps"
         / "render-preview"
@@ -122,6 +143,7 @@ def test_task_env_is_scoped_and_restored_after_success(
 ) -> None:
     projects_root = tmp_path / "projects"
     _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     monkeypatch.setenv(TASK_PROJECT_ENV, "outer-project")
     monkeypatch.delenv(TASK_RUN_ID_ENV, raising=False)
     monkeypatch.setenv(TASK_STEP_ID_ENV, "")
@@ -153,6 +175,7 @@ def test_task_env_is_scoped_and_restored_after_child_raises(
 ) -> None:
     projects_root = tmp_path / "projects"
     _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     monkeypatch.delenv(TASK_PROJECT_ENV, raising=False)
     monkeypatch.setenv(TASK_RUN_ID_ENV, "outer-run")
     monkeypatch.setenv(TASK_STEP_ID_ENV, "outer-step")
@@ -196,6 +219,7 @@ def test_caller_selected_output_name_is_forwarded(
 ) -> None:
     projects_root = tmp_path / "projects"
     _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     calls: list[object] = []
     monkeypatch.setattr(attached, "run_executor", _fake_success(calls))
     output = tmp_path / "deliverables" / "iteration.mp4"
@@ -222,6 +246,7 @@ def test_executor_override_changes_attached_behavior(
 ) -> None:
     projects_root = tmp_path / "projects"
     _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     calls: list[object] = []
 
     def invoke(request, registry):
@@ -289,6 +314,7 @@ def test_bound_with_invalid_parent_is_rejected_without_fallback(
 ) -> None:
     projects_root = tmp_path / "projects"
     create_project("demo", root=projects_root)
+    _patch_runtime_parent(monkeypatch, run_id="missing-run", valid=False)
     service = _Service()
     invoked = False
 
@@ -298,7 +324,7 @@ def test_bound_with_invalid_parent_is_rejected_without_fallback(
 
     monkeypatch.setattr(attached, "run_executor", should_not_run)
 
-    with pytest.raises(attached.AttachedRenderError, match="invalid parent"):
+    with pytest.raises(attached.AttachedRenderError, match="invalid runtime parent"):
         attached.invoke_attached_render(
             tmp_path / "timeline.json",
             tmp_path / "assets.json",

@@ -297,17 +297,12 @@ def _run_declarations(
     project_root: Path,
     timeline_dir: Path | None,
 ) -> list[tuple[Mapping, Path | None, Path, bool]]:
+    # Runtime runs are authoritative.  This transcript helper has no runtime
+    # artifact lookup API yet, so it intentionally declines to infer producer
+    # declarations from local run files (including the old directory scan).
     run_paths = _declared_timeline_run_paths(project_root, timeline_dir)
     if run_paths is None:
-        runs_dir = project_root / "runs"
-        try:
-            run_paths = sorted(
-                path / "run.json"
-                for path in runs_dir.iterdir()
-                if path.is_dir() and (path / "run.json").is_file()
-            )
-        except OSError:
-            run_paths = []
+        return []
 
     runs_root = (project_root / "runs").resolve()
     declarations: list[tuple[Mapping, Path | None, Path, bool]] = []
@@ -350,18 +345,12 @@ def _declared_timeline_run_paths(
     run_ids = manifest.get("contributing_runs")
     if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
         return []
-    runs_root = (project_root / "runs").resolve()
-    paths: list[Path] = []
-    for run_id in run_ids:
-        declared_root = runs_root / run_id
-        run_root = declared_root.resolve()
-        if (
-            not declared_root.is_symlink()
-            and run_root.parent == runs_root
-            and run_root.name == run_id
-        ):
-            paths.append(run_root / "run.json")
-    return paths
+    # A frozen timeline may retain producer ids for provenance, but this
+    # module cannot turn those ids into authoritative artifact declarations
+    # without the runtime's artifact read operation.  Fail closed until that
+    # API exists rather than reading a local run.json projection.
+    del project_root, run_ids
+    return []
 
 
 def _declared_run_base(

@@ -19,18 +19,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry
 from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.foundation.project_paths import (
-    project_dir,
-    resolve_projects_root,
-    validate_project_slug,
-    validate_run_id,
-)
+from astrid.core.foundation.project_paths import resolve_projects_root, validate_run_id
 from astrid.core.io.cas import link_into_produces
-from astrid.core.project.run import load_run_record, step_dir_for
+from astrid.core.project.runtime import ProjectRuntimeError, step_dir_for
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
 from .service import RenderService
@@ -96,7 +90,7 @@ def invoke_attached_render(
         raise AttachedRenderError("step_id is required for an attached render")
     child_step = validate_run_id(step_id)
     projects_root = resolve_projects_root(root)
-    _validate_parent_run(bound_project, bound_run, root=projects_root)
+    _validate_parent_run(bound_project, bound_run)
     step_root = step_dir_for(
         bound_project,
         bound_run,
@@ -188,30 +182,32 @@ def _resolve_parent_binding(
 def _validate_parent_run(
     project_slug: str,
     parent_run_id: str,
-    *,
-    root: Path,
 ) -> dict[str, Any]:
-    project = validate_project_slug(project_slug)
+    """Verify the parent through the runtime API, never a local run file."""
+    project = str(project_slug)
     run_id = validate_run_id(parent_run_id)
-    # Attached execution is admitted by the parent runtime and carries its
-    # parent binding in the task environment. The child must not open a local
-    # kernel database to re-authorize that binding. The immutable run record is
-    # only the filesystem projection needed for the produces destination.
     try:
-        record = load_run_record(project, run_id, root=root)
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as client:
+            result = client.runs.show(project, run_id)
+            if not result.ok or not isinstance(result.data, Mapping):
+                raise ProjectRuntimeError("runtime did not return the parent run")
+            record = dict(result.data)
     except Exception as exc:
         raise AttachedRenderError(
-            f"invalid parent project/run ledger {project!r}/{run_id!r}: {exc}"
+            f"invalid runtime parent project/run {project!r}/{run_id!r}: {exc}"
         ) from exc
-    if record.get("project_slug") != project or record.get("run_id") != run_id:
-        raise AttachedRenderError("parent run record identity does not match its ledger path")
-    if record.get("status") != RunStatus.RUNNING.value:
+    record_project = record.get("project_id") or record.get("project_slug") or record.get("project")
+    record_id = record.get("run_id") or record.get("id")
+    if record_project is not None and str(record_project) != project:
+        raise AttachedRenderError("runtime parent run does not belong to the selected project")
+    if record_id is not None and str(record_id) != run_id:
+        raise AttachedRenderError("runtime parent run identity does not match the requested run")
+    if str(record.get("status") or "").lower() not in {"running", "queued", "in_progress"}:
         raise AttachedRenderError(
             f"parent run {run_id!r} is not running (status={record.get('status')!r})"
         )
-    run_root = project_dir(project, root=root) / "runs" / run_id
-    if not run_root.is_dir():
-        raise AttachedRenderError(f"parent run directory is missing: {run_root}")
     return record
 
 @contextmanager

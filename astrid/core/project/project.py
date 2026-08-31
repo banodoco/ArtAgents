@@ -20,7 +20,6 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation import project_paths as paths
 from astrid.core.foundation.atomic_io import write_text_atomic
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.theme import load_theme_by_id
 from astrid.core.util.time import utc_now_seconds
 
@@ -150,8 +149,10 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
     """
 
     project = require_project(slug, root=root)
-    # Kernel-first: list runs from kernel if DB present; FS fallback for historical dirs.
-    runs = _kernel_or_fs_runs(slug, root=root)
+    # Run identity belongs to the runtime/kernel.  This cache view intentionally
+    # reports no runs when the runtime read model is unavailable; it never
+    # reconstructs authority by enumerating project files.
+    runs = _kernel_runs(slug, root=root)
     return {
         "project": project,
         "project_id": project.get("project_id"),
@@ -162,23 +163,14 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
     }
 
 
-def _kernel_or_fs_runs(slug: str, *, root: str | Path | None = None) -> list[str]:
-    import astrid.core.foundation.project_paths as paths
-
+def _kernel_runs(slug: str, *, root: str | Path | None = None) -> list[str]:
+    """Read the local kernel projection without falling back to run files."""
     try:
-        import sqlite3
-
         from astrid.core.kernel.read import kernel_runs_for_project
 
-        projects_root = paths.resolve_projects_root(root)
-        has_db = resolve_kernel_database_authority(projects_root).exists
-        if has_db:
-            ids = kernel_runs_for_project(slug, projects_root=projects_root)
-            return ids
-    except sqlite3.Error:
-        pass
-    run_root = paths.runs_dir(slug, root=root)
-    return sorted(path.name for path in run_root.iterdir() if (path / "run.json").exists()) if run_root.exists() else []
+        return kernel_runs_for_project(slug, projects_root=paths.resolve_projects_root(root))
+    except Exception:
+        return []
 def update_project_details(
     slug: str,
     *,

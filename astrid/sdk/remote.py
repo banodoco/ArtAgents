@@ -293,7 +293,27 @@ class RemoteAstridClient:
         self.projects, self.timelines, self.media = RemoteProjects(transport), RemoteTimelines(transport), RemoteMedia(transport)
         self.tasks, self.runs, self.references = RemoteTasks(transport), RemoteRuns(transport), RemoteReferences(transport)
         self.shots, self.generations = RemoteShots(transport), RemoteGenerations(transport)
-    def selected_project_ref(self, **kwargs): return None
+    def selected_project_ref(self, **kwargs):
+        """Resolve the sole runtime project for selection-free public routes.
+
+        The runtime contract intentionally has no local preference store.  A
+        route may infer a project only when the runtime exposes exactly one;
+        multiple projects remain an explicit-selection error.
+        """
+        del kwargs
+        try:
+            result = self.projects.list()
+            data = result.data
+            if isinstance(data, dict):
+                data = data.get("items", [])
+            if not result.ok or not isinstance(data, list) or len(data) != 1:
+                return None
+            row = data[0]
+            if not isinstance(row, dict):
+                row = vars(row) if hasattr(row, "__dict__") else {}
+            return str(row.get("project_id") or row.get("id") or row.get("slug") or "") or None
+        except Exception:
+            return None
     def health(self): return self._transport.health()
     def handshake(self, client_name="astrid", client_version="stage1", requested_scopes=None): return self._transport.handshake(client_name, client_version, requested_scopes or [])
     def doctor(self): return self._transport.doctor()

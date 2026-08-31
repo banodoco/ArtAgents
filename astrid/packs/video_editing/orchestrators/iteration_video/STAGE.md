@@ -18,6 +18,11 @@ Run through the SDK. The pack-level `--thread` is an optional lineage selector
 matched against runtime run metadata; it is not a generic Astrid session
 binding flag.
 
+The public default is resolved by the runtime: when no project is supplied,
+the route may use the sole project returned by `projects.list`; with multiple
+runtime projects callers must provide `--project`. Local `project.json`,
+`runs/*/run.json`, thread indexes, and event-log sidecars are never consulted.
+
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke(

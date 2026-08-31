@@ -8,40 +8,39 @@ admit → claim → start → execute → complete | fail
 ```
 
 Hash-chained events, receipts, execution attempts, and leases are the record
-of what happened. The filesystem record
-`<project>/runs/<run_id>/run.json` is a **derived projection**: written once
-from kernel state at finalize, stamped as kernel-derived, and never read
-back as an authority.
+of what happened. The filesystem record `<project>/runs/<run_id>/run.json` is
+historical output only. Current production code does not create, update, or
+read it for run identity. Runtime clients use `projects.list/show` and
+`runs.list/show`; a missing runtime resource is an error, not a reason to scan
+local files.
 
 ## Single-ledger invariant
 
-**Every in-band Astrid capability invocation is admitted into the kernel
+**Every in-band Astrid capability invocation is admitted into the runtime
 exactly once — one `runs` row with its ordered child task(s), hash-chained
 events on the `core.run`/`core.task` streams, and receipts — and executes
-to a terminal status under the kernel lifecycle. At finalize, exactly one
-truthful `run.json` projection is written into exactly one project.**
+to a terminal status under the runtime lifecycle. The runtime settlement
+resource, not a local projection, is the durable identity.**
 
-"Truthful" keeps its established meaning for the projection: it records the
-actual tool invoked, the terminal status the kernel reached, and the actual
-outputs produced (or a manifest pointer to them). "Exactly one" covers both
-sides: no invocation is invisible to the kernel (unledgered), and no
-invocation produces duplicate runs/tasks or duplicate projections.
+"Exactly one" means no invocation is invisible to the runtime (unledgered),
+and no invocation produces duplicate runs/tasks. The historical projection
+schema below remains only for imported evidence and human-readable archives;
+it is not a current production write or read path.
 
 ## Authority rules
 
-1. **The kernel is the status authority.** Run progress is derived by the
+1. **The runtime database is the status authority.** Run progress is derived by the
    single shared rule `derive_run_progress_counts`
    (`astrid/core/repositories/tasks.py`): a pure read over child task rows —
    `running` until every child is terminal, then `failed` when any child
    failed, `cancelled` when any child was cancelled (and none failed), else
    `succeeded`. No cursor and no persisted mutable progress aggregate ever
    exist; every reader surface gets the same answer.
-2. **`run.json` is write-once.** `finalize_project_run`
-   (`astrid/core/project/run.py`) writes the projection from finalized
-   kernel state when the run reaches a terminal status. Execution paths
-   never rewrite it afterwards.
-3. **`run.json` is never read back as authority.** Status questions resolve
-   through the kernel — CLI `runs show`/`tasks events` (with `--json`), SDK
+2. **Local run files are not a production lifecycle.** The retired
+   `astrid.core.project.run` namespace raises on local prepare/finalize/CRUD
+   calls; runtime admission and settlement are the only supported lifecycle.
+3. **Local run files are never read as authority.** Status questions resolve
+   through the runtime — CLI `runs show`/`tasks events` (with `--json`), SDK
    `client.runs`/`client.tasks`. A stale or missing projection never changes
    what the kernel reports; the file exists for artifact placement and
    human browsing of project directories, not coordination.
@@ -67,7 +66,12 @@ attempt/lease/version facts, and a handler that finishes after cancellation
 loses its later fenced completion without publishing media or task outputs.
 Executor callers may provide the complete fence; partial fences are rejected.
 
-## Derived projection (`run.json`)
+## Historical derived projection (`run.json`)
+
+The remainder of this section documents the schema of old/imported records.
+It is retained for provenance validation only. Current runtime admission does
+not create these records, and current readers never use them to select,
+authorize, or report a run.
 
 ### Stamp fields
 
@@ -131,7 +135,8 @@ and child are kernel ledger entries; the nesting is filesystem layout for
 artifact placement only. The parent's `steps/*/produces/` tree is where the
 child's outputs land — never an authority for either entry's status.
 
-- **Code path**: `prepare_project_run` in `astrid/core/project/run.py`
+- **Historical code path**: `prepare_project_run` in the retired
+  `astrid/core/project/run.py` namespace
   (parent_run_id branch).
 - **Contributing_runs recording**: Task-attached paths record the parent run
   in the timeline's `contributing_runs` _at prepare time_. This is the

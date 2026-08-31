@@ -6,28 +6,36 @@ import os
 from pathlib import Path
 from typing import Any
 
-from astrid.core._shared.jsonio import read_json
 from astrid.core.env_vars import ASTRID_PROJECT_SLUG
 from astrid.core.foundation.project_paths import resolve_projects_root
-from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.preferences import resolve_default_project
 
 
-def _discover_projects(*, root: str | Path | None = None) -> list[str]:
-    """Return project slugs under the projects root, sorted by mtime descending."""
+def _runtime_projects() -> list[dict[str, Any]]:
+    """Return projects from the selected runtime, or an empty unavailable read."""
 
-    projects_root = resolve_projects_root(root)
-    if not projects_root.exists():
+    try:
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as client:
+            result = client.projects.list()
+            data = result.data
+            if isinstance(data, dict):
+                data = data.get("items", [])
+            if not result.ok or not isinstance(data, list):
+                return []
+            rows: list[dict[str, Any]] = []
+            for item in data:
+                if hasattr(item, "__dict__") and not isinstance(item, dict):
+                    item = vars(item)
+                if isinstance(item, dict):
+                    rows.append(dict(item))
+            return rows
+    except Exception:
+        # Guidance is shown while handling another command.  Runtime
+        # unavailability must produce concise recovery text, never a local
+        # filesystem approximation of project authority.
         return []
-    candidates: list[tuple[float, str]] = []
-    for entry in projects_root.iterdir():
-        if not entry.is_dir():
-            continue
-        if not (entry / "project.json").exists():
-            continue
-        candidates.append((entry.stat().st_mtime, entry.name))
-    candidates.sort(key=lambda pair: pair[0], reverse=True)
-    return [name for _, name in candidates]
 
 
 def project_summaries(
@@ -38,30 +46,32 @@ def project_summaries(
 ) -> list[dict[str, Any]]:
     """Return recent projects with enough context to choose one safely."""
 
-    projects_root = resolve_projects_root(root)
+    del root
     default = resolve_default_project()
     rows: list[dict[str, Any]] = []
-    for slug in _discover_projects(root=projects_root):
+    for project in _runtime_projects():
+        slug = str(project.get("slug") or project.get("project_id") or project.get("id") or "")
+        if not slug:
+            continue
         if not include_test_projects and slug.startswith("agentic-"):
             continue
-        project_root = projects_root / slug
-        try:
-            payload = read_json(project_root / "project.json")
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
+        name = str(project.get("name") or slug)
+        description = str(project.get("description") or project.get("metadata", {}).get("description", ""))
+        theme = str(project.get("theme") or project.get("metadata", {}).get("theme", ""))
+        updated_at = str(project.get("updated_at") or "")
+        runs = _runtime_run_count(slug)
+        timelines = _runtime_timeline_count(slug)
         rows.append(
             {
                 "slug": slug,
-                "name": str(payload.get("name") or slug),
-                "description": str(payload.get("description") or ""),
-                "theme": str(payload.get("theme") or ""),
-                "updated_at": str(payload.get("updated_at") or ""),
+                "name": name,
+                "description": description,
+                "theme": theme,
+                "updated_at": updated_at,
                 "is_default": slug == default,
-                "runs": _kernel_or_fs_run_count(slug, projects_root, project_root),
-                "timelines": _count_children(project_root / "timelines"),
-                "experiments": _count_children(project_root / "experiments"),
+                "runs": runs,
+                "timelines": timelines,
+                "experiments": 0,
             }
         )
         if limit is not None and len(rows) >= limit:
@@ -126,9 +136,11 @@ def format_project_required_guidance(*, operation: str) -> str:
 
 
 def selected_project(explicit_project: str | None) -> tuple[str | None, str]:
-    """Resolve only explicit or genuinely attached project context.
+    """Resolve explicit, attached, or an unambiguous runtime project.
 
-    Configured defaults and path inference are intentionally excluded.
+    Configured defaults and path inference are intentionally excluded.  A
+    single project returned by the runtime is safe to address; multiple
+    projects remain an explicit-selection requirement.
     """
 
     if explicit_project:
@@ -136,39 +148,35 @@ def selected_project(explicit_project: str | None) -> tuple[str | None, str]:
     attached = os.environ.get(ASTRID_PROJECT_SLUG)
     if attached:
         return attached, "attached"
+    projects = _runtime_projects()
+    if len(projects) == 1:
+        project = projects[0]
+        ref = project.get("project_id") or project.get("id") or project.get("slug")
+        if ref:
+            return str(ref), "runtime"
     return None, "missing"
 
 
-def _count_children(path: Path, *, marker: str | None = None) -> int:
-    if not path.is_dir():
-        return 0
+def _runtime_run_count(project: str) -> int:
     try:
-        return sum(
-            1
-            for child in path.iterdir()
-            if child.is_dir() and (marker is None or (child / marker).is_file())
-        )
-    except OSError:
+        from astrid.sdk.client import AstridClient
+
+        with AstridClient.open() as client:
+            result = client.runs.list(project)
+            return len(result.data) if result.ok and isinstance(result.data, list) else 0
+    except Exception:
         return 0
 
 
-def _kernel_or_fs_run_count(slug: str, projects_root: Path, project_root: Path) -> int:
-    # Kernel-first via single helper; FS fallback for historical dirs.
+def _runtime_timeline_count(project: str) -> int:
     try:
-        import sqlite3
+        from astrid.sdk.client import AstridClient
 
-        from astrid.core.kernel.read import kernel_runs_for_project
-
-        ids = kernel_runs_for_project(slug, projects_root=projects_root)
-        # kernel_runs_for_project returns [] when DB exists but zero runs (authority)
-        # — do not count stale FS leftovers in that case. Fall through only when no DB.
-        has_db = resolve_kernel_database_authority(projects_root).exists
-        if has_db:
-            return len(ids)
-        # No DB → FS count
-        return _count_children(project_root / "runs", marker="run.json")
-    except sqlite3.Error:
-        return _count_children(project_root / "runs", marker="run.json")
+        with AstridClient.open() as client:
+            result = client.timelines.list(project)
+            return len(result.data) if result.ok and isinstance(result.data, list) else 0
+    except Exception:
+        return 0
 
 __all__ = [
     "format_project_required_guidance",

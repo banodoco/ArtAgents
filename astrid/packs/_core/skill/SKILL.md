@@ -80,15 +80,16 @@ success, `1` typed SDK/runtime error, `2` usage/parse error.
 
 | Family | Verbs | Notes |
 | --- | --- | --- |
-| `projects` | `create`, `list`, `show`, `update` | Project selection is runtime-scoped; pass `--project` explicitly. |
+| `projects` | `create`, `list`, `show`, `update` | Project selection is runtime-scoped; a sole runtime project may be selected implicitly, while multiple projects require `--project`. |
 | `timelines` | `create`, `list`, `show`, `save`, `archive`, `unarchive`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `unarchive` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
 | `media` | `import`, `list`, `show`, `verify` | Media is ingested and addressed as runtime-owned objects; reference-in-place repair is not a Stage1 user operation. |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
 | `runs` | `list`, `show`, `cancel`, `retry-failed`, `events` | `retry-failed` is the batch-retry surface (all-failed-children or explicit `--task` subset) |
 
 The former file-side `projects select/current` preference is not Stage1
-authority. Pass `--project` explicitly; runtime selection is resolved by the
-connected workspace service.
+authority. Runtime selection is resolved by the connected workspace service:
+an explicit `--project` always wins, a sole runtime project is safe to infer,
+and multiple projects require an explicit reference.
 
 Nested mounts (reachable only beneath their parent family, never top-level):
 
@@ -116,7 +117,8 @@ authority.
 
 Tasks and runs are runtime resources. Every capability admission and lifecycle
 transition crosses the generated workspace client; local projections are not
-status authority. Use an explicit runtime project reference:
+status authority. Use an explicit runtime project reference when more than
+one project is visible; the sole runtime project is selected automatically:
 
 ```bash
 python3 -m astrid tasks list --project demo --json

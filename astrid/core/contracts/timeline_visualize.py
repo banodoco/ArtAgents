@@ -107,12 +107,6 @@ def _validated_timeline_visualize_view_context(
         return None
 
     try:
-        from astrid.core.contracts.run_record import (
-            load_run_record_unvalidated as load_run_record,
-        )
-        from astrid.core.contracts.run_record import (
-            resolve_record_path,
-        )
         from astrid.core.foundation.project_paths import resolve_projects_root
         from astrid.packs.rendering.executors.timeline_visualize.frozen import (
             discard_rehydrated_pack,
@@ -143,75 +137,28 @@ def _validated_timeline_visualize_view_context(
         run_root = (projects_root / project_slug / "runs" / run_id).resolve(strict=True)
         if not run_root.is_dir() or not manifest_path.is_relative_to(run_root):
             return None
-        # Kernel-first ownership: prefer kernel run status; FS fallback for historical dirs.
+        # Runtime ownership is mandatory.  Historical filesystem ledgers are
+        # not a valid authorization source for a public frozen-view route.
         kernel_info = _runtime_visualize_run_info(project_slug, run_id)
-        if kernel_info is not None:
-            run_project_id = kernel_info.get("project_id")
-            current_project_id = kernel_info.get("current_project_id")
-            if (
-                run_project_id is not None
-                and current_project_id is not None
-                and str(run_project_id) != str(current_project_id)
-            ):
-                return None
-            if kernel_info.get("status") not in ("succeeded", "completed"):
-                return None
-            if kernel_info.get("tool_id") not in (None, "rendering.timeline_visualize"):
-                # When kernel task capability is available, enforce it; otherwise rely on manifest checks below
-                if kernel_info.get("capability") not in (None, "rendering.timeline_visualize"):
-                    return None
-            # Kernel run has no authoritative run.json; skip FS manifest pointer checks
-            record_manifest = manifest_path
-        else:
-            run_json_path = (run_root / "run.json").resolve(strict=True)
-            if run_json_path.parent != run_root or not run_json_path.is_file():
-                return None
-
-            record = load_run_record(project_slug, run_id, root=projects_root)
-            metadata = record.get("metadata")
-            if (
-                record.get("project_slug") != project_slug
-                or record.get("run_id") != run_id
-                or record.get("tool_id") != "rendering.timeline_visualize"
-                or record.get("status") != "completed"
-                or not isinstance(metadata, dict)
-                or metadata.get("evidence") is not True
-            ):
-                return None
-
-            record_manifest_raw = record.get("manifest_path")
-            if not isinstance(record_manifest_raw, str) or not record_manifest_raw:
-                return None
-            record_manifest = resolve_record_path(
-                record_manifest_raw,
-                project_slug,
-                root=projects_root,
-            ).resolve(strict=True)
-            if not record_manifest.is_file() or not record_manifest.is_relative_to(run_root):
-                return None
-            if manifest_path != record_manifest:
-                root_manifest = json.loads(record_manifest.read_text(encoding="utf-8"))
-                if (
-                    not isinstance(root_manifest, dict)
-                    or root_manifest.get("kind") != "timeline_visualize_project"
-                ):
-                    return None
-                reading_order = root_manifest.get("reading_order")
-                if not isinstance(reading_order, list):
-                    return None
-                declared_children: set[Path] = set()
-                for raw_child in reading_order:
-                    if not isinstance(raw_child, str) or not raw_child:
-                        return None
-                    child = (record_manifest.parent / raw_child).resolve(strict=True)
-                    if not child.is_file() or not child.is_relative_to(record_manifest.parent):
-                        return None
-                    declared_children.add(child)
-                if manifest_path not in declared_children:
-                    return None
-        # Record_manifest resolved (kernel path uses manifest_path itself)
-        if "record_manifest" not in locals():
+        if kernel_info is None:
             return None
+        run_project_id = kernel_info.get("project_id")
+        current_project_id = kernel_info.get("current_project_id")
+        if (
+            run_project_id is not None
+            and current_project_id is not None
+            and str(run_project_id) != str(current_project_id)
+        ):
+            return None
+        if kernel_info.get("status") not in ("succeeded", "completed"):
+            return None
+        if kernel_info.get("tool_id") not in (None, "rendering.timeline_visualize"):
+            if kernel_info.get("capability") not in (None, "rendering.timeline_visualize"):
+                return None
+        # The runtime run resource does not carry an authoritative filesystem
+        # manifest pointer; the contained manifest supplied by the caller is
+        # the frozen artifact being verified.
+        record_manifest = manifest_path
 
         hashes_path = (manifest_path.parent / "pack-hashes.json").resolve(strict=True)
         if hashes_path.parent != manifest_path.parent or not hashes_path.is_file():
