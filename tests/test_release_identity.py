@@ -39,7 +39,7 @@ def test_pre_live_and_candidate_receipts_are_reproducible(tmp_path: Path) -> Non
     astrid = _repo(tmp_path, "Astrid")
     runtime = _repo(tmp_path, "runtime")
     pre_path = tmp_path / "pre-live.json"
-    pre = create_pre_live_identity({"ASTRID-CLIENT": astrid, "NEUTRAL-RUNTIME": runtime}, output=pre_path)
+    pre = create_pre_live_identity({"ASTRID-CLIENT": astrid, "NEUTRAL-RUNTIME": runtime}, output=pre_path, seed_outputs={seed: seed.encode() for seed in __import__("astrid.core.release_identity", fromlist=["PRELIVE_SEEDS"]).PRELIVE_SEEDS})
     assert load_receipt(pre_path)["identity"] == pre["identity"]
     assert verify_receipt(pre) == pre["identity"]
 
@@ -72,7 +72,8 @@ def test_remote_binding_is_copy_only(tmp_path: Path) -> None:
 def test_b11_manifest_rejects_missing_seed_bytes_and_46_rows(tmp_path: Path) -> None:
     with pytest.raises(ReleaseIdentityError, match="missing"):
         build_prelive_manifest({})
-    manifest = build_prelive_manifest()
+    from astrid.core.release_identity import PRELIVE_SEEDS
+    manifest = build_prelive_manifest({seed: seed.encode() for seed in PRELIVE_SEEDS})
     manifest["evidence_rows"].pop()
     manifest["manifest_sha256"] = __import__("astrid.core.release_identity", fromlist=["framed_hash"]).framed_hash(
         "banodoco.pre-live-manifest.v1", {k: v for k, v in manifest.items() if k != "manifest_sha256"}
