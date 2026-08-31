@@ -48,9 +48,6 @@ def test_read_events_uses_injected_runtime_run_events() -> None:
     records = events.read_events(
         "demo",
         "run-1",
-        projects_root=Path("/legacy/projects"),
-        include_audit=False,
-        verify=False,
         _client=client,
     )
 

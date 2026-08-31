@@ -25,8 +25,6 @@ from astrid.core.execution.orchestrator.runner import (
 )
 from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.foundation import project_paths
-from astrid.core.project.project import create_project
-from astrid.core.timeline.crud import create_timeline
 
 
 @pytest.fixture(autouse=True)
@@ -388,7 +386,7 @@ def test_project_orchestrator_rejects_passthrough_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    create_project("demo")
+    (tmp_path / "projects" / "demo").mkdir(parents=True, exist_ok=True)
 
     orch = _command_orchestrator(
         orchestrator_id="test.proj_passthrough",
@@ -415,8 +413,7 @@ def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
 ) -> None:
     _require_timeline_schema()
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    create_project("demo")
-    create_timeline("demo", "main", is_default=True)
+    (tmp_path / "projects" / "demo").mkdir(parents=True, exist_ok=True)
 
     orch = _command_orchestrator(
         orchestrator_id="video_editing.hype",
@@ -446,8 +443,7 @@ def test_orchestrator_out_only_requires_project(
     _require_timeline_schema()
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
-    create_project("default")
-    create_timeline("default", "main", is_default=True)
+    (projects_root / "default").mkdir(parents=True, exist_ok=True)
 
     out_dir = tmp_path / "auto-orch-out"
     orch = _command_orchestrator(

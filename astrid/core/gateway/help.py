@@ -112,7 +112,7 @@ Product families:
   projects    [kernel] project create/list/show/update/select/current
   media       [kernel] media import/list/show/verify/relate
   tasks       [kernel] task create/list/show/cancel/retry/events
-  runs        [kernel] run list/show/cancel/retry-failed/events
+  runs        [kernel] run list/show/cancel/retry/events
   timelines   [pack: timeline] timeline create/list/show/save/archive/recover/history/diff/visualize/render
 
 Operational families:

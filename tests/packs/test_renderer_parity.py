@@ -28,7 +28,6 @@ from astrid.core.execution.executor.runner import ExecutorRunRequest, run_execut
 from astrid.core.foundation import project_paths
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.media import ffprobe_metadata_strict
-from astrid.core.project.project import create_project
 from astrid.core.project.runtime import step_dir_for
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
@@ -48,7 +47,6 @@ from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.service import RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.timeline.crud import create_timeline
 from tests.packs.rendering._helpers import _execution_env
 
 pytestmark = [pytest.mark.renderer_parity, pytest.mark.integration]
@@ -696,8 +694,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_task_env(monkeypatch)
-    create_project("demo")
-    create_timeline("demo", "main", is_default=True)
+    (projects_root / "demo").mkdir(parents=True, exist_ok=True)
     inputs_root = projects_root / "demo" / "inputs"
     inputs_root.mkdir(parents=True)
     timeline = inputs_root / "hype.timeline.json"

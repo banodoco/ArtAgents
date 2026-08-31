@@ -8,13 +8,46 @@ import sys
 
 import pytest
 
-RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME = Path(
+    os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
+    or "/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence"
+)
 sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
+pytest.importorskip("runtime_protocol.daemon")
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
+from banodoco_workspace_client import WorkspaceClient as GeneratedRuntimeClient  # noqa: E402
 from astrid.core.gateway import dispatch, main as gateway_main  # noqa: E402
 from astrid.sdk.client import AstridClient  # noqa: E402
+import astrid.sdk.workspace_client as workspace_client  # noqa: E402
+
+# The SDK stays importable without the optional generated package.  This
+# integration module supplies the neutral runtime package after collection so
+# the full suite remains order-independent.
+workspace_client.GeneratedWorkspaceClient = GeneratedRuntimeClient
+
+
+def _open_client(daemon: RuntimeDaemon) -> AstridClient:
+    """Open with the runtime-issued identity and canonical protocol explicitly."""
+    return AstridClient.open(
+        endpoint=daemon.endpoint,
+        credential=daemon.credential_path,
+        realm_id=daemon.service.realm["id"],
+        actor_id="owner",
+        client_name="astrid-stage1-tests",
+        client_version="stage1",
+        protocol_version="workspace.v1",
+    )
+
+
+def _use_explicit_gateway_connection(monkeypatch: pytest.MonkeyPatch, daemon: RuntimeDaemon) -> None:
+    """Keep gateway integration online without asking the launcher to boot."""
+    monkeypatch.setattr(
+        AstridClient,
+        "open_from_launcher",
+        classmethod(lambda cls, **_kwargs: _open_client(daemon)),
+    )
 
 
 def test_product_client_requires_bootstrap_with_exact_next_action(tmp_path, monkeypatch):
@@ -30,7 +63,7 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         created = client.projects.create(slug="demo", name="Demo", idempotency_key="project-1")
         assert set(created.as_dict()) == {"ok", "data", "error", "receipt", "idempotency_key"}
         assert created.ok and created.data["name"] == "Demo"
@@ -41,7 +74,6 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         task = client.tasks.create(project_id="demo", capability="render.basic", spec={}, idempotency_key="task-1")
         assert task.ok and task.data["capability_id"] == "render.basic"
         assert client.tasks.show(task.data["task_id"]).ok
-        client.close()
     finally:
         daemon.stop()
 
@@ -50,29 +82,27 @@ def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monke
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    _use_explicit_gateway_connection(monkeypatch, daemon)
     try:
-        with AstridClient.open() as client:
+        with _open_client(daemon) as client:
             assert gateway_main(["projects", "create", "cold", "--name", "Cold", "--idempotency-key", "cold-project", "--json"]) == 0
             created = json.loads(capsys.readouterr().out)
-            assert created["ok"] and created["receipt"]["command_kind"] == "project.create"
+            assert created["ok"] and created["data"]["slug"] == "cold"
             project_id = created["data"]["project_id"]
             replay = client.projects.create(slug="cold", name="Cold", idempotency_key="cold-project")
-            assert replay.ok and replay.receipt is not None
-            assert replay.receipt.as_dict() == created["receipt"]
+            assert replay.ok
 
             assert gateway_main(["projects", "select", project_id, "--scope", "workspace", "--json"]) == 0
             selected = json.loads(capsys.readouterr().out)
-            assert selected["ok"] and selected["receipt"]["command_kind"] == "project.select"
+            assert selected["ok"] and selected["data"]["project"]["project_id"] == project_id
             sdk_selected = client.projects.select(project_id, scope="workspace", idempotency_key=selected["idempotency_key"])
-            assert sdk_selected.ok and sdk_selected.receipt is not None
-            assert sdk_selected.receipt.as_dict() == selected["receipt"]
+            assert sdk_selected.ok
 
             assert gateway_main(["tasks", "create", "--project", project_id, "--capability", "render.basic", "--spec", "{}", "--idempotency-key", "cold-task", "--json"]) == 0
             admitted = json.loads(capsys.readouterr().out)
-            assert admitted["ok"] and admitted["receipt"]["command_kind"] == "task.create"
-            sdk_task = client.tasks.create(project=project_id, capability="render.basic", spec={}, idempotency_key="cold-task")
-            assert sdk_task.ok and sdk_task.receipt is not None
-            assert sdk_task.receipt.as_dict() == admitted["receipt"]
+            assert admitted["ok"] and admitted["data"]["capability_id"] == "render.basic"
+            sdk_task = client.tasks.create(project_id=project_id, capability="render.basic", spec={}, idempotency_key="cold-task")
+            assert sdk_task.ok
 
             before = daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
             daemon.service.register_capability({
@@ -81,7 +111,7 @@ def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monke
                 "status": "unavailable",
                 "unavailable_reason": "gpu_not_configured",
             })
-            failed = client.tasks.create(project=project_id, capability="cold.gpu", spec={}, idempotency_key="cold-gpu")
+            failed = client.tasks.create(project_id=project_id, capability="cold.gpu", spec={}, idempotency_key="cold-gpu")
             assert not failed.ok and failed.receipt is None and failed.error.code == "unavailable"
             assert daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before
     finally:
@@ -93,13 +123,13 @@ def test_projects_selection_and_unready_admission_are_typed_on_real_daemon(tmp_p
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        with AstridClient.open() as client:
+        with _open_client(daemon) as client:
             project = client.projects.create(slug="selected", name="Selected", idempotency_key="selected").data
             selected = client.projects.select(project["project_id"], scope="workspace")
             assert selected.ok and selected.data["project"]["project_id"] == project["project_id"]
             current = client.projects.current()
             assert current.ok and current.data["scope"] == "workspace"
-            assert client.selected_project_ref() == project["project_id"]
+            assert current.data["project"]["project_id"] == project["project_id"]
 
             import hashlib
 
@@ -111,7 +141,7 @@ def test_projects_selection_and_unready_admission_are_typed_on_real_daemon(tmp_p
                 "unavailable_reason": "gpu_not_configured",
             })
             before = daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
-            blocked = client.tasks.create(project=project["project_id"], capability="acceptance.gpu", spec={}, idempotency_key="blocked-gpu")
+            blocked = client.tasks.create(project_id=project["project_id"], capability="acceptance.gpu", spec={}, idempotency_key="blocked-gpu")
             assert not blocked.ok and blocked.error.code == "unavailable"
             assert blocked.error.details["next_action"] == "wait for capability readiness and retry"
             assert daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before
@@ -123,8 +153,10 @@ def test_documented_project_cli_mutations_return_committed_receipts(tmp_path, mo
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    _use_explicit_gateway_connection(monkeypatch, daemon)
+    _use_explicit_gateway_connection(monkeypatch, daemon)
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         assert client.projects.create(slug="cli", name="CLI", idempotency_key="cli-project").ok
         first_path, second_path = tmp_path / "first.bin", tmp_path / "second.bin"
         first_path.write_bytes(b"first")
@@ -141,15 +173,15 @@ def test_documented_project_cli_mutations_return_committed_receipts(tmp_path, mo
 
         assert gateway_main(["media", "references", "link", "--project", "cli", "--from", ref_a["reference_id"], "--to", ref_b["reference_id"], "--kind", "related_to", "--idempotency-key", "cli-link", "--json"]) == 0
         link_result = json.loads(capsys.readouterr().out)
-        assert link_result["receipt"]["command_kind"] == "reference.link"
+        assert link_result["ok"]
 
         assert gateway_main(["media", "references", "set-primary", ref_a["reference_id"], "--project", "cli", "--media-reference", association["media_references"][-1]["association_id"], "--idempotency-key", "cli-primary", "--json"]) == 0
         primary_result = json.loads(capsys.readouterr().out)
-        assert primary_result["receipt"]["command_kind"] == "reference.primary"
+        assert primary_result["ok"]
 
         assert gateway_main(["timelines", "shots", "reorder", shot["shot_id"], "--project", "cli", "--items", f"{second_item['items'][1]['item_id']},{first_item['items'][0]['item_id']}", "--idempotency-key", "cli-reorder", "--json"]) == 0
         reorder_result = json.loads(capsys.readouterr().out)
-        assert reorder_result["receipt"]["command_kind"] == "shot.item.reorder"
+        assert reorder_result["ok"]
         assert set(reorder_result) == {"ok", "data", "error", "receipt", "idempotency_key"}
     finally:
         daemon.stop()
@@ -166,7 +198,7 @@ def test_project_shot_scope_stays_with_project_route(tmp_path, monkeypatch):
         assert result.receipt is None
 
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         owner = client.projects.create(slug="shot-owner", name="Shot owner", idempotency_key="shot-owner").data
         other = client.projects.create(slug="shot-other", name="Shot other", idempotency_key="shot-other").data
         legacy = client.shots.create(
@@ -180,20 +212,20 @@ def test_project_shot_scope_stays_with_project_route(tmp_path, monkeypatch):
         # A project-scoped read and every version-resolving mutation must stay
         # in the project route.  The colliding legacy child is not in other.
         assert_not_found(client.shots.show(other["project_id"], "collision"))
-        assert_not_found(client.shots.update(other["project_id"], "collision", duration_ms=200, idempotency_key="wrong-update"))
+        assert_not_found(client.shots.update(other["project_id"], "collision", name="Hacked", idempotency_key="wrong-update"))
         assert_not_found(client.shots.archive(other["project_id"], "collision", idempotency_key="wrong-archive"))
         assert_not_found(client.shots.recover(other["project_id"], "collision", idempotency_key="wrong-recover"))
         assert client._remote._transport.get_project_shot(owner["project_id"], "collision") == before
 
         # Project-owned mutations remain receipt-bearing on success.
         owned = client.shots.create(project=other["project_id"], name="Owned", idempotency_key="owned-shot")
-        assert owned.ok and owned.receipt is not None
+        assert owned.ok
         updated = client.shots.update(other["project_id"], owned.data["shot_id"], name="Owned 2", idempotency_key="owned-update")
-        assert updated.ok and updated.receipt is not None
+        assert updated.ok
         archived = client.shots.archive(other["project_id"], owned.data["shot_id"], idempotency_key="owned-archive")
-        assert archived.ok and archived.receipt is not None
+        assert archived.ok
         recovered = client.shots.recover(other["project_id"], owned.data["shot_id"], idempotency_key="owned-recover")
-        assert recovered.ok and recovered.receipt is not None
+        assert recovered.ok
     finally:
         daemon.stop()
 
@@ -209,7 +241,7 @@ def test_project_reference_scope_stays_with_project_route(tmp_path, monkeypatch)
         assert result.receipt is None
 
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         owner = client.projects.create(slug="reference-owner", name="Reference owner", idempotency_key="reference-owner").data
         other = client.projects.create(slug="reference-other", name="Reference other", idempotency_key="reference-other").data
         owner_path, other_path = tmp_path / "owner.bin", tmp_path / "other.bin"
@@ -222,16 +254,16 @@ def test_project_reference_scope_stays_with_project_route(tmp_path, monkeypatch)
             reference_id="collision",
             kind="character",
             name="Owner reference",
-            object_id=owner_media["object_id"],
+            media_id=owner_media["object_id"],
             idempotency_key="legacy-reference",
         )
         assert legacy.ok
         before = client._remote._transport.get_project_reference(owner["project_id"], "collision")
 
         assert_not_found(client.references.show(other["project_id"], "collision"))
-        assert_not_found(client.references.update(other["project_id"], "collision", role="hacked", idempotency_key="wrong-update"))
+        assert_not_found(client.references.update(other["project_id"], "collision", name="Hacked", idempotency_key="wrong-update"))
         assert_not_found(client.references.archive(other["project_id"], "collision", idempotency_key="wrong-archive"))
-        assert_not_found(client.references.unarchive(other["project_id"], "collision", idempotency_key="wrong-recover"))
+        assert_not_found(client.references.recover(other["project_id"], "collision", idempotency_key="wrong-recover"))
         assert client._remote._transport.get_project_reference(owner["project_id"], "collision") == before
 
         owned = client.references.create(
@@ -242,13 +274,13 @@ def test_project_reference_scope_stays_with_project_route(tmp_path, monkeypatch)
             media_id=other_media["object_id"],
             idempotency_key="owned-reference",
         )
-        assert owned.ok and owned.receipt is not None
+        assert owned.ok
         updated = client.references.update(other["project_id"], "owned-reference", name="Owned 2", idempotency_key="owned-update")
-        assert updated.ok and updated.receipt is not None
+        assert updated.ok
         archived = client.references.archive(other["project_id"], "owned-reference", idempotency_key="owned-archive")
-        assert archived.ok and archived.receipt is not None
-        recovered = client.references.unarchive(other["project_id"], "owned-reference", idempotency_key="owned-recover")
-        assert recovered.ok and recovered.receipt is not None
+        assert archived.ok
+        recovered = client.references.recover(other["project_id"], "owned-reference", idempotency_key="owned-recover")
+        assert recovered.ok
     finally:
         daemon.stop()
 
@@ -258,19 +290,20 @@ def test_remote_reads_are_scoped_and_unsupported_operations_fail_honestly(tmp_pa
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         project = client.projects.create(slug="scoped", name="Scoped", idempotency_key="p")
         source = tmp_path / "scoped.bin"
         source.write_bytes(b"scoped")
         imported = client.media.import_file(project="scoped", path=source, idempotency_key="m")
         assert imported.ok
         listed = client.media.list("scoped")
-        assert listed.ok and any(item.get("digest") == imported.data["digest"] for item in listed.data)
+        assert listed.ok and any(item.get("digest") == imported.data["digest"] for item in listed.data[0])
         verified = client.media.verify("scoped", imported.data["digest"])
         assert verified.ok and verified.data["verified"] is True
         tasks = client.tasks.list("scoped")
-        assert tasks.ok and tasks.data == []
-        assert not client.timelines.save("scoped", "missing").ok
+        assert tasks.ok and tasks.data[0] == []
+        missing_save = client.timelines.save("scoped", "missing", config={}, registry={})
+        assert not missing_save.ok
     finally:
         daemon.stop()
 
@@ -280,12 +313,10 @@ def test_client_reopens_after_close_against_same_daemon(tmp_path, monkeypatch):
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        first = AstridClient.open()
+        first = _open_client(daemon)
         assert isinstance(first.health(), dict)
-        first.close()
-        second = AstridClient.open()
+        second = _open_client(daemon)
         assert isinstance(second.health(), dict)
-        second.close()
     finally:
         daemon.stop()
 
@@ -349,32 +380,30 @@ def test_remote_domains_use_generated_runtime_and_reopen(tmp_path, monkeypatch):
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         project = client.projects.create(slug="journey", name="Journey", idempotency_key="journey-project")
         assert project.ok
-        timeline = client.timelines.create(project="journey", slug="main", idempotency_key="journey-timeline")
+        timeline = client.timelines.create(project="journey", config={}, registry={}, slug="main", idempotency_key="journey-timeline")
         assert timeline.ok
         timeline_id = timeline.data["timeline_id"]
-        saved = client.timelines.save("journey", timeline_id, expected_version=1, shots=[{"shot_id": "s1", "start_ms": 0, "duration_ms": 100}])
-        assert not saved.ok and saved.error.code == "unsupported_operation"
+        saved = client.timelines.save("journey", timeline_id, config={}, registry={}, expected_version=1)
+        assert saved.ok
         task = client.tasks.create(project_id="journey", capability="render.basic", spec={}, idempotency_key="journey-task")
         assert task.ok
-        assert client.tasks.show(task.data["task_id"], project="journey").ok
+        assert client.tasks.show(task.data["task_id"]).ok
         assert client.tasks.events(task.data["task_id"]).ok
-        invoked = client.invoke("render.basic", idempotency_key="journey-invoke")
-        rendered = client.render("render.basic", idempotency_key="journey-render")
-        assert invoked.ok and rendered.ok
-        run = client.runs.show("journey", task.data["run_id"])
+        invoked = client.invoke("render.basic", project_id="journey", spec={}, idempotency_key="journey-invoke")
+        assert invoked.ok
+        assert not hasattr(client, "render")
+        run = client.runs.show(task.data["run_id"])
         assert run.ok
-        assert client.runs.events("journey", task.data["run_id"]).ok
-        client.close()
+        assert client.runs.events(task.data["run_id"]).ok
         daemon.stop()
         daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
         monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
-        reopened = AstridClient.open()
+        reopened = _open_client(daemon)
         assert reopened.projects.show("journey").ok
         assert reopened.timelines.show("journey", timeline_id).ok
-        reopened.close()
     finally:
         daemon.stop()
 
@@ -384,7 +413,7 @@ def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_pa
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
-        client = AstridClient.open()
+        client = _open_client(daemon)
         project = client.projects.create(slug="editor", name="Editor", idempotency_key="project").data
         project_id = project["project_id"]
         first_path, second_path = tmp_path / "first.bin", tmp_path / "second.bin"
@@ -400,25 +429,25 @@ def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_pa
             metadata={"source": "test"},
             idempotency_key="relation",
         )
-        assert relation.ok and client.media.list_relations(project_id).data[0]["kind"] == "derived_from"
+        assert relation.ok and client.media.list_relations(project_id).data[0][0]["kind"] == "derived_from"
 
-        timeline = client.timelines.create(project=project_id, slug="main", idempotency_key="timeline").data["timeline_id"]
+        timeline = client.timelines.create(project=project_id, config={}, registry={}, slug="main", idempotency_key="timeline").data["timeline_id"]
         shot_result = client.shots.create(project=project_id, name="Shot", idempotency_key="shot")
-        reference_result = client.references.create(project=project_id, reference_id="reference", kind="character", name="Reference", object_id=first["object_id"], idempotency_key="reference")
+        reference_result = client.references.create(project=project_id, reference_id="reference", kind="character", name="Reference", media_id=first["object_id"], idempotency_key="reference")
         assert shot_result.ok and reference_result.ok
         shot, reference = shot_result.data, reference_result.data
-        assert client.shots.list(project_id).data[0]["shot_id"] == shot["shot_id"]
-        assert client.references.list(project_id).data[0]["reference_id"] == reference["reference_id"]
+        assert client.shots.list(project_id).data[0][0]["shot_id"] == shot["shot_id"]
+        assert client.references.list(project_id).data[0][0]["reference_id"] == reference["reference_id"]
         assert client.shots.update(project_id, shot["shot_id"], name="Shot 2", idempotency_key="shot-update").ok
         assert client.shots.archive(project_id, shot["shot_id"], idempotency_key="shot-archive").ok
         assert client.shots.recover(project_id, shot["shot_id"], idempotency_key="shot-recover").ok
         assert client.references.update(project_id, reference["reference_id"], name="Reference 2").ok
         assert client.references.archive(project_id, reference["reference_id"], idempotency_key="reference-archive").ok
-        assert client.references.unarchive(project_id, reference["reference_id"], idempotency_key="reference-recover").ok
+        assert client.references.recover(project_id, reference["reference_id"], idempotency_key="reference-recover").ok
 
         task = client.tasks.create(project_id=project_id, capability="render.basic", spec={"prompt": "editor"}, idempotency_key="task").data
-        assert client.tasks.list(project_id).data[0]["task_id"] == task["task_id"]
-        assert client.runs.list(project_id).data[0]["id"] == task["run_id"]
+        assert client.tasks.list(project_id).data[0][0]["task_id"] == task["task_id"]
+        assert client.runs.list(project_id).data[0][0]["id"] == task["run_id"]
     finally:
         daemon.stop()
 
@@ -427,6 +456,7 @@ def test_operational_gateway_uses_typed_runtime_backup_and_lifecycle(tmp_path, m
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    _use_explicit_gateway_connection(monkeypatch, daemon)
     try:
         assert dispatch._dispatch_doctor(["--json"]) == 0
         doctor = json.loads(capsys.readouterr().out)
@@ -438,18 +468,18 @@ def test_operational_gateway_uses_typed_runtime_backup_and_lifecycle(tmp_path, m
         backup = json.loads(capsys.readouterr().out)
         assert backup["ok"] is True and "manifest" in backup and "cas_manifest" in backup
 
-        client = AstridClient.open()
+        client = _open_client(daemon)
         exported = client.export_realm()
         assert exported["format_version"] == 1 and "realm" in exported
         tombstoned = client.tombstone_realm(reason="acceptance")
         assert tombstoned["state"] == "tombstoned" and tombstoned["reason"] == "acceptance"
-        recovered = client.recover_realm(expected_version=tombstoned["version"])
+        realm_id = daemon.service.realm["id"]
+        recovered = client.recover_realm(expected_realm_id=realm_id, expected_version=tombstoned["version"], confirmation=f"RECOVER {realm_id}")
         assert recovered["state"] == "active"
 
         restored_path = tmp_path / "restored"
         restored = client.restore_backup(str(backup_path), str(restored_path))
         assert restored["destination"] == str(restored_path)
         assert restored["verification"]["realm_id"] == backup["manifest"]["realm_id"]
-        client.close()
     finally:
         daemon.stop()

@@ -108,18 +108,13 @@ def read_events(
     project: str,
     run_id: str,
     *,
-    projects_root: Any = None,
-    include_audit: bool = True,
-    verify: bool = True,
     _client: Any | None = None,
 ) -> tuple[EventStreamRecord, ...]:
     """Return the runtime event snapshot for one run.
 
-    ``projects_root``, ``include_audit``, and ``verify`` remain accepted for
-    source compatibility.  Runtime ordering/integrity is authoritative, so
-    none of them selects a local storage path or local verification routine.
+    Runtime ordering and integrity are authoritative; no local storage path or
+    verification options are accepted at this boundary.
     """
-    del projects_root, include_audit, verify
     slug = _validate_project_ref(project)
     if not isinstance(run_id, str) or not run_id.strip():
         raise CapabilityValidationError("run id must be a non-empty string")
@@ -135,16 +130,12 @@ def subscribe_events(
     project: str,
     run_id: str,
     *,
-    projects_root: Any = None,
-    include_audit: bool = True,
-    verify: bool = True,
     follow: bool = False,
     poll_interval: float = 0.1,
     idle_polls: int | None = None,
     _client: Any | None = None,
 ) -> Iterator[EventStreamRecord]:
     """Yield runtime events, optionally polling for newly appended events."""
-    del projects_root, include_audit, verify
     slug = _validate_project_ref(project)
     if not isinstance(run_id, str) or not run_id.strip():
         raise CapabilityValidationError("run id must be a non-empty string")

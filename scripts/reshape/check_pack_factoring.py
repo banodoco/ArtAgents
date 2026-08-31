@@ -21,12 +21,9 @@ The enumerated :data:`KERNEL_LANE` is the fixed, complete set of kernel test
 files under ``tests/v10`` that import no domain schema pack at module level
 and whose assertions hold under *any* subset of the four packs:
 
-- kernel repositories/execution: fanout (run creation/continuation), the
-  multi-task journey, task races, evidence, media, projects, receipts/events,
-  writer/UoW, task lifecycle, task admission, task executor;
-- capability adapters that stay kernel-owned (generation roundtrip,
-  capability roundtrip, understanding repository);
-- the deterministic authority lint (pure text fixtures under ``tmp_path``).
+- runtime-boundary and authority checks: import laziness, explicit launcher/
+  SDK context, generated runtime event reads, and deterministic authority lint
+  (all pure text fixtures under ``tmp_path``).
 
 Deliberately excluded suites (asserted separately, see below):
 
@@ -45,10 +42,9 @@ Deliberately excluded suites (asserted separately, see below):
 
 The remaining catalog is verified deterministically for every removal:
 core + the three remaining packs compose to exactly
-``CORE_TABLES | (all pack tables - the removed pack's tables)``, the removed
-pack is absent from the frozen registry and the registration tuple, and a
-fresh database opened from the modified composition contains exactly the
-remaining tables (never the removed pack's).
+``CORE_TABLES | (all pack tables - the removed pack's tables)``, and the
+removed pack is absent from the frozen registry and registration tuple. The
+probe is runtime-neutral: it does not open or construct a local database.
 
 Packaged mode additionally checks that the removed pack's stream, event,
 command, repository, CLI, and bridge vocabulary is absent, every foreign key
@@ -194,21 +190,12 @@ _SKETCH_INVENTORY_MARKER = (
 inventory (followed by a fenced block of table names)."""
 
 KERNEL_LANE: tuple[str, ...] = (
-    "tests/v10/test_fanout.py",
-    "tests/v10/test_multi_task_journey.py",
-    "tests/v10/test_task_races.py",
-    "tests/v10/test_evidence_repository.py",
-    "tests/v10/test_media_repository.py",
-    "tests/v10/test_project_repository.py",
-    "tests/v10/test_receipts_events.py",
-    "tests/v10/test_writer_uow.py",
-    "tests/v10/test_task_lifecycle.py",
-    "tests/v10/test_task_admission.py",
-    "tests/v10/test_task_executor.py",
-    "tests/v10/test_capability_roundtrip.py",
-    "tests/v10/test_generation_roundtrip.py",
-    "tests/v10/test_understanding_repository.py",
+    "tests/stage1/test_core_import_authority.py",
+    "tests/stage1/test_sdk_explicit_boundary_luna.py",
+    "tests/stage1/test_events_runtime_cutover.py",
+    "tests/stage1/test_b72_authority_removal.py",
     "tests/v10/test_authority_lint.py",
+    "tests/v10/test_pack_write_path_lint.py",
 )
 """The complete enumerated kernel test lane (see module docstring)."""
 
@@ -486,7 +473,6 @@ def _artifact_environment(*roots: Path) -> dict[str, str]:
 
 _ARTIFACT_COMPOSITION_PROBE = r'''
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -495,8 +481,6 @@ import astrid
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.migrations.catalog import CORE_TABLES
 from astrid.core.schema_packs.registry import SchemaPackRegistry
-from astrid.core.store.database import open_database
-from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
 
 
@@ -532,43 +516,18 @@ for field, values in expected["removed_vocabulary"].items():
     for value in values:
         assert value not in mapping, (field, value, mapping)
 
-database = artifact_root / ("factoring-" + removed_pack + ".sqlite3")
-for suffix in ("", "-wal", "-shm"):
-    database.with_name(database.name + suffix).unlink(missing_ok=True)
-connection = open_database(database, frozen)
-try:
-    tables = {
-        row[0]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        )
-    }
-    assert tables == expected_tables
-    assert tables.isdisjoint(expected["removed_tables"])
-    connection.execute("PRAGMA foreign_keys = ON")
-    foreign_keys = {
-        (table, row[2])
-        for table in tables
-        for row in connection.execute("PRAGMA foreign_key_list('" + table + "')")
-    }
-finally:
-    connection.close()
-
-owners = {table: "core" for table in CORE_TABLES}
-owners.update(frozen.tables)
-for source, target in foreign_keys:
-    source_pack = owners[source]
-    target_pack = owners[target]
-    assert target_pack == "core" or target_pack == source_pack, (source, target)
-    assert target not in expected["removed_tables"], (source, target)
+# The product surface is now a generated neutral-runtime client. Importing the
+# SDK composition root must not pull in the retired local store/repositories.
+from astrid.sdk.client import AstridClient
+assert AstridClient
+assert not any(name.startswith("astrid.core.store") for name in sys.modules)
+assert not any(name.startswith("astrid.core.repositories") for name in sys.modules)
 
 print(json.dumps({
     "removed_pack": removed_pack,
     "remaining_packs": sorted(remaining),
     "tables": len(expected_tables),
-    "foreign_keys": len(foreign_keys),
-    "writer": "one-shared-writer",
+    "runtime": "generated-workspace-client",
 }))
 '''
 
@@ -580,7 +539,7 @@ def verify_artifact_composition(
     python: str | None = None,
     timeout: int = 30,
 ) -> str:
-    """Run installed-root catalog, vocabulary, FK, and writer checks."""
+    """Run installed-root catalog/vocabulary/runtime-boundary checks."""
     if removed_pack not in DOMAIN_PACKS:
         raise ValueError(
             f"unknown domain pack {removed_pack!r}; expected one of {DOMAIN_PACKS}"
@@ -826,7 +785,6 @@ import sys
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.migrations.catalog import CORE_TABLES
 from astrid.core.schema_packs.registry import SchemaPackRegistry
-from astrid.core.store.database import open_database
 from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
 
 removed_pack = sys.argv[1]
@@ -858,24 +816,14 @@ assert tables.isdisjoint(removed_tables), (
 for table in tables:
     assert frozen.tables[table], f"table {table!r} has no owning pack"
 
-# A fresh database from the modified composition matches the remaining
-# manifest-derived catalog exactly (never the removed pack's tables).
-conn = open_database("catalog_check.sqlite3", frozen)
-try:
-    names = {
-        row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master"
-            " WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        )
-    }
-finally:
-    conn.close()
-assert names == tables, (
-    f"fresh database tables differ from the remaining catalog: {names ^ tables}"
-)
+# Product callers use the generated neutral-runtime client; no local database
+# is opened by this composition probe.
+from astrid.sdk.client import AstridClient
+assert AstridClient
+assert not any(name.startswith("astrid.core.store") for name in sys.modules)
+assert not any(name.startswith("astrid.core.repositories") for name in sys.modules)
 print(
-    f"catalog-ok tables={len(tables)} "
+    f"runtime-catalog-ok tables={len(tables)} "
     f"packs={sorted(STANDARD_SCHEMA_PACKS)}"
 )
 """
@@ -885,7 +833,7 @@ def verify_remaining_catalog(
     work: Path, python: str, removed_pack: str, *, timeout: int = 30
 ) -> str:
     """Compose the modified registration in the temp copy and verify the
-    remaining manifest-derived catalog (registry + fresh database)."""
+    remaining manifest-derived catalog plus neutral runtime boundary."""
     removed_tables = ",".join(PACK_TABLES[removed_pack])
     remaining_tables = ",".join(sorted(ALL_PACK_TABLES - set(PACK_TABLES[removed_pack])))
     env = _artifact_environment(work)
@@ -1175,7 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "packaged factoring check PASSED: every requested domain pack is "
             "removable from one unpacked wheel while the complete kernel lane, "
-            "catalog, authority, and writer checks stay green."
+            "runtime-catalog and authority checks stay green."
         )
         return 0
 

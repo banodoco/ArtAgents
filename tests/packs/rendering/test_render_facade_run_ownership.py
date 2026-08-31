@@ -24,9 +24,7 @@ from astrid.core.execution.executor.runner import (
     run_executor,
 )
 from astrid.core.foundation import project_paths as paths
-from astrid.core.project.project import create_project
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.timeline.crud import create_timeline
 
 PARENT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAT"
 TASK_STEP_ID = "render"
@@ -62,8 +60,10 @@ def _setup_project(
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_env(monkeypatch)
-    create_project("demo")
-    timeline = create_timeline("demo", "main", is_default=True) if with_timeline else None
+    # Project identity is runtime-owned; this fixture supplies only the
+    # explicit directory used for input/staging containment assertions.
+    (projects_root / "demo").mkdir(parents=True, exist_ok=True)
+    timeline = {"timeline_id": "runtime-timeline"} if with_timeline else None
     return projects_root, timeline
 
 

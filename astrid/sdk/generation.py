@@ -54,6 +54,12 @@ _EXPLICIT_ONLY_IMAGE_MODES: frozenset[str] = frozenset(
 )
 
 
+def _reject_retired_generation_inputs(inputs: dict[str, Any]) -> None:
+    """Reject removed public spellings instead of silently forwarding them."""
+    if "backend" in inputs:
+        raise TypeError("generate.* no longer accepts 'backend'; use execution")
+
+
 def _infer_video_mode(
     explicit_mode: str | None,
     inputs: dict[str, Any],
@@ -116,36 +122,6 @@ def _resolve_execution(
     )
 
 
-def _resolve_requested_execution(
-    execution: str | None,
-    backend: str | None,
-) -> str | None:
-    """Resolve the public ``execution`` spelling and legacy ``backend`` alias.
-
-    ``execution`` is the canonical generation vocabulary.  ``backend`` was
-    historically accepted accidentally through ``**inputs`` and therefore
-    silently ignored, which could turn an explicit local preference into the
-    inferred cloud backend.  Keep the spelling usable for callers while
-    making it participate in the same pre-admission validation as
-    ``execution``.
-    """
-    if backend is None:
-        return execution
-    if not isinstance(backend, str) or not backend.strip():
-        raise CapabilityValidationError(
-            "generation backend must be a non-empty string; use one of "
-            "the model's declared backends via execution='local', "
-            "execution='cloud', or execution='codex'"
-        )
-    backend = backend.strip()
-    if execution is not None and execution != backend:
-        raise CapabilityValidationError(
-            f"conflicting generation backend selections: execution={execution!r} "
-            f"and backend={backend!r}; provide only one or make them match"
-        )
-    return backend
-
-
 def _resolve_invoke_destination(
     *,
     out: Path | str | None,
@@ -206,7 +182,6 @@ class GenerationFacade:
         model: str,
         mode: str | None = None,
         execution: str | None = None,
-        backend: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
         project_root: str | Path | None = None,
@@ -222,7 +197,7 @@ class GenerationFacade:
         argv: tuple[str, ...] = (),
         **inputs: Any,
     ) -> Any:
-        execution = _resolve_requested_execution(execution, backend)
+        _reject_retired_generation_inputs(inputs)
         if execution == "openai":
             raise CapabilityPreconditionError(
                 "astrid.generate.image does not support execution='openai'; use executor "
@@ -316,7 +291,6 @@ class GenerationFacade:
         model: str,
         mode: str | None = None,
         execution: str | None = None,
-        backend: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
         project_root: str | Path | None = None,
@@ -332,7 +306,7 @@ class GenerationFacade:
         argv: tuple[str, ...] = (),
         **inputs: Any,
     ) -> Any:
-        execution = _resolve_requested_execution(execution, backend)
+        _reject_retired_generation_inputs(inputs)
         sdk_module = importlib.import_module(self.sdk_module_name)
         resolved_mode = sdk_module._infer_video_mode(mode, inputs)
         registry = sdk_module._load_model_registry(
@@ -422,7 +396,6 @@ class GenerationFacade:
         model: str,
         mode: str | None = None,
         execution: str | None = None,
-        backend: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
         project_root: str | Path | None = None,
@@ -438,9 +411,9 @@ class GenerationFacade:
         argv: tuple[str, ...] = (),
         **inputs: Any,
     ) -> Any:
+        _reject_retired_generation_inputs(inputs)
         """Generate audio through the same typed preflight as image/video."""
 
-        execution = _resolve_requested_execution(execution, backend)
         sdk_module = importlib.import_module(self.sdk_module_name)
         registry = sdk_module._load_model_registry(
             project_root=project_root,

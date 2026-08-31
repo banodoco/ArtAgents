@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.project.project import create_project
 from astrid.core.rendering import attached
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.packs.video_editing.orchestrators.hype import steps
@@ -79,7 +78,7 @@ def test_hype_attached_render_writes_default_pair_and_only_parent_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = tmp_path / "projects"
-    create_project("demo", root=projects_root)
+    projects_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
     _patch_runtime_parent(monkeypatch, run_id="hype-parent")
     for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):

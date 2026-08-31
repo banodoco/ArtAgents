@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import subprocess
@@ -10,15 +12,34 @@ from types import SimpleNamespace
 
 import pytest
 
-RUNTIME = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME = Path(
+    os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
+    or "/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence"
+)
 sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 pytest.importorskip("runtime_protocol.daemon")
 
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
+from banodoco_workspace_client import WorkspaceClient as GeneratedRuntimeClient  # noqa: E402
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video  # noqa: E402
 from astrid.sdk.client import AstridClient  # noqa: E402
+import astrid.sdk.workspace_client as workspace_client  # noqa: E402
+
+workspace_client.GeneratedWorkspaceClient = GeneratedRuntimeClient
+
+
+def _open_client(daemon: RuntimeDaemon) -> AstridClient:
+    return AstridClient.open(
+        endpoint=daemon.endpoint,
+        credential=daemon.credential_path,
+        realm_id=daemon.service.realm["id"],
+        actor_id="owner",
+        client_name="astrid-stage1-iteration-video",
+        client_version="stage1",
+        protocol_version="workspace.v1",
+    )
 
 
 def test_runtime_execution_imports_do_not_reach_retired_project_run() -> None:
@@ -50,7 +71,7 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(support / "credentials" / "owner.token"))
     try:
-        with AstridClient.open() as client:
+        with _open_client(daemon) as client:
             created = client.projects.create(slug="demo", name="Demo", idempotency_key="project")
             assert created.ok
             admitted = client.tasks.create(
@@ -84,6 +105,12 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
 
             monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble)
             monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
+            monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda _client=None: nullcontext(client))
+            # The generated contract's ``get_run`` takes only the opaque run
+            # id; the iteration route still supplies its selected project for
+            # ownership validation.  Adapt that fixture seam explicitly.
+            generated_show = client.runs.show
+            monkeypatch.setattr(client.runs, "show", lambda _project, run_id: generated_show(run_id))
             result = iteration_video.run_orchestrator(
                 SimpleNamespace(
                     out=tmp_path / "out",
@@ -98,7 +125,7 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
                 SimpleNamespace(id="video_editing.iteration_video", kind="orchestrator"),
             )
 
-        assert result["returncode"] == 0
+            assert result["returncode"] == 0, result
         assert result["outputs"]["iteration.mp4"]
         assert result["planned_commands"][0][0] == "runtime.runs.list/show"
         assert result["planned_commands"][0][2] == runtime_run_id

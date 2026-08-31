@@ -330,6 +330,10 @@ def _runtime_run_list(client: Any, project: str) -> list[Any]:
         if not callable(method):
             raise IterationVideoError("runtime client does not expose project run listing")
         value = _unwrap_runtime_result(method(project))
+    # Generated list operations return ``(items, next_cursor)``.  Keep the
+    # runtime boundary typed while presenting the pack with its item list.
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
+        value = value[0]
     if isinstance(value, Mapping):
         if "items" not in value:
             raise IterationVideoError("runtime project run listing returned an invalid response")
@@ -480,6 +484,8 @@ def _runtime_task_records(
         if "items" not in value:
             return {}, False
         value = value["items"]
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
+        value = value[0]
     if not isinstance(value, (list, tuple)):
         return {}, False
     by_run: dict[str, list[dict[str, Any]]] = {}
@@ -529,6 +535,8 @@ def _runtime_relations(client: Any, project: str) -> tuple[list[dict[str, Any]],
         if "items" not in value:
             return [], False
         value = value["items"]
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
+        value = value[0]
     if not isinstance(value, (list, tuple)):
         return [], False
     return [item for raw in value if (item := _as_mapping(raw)) is not None], True

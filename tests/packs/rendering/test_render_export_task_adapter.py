@@ -18,12 +18,7 @@ import pytest
 
 pytest.importorskip("banodoco_timeline_schema")
 
-from astrid.core.events.registry import core_only_registry
-from astrid.core.events.service import EventAppendService
-from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
-from astrid.core.project.project import create_project
-from astrid.core.receipts import ReceiptService
 from astrid.core.rendering import remotion_runtime
 from astrid.core.rendering.remotion_runtime import (
     NODE_EXECUTABLE_ENV,
@@ -32,12 +27,8 @@ from astrid.core.rendering.remotion_runtime import (
     remotion_runtime_status,
     resolve_remotion_runtime_tools,
 )
-from astrid.core.repositories import ProjectRepository
-from astrid.core.repositories.media import MediaRepository
-from astrid.core.repositories.tasks import TaskRepository
-from astrid.core.store.uow import UnitOfWork
-from astrid.core.store.writer import DatabaseWriter
-from astrid.core.task_executor import ExecutionService
+from astrid.sdk import workspace_client
+from astrid.sdk.workspace_client import WorkspaceClient
 from astrid.packs.rendering.backends.remotion import run as remotion_run
 from astrid.packs.rendering.executors.render import task_adapter as task_adapter_module
 from astrid.packs.rendering.executors.render.task_adapter import (
@@ -112,7 +103,7 @@ def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespac
 
 
 def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -> None:
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     manifest = execute_render_export_task(
         task=task,
@@ -141,7 +132,7 @@ def test_media_timeline_selects_ffmpeg_without_remotion_configuration(
 ) -> None:
     """An ordinary media timeline must never synthesize a Remotion project."""
 
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     captured: dict[str, Any] = {}
 
@@ -188,7 +179,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
 ) -> None:
     """Renderer writes cannot mutate managed media or durable staging evidence."""
 
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     digest = task.spec["timeline_snapshot"]["registry"]["assets"]["source"][
         "content_sha256"
@@ -239,7 +230,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
 
 
 def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     task.spec["params"] = {
         **task.spec["params"],
@@ -260,7 +251,7 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
 ) -> None:
     """A clean deployment runtime, not the source ``remotion/`` checkout, renders text."""
 
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     runtime = tmp_path / "installed-remotion"
     (runtime / "node_modules" / "@banodoco").mkdir(parents=True)
     for package in ("timeline-composition", "timeline-schema", "timeline-theme-2rp"):
@@ -422,7 +413,7 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
 def test_forced_caption_fails_before_renderer_without_server_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     # Make the absence explicit: the source checkout may itself contain a
     # valid Remotion bundle during the pinned CI run.
     monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(tmp_path / "missing-remotion"))
@@ -586,7 +577,7 @@ def test_render_export_adapter_fails_closed_without_snapshot_or_project(tmp_path
 def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
     tmp_path: Path,
 ) -> None:
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     seen: list[dict] = []
     context = RenderExportExecutionContext.bounded(
@@ -617,7 +608,7 @@ def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
 def test_render_export_adapter_fails_closed_on_missing_asset_or_renderer(
     tmp_path: Path, change: str, expected: str
 ) -> None:
-    create_project("render-project", name="Render Project", root=tmp_path)
+    (tmp_path / "render-project").mkdir(parents=True, exist_ok=True)
     task = _task(root=tmp_path)
     task.spec = dict(task.spec)
     snapshot = dict(task.spec["timeline_snapshot"])
@@ -639,86 +630,29 @@ def test_render_export_adapter_fails_closed_on_missing_asset_or_renderer(
             task=task, staging_dir=tmp_path / "staging"
         )
 
-def test_render_export_round_trip_materializes_mp4_media_id(tmp_path: Path) -> None:
-    db_path = tmp_path / ".astrid" / "astrid.sqlite3"
-    db_path.parent.mkdir()
-    core_registry = core_only_registry()
-    writer = DatabaseWriter(db_path, core_registry)
-    try:
-        events = EventAppendService(core_registry)
-        receipts = ReceiptService()
-        projects = ProjectRepository(events=events, receipts=receipts)
-        tasks = TaskRepository(events=events, receipts=receipts)
-        media = MediaRepository(events=events, receipts=receipts, projects_root=tmp_path)
-        project_id = generate_lowercase_ulid()
-        UnitOfWork(writer).run(
-            lambda u: projects.create(
-                u,
-                project_id=project_id,
-                slug="render-project",
-                name="Render Project",
-                settings={},
-                idempotency_key="project-render-k",
-                created_at=TS,
-            )
-        )
-        create_project("render-project", name="Render Project", root=tmp_path, exist_ok=True)
-        task = _task(root=tmp_path)
-        admitted = UnitOfWork(writer).run(
-            lambda u: tasks.create(
-                u,
-                project_id=project_id,
-                task_id=task.id,
-                capability="rendering.render",
-                spec=task.spec,
-                input_manifest=[],
-                idempotency_key="render-admit-k",
-                max_attempts=1,
-                created_at=TS,
-            )
-        )
-        claim = UnitOfWork(writer).run(
-            lambda u: tasks.claim(
-                u,
-                project_id=project_id,
-                idempotency_key="render-claim-k",
-                executor_id="render-worker",
-                now=TS,
-            )
-        )
-        assert claim is not None
-        service = ExecutionService(projects_root=tmp_path, task_repo=tasks)
-        prepared = service.execute(
-            UnitOfWork(writer),
-            project_id=project_id,
-            task_id=admitted.id,
-            attempt_id=claim.attempt.id,
-            lease_id=claim.attempt.lease_id,
-            expected_status_version=claim.attempt.status_version,
-            idempotency_key="render-exec-k",
-            handler=RenderExportTaskAdapter(projects_root=tmp_path),
-            now=TS,
-        )
-        assert prepared.outcome == "prepared"
-        assert prepared.prepared is not None
-        completed = service.complete(
-            UnitOfWork(writer),
-            prepared=prepared.prepared,
-            media_repo=media,
-            idempotency_key="render-complete-k",
-            now=TS,
-        )
-        assert completed.outcome == "completed"
-        output = completed.completed.outputs[0]
-        assert output.role == "result"
-        assert output.media_id
-        managed = media.show(writer, output.media_id)
-        assert managed.content_hash == output.params["content_hash"]
-        assert managed.mime_type == "video/mp4"
-        assert Path(managed.locations[0].locator).is_file()
-        # The canonical task repository owns the lifecycle projection; the
-        # retired local bridge is not part of the render execution contract.
-        stored = tasks.show(writer, admitted.id)
-        assert stored.status == "succeeded"
-    finally:
-        writer.close()
+def test_generated_runtime_attempt_settlement_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Attempt completion crosses only the generated neutral-runtime client.
+
+    The former local SQLite task/media round trip was retired with local
+    authority. This fake generated client preserves the wire/argument contract
+    while keeping the test independent of product stores and repositories.
+    """
+    calls: list[tuple[str, dict[str, Any], str]] = []
+
+    class Generated:
+        def __init__(self, _endpoint: str, _token: str) -> None:
+            pass
+
+        def settle_attempt(self, attempt_id: str, settlement: dict[str, Any], *, idempotency_key: str) -> dict[str, Any]:
+            calls.append((attempt_id, settlement, idempotency_key))
+            return {"attempt_id": attempt_id, "status": settlement["status"], "outputs": settlement["output_objects"]}
+
+    monkeypatch.setattr(workspace_client, "GeneratedWorkspaceClient", Generated)
+    client = WorkspaceClient("https://runtime.example", "runtime-token")
+    settlement = {
+        "status": "succeeded",
+        "output_objects": [{"name": "rendered", "object_id": "sha256:" + "a" * 64}],
+    }
+    response = client.settle_attempt("attempt-1", settlement, idempotency_key="settle-1")
+    assert response == {"attempt_id": "attempt-1", "status": "succeeded", "outputs": settlement["output_objects"]}
+    assert calls == [("attempt-1", settlement, "settle-1")]

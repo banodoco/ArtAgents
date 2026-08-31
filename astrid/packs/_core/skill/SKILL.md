@@ -84,7 +84,7 @@ success, `1` typed SDK/runtime error, `2` usage/parse error.
 | `timelines` | `create`, `list`, `show`, `save`, `archive`, `unarchive`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `unarchive` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
 | `media` | `import`, `list`, `show`, `verify` | Media is ingested and addressed as runtime-owned objects; reference-in-place repair is not a Stage1 user operation. |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
-| `runs` | `list`, `show`, `cancel`, `retry-failed`, `events` | `retry-failed` is the batch-retry surface (all-failed-children or explicit `--task` subset) |
+| `runs` | `list`, `show`, `cancel`, `retry`, `events` | `retry` retries the selected run's eligible failed/expired children (all by default or an explicit `--task` subset) |
 
 The former file-side `projects select/current` preference is not Stage1
 authority. Runtime selection is resolved by the connected workspace service:
@@ -124,10 +124,10 @@ one project is visible; the sole runtime project is selected automatically:
 python3 -m astrid tasks list --project demo --json
 python3 -m astrid runs show <run_id> --project demo --json --evidence
 python3 -m astrid runs cancel <run_id> --project demo --json
-python3 -m astrid runs retry-failed <run_id> --project demo --json
+python3 -m astrid runs retry <run_id> --project demo --json
 ```
 
-Read events with `client.read_events(...)` or the runtime-backed
+Read events with `client.runs.events(...)` or the runtime-backed
 `client.runs.events(...)`; event ordering and retention belong to the runtime.
 `projects_root`, local `events.jsonl`, and SQLite fallbacks are historical
 interfaces and must not be used for live observation.

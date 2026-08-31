@@ -50,12 +50,12 @@ class _ReceiptClient(_RecordingClient):
 
 
 class GeneratedClientCutoverRegressionTest(unittest.TestCase):
-    def test_project_create_forwards_slug_and_settings(self) -> None:
+    def test_project_create_forwards_slug_and_metadata(self) -> None:
         client = _RecordingClient()
         result = RemoteProjects(client).create(
             slug="demo",
             name="Demo",
-            settings={"theme": "dark"},
+            metadata={"theme": "dark"},
             idempotency_key="project-key",
         )
 
@@ -64,7 +64,7 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
         args, kwargs = client.project_call
         self.assertEqual(args, ("Demo",))
         self.assertEqual(kwargs["slug"], "demo")
-        self.assertEqual(kwargs["settings"], {"theme": "dark"})
+        self.assertEqual(kwargs["metadata"], {"theme": "dark"})
         self.assertEqual(kwargs["idempotency_key"], "project-key")
 
     def test_task_create_forwards_spec(self) -> None:
@@ -86,7 +86,7 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
 
     def test_generic_invoke_forwards_server_receipt(self) -> None:
         result = RemoteAstridClient(_ReceiptClient()).invoke(
-            "capability-1", project_id="project-1", idempotency_key="task-key"
+            "capability-1", project_id="project-1", spec={}, idempotency_key="task-key"
         )
         self.assertTrue(result.ok)
         assert result.receipt is not None
