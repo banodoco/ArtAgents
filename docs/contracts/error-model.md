@@ -222,10 +222,10 @@ entrypoint, follow these rules:
    `pipeline.main()`.
 
 4. **Use `AstridError` subclasses for typed domain errors.**  The pattern
-   established by `TaskRunGateError`, `SessionBindingError`,
-   `TimelineEditError`, `ProjectError`, `ProjectValidationError`, and
-   `ExecAstridError` is: inherit from `AstridError`, set `cause` in `__init__`,
-   and preserve any legacy attributes the existing call sites expect.
+   established by `TaskRunGateError`, `SessionBindingError`, `ProjectError`,
+   `ProjectValidationError`, and `ExecAstridError` is: inherit from
+   `AstridError`, set `cause` in `__init__`, and expose only the typed fields
+   required by the current public contract.
 
 5. **Use `wrap_degraded_error()` only at the outermost catch-all.**  Do not call
    it inside pack entrypoints or kernel helpers — let those raise proper

@@ -83,7 +83,6 @@ from astrid.packs.video_editing.orchestrators.hype.steps import (  # noqa: F401 
     PER_BRIEF_SENTINELS,
     PER_SOURCE_SENTINELS,
     Step,
-    _append_managed_binding,
     _arrange_target_duration,
     _initial_facts,
     _verdict_build_cmd,
@@ -128,15 +127,6 @@ def main(argv: list[str] | None = None) -> int:
         if project_context is not None:
             args.project = project_context.project_slug
             args.render_parent_run_id = project_context.run_id
-            if not hasattr(args, "actor_via") or args.actor_via is None:
-                from astrid.core.timeline.events.schema import TimelineActor as _HypeActor
-
-                _hype_actor_type = "agent" if os.environ.get("ASTRID_INTERNAL_INVOCATION") else "human"
-                args.actor_via = _HypeActor(
-                    type=_hype_actor_type,
-                    id=f"hype:{project_context.project_slug}",
-                    display=f"hype ({_hype_actor_type})",
-                )
         keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
         keep_flag = bool(getattr(args, "keep_downloads", False))
         session_enabled = not (keep_flag or keep_env)

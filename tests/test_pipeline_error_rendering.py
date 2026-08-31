@@ -11,7 +11,6 @@ from astrid.core import gateway
 from astrid.core.contracts.errors import AstridError
 from astrid.core.project.runtime import ProjectRuntimeError
 from astrid.core.project.schema import ProjectValidationError
-from astrid.core.timeline._edit_helpers import TimelineEditError
 
 pipeline = gateway
 
@@ -175,17 +174,6 @@ def test_project_validation_error_renders_via_envelope_no_prefix() -> None:
     assert "Traceback" not in stderr
 
 
-def test_timeline_edit_error_renders_via_envelope() -> None:
-    """TimelineEditError routed through pipeline.main() → envelope, no 'timelines:' prefix."""
-    err = TimelineEditError("clip 'X' not found")
-    with mock.patch.object(pipeline, "_dispatch", side_effect=err):
-        rc, stderr = _capture(["timelines", "ls"])
-    assert rc == 2
-    assert "clip 'X' not found" in stderr
-    assert "timelines:" not in stderr  # no bespoke prefix when routed through envelope
-    assert "Traceback" not in stderr
-
-
 def test_project_runtime_error_renders_via_envelope() -> None:
     """ProjectRuntimeError routed through pipeline.main() → envelope."""
     err = ProjectRuntimeError("project 'demo' already exists")
@@ -203,20 +191,4 @@ def test_project_validation_error_renders_via_envelope() -> None:
         rc, stderr = _capture(["projects", "show"])
     assert rc == 2
     assert "source.kind must be one of {...}" in stderr
-    assert "Traceback" not in stderr
-
-
-def test_timeline_edit_error_envelope_has_no_stderr_prefix() -> None:
-    """Legacy 'timelines:' stderr prefix must NOT appear in envelope-rendered error."""
-    err = TimelineEditError("track 'A' not found")
-    assert "timelines:" not in err.cause
-    assert "timelines:" not in err.message
-    with mock.patch.object(pipeline, "_dispatch", side_effect=err):
-        rc, stderr = _capture(["timelines", "show", "demo"])
-    assert rc == 2
-    assert "track 'A' not found" in stderr
-    assert "timelines:" not in stderr.lower()
-    # But the universal renderer env should still say "recovery:" / "valid options:"
-    # if those fields happen to be set — TimelineEditError has none of them, so
-    # just ensure no prepended prefix leaked.
     assert "Traceback" not in stderr

@@ -164,9 +164,9 @@ def build_multitrack_timeline(
     """Build a standalone Remotion timeline from arrangement + pool data.
 
     Returns a ``TimelineConfig`` that is serialized as ``hype.timeline.json`` — a
-    **standalone** render artefact, not a project-timeline container.  Migration
-    to emit ``clip.*`` events through the project-timeline ``EventLogBackend`` is
-    deferred to **m3.5**.
+    standalone attempt output, not a project-timeline container. A caller may
+    deliberately apply it later through ``client.timelines.save`` with an
+    expected version; the worker never opens timeline authority itself.
     """
     clips: list[dict[str, Any]] = []
     if primary_asset is None and "rant" in registry["assets"]:
@@ -561,55 +561,3 @@ def _register_cut_outputs(
     if rendered_path is not None and rendered_path.exists():
         outputs.append(audit.register_asset(kind="render", path=rendered_path, label="Rendered hype video", parents=outputs, stage=stage, metadata=metadata))
     audit.register_node(stage=stage, label="Build cut artifacts", parents=parent_ids, outputs=outputs, metadata=metadata or {})
-
-
-def _emit_cut_managed_events(
-    args: argparse.Namespace, timeline: dict[str, Any],
-    *, actor_via: Any | None = None,
-) -> int:
-    """Emit timeline.config_replaced event through the pack write gateway.
-
-    Called when cut runs in managed mode (--project + --timeline-slug).
-    Emits events before derived outputs are written.  Created timelines
-    accept bare first domain events.  After
-    appending, ``assembly.json`` is regenerated from the canonical
-    event stream.
-
-    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
-    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
-    provenance on the emitted events.
-
-    *kernel_binding_factory* resolves the kernel timeline write path
-    (default: :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`).
-    When it binds, the gateway commits the kernel ``timeline.replace_config``
-    receipt BEFORE the eventlog append (no kernel/eventlog divergence);
-    when it returns ``None`` the context is genuinely kernel-less and the
-    documented eventlog-only escape applies.
-    """
-    import time as _time
-
-    from astrid.core.timeline._edit_helpers import pack_write_gateway
-    from astrid.core.timeline.events.schema import TimelineActor
-
-    actor = TimelineActor(
-        type="system",
-        id=f"video_editing.cut:{hash(str(_time.time()))}",
-        display="video_editing.cut",
-        via=[actor_via] if actor_via is not None else None,
-    )
-    config = canonical_timeline_config(timeline)
-    events = [
-        {
-            "kind": "timeline.config_replaced",
-            "payload": {"config": config},
-        }
-    ]
-    result = pack_write_gateway(
-        project_slug=args.project,
-        timeline_slug=args.timeline_slug,
-        timeline_ulid="",  # resolved by gateway from slug
-        timeline_event_stream_id="",  # resolved by gateway
-        events=events,
-        actor=actor,
-    )
-    return result.new_version

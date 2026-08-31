@@ -51,35 +51,11 @@ contracts. The remaining pack contract below covers only resolver behavior.
 | Dotted path / attribute | Test file : line | Symbol pinned | How patched |
 |---|---|---|---|
 | `astrid.core.timeline.save_timeline` | `tests/test_publish.py` : 440 | `save_timeline` | `mock.patch("astrid.core.timeline.save_timeline")` |
-| `astrid.core.timeline.projection.regenerate_projection` | `tests/timeline/test_projection.py` : 1168 | `regenerate_projection` | `monkeypatch.setattr("astrid.core.timeline.projection.regenerate_projection", ...)` |
-| `astrid.core.timeline._edit_helpers.select_timeline_backend` | `tests/timeline/test_clip_edits.py` : 239, 616, 654, 673, 709; `tests/timeline/test_secondary_edits.py` : 616, 646 | `select_timeline_backend` | `monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", ...)` |
-| `astrid.core.timeline._edit_helpers.find_timeline_by_slug` | `tests/timeline/test_clip_edits.py` : 247 | `find_timeline_by_slug` | `monkeypatch.setattr("astrid.core.timeline._edit_helpers.find_timeline_by_slug", ...)` |
-| `astrid.core.timeline._edit_helpers.read_json` | `tests/timeline/test_clip_edits.py` : 249 | `read_json` | `monkeypatch.setattr("astrid.core.timeline._edit_helpers.read_json", ...)` |
-| `astrid.core.timeline.clip_edits._materialize` | `tests/timeline/test_clip_edits.py` : 251 | `_materialize` | `monkeypatch.setattr("astrid.core.timeline.clip_edits._materialize", ...)` |
-| `astrid.core.timeline.crud.select_timeline_backend` | `tests/timeline/test_crud.py` : 354, 399, 433 | `select_timeline_backend` | `monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", ...)` |
-| `astrid.core.timeline.crud.LocalFsBackend.append_event` | `tests/timeline/test_crud.py` : 289 | `LocalFsBackend.append_event` | `monkeypatch.setattr(LocalFsBackend, ...)` resolves via import |
-| `astrid.core.timeline.cli` (*module object*) | `tests/timeline/test_timeline_cli.py` (many lines; see summary below) | 30+ CLI handlers | `monkeypatch.setattr(timeline_cli, ...)` resolves via `from astrid.core.timeline import cli` |
 
-**timeline_cli attribute summary** (all via `monkeypatch.setattr(timeline_cli, ...)` in `tests/timeline/test_timeline_cli.py`):
-
-`cmd_ls`, `_require_session`, `cmd_show`, `cmd_finalize`, `cmd_purge`, `cmd_set_default`,
-`cmd_clip_add`, `cmd_clip_remove`, `cmd_clip_move`, `cmd_clip_retime`, `cmd_clip_swap`,
-`cmd_clip_replace`, `cmd_clip_set_text`, `cmd_clip_annotate`, `cmd_push`, `cmd_pull`,
-`cmd_recover`, `cmd_branch_create`, `cmd_branch_list`, `cmd_undo`, `cmd_mass_undo`,
-`cmd_erase`, `cmd_history`, `cmd_diff`, `cmd_audit`, `cmd_preview`, `cmd_who_edited`,
-`cmd_migrate_events`, `_resolve_clip_backend_name`, plus various handler names (line 1202).
-
-**timeline_cli sub-object attributes:**
-
-| Sub-object path | Symbols pinned | Test file : line |
-|---|---|---|
-| `astrid.core.timeline.cli.crud` | `create_timeline`, `rename_timeline`, `set_default`, `get_arrangement`, `show_timeline` | `tests/timeline/test_timeline_cli.py` : 191, 362, 395, 1469, 1470 |
-| `astrid.core.timeline.cli.clip_edits` | `add_clip` | `tests/timeline/test_timeline_cli.py` : 650 |
-| `astrid.core.timeline.cli.transition_edits` | `transition_set` | `tests/timeline/test_timeline_cli.py` : 1316 |
-| `astrid.core.timeline.cli.effect_edits` | `effect_add` | `tests/timeline/test_timeline_cli.py` : 1355 |
-| `astrid.core.timeline.cli.theme_edits` | `theme_set` | `tests/timeline/test_timeline_cli.py` : 1378 |
-| `astrid.core.timeline.cli.track_edits` | `track_add` | `tests/timeline/test_timeline_cli.py` : 1399 |
-| `astrid.core.timeline.cli.audio_edits` | `audio_bind` | `tests/timeline/test_timeline_cli.py` : 1426 |
+The retired local timeline CLI, edit helpers, event-log backend, projection
+writer, branch, erasure, recovery, and undo modules have no compatibility
+monkeypatch contract. Supported timeline mutations are versioned generated-
+client calls and are tested at the SDK/runtime boundary.
 
 ## 5. task/operator/view ↔ operator/render
 

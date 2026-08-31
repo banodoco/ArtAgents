@@ -11,7 +11,6 @@ import argparse
 import copy
 import json
 import subprocess
-import sys
 import tempfile
 from datetime import datetime, timezone
 from functools import partial
@@ -23,13 +22,10 @@ from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.managed_binding import is_managed_mode
 from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,
-    load_arrangement,
     load_metadata,
-    load_pool,
     load_registry,
     load_timeline,
     save_arrangement,
@@ -84,19 +80,6 @@ def build_parser() -> argparse.ArgumentParser:
     add("--similarity-threshold", type=float, default=0.85)
     add("--skip-whisper", action="store_true")
     add("--env-file", type=Path)
-    # Managed binding seam (m3.5): when both --project and --timeline-slug are
-    # present, the pack writes canonical timeline events through the event gateway.
-    # Without these flags, the pack runs in unmanaged artifact mode (writes
-    # run-local compatibility outputs only).  --timeline-id is intentionally NOT
-    # added here -- it is reserved for executor UUID mode.
-    add("--project", help="Project slug for managed canonical writes.")
-    add("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
-    add(
-        "--actor-via",
-        type=json.loads,
-        default=None,
-        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
-    )
     return parser
 
 
@@ -568,59 +551,8 @@ def _flag_entry(finding: enriched_arrangement.ReviewerFinding) -> dict[str, Any]
     }
 
 
-def _emit_refine_managed_events(
-    args: argparse.Namespace, config: dict[str, Any],
-    *, actor_via: Any | None = None,
-) -> int:
-    """Emit timeline.config_replaced event through the pack write gateway.
-
-    Called when refine runs in managed mode (--project + --timeline-slug).
-    Emits events before compatibility outputs are written, preserving the
-    append-then-materialize contract.
-
-    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
-    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
-    provenance on the emitted events.
-
-    *kernel_binding_factory* resolves the kernel timeline write path
-    (default: :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`).
-    When it binds, the gateway commits the kernel ``timeline.replace_config``
-    receipt BEFORE the eventlog append (no kernel/eventlog divergence);
-    when it returns ``None`` the context is genuinely kernel-less and the
-    documented eventlog-only escape applies.
-    """
-    import time as _time
-
-    from astrid.core.timeline._edit_helpers import pack_write_gateway
-    from astrid.core.timeline.events.schema import TimelineActor
-
-    actor = TimelineActor(
-        type="system",
-        id=f"editorial.refine:{hash(str(_time.time()))}",
-        display="editorial.refine",
-        via=[actor_via] if actor_via is not None else None,
-    )
-    validated_config = canonical_timeline_config(config)
-    events = [
-        {
-            "kind": "timeline.config_replaced",
-            "payload": {"config": validated_config},
-        }
-    ]
-    result = pack_write_gateway(
-        project_slug=args.project,
-        timeline_slug=args.timeline_slug,
-        timeline_ulid="",
-        timeline_event_stream_id="",
-        events=events,
-        actor=actor,
-    )
-    return result.new_version
-
-
 def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: dict[str, Any], transcript_segments: list[dict[str, Any]], prior_meta: dict[str, Any], args: argparse.Namespace, report: dict[str, Any]) -> None:
     pool_entries = _pool_map(enriched.pool)
-    managed = is_managed_mode(args)
     if not is_all_generative_arrangement(enriched.arrangement, enriched.pool):
         validate_arrangement_duration_window(enriched.arrangement)
     save_arrangement(enriched.arrangement, args.arrangement, set(pool_entries))
@@ -657,14 +589,6 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
     if isinstance(prior_timeline, dict) and isinstance(prior_timeline.get("theme_overrides"), dict):
         rebuilt.setdefault("theme_overrides", prior_timeline["theme_overrides"])
     canonical_timeline_config(rebuilt)
-    # m3.5 managed mode: emit events through the gateway before writing
-    # compatibility outputs.
-    if managed:
-        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
-
-        actor_via_raw = getattr(args, "actor_via", None)
-        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
-        _emit_refine_managed_events(args, rebuilt, actor_via=actor_via)
     save_timeline(rebuilt, args.timeline)
     save_metadata(metadata, args.metadata)
     clips_by_order = {int(clip_id.rsplit("_", 1)[-1]): dict(clip_meta) for clip_id, clip_meta in metadata.get("clips", {}).items() if clip_id.startswith("clip_a_")}
@@ -716,13 +640,6 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
 
 def main(argv: Sequence[str] | None = None, *, transcriber: SnippetTranscriber | None = None) -> int:
     args = build_parser().parse_args(argv)
-    # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = is_managed_mode(args)
-    if managed:
-        print(f"refine: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
-    else:
-        if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
-            raise SystemExit("--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode")
     for name in ("arrangement", "pool", "timeline", "assets", "metadata", "transcript", "out"):
         setattr(args, name, getattr(args, name).resolve())
     args.out.mkdir(parents=True, exist_ok=True)

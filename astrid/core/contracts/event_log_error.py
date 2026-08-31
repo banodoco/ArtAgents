@@ -1,4 +1,4 @@
-"""Shared EventLogError base for task and timeline event-log hierarchies."""
+"""Shared EventLogError base for the runtime-facing task event hierarchy."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ from __future__ import annotations
 class EventLogError(RuntimeError):
     """Base for all event-log errors across task and timeline domains.
 
-    Both ``astrid.core.events.EventLogError`` and
-    ``astrid.core.timeline.eventlog.types.EventLogError`` re-export this class
-    so ``except EventLogError`` catches errors from either family regardless of
-    which import site was used.
+    Timeline storage errors are returned by the generated workspace client;
+    Astrid no longer exposes a product-side timeline event-log hierarchy.
     """

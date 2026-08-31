@@ -1,11 +1,8 @@
 """Pack write-path lint (adherence item 6).
 
 Pack event writes must route through the pack repositories' own methods —
-never through the legacy timeline event-log entrypoints. This lint scans the
-v10 schema-pack code (``astrid/packs/{timeline,shots,references}`` — the
-packs the standard composition registers; the m1-m6 legacy capability packs
-are non-product dead code with their own import graph, per the authority
-lint's product-path rule) and forbids:
+never through legacy timeline event-log entrypoints. This lint scans the v10
+schema packs and the live cut/assemble/refine task workers and forbids:
 
 - calls to ``pack_write_gateway``, ``EventLogBackend``, or any
   ``append_event`` call target — the direct event-append entrypoints
@@ -32,30 +29,38 @@ _ROOT = Path(__file__).resolve().parents[2]
 _PACKS_ROOT = _ROOT / "astrid" / "packs"
 
 _SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+_TASK_WORKER_ROOTS: tuple[Path, ...] = (
+    _PACKS_ROOT / "video_editing/executors/cut",
+    _PACKS_ROOT / "iteration/executors/assemble",
+    _PACKS_ROOT / "editorial/executors/refine",
+)
 
 # Event-append entrypoints a pack must never call directly.
 _FORBIDDEN_CALL_TAILS: tuple[str, ...] = ("pack_write_gateway", "append_event")
 _FORBIDDEN_BACKEND_NAME = "EventLogBackend"
 
-# Files where the event-append entrypoint names may legitimately appear: the
-# gateway definition site itself and the sanctioned pack write path.
+# The schema timeline repository is the sole sanctioned pack write path.
 _ALLOWED_ENTRYPOINT_FILES: frozenset[Path] = frozenset(
     {
-        _ROOT / "astrid/core/timeline/_edit_helpers.py",
         _ROOT / "astrid/packs/timeline/repository.py",
     }
 )
 
 
 def _schema_pack_sources() -> list[Path]:
-    files = [
+    schema_files = [
         path
         for pack in _SCHEMA_PACKS
         for path in sorted((_PACKS_ROOT / pack).rglob("*.py"))
     ]
-    if not files:
-        raise AssertionError("write-path lint scanned no schema-pack sources")
-    return files
+    worker_files = [
+        path
+        for worker_root in _TASK_WORKER_ROOTS
+        for path in sorted(worker_root.rglob("*.py"))
+    ]
+    if not schema_files or not worker_files:
+        raise AssertionError("write-path lint did not scan every required source root")
+    return schema_files + worker_files
 
 
 def _dotted_tail(node: ast.AST) -> str:

@@ -1,8 +1,8 @@
 """Canonical event-to-assembly projector (backend-agnostic).
 
 This module defines the **sole** applicator table and two public surfaces
-for projecting a sequence of ``TimelineEvent`` objects into an ``assembly``
-dict suitable for writing to ``assembly.json``:
+for projecting a sequence of ``TimelineEvent`` objects into an in-memory
+timeline configuration:
 
 * ``apply_event_to_assembly(state: dict, event: TimelineEvent) -> dict``
   – single-event fold (returns a *new* dict).
@@ -721,9 +721,8 @@ def project_to_assembly(
 ) -> dict[str, Any]:
     """Replay an ordered sequence of *events* into a projected assembly dict.
 
-    The projector is **backend-agnostic**: it accepts ``TimelineEvent``
-    objects regardless of whether they came from ``LocalFsBackend``
-    or a test fixture.
+    The projector is storage-agnostic: it accepts ``TimelineEvent`` objects
+    materialized by the runtime or constructed by a pure test fixture.
 
     Parameters
     ----------
@@ -738,9 +737,7 @@ def project_to_assembly(
     Returns
     -------
     dict
-        The projected assembly dict.  This is the **inner** assembly value
-        (the on-disk ``assembly.json`` content), **not** a legacy wrapper.
-        Callers that need the wrapper must construct it themselves.
+        The projected in-memory timeline configuration.
 
     Raises
     ------
@@ -758,7 +755,7 @@ def project_to_assembly(
 
 
 # ============================================================================
-# Pure replay (never writes files — used by observability / audit)
+# Pure replay (never writes files)
 # ============================================================================
 
 
@@ -769,10 +766,9 @@ def replay_projection(
 ) -> dict[str, Any]:
     """Replay the full event stream into an assembly dict **without any disk I/O**.
 
-    This is the pure, read-only counterpart of ``regenerate_projection()``.
-    It reads events through *backend* (which must satisfy
-    ``EventLogBackend.read_events()``) and folds them via
-    ``apply_event_to_assembly``.
+    It reads events through an explicitly supplied read-only source and folds
+    them via ``apply_event_to_assembly``. Live product code receives timeline
+    documents through the generated runtime client instead.
 
     Parameters
     ----------
@@ -858,9 +854,8 @@ def project_to_checkpoint(
 ) -> dict[str, Any]:
     """Replay the full event stream into an assembly dict with optional verification.
 
-    Unlike ``regenerate_projection()``, this helper does **not** write
-    any files.  It is suitable for callers that need a pure projected
-    assembly for comparison or validation.
+    This helper does **not** write files. It is suitable for migrated fixture
+    comparison and pure validation only.
 
     Parameters
     ----------
@@ -893,229 +888,3 @@ def project_to_checkpoint(
         # Additional safety: the projected state is from events only — caller
         # must never treat stale compatibility blobs as authority.
     return state
-
-
-# ============================================================================
-# Replay orchestration (backend-agnostic, with LocalFs checkpoint support)
-# ============================================================================
-
-# Version tag for the checkpoint file format.  Bump when the shape changes.
-_CHECKPOINT_SCHEMA_VERSION = 1
-
-
-def regenerate_projection(
-    timeline_id: str,
-    backend: Any,
-    *,
-    timeline_home: Any,
-    batch_events: Sequence[TimelineEvent] | None = None,
-) -> dict[str, Any]:
-    """Regenerate ``assembly.json`` from the canonical event stream.
-
-    This is the **single** replay orchestration entry point.  It is
-    backend-agnostic: *backend* must satisfy the ``EventLogBackend``
-    protocol (``.head()`` and ``.read_events()``), and *timeline_home*
-    is a ``pathlib.Path`` to the timeline directory (used for
-    checkpoint and assembly file I/O).
-
-    Algorithm
-    ---------
-    1. Read ``assembly.checkpoint.json`` (if present).
-    2. Verify checkpoint metadata against the current *backend* head.
-    3. **Checkpoint hit**: seed ``project_to_assembly`` with the cached
-       assembly and replay only suffix events (``after=last_event_id``).
-    4. **Checkpoint miss / corruption / version mismatch**: try the bounded
-       cold bootstrap (project only the post-reset tail when the tail's
-       oldest event resets the assembly); otherwise fall back to full replay
-       via ``replay_projection()``.
-    5. Atomically write the projected raw TimelineConfig to ``assembly.json``.
-    6. Atomically write / refresh ``assembly.checkpoint.json``.
-
-    ``batch_events`` supplies the just-appended event batch when the caller
-    already holds it in memory (the incremental save path): when the
-    checkpoint is behind by exactly that batch, the suffix is projected from
-    memory instead of a ``read_events()`` full-log scan.
-
-    Returns
-    -------
-    dict
-        The projected raw TimelineConfig dict.
-
-    Raises
-    ------
-    ProjectionError
-        When any event in the stream fails to project.
-    OSError
-        When file I/O fails.
-    """
-    from pathlib import Path
-
-    from astrid.core._shared.jsonio import read_json, write_json_atomic
-
-    _home = Path(timeline_home)
-    checkpoint_file = _home / "assembly.checkpoint.json"
-    assembly_file = _home / "assembly.json"
-
-    head = backend.head()
-
-    assembly: dict[str, Any] = {}
-    events_applied = 0
-
-    # --- Try checkpoint-assisted replay ---
-    checkpoint = None
-    try:
-        if checkpoint_file.is_file():
-            checkpoint = read_json(checkpoint_file)
-    except Exception:
-        checkpoint = None
-
-    checkpoint_valid = False
-    if isinstance(checkpoint, dict):
-        # Verify checkpoint metadata matches current head.
-        cp_schema = checkpoint.get("schema_version")
-        cp_timeline_id = checkpoint.get("timeline_id")
-        cp_last_event_id = checkpoint.get("last_event_id")
-        cp_last_hash = checkpoint.get("last_hash")
-        cp_event_count = checkpoint.get("event_count")
-        cp_assembly = checkpoint.get("assembly")
-
-        # Ancestry guardrails (MUST-FIX 3c): a checkpoint may only be
-        # trusted when it is a true ancestor of the current log.  The
-        # schema/timeline must match and the covered event count must lie
-        # in ``[0, head.event_count]`` (a count ABOVE the head is corrupt
-        # and forces full replay below); the covered id/hash are verified
-        # against the log when a suffix is replayed.
-        cp_plausible = (
-            cp_schema == _CHECKPOINT_SCHEMA_VERSION
-            and cp_timeline_id == head.timeline_id
-            and isinstance(cp_event_count, int)
-            and not isinstance(cp_event_count, bool)
-            and 0 <= cp_event_count <= head.event_count
-            and isinstance(cp_assembly, dict)
-        )
-
-        if cp_plausible and cp_event_count == head.event_count:
-            if (
-                cp_last_event_id == head.last_event_id
-                and cp_last_hash == head.last_hash
-            ):
-                # Checkpoint is current — no suffix events to replay.
-                # M9: Verify that no recovery/erasure events are in the stream
-                # that would invalidate the checkpoint.  Checkpoint is only valid
-                # when it was regenerated from events, not from stale blobs.
-                assembly = dict(cp_assembly)
-                events_applied = cp_event_count
-                checkpoint_valid = True
-        elif cp_plausible and cp_event_count < head.event_count:
-            # Checkpoint is behind — replay suffix events, but only after
-            # proving the checkpoint is an ancestor of the current log.
-            # Prefer the in-memory batch (incremental save path, no
-            # full-log read) when it accounts for exactly the missing suffix.
-            expected_suffix = head.event_count - cp_event_count
-            if batch_events is not None and len(batch_events) == expected_suffix:
-                suffix_events = list(batch_events)
-            else:
-                suffix_events = backend.read_events(after=cp_last_event_id)
-            # Ancestry checks — a checkpoint that is NOT an ancestor of the
-            # current log (unknown last_event_id, hash mismatch, or a suffix
-            # that does not chain) must never silently replay a wrong suffix:
-            #  - the suffix must contain exactly the missing events (an
-            #    unknown cp_last_event_id makes read_events() return []),
-            #  - the first suffix event must chain from the checkpoint's
-            #    last_hash,
-            #  - the suffix must chain internally and terminate at the head.
-            suffix_chains = (
-                len(suffix_events) == expected_suffix
-                and expected_suffix > 0
-                and suffix_events[0].prev_hash == cp_last_hash
-                and suffix_events[-1].event_id == head.last_event_id
-                and suffix_events[-1].hash == head.last_hash
-                and all(
-                    event.prev_hash == prev.hash
-                    for event, prev in zip(suffix_events[1:], suffix_events[:-1])
-                )
-            )
-            # M9: If any suffix event is a recovery or erasure, invalidate
-            # the checkpoint and force full replay.  Recovery replaces the
-            # assembly; erasure may have removed payloads the checkpoint
-            # still contains.
-            suffix_has_recovery_or_erasure = any(
-                e.kind in ("timeline.recovered", "timeline.erased")
-                for e in suffix_events
-            )
-            if suffix_chains and not suffix_has_recovery_or_erasure:
-                assembly = project_to_assembly(
-                    suffix_events,
-                    initial_assembly=cp_assembly,
-                )
-                events_applied = head.event_count
-                checkpoint_valid = True
-
-    # --- Fall back to full replay (via pure replay_projection) ---
-    if not checkpoint_valid:
-        assembly = _cold_bootstrap_projection(backend)
-        if assembly is None:
-            assembly = replay_projection(backend)
-        events_applied = head.event_count
-
-    # --- Write assembly.json atomically ---
-    from astrid.core.timeline.model import write_timeline_config_json
-
-    assembly = write_timeline_config_json(assembly_file, assembly)
-
-    # --- Write / refresh checkpoint ---
-    checkpoint_payload = {
-        "schema_version": _CHECKPOINT_SCHEMA_VERSION,
-        "timeline_id": head.timeline_id,
-        "last_event_id": head.last_event_id,
-        "last_hash": head.last_hash,
-        "event_count": head.event_count,
-        "version": head.version,
-        "assembly": assembly,
-    }
-    write_json_atomic(checkpoint_file, checkpoint_payload)
-
-    return assembly
-
-
-def _cold_bootstrap_projection(backend: Any) -> dict[str, Any] | None:
-    """Bounded cold-start projection from the log tail.
-
-    When the tail window contains the stream's LAST resetting event
-    (``timeline.config_replaced``, or ``timeline.recovered`` with a projected
-    state summary), the projected state of the FULL stream equals the
-    projection of the suffix starting at that event — everything before the
-    last reset is discarded by the reset.  This bounds the checkpoint-cold
-    cost to O(tail) instead of an unbounded full replay (which re-validates
-    every historical config event).
-
-    Returns ``None`` when the backend cannot read a bounded tail or no
-    resetting event is found within it, so the caller falls back to the
-    full replay.
-    """
-    read_tail = getattr(backend, "read_tail_events", None)
-    if read_tail is None:
-        return None
-    try:
-        suffix = read_tail(limit=256)
-    except Exception:
-        return None
-    if not suffix:
-        return None
-    reset_index: int | None = None
-    for index in range(len(suffix) - 1, -1, -1):
-        event = suffix[index]
-        if event.kind == "timeline.config_replaced":
-            reset_index = index
-            break
-        if event.kind == "timeline.recovered":
-            payload = event.payload
-            if (
-                isinstance(payload, TimelineRecoveredPayload)
-                and payload.projected_state_summary is not None
-            ):
-                reset_index = index
-                break
-    if reset_index is None:
-        return None
-    return project_to_assembly(suffix[reset_index:])

@@ -13,7 +13,6 @@ from astrid.core.contracts.errors import (
 from astrid.core.contracts.exec_error import ExecError
 from astrid.core.project.runtime import ProjectRuntimeError
 from astrid.core.project.schema import ProjectValidationError
-from astrid.core.timeline._edit_helpers import TimelineEditError
 
 
 @dataclass(frozen=True)
@@ -345,15 +344,6 @@ def test_project_validation_error_is_astrid_error() -> None:
     assert err.degraded is False
 
 
-def test_timeline_edit_error_is_astrid_error() -> None:
-    err = TimelineEditError("clip 'X' not found")
-    assert isinstance(err, AstridError)
-    assert err.cause == "clip 'X' not found"
-    assert err.message == "clip 'X' not found"
-    assert err.reason == "clip 'X' not found"
-    assert err.degraded is False
-
-
 def test_project_runtime_error_is_astrid_error() -> None:
     err = ProjectRuntimeError("project 'demo' already exists")
     assert isinstance(err, AstridError)
@@ -376,7 +366,6 @@ def test_project_validation_error_is_astrid_error() -> None:
 def test_all_migrated_errors_coerce_to_canonical_envelope() -> None:
     """Every migrated error class round-trips through coerce_astrid_error."""
     cases: list[tuple[AstridError, str]] = [
-        (TimelineEditError("clip not found"), "clip not found"),
         (ProjectRuntimeError("project exists"), "project exists"),
         (ProjectValidationError("invalid field"), "invalid field"),
     ]

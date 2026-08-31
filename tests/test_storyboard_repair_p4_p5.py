@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.timeline._edit_helpers import TimelineEditError
 from astrid.core.timeline.banodoco_schema import canonical_timeline_config
-from astrid.core.timeline.expand_shots import expand_shot_clips
+from astrid.core.timeline.expand_shots import ShotExpansionError, expand_shot_clips
 from scripts import build_storyboard as bs
 
 
@@ -41,6 +40,7 @@ def _story() -> dict:
 
 
 def test_image_media_is_emitted_as_a_bounded_window() -> None:
+    pytest.importorskip("banodoco_timeline_schema")
     importer = _Import()
     story = _story()
     config, registry, _ = bs.compile_storyboard(
@@ -106,13 +106,14 @@ def test_expansion_rejects_unbounded_image_media_before_renderer() -> None:
             {"assets": {"still": {"file": "still.png", "type": "image"}}},
         )
 
-    with pytest.raises(TimelineEditError, match="hold without explicit from/to"):
+    with pytest.raises(ShotExpansionError, match="hold without explicit from/to"):
         expand_shot_clips(config, {"assets": {}}, load_timeline=load_child)
 
 
 def test_compile_threads_isolated_projects_root_to_default_importer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("banodoco_timeline_schema")
     importer = _Import()
     root = Path("/isolated/projects-root")
     monkeypatch.setattr(bs, "sdk_import_asset", importer)

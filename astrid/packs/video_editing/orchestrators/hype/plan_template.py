@@ -389,8 +389,6 @@ def _runtime_args_from_template_inputs(
         allow_generative_effects=False,
         brief_allow_generative_visuals=False,
         project=None,
-        timeline_slug=None,
-        actor_via=None,
     )
 
 

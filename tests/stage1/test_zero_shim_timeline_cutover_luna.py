@@ -25,7 +25,6 @@ from astrid.packs.rendering.executors.timeline_visualize.select import KernelTim
 from astrid.sdk import invocation
 from astrid.sdk.exceptions import CapabilityValidationError
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -42,6 +41,10 @@ for name in (
     'astrid.core.timeline.eventlog.local_fs',
     'astrid.core.timeline.eventlog.selector',
     'astrid.core.timeline._edit_helpers',
+    'astrid.core.timeline.branch',
+    'astrid.core.timeline.erasure',
+    'astrid.core.timeline.operations',
+    'astrid.core.timeline.undo',
 ):
     assert name not in sys.modules, name
 """
@@ -55,6 +58,20 @@ for name in (
         "astrid/core/timeline/repair.py",
         "astrid/core/timeline/eventlog/local_fs.py",
         "astrid/core/timeline/eventlog/selector.py",
+        "astrid/core/timeline/eventlog/protocol.py",
+        "astrid/core/timeline/eventlog/types.py",
+        "astrid/core/timeline/_edit_helpers.py",
+        "astrid/core/timeline/audio_edits.py",
+        "astrid/core/timeline/branch.py",
+        "astrid/core/timeline/clip_edits.py",
+        "astrid/core/timeline/effect_edits.py",
+        "astrid/core/timeline/erasure.py",
+        "astrid/core/timeline/observability.py",
+        "astrid/core/timeline/operations.py",
+        "astrid/core/timeline/theme_edits.py",
+        "astrid/core/timeline/track_edits.py",
+        "astrid/core/timeline/transition_edits.py",
+        "astrid/core/timeline/undo.py",
     ):
         assert not (ROOT / relative).exists(), relative
 
@@ -117,7 +134,7 @@ def test_runtime_materialization_projects_in_memory_and_never_repairs(tmp_path: 
     assert not list(tmp_path.rglob("assembly.jsonl"))
 
 
-def test_runtime_timeline_create_read_version_and_cas(tmp_path: Path, monkeypatch) -> None:
+def test_runtime_timeline_create_read_version_and_cas(tmp_path: Path) -> None:
     """The supported timeline lifecycle is a runtime transaction, including CAS."""
     runtime_root = Path(
         os.environ.get(
@@ -128,66 +145,79 @@ def test_runtime_timeline_create_read_version_and_cas(tmp_path: Path, monkeypatc
     )
     if not runtime_root.is_dir():
         pytest.skip("workspace runtime checkout is not available")
-    sys.path.insert(0, str(runtime_root))
-    sys.path.insert(0, str(runtime_root / "packages" / "python"))
-    daemon_module = pytest.importorskip("runtime_protocol.daemon")
-    from astrid.sdk.client import AstridClient
+    probe = r'''import sys
+from pathlib import Path
 
-    daemon = daemon_module.RuntimeDaemon(
-        tmp_path / "realm", support_root=tmp_path / "support"
-    ).start()
-    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
-    monkeypatch.setenv(
-        "BANODOCO_RUNTIME_CREDENTIAL",
-        str(tmp_path / "support" / "credentials" / "owner.token"),
+from runtime_protocol.daemon import RuntimeDaemon
+from astrid.sdk.client import AstridClient
+
+root = Path(sys.argv[1])
+daemon = RuntimeDaemon(root / "realm", support_root=root / "support").start()
+try:
+    credential = root / "support" / "credentials" / "owner.token"
+    with AstridClient.open(
+        endpoint=daemon.endpoint,
+        credential=credential,
+        realm_id=daemon.service.realm["id"],
+        actor_id="owner",
+        client_name="astrid-stage1-test",
+        client_version="stage1",
+        protocol_version="workspace.v1",
+    ) as client:
+        created = client.projects.create(
+            slug="demo", name="Demo", idempotency_key="project"
+        )
+        assert created.ok and created.data
+        created_timeline = client.timelines.create(
+            project="demo",
+            slug="main",
+            config={"tracks": [], "clips": []},
+            registry={"assets": {}},
+            idempotency_key="timeline",
+        )
+        assert created_timeline.ok and created_timeline.data
+        timeline_id = created_timeline.data["timeline_id"]
+        shown = client.timelines.show("demo", timeline_id)
+        assert shown.ok and shown.data["config_version"] == 1
+        updated = client.timelines.save(
+            "demo",
+            timeline_id,
+            config={"tracks": [], "clips": []},
+            registry={"assets": {}},
+            expected_version=1,
+            idempotency_key="timeline-save",
+        )
+        assert updated.ok and updated.data["config_version"] == 2
+        stale = client.timelines.save(
+            "demo",
+            timeline_id,
+            config={"tracks": [], "clips": []},
+            registry={"assets": {}},
+            expected_version=1,
+            idempotency_key="timeline-stale",
+        )
+        assert not stale.ok and stale.error.code == "conflict"
+        assert stale.error.details == {"actual": 2, "expected": 1}
+        assert client.timelines.show("demo", timeline_id).data["config_version"] == 2
+finally:
+    daemon.stop()
+'''
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        (
+            str(runtime_root / "packages" / "python"),
+            str(runtime_root),
+            str(ROOT),
+        )
     )
-    try:
-        with AstridClient.open(
-            endpoint=daemon.endpoint,
-            credential=tmp_path / "support" / "credentials" / "owner.token",
-            realm_id=daemon.service.realm["id"],
-            actor_id="owner",
-            client_name="astrid-stage1-test",
-            client_version="stage1",
-            protocol_version="workspace.v1",
-        ) as client:
-            created = client.projects.create(
-                slug="demo", name="Demo", idempotency_key="project"
-            )
-            assert created.ok and created.data
-            created_timeline = client.timelines.create(
-                project="demo",
-                slug="main",
-                config={"tracks": [], "clips": []},
-                registry={"assets": {}},
-                idempotency_key="timeline",
-            )
-            assert created_timeline.ok and created_timeline.data
-            timeline_id = created_timeline.data["timeline_id"]
-            shown = client.timelines.show("demo", timeline_id)
-            assert shown.ok and shown.data["config_version"] == 1
-            updated = client.timelines.save(
-                "demo",
-                timeline_id,
-                config={"tracks": [], "clips": []},
-                registry={"assets": {}},
-                expected_version=1,
-                idempotency_key="timeline-save",
-            )
-            assert updated.ok and updated.data["config_version"] == 2
-            stale = client.timelines.save(
-                "demo",
-                timeline_id,
-                config={"tracks": [], "clips": []},
-                registry={"assets": {}},
-                expected_version=1,
-                idempotency_key="timeline-stale",
-            )
-            assert not stale.ok and stale.error.code == "conflict"
-            assert stale.error.details == {"actual": 2, "expected": 1}
-            assert client.timelines.show("demo", timeline_id).data["config_version"] == 2
-    finally:
-        daemon.stop()
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(tmp_path)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_replay_capture_has_no_timeline_or_theme_file_authority() -> None:
@@ -220,9 +250,34 @@ def test_legacy_eventlog_exports_are_not_product_api() -> None:
     import astrid.core.timeline.eventlog as eventlog
 
     for name in (
+        "EventLogBackend",
         "LocalFsBackend",
         "select_timeline_backend",
         "select_timeline_stream",
     ):
         with pytest.raises(AttributeError):
             getattr(eventlog, name)
+
+
+def test_pack_workers_are_result_only_and_have_no_timeline_write_binding() -> None:
+    worker_paths = (
+        ROOT / "astrid/packs/video_editing/executors/cut/timeline_build.py",
+        ROOT / "astrid/packs/iteration/executors/assemble/run.py",
+        ROOT / "astrid/packs/editorial/executors/refine/run.py",
+    )
+    forbidden = (
+        "pack_write_gateway",
+        "append_event",
+        "regenerate_projection",
+        "--timeline-slug",
+        "--actor-via",
+    )
+    for path in worker_paths:
+        source = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            assert marker not in source, f"{path.relative_to(ROOT)}: {marker}"
+
+    projection_source = (ROOT / "astrid/core/timeline/projection.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def regenerate_projection(" not in projection_source

@@ -3,10 +3,10 @@
 
 .. note::
 
-    This module produces **standalone** ``hype.timeline.json`` artifacts for
-    the Remotion renderer.  In managed mode the same validated raw
-    ``TimelineConfig`` is emitted to the project timeline as
-    ``timeline.config_replaced`` before these run-local artifacts are written."""
+    This module produces **standalone** ``hype.timeline.json`` attempt outputs
+    for the Remotion renderer. It never writes a project timeline; callers may
+    deliberately apply an output through the generated client with an expected
+    version."""
 
 from __future__ import annotations
 
@@ -24,8 +24,7 @@ from typing import Any, Sequence
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.managed_binding import is_managed_mode
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.theme import load_theme, theme_root
@@ -43,6 +42,7 @@ from astrid.core.timeline import (
 )
 from astrid.packs.editorial.hype.arrangement_rules import compile_arrangement_plan
 
+from . import attempt_assets as _attempt_assets
 from . import probe
 from . import resume as _resume
 from . import timeline_build as _timeline_build
@@ -71,7 +71,6 @@ build_metadata_from_arrangement = _timeline_build.build_metadata_from_arrangemen
 arrangement_edl_rows = _timeline_build.arrangement_edl_rows
 write_edl = _timeline_build.write_edl
 _register_cut_outputs = _timeline_build._register_cut_outputs
-_emit_cut_managed_events = _timeline_build._emit_cut_managed_events
 
 # ── re-exports from resume (T80) ─────────────────────────────────────
 ensure_resume_mode_args = _resume.ensure_resume_mode_args
@@ -79,6 +78,26 @@ build_resume_metadata = _resume.build_resume_metadata
 execute_resume_mode = _resume.execute_resume_mode
 ResumeModeResult = _resume.ResumeModeResult
 run_resume_mode = _resume.run_resume_mode
+
+def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
+    """Resolve host-materialized files; the empty second value is API continuity."""
+    return _attempt_assets.resolve_materialized_asset_paths(args), {}
+
+
+def build_registry(
+    asset_paths: dict[str, Path],
+    asset_urls: dict[str, str],
+    existing_registry: dict[str, Any],
+    prior_meta: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Build an attempt render registry without URL or workspace authority."""
+    if asset_urls:
+        raise AstridError(
+            "cut workers accept no URL assets; ingest them before task admission"
+        )
+    return _attempt_assets.build_attempt_registry(
+        asset_paths, existing_registry, prior_meta
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,19 +140,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Qualified rendering backend id.",
     )
     parser.add_argument("--render", action="store_true", help="Render clips and concat them into hype.mp4.")
-    # Managed binding seam (m3.5): when both --project and --timeline-slug are
-    # present, the pack writes canonical timeline events through the event gateway.
-    # Without these flags, the pack runs in unmanaged artifact mode (writes
-    # run-local compatibility outputs only).  --timeline-id is intentionally NOT
-    # added here -- it is reserved for executor UUID mode.
-    parser.add_argument("--project", help="Project slug for managed canonical writes. When combined with --timeline-slug, timeline mutations emit events through the gateway.")
-    parser.add_argument("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
-    parser.add_argument(
-        "--actor-via",
-        type=json.loads,
-        default=None,
-        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
-    )
     return parser
 
 
@@ -151,7 +157,16 @@ def _resolve_theme_path(theme_value: str | None) -> Path | None:
         return candidate / "theme.json"
     if candidate.exists():
         return candidate
-    return WORKSPACE_ROOT / "themes" / theme_value / "theme.json"
+    return None
+
+
+def _theme_slug(theme_value: str | None, theme_path: Path | None) -> str | None:
+    if theme_path is not None:
+        return _theme_slug_from_path(theme_path)
+    if theme_value is None:
+        return None
+    value = str(theme_value).strip()
+    return value or None
 
 
 def _theme_slug_from_path(theme_path: Path | None) -> str | None:
@@ -210,25 +225,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
-    raise AstridError(
-        "video_editing.cut source media is retired; use runtime-managed object_id/digest inputs"
-    )
-    # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = is_managed_mode(args)
-    if managed:
-        # Managed mode: canonical mutations will route through the event gateway
-        # (T10).  For now, validate that both flags are present.
-        print(f"cut: managed mode --project={args.project} --timeline-slug={args.timeline_slug}")
-    else:
-        # Unmanaged mode: writes run-local compatibility outputs only.
-        if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
-            raise SystemExit("--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode")
     if args.timeline is not None:
         return run_resume_mode(args)
     theme_path = _resolve_theme_path(args.theme)
     theme = load_theme(theme_path) if theme_path is not None else None
     theme_dir = theme_root(theme_path).resolve() if theme_path is not None else None
-    theme_slug = _theme_slug_from_path(theme_path)
+    theme_slug = _theme_slug(args.theme, theme_path)
     pure_generative = args.video is None and args.audio is not None
     no_audio = args.video is None and args.audio is None
     if args.scenes is None and not (pure_generative or no_audio):
@@ -247,8 +249,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_dir = args.out.resolve()
     if scenes_path is not None and not scenes_path.is_file():
         raise SystemExit(f"Scenes file not found: {scenes_path}")
-    if args.video is not None and not asset_cache.is_url(args.video) and not Path(args.video).resolve().is_file():
-        raise SystemExit(f"Video file not found: {Path(args.video).resolve()}")
     if args.transcript is not None and not args.transcript.resolve().is_file():
         raise SystemExit(f"Transcript file not found: {args.transcript.resolve()}")
     if args.shots is not None and not args.shots.resolve().is_file():
@@ -351,14 +351,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     edl_path = write_edl(edl_rows, out_dir, asset_paths, asset_urls)
     timeline_path = out_dir / "hype.timeline.json"
     canonical_timeline_config(timeline)
-    # m3.5 managed mode: emit events through the gateway before writing
-    # compatibility outputs.
-    if managed:
-        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
-
-        actor_via_raw = getattr(args, "actor_via", None)
-        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
-        _emit_cut_managed_events(args, timeline, actor_via=actor_via)
     save_timeline(timeline, timeline_path)
     save_registry(registry, assets_path)
     save_metadata(meta, metadata_path)

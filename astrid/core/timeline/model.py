@@ -44,7 +44,7 @@ def _validate_run_ref(value: str) -> str:
 
 
 def validate_timeline_config_json(raw: Any) -> dict[str, Any]:
-    """Return a canonical raw TimelineConfig suitable for ``assembly.json``."""
+    """Return a canonical raw TimelineConfig for an explicit artifact."""
     try:
         return canonical_timeline_config(raw)
     except ValueError as exc:
@@ -54,8 +54,7 @@ def validate_timeline_config_json(raw: Any) -> dict[str, Any]:
 def read_timeline_config_json(path: str | Path) -> dict[str, Any]:
     """Read a raw TimelineConfig from *path*.
 
-    ``assembly.json`` is no longer wrapped in ``{schema_version, assembly}``;
-    callers receive the validated TimelineConfig directly.
+    Callers receive the validated TimelineConfig directly, without a wrapper.
     """
     return validate_timeline_config_json(read_json(path))
 

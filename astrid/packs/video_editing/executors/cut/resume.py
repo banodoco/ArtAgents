@@ -16,7 +16,7 @@ from typing import Any
 
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.contracts.errors import AstridError
-from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.timeline import (
@@ -100,9 +100,6 @@ def build_resume_metadata(
 
 
 def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
-    raise AstridError(
-        "video_editing.cut resume source media is retired; use runtime-managed object_id/digest inputs"
-    )
     ensure_resume_mode_args(args)
 
     timeline_path = args.timeline.resolve()
@@ -116,20 +113,13 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
     config = load_timeline(timeline_path)
     registry = load_registry(assets_path_in)
 
-    # SD-009: backfill the canonical `output` block if the resumed timeline
-    # was authored before materialize_output() was wired in. Resolves the
-    # timeline's theme slug + theme_overrides via the workspace themes root.
+    # Backfill an old attempt artifact without consulting a workspace theme
+    # hierarchy. Runtime-owned style documents must be materialized explicitly.
     if "output" not in config:
-        themes_root = WORKSPACE_ROOT / "themes"
-        try:
-            from astrid.core.timeline import resolve_timeline_theme
-            merged_theme = resolve_timeline_theme(config, themes_root)
-            config["output"] = materialize_output(config, merged_theme)
-        except (FileNotFoundError, ValueError):
-            config["output"] = materialize_output(
-                config,
-                {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
-            )
+        config["output"] = materialize_output(
+            config,
+            {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
+        )
 
     missing_assets = sorted(
         {

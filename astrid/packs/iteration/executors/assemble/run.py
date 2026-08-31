@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Assemble runtime-derived or file-backed iteration data into render adapters."""
+"""Assemble runtime-derived inputs into attempt-local render adapters.
+
+The executor is result-only: it emits validated artifacts for settlement and
+never opens or mutates workspace timeline authority.
+"""
 
 
 from __future__ import annotations
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('iteration.assemble')
@@ -21,7 +24,6 @@ from typing import Any, Mapping
 from astrid.core import modalities, timeline
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.managed_binding import is_managed_mode
 
 SCHEMA_VERSION = 1
 
@@ -48,112 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--style-preset", default=None, help="Optional style preset label.")
     parser.add_argument("--audio-bed", default="auto", help="auto, iterations-as-bed, theme-declared-bed, or silence-room-tone.")
     parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Repository root for resolving artifact paths.")
-    # Managed binding seam (m3.5): when both --project and --timeline-slug are
-    # present, the pack writes canonical timeline events through the event gateway.
-    # Without these flags, the pack runs in unmanaged artifact mode (writes
-    # run-local compatibility outputs only).  --timeline-id is intentionally NOT
-    # added here -- it is reserved for executor UUID mode.
-    parser.add_argument("--project", help="Project slug for managed canonical writes.")
-    parser.add_argument("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
-    parser.add_argument(
-        "--actor-via",
-        type=json.loads,
-        default=None,
-        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
-    )
     return parser
 
 
-# Thread-local managed binding state (set by main before assemble_iteration).
-_managed_project: str | None = None
-_managed_timeline_slug: str | None = None
-_managed_actor_via: Any | None = None
-
-
-def _get_managed_project() -> str | None:
-    return _managed_project
-
-
-def _get_managed_timeline_slug() -> str | None:
-    return _managed_timeline_slug
-
-
-def _get_managed_actor_via() -> Any | None:
-    return _managed_actor_via
-
-
-def _emit_assemble_managed_events(
-    project_slug: str, timeline_slug: str, timeline_config: dict[str, Any],
-    *, actor_via: Any | None = None,
-) -> int:
-    """Emit timeline.config_replaced event through the pack write gateway.
-
-    Called when assemble runs in managed mode (--project + --timeline-slug).
-    Emits events before compatibility outputs are written, preserving the
-    append-then-materialize contract.
-
-    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
-    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
-    provenance on the emitted events.
-
-    *kernel_binding_factory* resolves the kernel timeline write path
-    (default: :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`).
-    When it binds, the gateway commits the kernel ``timeline.replace_config``
-    receipt BEFORE the eventlog append (no kernel/eventlog divergence);
-    when it returns ``None`` the context is genuinely kernel-less and the
-    documented eventlog-only escape applies.
-    """
-    import time as _time
-
-    from astrid.core.timeline._edit_helpers import pack_write_gateway
-    from astrid.core.timeline.events.schema import TimelineActor
-
-    actor = TimelineActor(
-        type="system",
-        id=f"iteration.assemble:{hash(str(_time.time()))}",
-        display="iteration.assemble",
-        via=[actor_via] if actor_via is not None else None,
-    )
-    config = timeline.canonical_timeline_config(timeline_config)
-    events = [
-        {
-            "kind": "timeline.config_replaced",
-            "payload": {"config": config},
-        }
-    ]
-    result = pack_write_gateway(
-        project_slug=project_slug,
-        timeline_slug=timeline_slug,
-        timeline_ulid="",
-        timeline_event_stream_id="",
-        events=events,
-        actor=actor,
-    )
-    return result.new_version
-
-
 def main(argv: list[str] | None = None) -> int:
-    global _managed_project, _managed_timeline_slug
-
     def _run() -> int:
-        global _managed_project, _managed_timeline_slug, _managed_actor_via
         args = build_parser().parse_args(argv)
-        # m3.5 managed binding seam: detect managed vs unmanaged mode.
-        managed = is_managed_mode(args)
-        if managed:
-            from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
-
-            print(f"assemble: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
-            _managed_project = args.project
-            _managed_timeline_slug = args.timeline_slug
-            actor_via_raw = getattr(args, "actor_via", None)
-            _managed_actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
-        else:
-            if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
-                raise AstridError(
-                    "--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode",
-                    recovery_command="supply both --project and --timeline-slug together, or omit both for unmanaged mode",
-                )
         result = assemble_iteration(
             prepare_dir=Path(args.prepare_dir),
             out_path=Path(args.out),
@@ -235,14 +137,6 @@ def assemble_iteration(
     assets_path = out_path / "hype.assets.json"
     timeline_config = timeline.canonical_timeline_config(assembly["timeline"])
     assembly["timeline"] = timeline_config
-
-    # m3.5 managed mode: emit events through the gateway before writing
-    # compatibility outputs.
-    project_slug = _get_managed_project()
-    timeline_slug = _get_managed_timeline_slug()
-    actor_via = _get_managed_actor_via()
-    if project_slug is not None and timeline_slug is not None:
-        _emit_assemble_managed_events(project_slug, timeline_slug, timeline_config, actor_via=actor_via)
 
     timeline.save_timeline(timeline_config, timeline_path)
     timeline.save_timeline(timeline_config, hype_timeline_path)

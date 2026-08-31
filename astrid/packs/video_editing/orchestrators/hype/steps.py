@@ -79,33 +79,6 @@ def _arrange_target_duration(args: argparse.Namespace) -> float | None:
         return probe_audio_duration(args.audio)
     return float(args.target_duration)
 
-def _append_managed_binding(args: argparse.Namespace, cmd: list[str]) -> list[str]:
-    """Append --project and --timeline-slug to *cmd* when hype is managed.
-
-    File-only subprocess calls (those without --project on the hype parent)
-    are left unchanged — both flags are absent from args.
-
-    When an ``actor_via`` TimelineActor is available on *args* (set by the
-    hype orchestrator based on how it was invoked — human CLI, agent, or
-    system), the actor-via JSON is also appended as ``--actor-via`` so
-    child packs can chain upstream provenance into their emitted events.
-
-    Returns *cmd* so callers can pipeline.
-    """
-    project_slug = getattr(args, "project", None)
-    timeline_slug = getattr(args, "timeline_slug", None)
-    if project_slug and timeline_slug:
-        cmd.extend(["--project", str(project_slug), "--timeline-slug", str(timeline_slug)])
-        actor_via = getattr(args, "actor_via", None)
-        if actor_via is not None:
-            import json as _json
-
-            if hasattr(actor_via, "to_json_obj"):
-                cmd.extend(["--actor-via", _json.dumps(actor_via.to_json_obj())])
-            elif isinstance(actor_via, dict):
-                cmd.extend(["--actor-via", _json.dumps(actor_via)])
-    return cmd
-
 def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [
         *step_argv("cut.py", args.python_exec),
@@ -118,9 +91,6 @@ def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
         "--out",
         str(args.brief_out),
     ]
-    # m3.5 managed binding: pass --project and --timeline-slug to child pack
-    # when hype is running in managed mode (project + timeline_slug on args).
-    _append_managed_binding(args, cmd)
     if (args.out / "scenes.json").exists():
         cmd.extend(["--scenes", str(args.out / "scenes.json")])
     if (args.out / "transcript.json").exists():
@@ -388,31 +358,28 @@ def build_pool_steps() -> list[Step]:
         Step(
             "refine",
             ("refine.json",),
-            lambda args: _append_managed_binding(
+            lambda args: add_extra_args(
                 args,
-                add_extra_args(
-                    args,
-                    "refine",
-                    [
-                        *step_argv("refine.py", args.python_exec),
-                        "--arrangement",
-                        str(args.brief_out / "arrangement.json"),
-                        "--pool",
-                        str(args.out / "pool.json"),
-                        "--timeline",
-                        str(args.brief_out / "hype.timeline.json"),
-                        "--assets",
-                        str(args.brief_out / "hype.assets.json"),
-                        "--metadata",
-                        str(args.brief_out / "hype.metadata.json"),
-                        "--transcript",
-                        str(args.out / "transcript.json"),
-                        "--out",
-                        str(args.brief_out),
-                        *(["--primary-asset", args.primary_asset] if getattr(args, "primary_asset", None) else []),
-                        *(["--env-file", str(args.env_file)] if args.env_file else []),
-                    ],
-                ),
+                "refine",
+                [
+                    *step_argv("refine.py", args.python_exec),
+                    "--arrangement",
+                    str(args.brief_out / "arrangement.json"),
+                    "--pool",
+                    str(args.out / "pool.json"),
+                    "--timeline",
+                    str(args.brief_out / "hype.timeline.json"),
+                    "--assets",
+                    str(args.brief_out / "hype.assets.json"),
+                    "--metadata",
+                    str(args.brief_out / "hype.metadata.json"),
+                    "--transcript",
+                    str(args.out / "transcript.json"),
+                    "--out",
+                    str(args.brief_out),
+                    *(["--primary-asset", args.primary_asset] if getattr(args, "primary_asset", None) else []),
+                    *(["--env-file", str(args.env_file)] if args.env_file else []),
+                ],
             ),
             per_brief=True,
         ),

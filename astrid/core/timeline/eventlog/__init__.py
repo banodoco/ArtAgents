@@ -1,32 +1,12 @@
-"""Pure event-log contracts used by the runtime materialization boundary.
+"""Pure event-to-display projection used for migrated event fixtures.
 
-Filesystem event-log backends and selectors are not product runtime APIs.
-Offline migration code must import its reader directly; this package exports
-only backend-neutral protocol and value types.
+Runtime event storage and versioning live behind the generated workspace
+client.  Astrid deliberately exposes no backend, append request, stream-ref,
+or filesystem selector contract from this package.
 """
 from .projector import DisplayProjection, project_display
-from .protocol import EventLogBackend
-from .types import (
-    AppendEventRequest,
-    BackendName,
-    EventLogError,
-    EventLogHead,
-    EventLogStaleVersionError,
-    EventLogVerification,
-    TimelineStreamRef,
-    TimelineVersionConflict,
-)
 
 __all__ = [
-    "AppendEventRequest",
-    "BackendName",
-    "EventLogBackend",
-    "EventLogError",
-    "EventLogHead",
-    "EventLogStaleVersionError",
-    "EventLogVerification",
     "DisplayProjection",
     "project_display",
-    "TimelineVersionConflict",
-    "TimelineStreamRef",
 ]

@@ -537,30 +537,12 @@ def _plan_action(review: dict[str, Any]) -> str:
 def _apply_trim_deltas_to_arrangement(
     path: Path,
     notes: list[dict[str, Any]],
-    *,
-    project_slug: str | None = None,
-    timeline_slug: str | None = None,
-    timeline_event_stream_id: str | None = None,
-    actor_via: Any | None = None,
 ) -> None:
-    # m3.5 pack migration (T11):
-    #
-    # This function mutates arrangement audio trim ranges in-place and writes
-    # back to a run-local pipeline artifact via `timeline.save_arrangement()`.
-    #
-    # When *project_slug*, *timeline_slug*, and *timeline_event_stream_id*
-    # are all provided (i.e. the hype run is bound to a project-timeline
-    # container), the revised arrangement is emitted through the
-    # ``pack_write_gateway`` BEFORE the local artifact is saved.  This keeps
-    # the managed timeline event stream as the canonical source of truth and
-    # positions the run-local ``arrangement.json`` as a derived compatibility
-    # output.
-    #
-    # Created timelines with provenance ``"created"`` accept bare first
-    # domain events.  After appending, the gateway
-    # regenerates ``assembly.json`` from the canonical event stream.
-    # Actor attribution uses a system actor with optional ``actor.via``
-    # chaining for upstream provenance.
+    """Apply editor notes to an attempt-local arrangement artifact.
+
+    This is a pure worker-side artifact transform. It never writes a runtime
+    timeline; applying a resulting timeline remains an explicit client action.
+    """
     arrangement = timeline.load_arrangement(path, assign_missing_uuids=True)
     clips_by_order = {int(clip["order"]): clip for clip in arrangement.get("clips", [])}
     clips_by_uuid = {str(clip["uuid"]): clip for clip in arrangement.get("clips", []) if isinstance(clip.get("uuid"), str)}
@@ -595,11 +577,8 @@ def _apply_trim_deltas_to_arrangement(
         trim_range[0] = float(trim_range[0]) + float(detail.get("trim_delta_start_sec", 0.0))
         trim_range[1] = float(trim_range[1]) + float(detail.get("trim_delta_end_sec", 0.0))
 
-    # Always persist the run-local arrangement artifact for downstream
-    # consumers.  This function mutates an arrangement read model, not a raw
-    # TimelineConfig container, so it does not emit a canonical timeline event;
-    # managed full-container writes use timeline.config_replaced at the cut,
-    # refine, assemble, and worker TimelineConfig boundaries.
+    # Persist only the attempt-local arrangement artifact for downstream
+    # worker steps.
     timeline.save_arrangement(arrangement, path)
 
 def _rotate_editor_review(brief_out: Path, iteration: int) -> None:
@@ -627,7 +606,6 @@ def _run_revise(args: argparse.Namespace, prior_arrangement: Path, editor_notes:
 
     from .steps import (  # late import to avoid circular dependency
         Step,
-        _append_managed_binding,
         add_extra_args,
         step_argv,
     )
@@ -802,10 +780,6 @@ def pool_main(args: argparse.Namespace) -> int:
             _apply_trim_deltas_to_arrangement(
                 arrangement_path,
                 notes,
-                project_slug=project_slug,
-                timeline_slug=getattr(args, "timeline_slug", None) or getattr(args, "brief_slug", None),
-                timeline_event_stream_id=getattr(args, "timeline_event_stream_id", None),
-                actor_via=getattr(args, "actor_via", None),
             )
         elif action == "rework":
             returncode = _run_revise(args, arrangement_path, review_path)

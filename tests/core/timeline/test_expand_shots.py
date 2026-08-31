@@ -14,8 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.timeline._edit_helpers import TimelineEditError
-from astrid.core.timeline.expand_shots import expand_shot_clips
+from astrid.core.timeline.expand_shots import ShotExpansionError, expand_shot_clips
 from astrid.core.timeline.banodoco_schema import AssetRegistry
 from astrid.core.timeline.expand_shots import _total_assets
 
@@ -277,7 +276,7 @@ def test_registry_conflict_keeps_parent_entry():
 
 
 def test_nested_shot_raises_error():
-    """Shot clips nested inside another shot clip raise TimelineEditError."""
+    """Shot clips nested inside another shot clip raise ShotExpansionError."""
     config, registry = _make_timeline_fixture(
         "main",
         clips=[
@@ -295,7 +294,7 @@ def test_nested_shot_raises_error():
     )
 
     load_timeline = _load_timeline_from_fixture
-    with pytest.raises(TimelineEditError, match="nested shot"):
+    with pytest.raises(ShotExpansionError, match="nested shot"):
         expand_shot_clips(
             config=config,
             registry=registry,
@@ -304,7 +303,7 @@ def test_nested_shot_raises_error():
 
 
 def test_missing_params_raises_error():
-    """Shot clips missing params raise TimelineEditError."""
+    """Shot clips missing params raise ShotExpansionError."""
     config, registry = _make_timeline_fixture(
         "main",
         clips=[
@@ -326,7 +325,7 @@ def test_missing_params_raises_error():
     )
 
     load_timeline = _load_timeline_from_fixture
-    with pytest.raises(TimelineEditError, match="missing shot_id or timeline_document_id"):
+    with pytest.raises(ShotExpansionError, match="missing shot_id or timeline_document_id"):
         expand_shot_clips(
             config=config,
             registry=registry,
@@ -335,7 +334,7 @@ def test_missing_params_raises_error():
 
 
 def test_unknown_timeline_id_raises_error():
-    """Unknown timeline_document_id raises TimelineEditError."""
+    """Unknown timeline_document_id raises ShotExpansionError."""
     config, registry = _make_timeline_fixture(
         "main",
         clips=[
@@ -353,7 +352,7 @@ def test_unknown_timeline_id_raises_error():
     )
 
     load_timeline = _load_timeline_from_fixture
-    with pytest.raises(TimelineEditError, match="Failed to load sub-timeline"):
+    with pytest.raises(ShotExpansionError, match="Failed to load sub-timeline"):
         expand_shot_clips(
             config=config,
             registry=registry,
@@ -429,7 +428,7 @@ def test_deeply_nested_shot_raises_error():
     )
 
     load_timeline = _load_timeline_from_fixture
-    with pytest.raises(TimelineEditError, match="nested shot"):
+    with pytest.raises(ShotExpansionError, match="nested shot"):
         expand_shot_clips(
             config=config,
             registry=registry,

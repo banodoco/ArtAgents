@@ -154,7 +154,7 @@ def _chain_diagnostics(
     *,
     timeline_id: str,
 ) -> list[str]:
-    """Verify the captured objects using LocalFsBackend.verify_chain semantics."""
+    """Verify the captured runtime event objects as one in-memory hash chain."""
 
     diagnostics: list[str] = []
     previous_hash: str | None = None

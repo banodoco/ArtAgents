@@ -20,7 +20,7 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Adapt runtime-derived or file-backed iteration data into canonical iteration artifacts and render-compatible hype inputs.",
+  "description": "Adapt runtime-materialized iteration inputs into result-only iteration artifacts and render-compatible hype inputs.",
   "graph": {
     "consumes": [
       "iteration_manifest",
@@ -35,7 +35,7 @@
   "id": "iteration.assemble",
   "inputs": [
     {
-      "description": "Legacy directory containing iteration manifest and quality inputs.",
+      "description": "Attempt directory containing runtime-materialized iteration manifest and quality inputs.",
       "name": "prepare_dir",
       "required": true,
       "type": "directory"
@@ -67,7 +67,8 @@
       "mode": "create_or_replace",
       "name": "timeline",
       "path_template": "{out}/iteration.timeline.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "timeline"
     },
     {
       "description": "Final iteration manifest.",
@@ -95,16 +96,18 @@
       "mode": "create_or_replace",
       "name": "hype_timeline",
       "path_template": "{out}/hype.timeline.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "timeline"
     },
     {
       "description": "Render-compatible hype assets adapter.",
       "mode": "create_or_replace",
       "name": "hype_assets",
       "path_template": "{out}/hype.assets.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "timeline/assets"
     }
   ],
-  "short_description": "Adapt runtime-derived or file-backed iteration data into canonical iteration artifacts and render-ready hype inputs.",
+  "short_description": "Adapt runtime-materialized iteration data into result-only timeline and render artifacts.",
   "version": "1.0"
 }
