@@ -30,33 +30,20 @@ class _Runtime:
         return self.payload
 
 
-def _media_timeline(*, text: bool = False) -> dict:
-    clips = []
-    if text:
-        clips.append(
-            {
-                "id": "caption",
-                "at": 0,
-                "track": "video",
-                "clipType": "text-card",
-                "hold": 1,
-                "params": {"content": "runtime handoff"},
-            }
-        )
-    else:
-        clips.append(
-            {
-                "id": "source",
-                "at": 0,
-                "track": "video",
-                "clipType": "media",
-                "asset": "source",
-                "from": 0,
-                "to": 1,
-                "speed": 1,
-                "volume": 0,
-            }
-        )
+def _media_timeline() -> dict:
+    clips = [
+        {
+            "id": "source",
+            "at": 0,
+            "track": "video",
+            "clipType": "media",
+            "asset": "source",
+            "from": 0,
+            "to": 1,
+            "speed": 1,
+            "volume": 0,
+        }
+    ]
     return {
         "theme": "banodoco-default",
         "theme_overrides": {"visual": {"canvas": {"width": 1280, "height": 720, "fps": 24}}},
@@ -246,12 +233,35 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     source = tmp_path / "bounded.mp4"
     ffmpeg = shutil.which("ffmpeg")
     assert ffmpeg, "the bounded Remotion proof needs ffmpeg to emit a valid artifact"
-    subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=24:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-video_track_timescale", "90000", str(source)], check=True)
+    subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1280x720:r=24:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-video_track_timescale", "90000", str(source)], check=True)
+    # Bounded Remotion process: consume the real backend props, resolve the
+    # timeline media clip through the runtime registry, fetch the attempt-local
+    # URL, verify its digest, then transcode those fetched bytes.  This keeps
+    # the proof hermetic without weakening the production zero-shim boundary.
     node.write_text(
         "#!/usr/bin/env python3\n"
-        "import pathlib, subprocess, sys\n"
+        "import hashlib, json, pathlib, subprocess, sys, tempfile, urllib.parse, urllib.request\n"
         "if sys.argv[1:] == ['--version']:\n print('v20.19.4'); raise SystemExit(0)\n"
-        f"subprocess.run([{ffmpeg!r}, '-hide_banner', '-loglevel', 'error', '-y', '-i', {str(source)!r}, '-c', 'copy', str(pathlib.Path(sys.argv[sys.argv.index('--output') + 1]))], check=True)\n",
+        "args = sys.argv[1:]\n"
+        "props_path = pathlib.Path(args[args.index('--props') + 1])\n"
+        "output_path = pathlib.Path(args[args.index('--output') + 1])\n"
+        "props = json.loads(props_path.read_text())\n"
+        "timeline = props.get('timeline')\n"
+        "registry = props.get('assets', {}).get('assets')\n"
+        "assert isinstance(timeline, dict) and isinstance(registry, dict)\n"
+        "clips = [clip for clip in timeline.get('clips', []) if isinstance(clip, dict) and clip.get('clipType') == 'media']\n"
+        "assert len(clips) == 1 and clips[0].get('asset') == 'source'\n"
+        "entry = registry.get('source')\n"
+        "assert isinstance(entry, dict) and entry.get('media_id') == 'media-remotion'\n"
+        "source_url = entry.get('file')\n"
+        "parsed = urllib.parse.urlparse(source_url or '')\n"
+        "assert parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1', 'localhost'}\n"
+        "payload = urllib.request.urlopen(source_url).read()\n"
+        "assert hashlib.sha256(payload).hexdigest() == entry.get('content_sha256')\n"
+        "with tempfile.TemporaryDirectory(prefix='bounded-remotion-') as directory:\n"
+        " source_path = pathlib.Path(directory) / 'source.mp4'\n"
+        " source_path.write_bytes(payload)\n"
+        f" subprocess.run([{ffmpeg!r}, '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source_path), '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-video_track_timescale', '90000', str(output_path)], check=True)\n",
         encoding="utf-8",
     )
     node.chmod(0o755)
@@ -265,16 +275,18 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     digest = hashlib.sha256(payload).hexdigest()
     registry = tmp_path / "assets.json"
     registry.write_text(json.dumps({"assets": {"source": {
-        "media_id": "media-remotion", "content_sha256": digest, "type": "video/mp4"
+        "media_id": "media-remotion", "content_sha256": digest, "type": "video/mp4",
+        "duration": 1.0, "resolution": "1280x720", "fps": 24,
     }}}), encoding="utf-8")
     project_root = tmp_path / "projects" / "demo"
     project_root.mkdir(parents=True)
     timeline_path = project_root / "timeline.json"
-    timeline_path.write_text(json.dumps(_media_timeline(text=True)), encoding="utf-8")
+    timeline_path.write_text(json.dumps(_media_timeline()), encoding="utf-8")
     attempt = tmp_path / "attempt"
+    runtime_client = _Runtime(payload)
     host = GenericPackHost(
         pack_roots=[Path(__file__).parents[2] / "astrid" / "packs" / "rendering" / "executors" / "render"],
-        client=_Runtime(payload), attempt_root=attempt,
+        client=runtime_client, attempt_root=attempt,
     )
     values = host._materialize_inputs({"inputs": {"assets_registry": str(registry)}}, attempt)
     assets_path = project_root / "assets.json"
@@ -296,3 +308,19 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     assert result.ok, result.payload
     output = attempt / "result.mp4"
     assert output.is_file() and output.read_bytes()[4:8] == b"ftyp"
+    assert runtime_client.fetches == [digest]
+    # A valid-but-unrelated MP4 must not satisfy this proof.  The bounded
+    # process re-encodes the handed-off red source, so its decoded first frame
+    # must match the source frame exactly.
+    source_frame = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    output_frame = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert source_frame and output_frame
+    assert source_frame == output_frame
