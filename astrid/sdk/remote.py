@@ -32,7 +32,8 @@ class RemoteProjects(_RemoteFamily):
     def list(self): return self._typed("list_projects")
     def show(self, ref): return self._typed("get_project", ref)
     def update(self, ref, *, name=None, settings=None, expected_version=None, idempotency_key=None):
-        return self._typed("update_project", ref, key=idempotency_key, name=name, settings=settings, expected_version=expected_version)
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("update_project", ref, key=key, idempotency_key=key, name=name, metadata=settings, expected_version=expected_version)
     def select(self, ref, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "project selection is not supported by the workspace contract", {}))
     def current(self, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "project selection is not supported by the workspace contract", {}))
 
@@ -208,8 +209,12 @@ class RemoteRuns(_RemoteFamily):
         if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
         return result
     def show(self, project, run_id, **kwargs): return self._typed("get_run", run_id)
-    def cancel(self, project, run_id, *, idempotency_key=None): return DomainResult.failure(ErrorObject("unavailable", "run cancellation is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
-    def retry_failed(self, project, run_id, *, idempotency_key=None, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "run retry is not supported by the workspace contract", {}), idempotency_key=idempotency_key or "")
+    def cancel(self, project, run_id, *, idempotency_key=None):
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("cancel_run", run_id, key=key, idempotency_key=key)
+    def retry_failed(self, project, run_id, *, selected_task_ids=None, idempotency_key=None, **kwargs):
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("retry_run", run_id, key=key, idempotency_key=key, selected_task_ids=selected_task_ids)
     def events(self, project, run_id): return self._typed("list_run_events", run_id)
 
 

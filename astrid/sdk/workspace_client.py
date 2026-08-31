@@ -198,6 +198,7 @@ class WorkspaceClient:
         self,
         project_id: str,
         *,
+        idempotency_key: str,
         expected_version: int | None = None,
         name: str | None = None,
         settings: Mapping[str, Any] | None = None,
@@ -208,6 +209,7 @@ class WorkspaceClient:
         return self._call_generated(
             "update_project",
             project_id,
+            idempotency_key=idempotency_key,
             expected_version=expected_version,
             name=name,
             metadata=metadata,
@@ -488,6 +490,12 @@ class WorkspaceClient:
 
     def retry_task(self, task_id: str, *, idempotency_key: str) -> Any:
         return self._call_generated("retry_task", task_id, idempotency_key=idempotency_key)
+
+    def cancel_run(self, run_id: str, *, idempotency_key: str) -> Any:
+        return self._call_generated("cancel_run", run_id, idempotency_key=idempotency_key)
+
+    def retry_run(self, run_id: str, *, idempotency_key: str, selected_task_ids: list[str] | None = None) -> Any:
+        return self._call_generated("retry_run", run_id, idempotency_key=idempotency_key, selected_task_ids=selected_task_ids)
 
     def get_run(self, run_id: str) -> Any:
         return self._call_generated("get_run", run_id)
