@@ -2,31 +2,29 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core.foundation.project_paths import ProjectPathError, project_dir
-from astrid.core.ids import is_ulid
-
-_TIMELINE_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+from astrid.core.contracts.identifiers import (
+    _TIMELINE_SLUG_RE,  # noqa: F401 — retained as a public test/introspection constant
+    validate_timeline_slug as _validate_timeline_slug,
+    validate_timeline_ulid as _validate_timeline_ulid,
+)
 
 
 def validate_timeline_slug(slug: object) -> str:
-    if not isinstance(slug, str) or _TIMELINE_SLUG_RE.fullmatch(slug) is None:
-        raise ProjectPathError(
-            "timeline slug must start with a lowercase letter, contain only "
-            "lowercase letters, digits or '-', and be 1–32 characters long"
-        )
-    return slug
+    try:
+        return _validate_timeline_slug(slug)
+    except ValueError as exc:
+        raise ProjectPathError(str(exc)) from exc
 
 
 def validate_timeline_ulid(ulid: object) -> str:
-    if not is_ulid(ulid):
-        raise ProjectPathError(
-            "timeline ULID must be a 26-character Crockford ULID"
-        )
-    return str(ulid)
+    try:
+        return _validate_timeline_ulid(ulid)
+    except ValueError as exc:
+        raise ProjectPathError(str(exc)) from exc
 
 
 def timelines_dir(project_slug: str, *, root: str | Path | None = None) -> Path:

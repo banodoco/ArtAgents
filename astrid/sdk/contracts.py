@@ -10,7 +10,7 @@
   ``data`` null and a frozen error object).
 - :class:`ErrorObject` — the frozen error object with exactly the three keys
   ``code``/``message``/``details`` and bounded, JSON-safe details.
-- :class:`astrid.core.receipts.service.CommandReceipt` (re-exported here) —
+- :class:`astrid.core.receipts.contract.CommandReceipt` —
   the immutable committed receipt with the exact nine-key exposed shape.
 - Idempotency and identity helpers: :func:`generate_idempotency_key`,
   :func:`resolve_idempotency_key` (caller key preserved, generated key
@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -43,11 +43,9 @@ from astrid.core.receipts.canonical import (
     parse_json,
     request_hash,
 )
-if TYPE_CHECKING:
-    from astrid.core.receipts.service import CommandReceipt
+from astrid.core.receipts.contract import CommandReceipt as _CommandReceipt
 
 __all__ = [
-    "CommandReceipt",
     "DomainResult",
     "ENVELOPE_KEYS",
     "ERROR_OBJECT_KEYS",
@@ -60,14 +58,6 @@ __all__ = [
 
 T = TypeVar("T")
 
-
-def __getattr__(name: str) -> Any:
-    """Resolve the receipt compatibility export only when requested."""
-    if name == "CommandReceipt":
-        from astrid.core.receipts.service import CommandReceipt
-
-        return CommandReceipt
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 ENVELOPE_KEYS: tuple[str, ...] = (
     "ok",
@@ -175,7 +165,7 @@ class DomainResult(Generic[T]):
     ok: bool
     data: T | None
     error: ErrorObject | None
-    receipt: CommandReceipt | None
+    receipt: _CommandReceipt | None
     idempotency_key: str
 
     def __post_init__(self) -> None:
@@ -192,9 +182,7 @@ class DomainResult(Generic[T]):
         if not isinstance(self.idempotency_key, str):
             raise ValueError("idempotency_key must be a string")
         if self.receipt is not None:
-            from astrid.core.receipts.service import CommandReceipt
-
-            if not isinstance(self.receipt, CommandReceipt):
+            if not isinstance(self.receipt, _CommandReceipt):
                 raise TypeError("receipt must be a CommandReceipt or None")
         if self.error is not None and not isinstance(self.error, ErrorObject):
             raise TypeError("error must be an ErrorObject or None")
@@ -204,7 +192,7 @@ class DomainResult(Generic[T]):
         cls,
         data: T,
         *,
-        receipt: CommandReceipt | None = None,
+        receipt: _CommandReceipt | None = None,
         idempotency_key: str = "",
     ) -> DomainResult[T]:
         """Build a committed read/mutation result envelope."""
@@ -257,8 +245,6 @@ class DomainResult(Generic[T]):
                 "domain result must have exactly the keys "
                 + ", ".join(ENVELOPE_KEYS)
             )
-        from astrid.core.receipts.service import CommandReceipt
-
         return cls(
             ok=value["ok"],
             data=value["data"],
@@ -268,7 +254,7 @@ class DomainResult(Generic[T]):
                 else None
             ),
             receipt=(
-                CommandReceipt.from_dict(value["receipt"])
+                _CommandReceipt.from_dict(value["receipt"])
                 if value["receipt"] is not None
                 else None
             ),

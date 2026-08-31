@@ -25,6 +25,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .project_theme import ProjectStyleSnapshot, ProjectThemeBinding
+
 # ---------------------------------------------------------------------------
 # Scope key alias
 # ---------------------------------------------------------------------------
@@ -82,6 +84,7 @@ class ScopeRequest:
     project_slug: str | None = None
     env: Mapping[str, str] | None = None
     explicit: Mapping[ScopeKey, Any] | None = None
+    project_style: ProjectStyleSnapshot | ProjectThemeBinding | Mapping[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -13,14 +13,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from astrid.core.contracts.project_theme import ProjectStyleSnapshot
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import HYPE_ACTIVE_THEME
 from astrid.core.theme.scope import StyleScope, resolve_style_scope
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -63,41 +62,40 @@ def test_explicit_wins_over_env(existing_theme_dir: Path):
 
 def test_explicit_wins_over_project(existing_theme_dir: Path):
     """explicit['theme'] should win over project binding."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=str(existing_theme_dir.parent / "project_theme"),
-    ):
-        request = ScopeRequest(
-            explicit={"theme": str(existing_theme_dir)},
-            project_slug="test-proj",
-        )
-        result = resolve_style_scope(request)
-        assert result.theme_dir == existing_theme_dir.resolve()
+    request = ScopeRequest(
+        explicit={"theme": str(existing_theme_dir)},
+        project_slug="test-proj",
+        project_style=ProjectStyleSnapshot(
+            project_slug="test-proj", theme_dir=existing_theme_dir.parent / "project_theme"
+        ),
+    )
+    result = resolve_style_scope(request)
+    assert result.theme_dir == existing_theme_dir.resolve()
 
 
 def test_env_wins_over_project(existing_theme_dir: Path):
     """HYPE_ACTIVE_THEME should win over project binding."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=str(existing_theme_dir.parent / "project_theme"),
-    ):
-        request = ScopeRequest(
-            env={HYPE_ACTIVE_THEME: str(existing_theme_dir)},
-            project_slug="test-proj",
-        )
-        result = resolve_style_scope(request)
-        assert result.theme_dir == existing_theme_dir.resolve()
+    request = ScopeRequest(
+        env={HYPE_ACTIVE_THEME: str(existing_theme_dir)},
+        project_slug="test-proj",
+        project_style=ProjectStyleSnapshot(
+            project_slug="test-proj", theme_dir=existing_theme_dir.parent / "project_theme"
+        ),
+    )
+    result = resolve_style_scope(request)
+    assert result.theme_dir == existing_theme_dir.resolve()
 
 
 def test_project_resolves_when_explicit_and_env_absent(existing_theme_dir: Path):
-    """Project binding resolves when explicit and env are absent."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=str(existing_theme_dir),
-    ):
-        request = ScopeRequest(project_slug="test-proj")
-        result = resolve_style_scope(request)
-        assert result.theme_dir == existing_theme_dir.resolve()
+    """Injected project style resolves when explicit and env are absent."""
+    request = ScopeRequest(
+        project_slug="test-proj",
+        project_style=ProjectStyleSnapshot(
+            project_slug="test-proj", theme_dir=existing_theme_dir
+        ),
+    )
+    result = resolve_style_scope(request)
+    assert result.theme_dir == existing_theme_dir.resolve()
 
 
 def test_none_when_all_absent():
@@ -108,15 +106,11 @@ def test_none_when_all_absent():
     assert result.theme_dir is None
 
 
-def test_none_when_project_theme_returns_none():
-    """None when project binding returns None."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=None,
-    ):
-        request = ScopeRequest(project_slug="test-proj")
-        result = resolve_style_scope(request)
-        assert result.theme_dir is None
+def test_none_when_project_theme_is_not_injected():
+    """None when no project style snapshot is supplied."""
+    request = ScopeRequest(project_slug="test-proj")
+    result = resolve_style_scope(request)
+    assert result.theme_dir is None
 
 
 # ---------------------------------------------------------------------------
@@ -151,16 +145,15 @@ def test_explicit_theme_none_falls_through(existing_theme_dir: Path):
 
 def test_empty_env_string_falls_through_to_project(existing_theme_dir: Path):
     """Empty HYPE_ACTIVE_THEME value should fall through."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=str(existing_theme_dir),
-    ):
-        request = ScopeRequest(
-            env={HYPE_ACTIVE_THEME: ""},
-            project_slug="test-proj",
-        )
-        result = resolve_style_scope(request)
-        assert result.theme_dir == existing_theme_dir.resolve()
+    request = ScopeRequest(
+        env={HYPE_ACTIVE_THEME: ""},
+        project_slug="test-proj",
+        project_style=ProjectStyleSnapshot(
+            project_slug="test-proj", theme_dir=existing_theme_dir
+        ),
+    )
+    result = resolve_style_scope(request)
+    assert result.theme_dir == existing_theme_dir.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -170,13 +163,15 @@ def test_empty_env_string_falls_through_to_project(existing_theme_dir: Path):
 
 def test_env_none_falls_through(existing_theme_dir: Path):
     """When env mapping is None, fall through to project."""
-    with patch(
-        "astrid.core.project.project.get_project_theme",
-        return_value=str(existing_theme_dir),
-    ):
-        request = ScopeRequest(env=None, project_slug="test-proj")
-        result = resolve_style_scope(request)
-        assert result.theme_dir == existing_theme_dir.resolve()
+    request = ScopeRequest(
+        env=None,
+        project_slug="test-proj",
+        project_style=ProjectStyleSnapshot(
+            project_slug="test-proj", theme_dir=existing_theme_dir
+        ),
+    )
+    result = resolve_style_scope(request)
+    assert result.theme_dir == existing_theme_dir.resolve()
 
 
 # ---------------------------------------------------------------------------

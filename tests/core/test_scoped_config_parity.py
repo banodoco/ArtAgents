@@ -18,7 +18,6 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 import pytest
 
@@ -72,17 +71,24 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "expected": "banodoco-default",
     },
     "project_slug_resolves": {
-        "input": {"project_slug": "demo"},
+        "input": {
+            "project_slug": "demo",
+            "project_style": {"project_slug": "demo", "theme_id": "banodoco-default"},
+        },
         "expected": "banodoco-default",
     },
     "project_slug_none_theme": {
-        "input": {"project_slug": "no-theme-project"},
+        "input": {
+            "project_slug": "no-theme-project",
+            "project_style": {"project_slug": "no-theme-project", "theme_id": None},
+        },
         "expected": None,
     },
     "env_empty_falls_through": {
         "input": {
             "env": {"HYPE_ACTIVE_THEME": ""},
             "project_slug": "demo",
+            "project_style": {"project_slug": "demo", "theme_id": "banodoco-default"},
         },
         "expected": "banodoco-default",
     },
@@ -90,6 +96,7 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "input": {
             "env": None,
             "project_slug": "demo",
+            "project_style": {"project_slug": "demo", "theme_id": "banodoco-default"},
         },
         "expected": "banodoco-default",
     },
@@ -129,42 +136,24 @@ def _regenerate_golden() -> None:
         explicit = inp.get("explicit")
         env = inp.get("env")
         project_slug = inp.get("project_slug")
+        project_style = inp.get("project_style")
 
         scope_request = ScopeRequest(
             explicit=explicit,
             env=env,
             project_slug=project_slug,
+            project_style=project_style,
         )
 
-        # Patch get_project_theme for project-bound cases.
-        patches: list[Any] = []
-        if project_slug is not None:
-            if project_slug == "no-theme-project":
-                p = mock.patch(
-                    "astrid.core.project.project.get_project_theme",
-                    return_value=None,
-                )
-            else:
-                p = mock.patch(
-                    "astrid.core.project.project.get_project_theme",
-                    return_value="banodoco-default",
-                )
-            patches.append(p)
-            p.start()
-
-        try:
-            result = resolve_style_scope(scope_request)
-            if result.theme_dir is None:
-                expected = None
-            else:
-                # Store path relative to themes root.
-                try:
-                    expected = str(result.theme_dir.relative_to(_themes_root()))
-                except ValueError:
-                    expected = str(result.theme_dir)
-        finally:
-            for p in reversed(patches):
-                p.stop()
+        result = resolve_style_scope(scope_request)
+        if result.theme_dir is None:
+            expected = None
+        else:
+            # Store path relative to themes root.
+            try:
+                expected = str(result.theme_dir.relative_to(_themes_root()))
+            except ValueError:
+                expected = str(result.theme_dir)
 
         new_golden[case_name] = {"input": inp, "expected": expected}
 
@@ -191,7 +180,7 @@ def _regenerate_golden() -> None:
 
     new_lines = (
         lines[: begin_idx + 1]
-        + [f"{l}\n" if not l.endswith("\n") else l for l in golden_lines]
+        + [f"{line}\n" if not line.endswith("\n") else line for line in golden_lines]
         + lines[end_idx:]
     )
 
@@ -223,34 +212,16 @@ def test_golden_parity(case_name: str) -> None:
     explicit = inp.get("explicit")
     env = inp.get("env")
     project_slug = inp.get("project_slug")
+    project_style = inp.get("project_style")
 
     scope_request = ScopeRequest(
         explicit=explicit,
         env=env,
         project_slug=project_slug,
+        project_style=project_style,
     )
-
-    patches: list[Any] = []
-    if project_slug is not None:
-        if project_slug == "no-theme-project":
-            p = mock.patch(
-                "astrid.core.project.project.get_project_theme",
-                return_value=None,
-            )
-        else:
-            p = mock.patch(
-                "astrid.core.project.project.get_project_theme",
-                return_value="banodoco-default",
-            )
-        patches.append(p)
-        p.start()
-
-    try:
-        result = resolve_style_scope(scope_request)
-        actual = result.theme_dir
-    finally:
-        for p in reversed(patches):
-            p.stop()
+    result = resolve_style_scope(scope_request)
+    actual = result.theme_dir
 
     expected_path = _resolve_golden(golden_expected)
 

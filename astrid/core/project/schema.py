@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.identifiers import validate_timeline_slug, validate_timeline_ulid
+from astrid.core.contracts.project_theme import validate_theme_identifier
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.schema_validators import require_uuid_str
 from astrid.core.foundation.project_paths import (
@@ -64,7 +66,7 @@ def build_project(
     if description is not None:
         payload["description"] = _require_string(description, "project.description")
     if theme is not None:
-        payload["theme"] = validate_project_slug(theme)
+        payload["theme"] = validate_theme_identifier(theme)
     return payload
 
 
@@ -146,7 +148,6 @@ def build_run_record(
     if argv is not None:
         payload["argv"] = [_require_string(item, "run.argv[]") for item in argv]
     if timeline_id is not None:
-        from astrid.core.timeline.paths import validate_timeline_ulid
         payload["timeline_id"] = validate_timeline_ulid(timeline_id)
     return validate_run_record(payload)
 
@@ -176,7 +177,9 @@ def validate_project(raw: Any) -> dict[str, Any]:
         if payload["theme"] is None:
             payload.pop("theme")
         else:
-            payload["theme"] = validate_project_slug(_require_string(payload["theme"], "project.theme"))
+            payload["theme"] = validate_theme_identifier(
+                _require_string(payload["theme"], "project.theme")
+            )
     if "default_timeline_id" in payload:
         payload["default_timeline_id"] = _validate_default_timeline_id(
             payload["default_timeline_id"]
@@ -241,13 +244,11 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
         if tid is None:
             payload.pop("timeline_id")
         else:
-            from astrid.core.timeline.paths import validate_timeline_ulid
             payload["timeline_id"] = validate_timeline_ulid(tid)
     # Validate managed timeline binding metadata sub-keys (m3.5).
     meta = payload.get("metadata", {})
     if isinstance(meta, dict):
         if "timeline_slug" in meta:
-            from astrid.core.timeline.paths import validate_timeline_slug
             meta["timeline_slug"] = validate_timeline_slug(meta["timeline_slug"])
         if "timeline_event_stream_id" in meta:
             meta["timeline_event_stream_id"] = _require_uuid_str(
@@ -263,8 +264,6 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
             raw_timeline_ids = meta["timeline_ids"]
             if not isinstance(raw_timeline_ids, list):
                 raise ProjectValidationError("run.metadata.timeline_ids must be a list")
-            from astrid.core.timeline.paths import validate_timeline_ulid
-
             timeline_ids = [validate_timeline_ulid(item) for item in raw_timeline_ids]
             canonical = sorted(set(timeline_ids))
             if timeline_ids != canonical:
@@ -346,7 +345,6 @@ def _validate_default_timeline_id(raw: Any) -> str | None:
     if not isinstance(raw, str):
         raise ProjectValidationError("project.default_timeline_id must be a ULID string or null")
     try:
-        from astrid.core.timeline.paths import validate_timeline_ulid
         return validate_timeline_ulid(raw)
     except ValueError as exc:
         raise ProjectValidationError(f"project.default_timeline_id: {exc}") from exc

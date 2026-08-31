@@ -24,14 +24,18 @@ The service never exposes receipts to bridge DTOs; it only reads and writes
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_json,
     parse_json,
+)
+from astrid.core.receipts.contract import (
+    RECEIPT_SHAPE_KEYS,
+    CommandReceipt as _CommandReceipt,
+    ReceiptValidationError,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import WriterError
@@ -85,10 +89,6 @@ class ReceiptMismatchError(ReceiptError):
         super().__init__(message)
 
 
-class ReceiptValidationError(ReceiptError):
-    """Raised when a receipt record or lookup argument is invalid."""
-
-
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -112,141 +112,7 @@ def _require_non_negative_int(name: str, value: Any) -> int:
     return value
 
 
-# ---------------------------------------------------------------------------
-# Immutable committed receipt (m4 plan step 3, task T3)
-# ---------------------------------------------------------------------------
-
-RECEIPT_SHAPE_KEYS: frozenset[str] = frozenset(
-    {
-        "receipt_id",
-        "command_kind",
-        "idempotency_key",
-        "request_hash",
-        "project_id",
-        "project_seq",
-        "event_ids",
-        "result",
-        "created_at",
-    }
-)
-"""The exact exposed receipt keys (SDK contract v10 section 3, closed set)."""
-
-
-@dataclass(frozen=True, slots=True)
-class CommandReceipt:
-    """Immutable committed command receipt (SDK contract v10 section 3).
-
-    Exactly the exposed shape: ``receipt_id`` (the transaction id),
-    ``command_kind``, ``idempotency_key``, ``request_hash``, ``project_id``,
-    the inclusive ``[first, last]`` ``project_seq`` range, the ordered
-    ``event_ids``, the complete committed ``result``, and ``created_at``.
-
-    The object is **read-only**: every field is frozen, ``project_seq`` and
-    ``event_ids`` are tuples, and serialization round-trips losslessly
-    through :meth:`to_json` / :meth:`from_json`. No SDK call accepts a
-    receipt as a write input.
-    """
-
-    receipt_id: str
-    command_kind: str
-    idempotency_key: str
-    request_hash: str
-    project_id: str
-    project_seq: tuple[int, int]
-    event_ids: tuple[str, ...]
-    result: Any
-    created_at: str
-
-    def __post_init__(self) -> None:
-        _require_non_empty_string("receipt_id", self.receipt_id)
-        _require_non_empty_string("command_kind", self.command_kind)
-        _require_non_empty_string("idempotency_key", self.idempotency_key)
-        _require_non_empty_string("request_hash", self.request_hash)
-        _require_non_empty_string("project_id", self.project_id)
-        _require_non_empty_string("created_at", self.created_at)
-        seq = self.project_seq
-        if not isinstance(seq, tuple) or len(seq) != 2:
-            raise ReceiptValidationError(
-                "project_seq must be a (first_project_seq, last_project_seq) pair"
-            )
-        first = _require_positive_int("project_seq[0]", seq[0])
-        last = _require_positive_int("project_seq[1]", seq[1])
-        if last < first:
-            raise ReceiptValidationError(
-                "project_seq[1] must be >= project_seq[0] "
-                f"({first} vs {last})"
-            )
-        if not isinstance(self.event_ids, tuple):
-            raise ReceiptValidationError("event_ids must be a tuple")
-        for event_id in self.event_ids:
-            _require_non_empty_string("event_ids entry", event_id)
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the receipt as a plain JSON-ready mapping (exact shape)."""
-        return {
-            "receipt_id": self.receipt_id,
-            "command_kind": self.command_kind,
-            "idempotency_key": self.idempotency_key,
-            "request_hash": self.request_hash,
-            "project_id": self.project_id,
-            "project_seq": [self.project_seq[0], self.project_seq[1]],
-            "event_ids": list(self.event_ids),
-            "result": self.result,
-            "created_at": self.created_at,
-        }
-
-    @classmethod
-    def from_dict(cls, value: Any) -> CommandReceipt:
-        """Build a receipt from a plain mapping, rejecting any shape drift.
-
-        Accepts exactly the nine frozen keys; extra or missing keys raise
-        :class:`ReceiptValidationError` so a wire or storage change can
-        never silently produce a partial receipt.
-        """
-        if not isinstance(value, Mapping):
-            raise ReceiptValidationError("receipt must be a JSON object")
-        if set(value.keys()) != RECEIPT_SHAPE_KEYS:
-            raise ReceiptValidationError(
-                "receipt must have exactly the keys "
-                + ", ".join(sorted(RECEIPT_SHAPE_KEYS))
-            )
-        project_seq = value["project_seq"]
-        if (
-            not isinstance(project_seq, (list, tuple))
-            or len(project_seq) != 2
-        ):
-            raise ReceiptValidationError(
-                "project_seq must be a two-element [first, last] array"
-            )
-        event_ids = value["event_ids"]
-        if not isinstance(event_ids, (list, tuple)):
-            raise ReceiptValidationError("event_ids must be an array")
-        return cls(
-            receipt_id=value["receipt_id"],
-            command_kind=value["command_kind"],
-            idempotency_key=value["idempotency_key"],
-            request_hash=value["request_hash"],
-            project_id=value["project_id"],
-            project_seq=(project_seq[0], project_seq[1]),
-            event_ids=tuple(event_ids),
-            result=value["result"],
-            created_at=value["created_at"],
-        )
-
-    def to_json(self) -> str:
-        """Serialize losslessly to canonical JSON (exact exposed shape)."""
-        return canonical_json(self.as_dict())
-
-    @classmethod
-    def from_json(cls, text: str | bytes) -> CommandReceipt:
-        """Parse a canonical JSON receipt produced by :meth:`to_json`."""
-        try:
-            return cls.from_dict(parse_json(text))
-        except CanonicalizationError as exc:
-            raise ReceiptValidationError(f"invalid receipt JSON: {exc}") from exc
-
-
-def _receipt_from_row(row: Sequence[Any]) -> CommandReceipt:
+def _receipt_from_row(row: Sequence[Any]) -> _CommandReceipt:
     """Build the immutable receipt from one ``command_receipts`` row.
 
     The caller's SELECT defines the column order (txn_id, command_kind,
@@ -262,7 +128,7 @@ def _receipt_from_row(row: Sequence[Any]) -> CommandReceipt:
         raise ReceiptValidationError(f"corrupt stored receipt row: {exc}") from exc
     if not isinstance(event_ids, (list, tuple)):
         raise ReceiptValidationError("stored event_ids_json is not a JSON array")
-    return CommandReceipt(
+    return _CommandReceipt(
         receipt_id=row[0],
         command_kind=row[1],
         idempotency_key=row[2],
@@ -408,7 +274,7 @@ class ReceiptService:
         *,
         project_id: str,
         idempotency_key: str,
-    ) -> CommandReceipt | None:
+    ) -> _CommandReceipt | None:
         """Read-only committed-receipt lookup by ``(project_id, key)``.
 
         Runs exactly one SELECT on the caller's **read-only** connection
@@ -470,7 +336,7 @@ class ReceiptService:
 
     def get_committed(
         self, conn: sqlite3.Connection, *, receipt_id: str
-    ) -> CommandReceipt | None:
+    ) -> _CommandReceipt | None:
         """Read-only lookup of one committed receipt by its receipt (txn) id.
 
         Same read-only contract as :meth:`lookup_committed`; returns the
@@ -487,7 +353,6 @@ class ReceiptService:
 
 
 __all__ = [
-    "CommandReceipt",
     "RECEIPT_SHAPE_KEYS",
     "ReceiptError",
     "ReceiptMismatchError",

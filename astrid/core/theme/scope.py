@@ -9,22 +9,22 @@ Resolution precedence mirrors the S0 spike
 
 1. ``scope.explicit`` — caller-supplied theme path/name (highest priority).
 2. ``scope.env`` — the ``HYPE_ACTIVE_THEME`` environment variable.
-3. ``scope.project_slug`` — project-binding via
-   ``astrid.core.project.project.get_project_theme``.
+3. ``scope.project_style`` — runtime-provided project style snapshot.
 4. ``None`` — no theme resolved.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from astrid.core.contracts.scoped_config import (
     SCOPE_REGISTRY,
     ScopedConfig,
     ScopeRequest,
 )
+from astrid.core.contracts.project_theme import ProjectStyleSnapshot, ProjectThemeBinding
 from astrid.core.env_vars import HYPE_ACTIVE_THEME
 from astrid.core.theme import resolve_theme_dir as _resolve_raw_theme_dir
 
@@ -60,11 +60,21 @@ def resolve_style_scope(request: ScopeRequest) -> StyleScope:
         if theme:
             return StyleScope(theme_dir=_resolve_raw_theme_dir(theme))
 
-    # 3. Project binding (lazy import to avoid tier-2 cycles).
-    if request.project_slug:
-        from astrid.core.project.project import get_project_theme
-
-        theme = get_project_theme(request.project_slug)
+    # 3. Runtime-provided project style data; project persistence is upstream.
+    project_style = request.project_style
+    if isinstance(project_style, ProjectThemeBinding):
+        snapshot = ProjectStyleSnapshot(
+            project_slug=project_style.project_slug,
+            theme_id=project_style.theme_id,
+        )
+    elif isinstance(project_style, Mapping):
+        snapshot = ProjectStyleSnapshot.from_mapping(
+            project_style, project_slug=request.project_slug
+        )
+    else:
+        snapshot = project_style
+    if snapshot is not None:
+        theme = snapshot.theme_dir or snapshot.theme_id
         if theme:
             return StyleScope(theme_dir=_resolve_raw_theme_dir(theme))
 

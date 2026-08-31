@@ -7,9 +7,10 @@ from pathlib import Path
 import uuid
 from typing import Any, Mapping
 
+from astrid.core.receipts.contract import CommandReceipt
+
 from .contracts import DomainResult, ErrorObject
 from .workspace_client import WorkspaceClient, WorkspaceClientError
-from astrid.core.receipts.service import CommandReceipt
 
 
 class _RemoteFamily:

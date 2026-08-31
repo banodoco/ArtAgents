@@ -17,10 +17,10 @@ from typing import Any
 
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.project_theme import validate_theme_identifier
 from astrid.core.foundation import project_paths as paths
 from astrid.core.foundation.atomic_io import write_text_atomic
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.theme import load_theme_by_id
 from astrid.core.util.time import utc_now_seconds
 
 from .schema import build_project, build_source, validate_project
@@ -203,8 +203,7 @@ def set_project_theme(
     if theme is None:
         payload.pop("theme", None)
     else:
-        theme_slug = paths.validate_project_slug(theme)
-        load_theme_by_id(theme_slug)
+        theme_slug = validate_theme_identifier(theme)
         payload["theme"] = theme_slug
     payload["updated_at"] = utc_now_seconds()
     payload = validate_project(payload)

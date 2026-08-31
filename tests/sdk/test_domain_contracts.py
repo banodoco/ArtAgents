@@ -33,9 +33,9 @@ from pathlib import Path
 import pytest
 
 from astrid.core.events.registry import core_only_registry
+from astrid.core.receipts.contract import CommandReceipt
 from astrid.core.receipts.canonical import canonical_json
 from astrid.core.receipts.service import (
-    CommandReceipt,
     ReceiptMismatchError,
     ReceiptService,
     ReceiptValidationError,

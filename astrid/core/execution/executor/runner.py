@@ -29,6 +29,7 @@ from astrid.core.contracts.exec_error import (
     error_from_missing_binaries,
     error_from_returncode,
 )
+from astrid.core.contracts.project_theme import ProjectStyleSnapshot
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
@@ -138,6 +139,7 @@ class ExecutorRunRequest:
     executor_id: str
     out: Path | str | None
     project: str | None = None
+    project_style: ProjectStyleSnapshot | Mapping[str, Any] | None = None
     inputs: Mapping[str, Any] = field(default_factory=dict)
     outputs: Mapping[str, Any] = field(default_factory=dict)
     brief: Path | str | None = None
@@ -469,6 +471,7 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
         explicit={'theme': theme_val} if theme_val is not None else None,
         project_slug=request.project,
         env=dict(os.environ),
+        project_style=request.project_style,
     ))
     active_theme = active_theme_scope.theme_dir
     if theme_explicit:
@@ -1130,6 +1133,7 @@ def _emit_scoped_config_env(
         project_slug=request.project,
         env=dict(os.environ),
         explicit=explicit or None,
+        project_style=request.project_style,
     )
     env: dict[str, str] = {}
     for key in executor.scoped_configs:

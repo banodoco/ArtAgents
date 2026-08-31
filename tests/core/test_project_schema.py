@@ -184,15 +184,15 @@ def test_project_theme_set_get_clear_and_show(
     assert get_project_theme("demo") is None
 
 
-def test_project_theme_rejects_missing_theme(
+def test_project_theme_accepts_opaque_runtime_theme_identifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     monkeypatch.setenv("ASTRID_THEMES_ROOT", str(tmp_path / "themes"))
     create_project("demo")
 
-    with pytest.raises(ValueError, match="theme not found"):
-        set_project_theme("demo", "missing-theme")
+    updated = set_project_theme("demo", "missing-theme")
+    assert updated["theme"] == "missing-theme"
 
 
 def test_active_theme_resolution_prefers_env_over_project_binding(

@@ -26,7 +26,8 @@ from typing import Any
 import pytest
 
 from astrid.core.cli.domain_product import run_product_family
-from astrid.sdk.contracts import CommandReceipt, DomainResult, ErrorObject
+from astrid.core.receipts.contract import CommandReceipt
+from astrid.sdk.contracts import DomainResult, ErrorObject
 
 ENVELOPE_KEYS = {"ok", "data", "error", "receipt", "idempotency_key"}
 
