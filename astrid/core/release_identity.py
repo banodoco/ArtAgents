@@ -91,8 +91,8 @@ def git_identity(path: str | os.PathLike[str]) -> dict[str, Any]:
             initialized = subroot.is_dir() and (subroot / ".git").exists()
             subref = _git_text(subroot, "symbolic-ref", "-q", "--short", "HEAD", optional=True) if initialized else ""
             subgit = _git_text(subroot, "rev-parse", "--git-dir", optional=True); subcommon = _git_text(subroot, "rev-parse", "--git-common-dir", optional=True)
-            subs.append({"path": subpath, "oid": match.group(1), "head_ref": subref or NONE, "detached": not bool(subref), "git_dir_relative": os.path.relpath(subgit, subcommon) if subgit and subcommon else NONE, "common_dir_relative": ".", "dirty_paths": _dirty_paths(subroot) if initialized else []})
-    return {"repository_identity": _repo_identity(root), "head_oid": _git_text(root, "rev-parse", "HEAD"), "head_ref": ref or NONE, "detached": not bool(ref), "git_dir_kind": "worktree" if (root / ".git").is_file() else "directory", "git_dir_relative": os.path.relpath(git_dir, common) if git_dir and common else NONE, "common_dir_relative": ".", "submodules": sorted(subs, key=lambda x: x["path"])}
+            subs.append({"path": subpath, "oid": match.group(1), "head_ref": subref or NONE, "detached": not bool(subref), "git_dir_relative": "WORKTREE" if (subroot / ".git").is_file() else "MAIN", "common_dir_relative": ".", "dirty_paths": _dirty_paths(subroot) if initialized else []})
+    return {"repository_identity": _repo_identity(root), "head_oid": _git_text(root, "rev-parse", "HEAD"), "head_ref": ref or NONE, "detached": not bool(ref), "git_dir_kind": "worktree" if (root / ".git").is_file() else "directory", "git_dir_relative": "WORKTREE" if (root / ".git").is_file() else "MAIN", "common_dir_relative": ".", "submodules": sorted(subs, key=lambda x: x["path"])}
 
 def _submodule_sources(root: Path, approved_root: Path) -> list[dict[str, str]]:
     lines = _git_text(root, "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.url$", optional=True).splitlines()
@@ -236,7 +236,7 @@ def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions
                 run_root = base / gid / str(ordinal); checkout = run_root / "checkout"; _clean_git_checkout(source_checkout, checkout, by_component[cid]["integrated_oid"], Path(output_root).expanduser().resolve() if output_root else None); stage = run_root / "staging"; inputs = run_root / "inputs"; stage.mkdir(parents=True); inputs.mkdir()
                 contract_path, schema_path = inputs / "contract.json", inputs / "schema-manifest.json"; contract_path.write_bytes(contract_bytes); schema_path.write_bytes(schema_manifest_bytes)
                 executable = str(definition.get("interpreter_path") or definition.get("executable") or "python3")
-                argv = [executable, str(entrypoint), "--contract", str(contract_path), "--schema-manifest", str(schema_path), "--output-root", str(stage)]
+                argv = [executable, str(checkout / entrypoint_path), "--contract", str(contract_path), "--schema-manifest", str(schema_path), "--output-root", str(stage)]
                 before = _dirty_paths(checkout)
                 result = subprocess.run(argv, cwd=str(checkout), capture_output=True, check=False, timeout=300, env={"PATH": os.environ.get("PATH", "")})
                 after = _dirty_paths(checkout)
@@ -357,28 +357,32 @@ def _validate_git_identity_bytes(content: bytes, row: Mapping[str, Any]) -> None
     for sub in identity["submodules"]:
         if set(sub) != {"path", "oid", "head_ref", "detached", "git_dir_relative", "common_dir_relative", "dirty_paths"} or not isinstance(sub.get("dirty_paths"), list) or Path(str(sub.get("path"))).is_absolute() or ".." in Path(str(sub.get("path"))).parts: raise ReleaseIdentityError("Git submodule identity evidence schema mismatch")
 
-def create_pre_live_identity(components: Mapping[str, str | os.PathLike[str]], *, metadata: Mapping[str, Any] | None = None, output: str | os.PathLike[str] | None = None, seed_outputs: Mapping[str, bytes | bytearray | Mapping[str, Any] | Sequence[Any]] | None = None, generator_definitions: Sequence[Mapping[str, Any]] | None = None, contract_bytes: bytes | None = None, schema_manifest_bytes: bytes | None = None) -> dict[str, Any]:
+def create_pre_live_identity(components: Mapping[str, str | os.PathLike[str]], *, metadata: Mapping[str, Any] | None = None, output: str | os.PathLike[str] | None = None, seed_outputs: Mapping[str, bytes | bytearray | Mapping[str, Any] | Sequence[Any]] | None = None, generator_definitions: Sequence[Mapping[str, Any]] | None = None, contract_bytes: bytes | None = None, schema_manifest_bytes: bytes | None = None, registry_rows: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     _assert_clean(components, output); rows = resolve_reviewed_components(components)
     if generator_definitions is not None:
         if contract_bytes is None or schema_manifest_bytes is None: raise ReleaseIdentityError("B11.1 requires complete contract and schema-manifest bytes")
         rows = run_b11_1(rows, generator_definitions, contract_bytes=contract_bytes, schema_manifest_bytes=schema_manifest_bytes)
     metadata = dict(metadata or {}); planned = set(components) == {"ASTRID-CLIENT", "NEUTRAL-RUNTIME"}
     if seed_outputs is None: raise ReleaseIdentityError("PRELIVE-MANIFEST requires actual bytes for all 47 seeds")
+    definitions = sorted((dict(d) for d in (generator_definitions or [])), key=lambda d: d.get("generator_id", "")); definition_digests = []
+    if len({d.get("generator_id") for d in definitions}) != len(definitions) or any(not isinstance(d.get("generator_id"), str) for d in definitions): raise ReleaseIdentityError("generator definitions must have unique IDs")
+    if definitions:
+        epochs = dict(metadata.get("epochs", {})); epochs["generator_definition_digests"] = [_sha256_bytes(canonical_bytes(d)) for d in definitions]; metadata["epochs"] = epochs
     manifest = build_prelive_manifest(seed_outputs, metadata=metadata); seed_wrappers = _seed_payload_wrappers(seed_outputs, metadata=metadata); evidence = []
     for row in rows:
         data = canonical_bytes(row); digest = _sha256_bytes(data); evidence.append({"path": f"evidence/sha256/{digest[:2]}/{digest}", "sha256": digest, "producer_id": "CMD-IDENTITY:pre-live-root", "token_ids": [row["component_id"]], "epochs": metadata.get("epochs", {}), "media_type": "application/json"})
     evidence.sort(key=lambda r: (r["path"], r["sha256"], r["producer_id"])); root_payload = {"component_rows": rows, "evidence_rows": evidence, "manifest_sha256": manifest["manifest_sha256"]}; identity = framed_hash("banodoco.pre-live-evidence-root.v1", root_payload)
     strict = set(r["component_id"] for r in rows) == {"ASTRID-CLIENT", "NEUTRAL-RUNTIME"}
-    locators = join_plan_remote_targets(rows) if strict else []
+    locators = join_plan_remote_targets(rows, registry_rows=registry_rows) if strict else []
     identity_evidence = []
     for row in rows:
         binding = next((b for b in row["provenance_input_bindings"] if b.get("input_id") == f"GIT-IDENTITY:{row['component_id']}"), None)
         if binding is None: raise ReleaseIdentityError("candidate row lacks schema-legal Git identity evidence binding")
         identity_evidence.append(_artifact_wrapper(binding["input_id"], "CMD-IDENTITY:pre-live-root", canonical_bytes(git_identity(Path(components[row['component_id']])))))
     generator_definition_evidence = []
-    for definition in sorted((dict(d) for d in (generator_definitions or [])), key=lambda d: d.get("generator_id", "")):
+    for definition in definitions:
         gid = definition.get("generator_id")
-        if isinstance(gid, str): generator_definition_evidence.append(_artifact_wrapper(f"GENERATOR-DEFINITION:{gid}", "CMD-IDENTITY:pre-live-root", canonical_bytes(definition)))
+        if isinstance(gid, str): generator_definition_evidence.append(_artifact_wrapper(f"GENERATOR-DEFINITION:{gid}", "CMD-IDENTITY:pre-live-root", canonical_bytes(definition), detail_schema_id="generator-definition-v1"))
     receipt = {"schema_version": SCHEMA_VERSION, "kind": "pre-live-root", "operation_id": "CMD-IDENTITY:pre-live-root", "identity": identity, "pre_live_manifest": manifest, "pre_live_seed_payloads": seed_wrappers, "component_identity_evidence": identity_evidence, "generator_definition_evidence": generator_definition_evidence, "evidence_rows": evidence, "component_rows": rows, "plan_registry_enforced": bool(locators), "remote_target_locators": locators, "remote_target_registry_sha256": component_registry_sha256(plan_component_registry()) if locators else NONE, "metadata": _nfc(metadata)}; receipt["receipt_sha256"] = _receipt_digest(receipt); _write_receipt(receipt, output); return receipt
 
 def _component_set(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
@@ -393,10 +397,13 @@ def _component_set(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, 
 def create_candidate_core_identity(pre_live: Mapping[str, Any] | str | os.PathLike[str], components: Mapping[str, str | os.PathLike[str]], *, metadata: Mapping[str, Any] | None = None, output: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     source = load_receipt(pre_live) if isinstance(pre_live, (str, os.PathLike)) else dict(pre_live); verify_receipt(source)
     if source.get("kind") != "pre-live-root": raise ReleaseIdentityError("candidate core requires a pre-live-root receipt")
-    _assert_clean(components, output); rows = resolve_reviewed_components(components); old, new = _component_set(source.get("component_rows", [])), _component_set(rows)
+    _assert_clean(components, output); recomputed_rows = resolve_reviewed_components(components); old, new = _component_set(source.get("component_rows", [])), _component_set(recomputed_rows)
     if set(old) != set(new): raise ReleaseIdentityError("candidate component set is not a total bijection")
     for cid in sorted(old):
-        if canonical_bytes(old[cid]) != canonical_bytes(new[cid]): raise ReleaseIdentityError(f"candidate component field mismatch after pre-live capture: {cid}")
+        for field in CANDIDATE_COMPONENT_FIELDS:
+            if field in {"generator_ids", "generator_observation_rows"}: continue
+            if canonical_bytes(old[cid][field]) != canonical_bytes(new[cid][field]): raise ReleaseIdentityError(f"candidate component field mismatch after pre-live capture: {cid}:{field}")
+    rows = [copy.deepcopy(old[cid]) for cid in sorted(old)]
     meta = dict(metadata or {}); manifest = source["pre_live_manifest"]; core = {"schema_version": 1, "governance_binding": meta.get("governance_binding", "LOCAL-STAGE1-RELEASE"), "component_manifest_sha256": framed_hash("banodoco.component-manifest.v1", rows), "contract_id": meta.get("contract_id", framed_hash("banodoco.contract.v1", [r["contract_sha256"] for r in rows])), "runtime_build_id": meta.get("runtime_build_id", framed_hash("banodoco.runtime-build.v1", [r["integrated_oid"] for r in rows])), "source_manifest_id": meta.get("source_manifest_id", framed_hash("banodoco.source-manifest.v1", [r["subtree_sha256"] for r in rows])), "migration_manifest_id": meta.get("migration_manifest_id", NONE), "selected_realm_id": meta.get("selected_realm_id", NONE), "trusted_disposition_sha256": meta.get("trusted_disposition_sha256", NONE), "pre_live_evidence_root": source["identity"], "contract_epoch": meta.get("contract_epoch", NONE), "runtime_epoch": meta.get("runtime_epoch", NONE), "source_epoch": meta.get("source_epoch", NONE), "migration_epoch": meta.get("migration_epoch", NONE), "activation_epoch": meta.get("activation_epoch", NONE), "release_epoch": NONE, "component_rows": rows}; receipt = {"schema_version": SCHEMA_VERSION, "kind": "candidate-core", "operation_id": "CMD-IDENTITY:candidate-core", "identity": framed_hash("banodoco.candidate-core.v1", core), "candidate_core": core, "pre_live_root": source["identity"], "pre_live_component_rows": copy.deepcopy(source["component_rows"]), "pre_live_evidence_rows": copy.deepcopy(source["evidence_rows"]), "pre_live_manifest": copy.deepcopy(manifest), "pre_live_manifest_sha256": manifest["manifest_sha256"], "metadata": _nfc(meta)}; receipt["receipt_sha256"] = _receipt_digest(receipt); _write_receipt(receipt, output); return receipt
 
 def _configured_receipt_root() -> Path | None:
@@ -454,7 +461,17 @@ def verify_receipt(receipt: Mapping[str, Any]) -> str:
             _validate_git_identity_bytes(identity_content, row)
         definition_evidence = receipt.get("generator_definition_evidence", [])
         if not isinstance(definition_evidence, list): raise ReleaseIdentityError("generator definition evidence is not a list")
-        for item in definition_evidence: _decode_artifact(item, producer_id="CMD-IDENTITY:pre-live-root")
+        observations = [observation for row in rows_for_identity for observation in row.get("generator_observation_rows", [])]
+        if len(definition_evidence) != len(observations) or [item.get("artifact_id", "").removeprefix("GENERATOR-DEFINITION:") for item in definition_evidence] != [observation.get("generator_id") for observation in sorted(observations, key=lambda item: item.get("generator_id", ""))]: raise ReleaseIdentityError("generator definition evidence cardinality or order mismatch")
+        definition_digests = []
+        for item, observation in zip(definition_evidence, sorted(observations, key=lambda item: item.get("generator_id", ""))):
+            raw = _decode_artifact(item, artifact_id=f"GENERATOR-DEFINITION:{observation['generator_id']}", producer_id="CMD-IDENTITY:pre-live-root")
+            if item.get("detail_schema_id") != "generator-definition-v1" or _sha256_bytes(raw) != observation.get("generator_definition_sha256"): raise ReleaseIdentityError("generator definition evidence digest mismatch")
+            try: definition = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError): raise ReleaseIdentityError("generator definition evidence is not canonical JSON")
+            if canonical_bytes(definition) != raw: raise ReleaseIdentityError("generator definition evidence bytes are not canonical")
+            definition_digests.append(_sha256_bytes(raw))
+        if manifest.get("epochs", {}).get("generator_definition_digests", []) != definition_digests: raise ReleaseIdentityError("PRELIVE manifest is not bound to generator definitions")
         for row in rows_for_identity:
             for observation in row.get("generator_observation_rows", []):
                 if set(observation) != set(GENERATOR_ROW_FIELDS): raise ReleaseIdentityError("generator observation schema mismatch")
@@ -563,10 +580,16 @@ def _load_seed_inputs(seed_dir: str | os.PathLike[str], manifest_path: str | os.
         definitions[seed] = {"producer_id": producer, "media_type": media}
     return outputs, {"seed_artifacts": definitions}
 
+def _load_json_input(path: str | os.PathLike[str], label: str) -> Any:
+    try: return json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc: raise ReleaseIdentityError(f"{label} must be readable JSON") from exc
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); pre.add_argument("--seed-dir", required=True); pre.add_argument("--seed-manifest", required=True); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); pre.add_argument("--seed-dir", required=True); pre.add_argument("--seed-manifest", required=True); pre.add_argument("--generator-manifest"); pre.add_argument("--registry"); pre.add_argument("--contract-file"); pre.add_argument("--schema-manifest-file"); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
     try:
-        if args.operation == "pre-live": seed_outputs, seed_metadata = _load_seed_inputs(args.seed_dir, args.seed_manifest); result = create_pre_live_identity(_component_args(args.component), output=args.output, seed_outputs=seed_outputs, metadata=seed_metadata)
+        if args.operation == "pre-live":
+            seed_outputs, seed_metadata = _load_seed_inputs(args.seed_dir, args.seed_manifest); definitions = _load_json_input(args.generator_manifest, "--generator-manifest") if args.generator_manifest else None; definitions = definitions.get("generators", definitions) if isinstance(definitions, Mapping) else definitions; registry = _load_json_input(args.registry, "--registry") if args.registry else None; contract = Path(args.contract_file).read_bytes() if args.contract_file else None; schema = Path(args.schema_manifest_file).read_bytes() if args.schema_manifest_file else None
+            result = create_pre_live_identity(_component_args(args.component), output=args.output, seed_outputs=seed_outputs, metadata=seed_metadata, generator_definitions=definitions, contract_bytes=contract, schema_manifest_bytes=schema, registry_rows=registry)
         elif args.operation == "candidate-core": result = create_candidate_core_identity(args.pre_live, _component_args(args.component), output=args.output)
         else: result = {"ok": True, "identity": load_receipt(args.receipt)["identity"]}
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2)); return 0

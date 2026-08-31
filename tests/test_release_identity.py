@@ -117,6 +117,8 @@ def test_b11_runs_declared_generator_twice(tmp_path: Path) -> None:
     assert observed[0]["generator_observation_rows"][0]["output_digests"] == [__import__("hashlib").sha256(b"\x00\xff").hexdigest()]
     receipt = create_pre_live_identity({"ASTRID-CLIENT": checkout}, seed_outputs=_seeds(), generator_definitions=[{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
     assert verify_receipt(receipt) == receipt["identity"]
+    candidate = create_candidate_core_identity(receipt, {"ASTRID-CLIENT": checkout})
+    assert verify_receipt(candidate) == candidate["identity"]
 
 def test_installed_cli_consumes_exact_seed_directory_manifest(tmp_path: Path) -> None:
     checkout = _repo(tmp_path, "Astrid")
