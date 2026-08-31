@@ -1064,10 +1064,10 @@ class TestGitCredentials(unittest.TestCase):
 
 
 class TestInspectGitFields(GitTestBase):
-    """Verify inspect displays Git-enriched fields for Git-backed packs."""
+    """Verify inspect reads the authored manifest from discovery."""
 
     def test_inspect_shows_manifest_digest(self) -> None:
-        """Inspect output includes manifest_digest when available."""
+        """Inspect output remains available for a discovered Git checkout."""
         pack_id = "inspect_git"
         repo_path, commit_sha = _make_git_repo_with_pack(self._tmpdir, pack_id)
 
@@ -1077,10 +1077,13 @@ class TestInspectGitFields(GitTestBase):
         buf = io.StringIO()
         with mock.patch.dict(os.environ, {"ASTRID_HOME": str(self._astrid_home)}):
             with mock.patch.object(sys, "stdout", buf):
-                rc = cmd_inspect([pack_id])
+                # Pack inspect is manifest-ledger discovery only; installed
+                # revisions are not an authority for public discovery.
+                rc = cmd_inspect([pack_id, "--pack-root", str(Path(repo_path).parent)])
         self.assertEqual(rc, 0)
         output = buf.getvalue()
-        self.assertIn("Manifest Hash:", output)
+        self.assertIn("id: inspect_git", output)
+        self.assertIn("manifest_path:", output)
 
 
 if __name__ == "__main__":

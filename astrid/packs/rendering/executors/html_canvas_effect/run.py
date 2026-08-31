@@ -23,6 +23,16 @@ from astrid.core.foundation.paths import REPO_ROOT
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"
+_LOCAL_PACK_MANIFEST = """schema_version: 1
+id: local
+name: Project Local Pack
+version: 1.0.0
+origin: local
+install_tier: local
+pack_type: capability
+content:
+  elements: elements
+"""
 
 
 def _title_from_id(effect_id: str) -> str:
@@ -119,6 +129,12 @@ def scaffold(
         shutil.rmtree(element_root)
 
     element_root.mkdir(parents=True, exist_ok=False)
+    # Local elements participate in manifest-ledger discovery.  Bootstrap the
+    # authored local pack manifest once, while preserving any project-owned
+    # metadata on subsequent scaffolds.
+    local_pack_manifest = local_pack / "pack.yaml"
+    if not local_pack_manifest.exists():
+        local_pack_manifest.write_text(_LOCAL_PACK_MANIFEST, encoding="utf-8")
     component_path = element_root / "component.tsx"
     manifest_path = element_root / "element.yaml"
     component_path.write_text(_component_source(), encoding="utf-8")

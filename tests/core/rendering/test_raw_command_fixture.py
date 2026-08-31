@@ -394,7 +394,7 @@ def test_fixture_works_from_explicit_extra_pack_root(tmp_path: Path) -> None:
     _assert_clean_render(result, workspace)
 
 
-def test_fixture_works_from_trusted_install(tmp_path: Path) -> None:
+def test_fixture_install_is_not_a_public_discovery_authority(tmp_path: Path) -> None:
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
@@ -414,23 +414,9 @@ def test_fixture_works_from_trusted_install(tmp_path: Path) -> None:
     ):
         renderers, _, _ = load_default_registries(tmp_path / "project", include_installed=True)
 
-    candidate = renderers.get(BACKEND_ID)
-    assert candidate.source_kind == "installed"
-    assert candidate.execution_eligible is True
-
-    alias = renderers.get(ALIAS_ID)
-    assert alias.id == BACKEND_ID
-    assert alias.source_kind == "installed"
-    assert alias.execution_eligible is True
-
-    _, result, workspace = _run_transport(tmp_path / "workspace-installed", revision, verb="render")
-    _assert_clean_render(result, workspace)
-
-    _, support, _ = _run_transport(
-        tmp_path / "workspace-installed-support",
-        revision,
-        verb="support",
-        request_name="support.json",
-    )
-    assert isinstance(support, SupportReport)
-    assert support.backend == BACKEND_ID
+    with pytest.raises(RendererRegistryError) as caught:
+        renderers.get(BACKEND_ID)
+    assert caught.value.code == "unknown_capability"
+    with pytest.raises(RendererRegistryError) as alias_caught:
+        renderers.get(ALIAS_ID)
+    assert alias_caught.value.code == "unknown_capability"

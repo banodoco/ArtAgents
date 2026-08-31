@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.core.execution.executor.registry import (
-    load_default_registry as load_executor_registry,
-)
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.execution.orchestrator.registry import (
     load_default_registry as load_orchestrator_registry,
 )
@@ -34,7 +32,7 @@ PRESERVED_EXECUTOR_IDS = [
     # One canonical 2-segment id per remaining pack — sanity checks that the
     # regex relaxation did not regress the common case either.
     "training.asset_cache",
-    "iteration.prepare",
+    "iteration.assemble",
     "youtube.upload",
 ]
 
@@ -85,3 +83,9 @@ def test_preserved_orchestrator_id_resolves(public_id, orchestrator_registry):
     assert (
         orchestrator.metadata.get("source_pack") == public_id.split(".", 1)[0]
     )
+
+
+def test_retired_iteration_prepare_is_not_registered(executor_registry):
+    assert all(item.id != "iteration.prepare" for item in executor_registry.list())
+    with pytest.raises(KeyError, match="unknown executor"):
+        executor_registry.get("iteration.prepare")

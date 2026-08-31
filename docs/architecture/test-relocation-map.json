@@ -508,27 +508,6 @@
       "rationale": "Iteration assemble for iteration pack."
     },
     {
-      "file": "test_iteration_prepare_cache.py",
-      "lines": 155,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Iteration prepare cache."
-    },
-    {
-      "file": "test_iteration_prepare_collect.py",
-      "lines": 367,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Iteration prepare collect."
-    },
-    {
-      "file": "test_iteration_quality.py",
-      "lines": 121,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Iteration quality tests."
-    },
-    {
       "file": "test_iteration_video.py",
       "lines": 1073,
       "target": "tests/packs/",

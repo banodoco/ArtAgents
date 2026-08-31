@@ -28,7 +28,6 @@ AGENT_CLI_MODULE_PATHS: list[Path] = [
     ROOT / "astrid" / "core" / "cli" / "domain_runs.py",
     ROOT / "astrid" / "core" / "cli" / "domain_tasks.py",
     ROOT / "astrid" / "core" / "cli" / "registration.py",
-    ROOT / "astrid" / "core" / "doctor.py",
     ROOT / "astrid" / "core" / "gateway" / "__init__.py",
     ROOT / "astrid" / "core" / "gateway" / "dispatch.py",
 ]

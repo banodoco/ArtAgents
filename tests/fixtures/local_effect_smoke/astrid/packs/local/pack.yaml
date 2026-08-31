@@ -1,0 +1,9 @@
+schema_version: 1
+id: local
+name: Fixture local pack
+version: 1.0.0
+origin: local
+install_tier: local
+pack_type: capability
+content:
+  elements: elements

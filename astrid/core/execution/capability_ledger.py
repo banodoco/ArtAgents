@@ -155,9 +155,9 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
             row["reason"] = row.get("reason") or "retained in historical executor snapshot; no current executor manifest"
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
     coverage = {
-        "source_labels": {"source": len(labels), "ledger": len(labels), "missing": [], "complete": True},
-        "historical_source_labels": {"source": 81, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 81},
-        "executor_inventory": {"source": 74, "ledger": len(executors), "missing": [], "complete": len(executors) == 74},
+        "source_labels": {"source": 82, "ledger": len(labels), "missing": [], "complete": len(labels) == 82},
+        "historical_source_labels": {"source": 80, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 80},
+        "executor_inventory": {"source": 73, "ledger": len(executors), "missing": [], "complete": len(executors) == 73},
         "legacy_ids": {"source": 19, "ledger": len(legacy), "missing": [], "complete": len(legacy) == 19},
     }
     if not all(section["complete"] for section in coverage.values()):

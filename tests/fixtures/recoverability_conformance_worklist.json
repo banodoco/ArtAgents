@@ -1661,13 +1661,6 @@
     },
     {
       "kind": "direct_stderr",
-      "line": 75,
-      "path": "astrid/packs/iteration/executors/prepare/run.py",
-      "source": "print(str(exc), file=sys.stderr)",
-      "stderr_kind": "print"
-    },
-    {
-      "kind": "direct_stderr",
       "line": 83,
       "path": "astrid/packs/media/executors/clip_extract/run.py",
       "source": "print(f\"Error: {error}\", file=sys.stderr)",
@@ -2549,11 +2542,6 @@
       "path": "astrid/packs/iteration/executors/experiment_review/run.py"
     },
     {
-      "module": "astrid.packs.iteration.executors.prepare.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/iteration/executors/prepare/run.py"
-    },
-    {
       "module": "astrid.packs.iteration.orchestrators.experiment_review_session.run",
       "builder": "build_parser",
       "path": "astrid/packs/iteration/orchestrators/experiment_review_session/run.py"
@@ -2977,13 +2965,6 @@
       "module": "astrid.packs.iteration.executors.experiment_review.run",
       "builder": "build_parser",
       "path": "astrid/packs/iteration/executors/experiment_review/run.py",
-      "prog": "-c",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.packs.iteration.executors.prepare.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/iteration/executors/prepare/run.py",
       "prog": "-c",
       "enum_arg_count": 0
     },

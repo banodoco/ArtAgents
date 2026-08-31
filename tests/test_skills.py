@@ -576,7 +576,7 @@ class InstalledDiscoveryTest(unittest.TestCase):
         )
         return pack_root
 
-    def test_installed_pack_included_by_default(self) -> None:
+    def test_installed_pack_is_not_a_default_discovery_authority(self) -> None:
         with TemporaryDirectory() as tmp:
             pack_root = self._write_installed_pack(Path(tmp), "installed_demo")
             with mock.patch(
@@ -585,8 +585,7 @@ class InstalledDiscoveryTest(unittest.TestCase):
             ):
                 descriptors = discovery.list_skills()
             pack_ids = [d.pack_id for d in descriptors]
-            self.assertIn("installed_demo", pack_ids)
-            # Source packs (e.g. _core) are still present alongside installed.
+            self.assertNotIn("installed_demo", pack_ids)
             self.assertIn("_core", pack_ids)
 
     def test_explicit_packs_dir_does_not_pull_installed(self) -> None:

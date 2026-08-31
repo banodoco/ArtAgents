@@ -55,7 +55,7 @@ PORTFOLIO_PACK_IDS = [
 REPRESENTATIVE_EXECUTORS: dict[str, str] = {
     "rendering": "rendering.render",
     "training": "training.asset_cache",
-    "iteration": "iteration.prepare",
+    "iteration": "iteration.assemble",
     "youtube": "youtube.upload",
     "vibecomfy": "vibecomfy.validate",
     "moirae": "moirae.moirae",
@@ -269,4 +269,3 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
             f"{executor_id} unexpectedly dispatched through "
             "run_builtin_executor (the in-process built-in path)"
         )
-

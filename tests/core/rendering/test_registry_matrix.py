@@ -511,16 +511,10 @@ def _write_alias_to_absent_pack(packs_root: Path) -> Path:
     return pack_root
 
 
-def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
+def test_installed_pack_alias_is_not_a_public_discovery_authority(
     tmp_path: Path,
 ) -> None:
-    """A pack-declared alias whose canonical is absent still routes through
-    an override to an executable implementation.
-
-    The frozen ordering is alias -> canonical -> override: a missing canonical
-    must not silently drop a trusted pack alias when an override supplies the
-    implementation.
-    """
+    """Installed aliases do not enter the public registry or override route."""
     project_root = tmp_path / "project"
     source_root = tmp_path / "source"
     source_root.mkdir()
@@ -568,18 +562,10 @@ def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
     ):
         renderers, _, _ = load_default_registries(project_root, include_installed=True)
 
-    candidate = renderers.get("alias_missing.legacy")
-    assert candidate.id == "alias_missing.renderer"
-    assert candidate.source_kind == "installed"
-    assert candidate.execution_eligible is True
-
-    evidence = renderers.resolve_evidence("alias_missing.legacy")
-    assert evidence["canonical_id"] == "other.abstract.renderer"
-    assert evidence["resolved_id"] == "alias_missing.renderer"
-    assert evidence["override"] == {
-        "from": "other.abstract.renderer",
-        "to": "alias_missing.renderer",
-    }
+    assert renderers.inspect("alias_missing.legacy") == ()
+    with pytest.raises(RendererRegistryError) as caught:
+        renderers.get("alias_missing.legacy")
+    assert caught.value.code == "unknown_capability"
 
 
 def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
@@ -650,7 +636,7 @@ def test_env_candidate_cannot_shadow_eligible_extra_in_natural_discovery_order(
     ]
 
 
-def test_installed_pack_with_unaccepted_permissions_fails_closed(
+def test_installed_pack_with_unaccepted_permissions_is_not_publicly_discovered(
     tmp_path: Path,
 ) -> None:
     """An install record that accepted no permissions is not trustworthy.
@@ -677,13 +663,10 @@ def test_installed_pack_with_unaccepted_permissions_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path / "project", include_installed=True)
 
-    candidate = renderers.inspect("installed_render.renderer")[0]
-    assert candidate.execution_eligible is False
-    assert "accepted permissions" in candidate.eligibility.reason
-    assert candidate.eligibility.accepted_permissions == ()
+    assert renderers.inspect("installed_render.renderer") == ()
     with pytest.raises(RendererRegistryError) as caught:
         renderers.get("installed_render.renderer")
-    assert caught.value.code == "execution_ineligible"
+    assert caught.value.code == "unknown_capability"
 
 
 def test_permission_deficiency_reason_lists_all_missing_permissions_sorted(

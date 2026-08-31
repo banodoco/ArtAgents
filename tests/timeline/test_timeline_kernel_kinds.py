@@ -12,10 +12,8 @@ Covers:
   ``TransitionSetPayload``) validate through the same registry path
   independent of CLI argparse.
 - Projection boundary validates track kinds through the registry.
-- Doctor exposes the six v10 checks (``sqlite_quick_check``, ``fk_integrity``,
-  ``schema_versions``, ``media_paths``, ``data_paths``, ``python_version``)
-  with a stable ``{"ok": bool, "checks": [...]}`` JSON envelope and fail-closed
-  exit codes on a missing/corrupt database.
+- The retired local doctor module is absent and the public doctor route fails
+  closed when runtime discovery is unavailable.
 
 All tests bypass CLI parsing — they exercise the kernel/SDK APIs directly.
 """
@@ -24,10 +22,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import importlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from astrid.core.timeline.events.schema import (
     ClipAddedPayload,
@@ -384,88 +385,30 @@ class ProjectionBoundaryKindTest(unittest.TestCase):
 
 
 class DoctorV10ChecksTest(unittest.TestCase):
-    """The v10 doctor reports six checks and fails closed on a corrupt DB."""
+    """The retired local doctor is replaced by the runtime gateway route."""
 
-    def _fresh_project(self, root) -> None:
-        # ``astrid.application`` was the pre-cutover in-process composition;
-        # Stage 1 retires it in favour of the kernel writer seam.  Seed the
-        # doctor fixture through that seam so this test exercises the current
-        # authority without resurrecting a compatibility module.
-        from astrid.core.repositories.projects import ProjectRepository
-        from astrid.core.events.service import EventAppendService
-        from astrid.core.receipts.service import ReceiptService
-        from astrid.core.schema_packs.standard import build_standard_registry
-        from astrid.core.store.ownership import DatabaseOwnerLock
-        from astrid.core.store.uow import UnitOfWork
-        from astrid.core.store.writer import open_database_writer
+    def test_retired_local_doctor_module_is_absent(self) -> None:
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("astrid.core.doctor")
 
-        database = Path(root) / ".astrid" / "astrid.sqlite3"
-        database.parent.mkdir(parents=True, exist_ok=True)
-        registry = build_standard_registry()
-        with DatabaseOwnerLock(database):
-            writer = open_database_writer(database, registry)
-            try:
-                events = EventAppendService(registry)
-                repo = ProjectRepository(events=events, receipts=ReceiptService())
-                UnitOfWork(writer).run(
-                    lambda uow: repo.create(
-                        uow,
-                        project_id="01jdoctorfixture000000000000",
-                        slug="demo",
-                        name="Demo",
-                        settings={},
-                        idempotency_key="p1",
-                    )
-                )
-            finally:
-                writer.close()
-
-    def test_doctor_reports_six_v10_checks(self) -> None:
-        from astrid.core import doctor as doctor_mod
+    def test_public_doctor_route_fails_closed_without_runtime(self) -> None:
+        from astrid.core.gateway import dispatch
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._fresh_project(root)
-            checks = doctor_mod.run_checks(projects_root=root)
+            output = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {
+                    "BANODOCO_RUNTIME_ENDPOINT": "",
+                    "BANODOCO_RUNTIME_DISCOVERY": str(Path(tmp) / "missing.json"),
+                    "BANODOCO_RUNTIME_CREDENTIAL": str(Path(tmp) / "missing.token"),
+                },
+                clear=False,
+            ), contextlib.redirect_stdout(output):
+                code = dispatch._dispatch_doctor(["--json"])
 
-        self.assertEqual(
-            {c.name for c in checks},
-            {
-                "python_version",
-                "data_paths",
-                "media_paths",
-                "sqlite_quick_check",
-                "fk_integrity",
-                "schema_versions",
-            },
-        )
-        self.assertTrue(all(c.status == "ok" for c in checks))
-
-    def test_doctor_json_fails_closed_on_corrupt_db(self) -> None:
-        from astrid.core import doctor as doctor_mod
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".astrid").mkdir()
-            (root / ".astrid" / "astrid.sqlite3").write_bytes(b"not a sqlite database")
-            stdout = io.StringIO()
-            with contextlib.redirect_stdout(stdout):
-                code = doctor_mod.main(["--json", "--projects-root", str(root)])
-            payload = json.loads(stdout.getvalue())
-
+        payload = json.loads(output.getvalue())
         self.assertEqual(code, 1)
         self.assertFalse(payload["ok"])
-        names = {item["name"] for item in payload["checks"]}
-        self.assertEqual(
-            names,
-            {
-                "python_version",
-                "data_paths",
-                "media_paths",
-                "sqlite_quick_check",
-                "fk_integrity",
-                "schema_versions",
-            },
-        )
-        for item in payload["checks"]:
-            self.assertEqual(set(item), {"name", "status", "detail", "required"})
+        self.assertEqual(payload["state"], "unavailable")
+        self.assertIn("banodoco-local up --profile astrid", payload["next_action"])

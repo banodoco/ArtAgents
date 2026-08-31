@@ -76,8 +76,6 @@ result = sdk.invoke(
 - The `video_editing.iteration_video` orchestrator reads the selected runtime
   project's runs through the generated client, derives the lineage graph and
   quality metadata in memory, then invokes `iteration.assemble` and rendering.
-  The retired `iteration.prepare` executor is not a public entrypoint and is
-  never declared or invoked by iteration-video.
 - Use the `experiment_*` executors to review/import runs from any provider
   without executing anything.
 

@@ -76,8 +76,6 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
             "astrid.packs.generation.executors.generate_image_openai.run._resolve_key",
             return_value="test-api-key",
         ), patch(
-            "astrid.packs.generation.executors.generate_image_openai.run.write_variant_sidecar",
-        ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run.write_json_atomic",
         ) as mock_write:
             # --- act: should raise the original AstridError ----------------
@@ -136,8 +134,6 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
         ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run._resolve_key",
             return_value="test-api-key",
-        ), patch(
-            "astrid.packs.generation.executors.generate_image_openai.run.write_variant_sidecar",
         ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run.write_json_atomic",
         ) as mock_write:
@@ -222,8 +218,6 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
             "astrid.packs.generation.executors.generate_image_openai.run._resolve_key",
             return_value="test-api-key",
         ), patch(
-            "astrid.packs.generation.executors.generate_image_openai.run.write_variant_sidecar",
-        ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run.write_json_atomic",
             side_effect=_capture_partial,
         ):
@@ -245,8 +239,6 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
         ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run._resolve_key",
             return_value="test-api-key",
-        ), patch(
-            "astrid.packs.generation.executors.generate_image_openai.run.write_variant_sidecar",
         ), patch(
             "astrid.packs.generation.executors.generate_image_openai.run.write_json_atomic",
             side_effect=_capture_full,

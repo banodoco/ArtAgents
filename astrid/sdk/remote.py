@@ -174,8 +174,21 @@ class RemoteTasks(_RemoteFamily):
         return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec)
     def claim(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str):
         return self._typed("claim_task", key=idempotency_key, executor_id=executor_id, capability_ids=capability_ids, idempotency_key=idempotency_key)
-    def settle(self, attempt_id: str, *, lease_id: str, fence: int, outputs: list[dict], idempotency_key: str, effect: dict | None = None):
-        settlement = {"lease_id": lease_id, "fence": fence, "outputs": outputs}
+    def settle(
+        self,
+        attempt_id: str,
+        *,
+        lease_id: str,
+        fence: int,
+        outputs: list[dict],
+        idempotency_key: str,
+        effect: dict | None = None,
+        runtime_epoch: int | None = None,
+    ):
+        if runtime_epoch is None:
+            health = self._client.health()
+            runtime_epoch = int(health.get("runtime_epoch", 0)) if isinstance(health, dict) else 0
+        settlement = {"lease_id": lease_id, "fence": fence, "outputs": outputs, "runtime_epoch": runtime_epoch}
         if effect is not None:
             settlement["effect"] = effect
         return self._typed("settle_attempt", attempt_id, settlement, key=idempotency_key, idempotency_key=idempotency_key)
@@ -288,7 +301,13 @@ class RemoteAstridClient:
     def restore_backup(self, backup, destination): return self._transport.restore_backup(backup, destination)
     def export_realm(self): return self._transport.export_realm()
     def tombstone_realm(self, *, reason=None, expected_version=None): return self._transport.tombstone_realm(reason=reason, expected_version=expected_version)
-    def recover_realm(self, *, expected_version=None): return self._transport.recover_realm(expected_version=expected_version)
+    def recover_realm(self, *, expected_realm_id=None, expected_version=None, confirmation=None, noninteractive=True):
+        return self._transport.recover_realm(
+            expected_realm_id=expected_realm_id,
+            expected_version=expected_version,
+            confirmation=confirmation,
+            noninteractive=noninteractive,
+        )
     def purge_realm(self, confirmation): return self._transport.purge_realm(confirmation)
     def read_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)
     def subscribe_events(self, *args, **kwargs): return self.tasks.events(*args, **kwargs)

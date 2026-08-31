@@ -593,7 +593,7 @@ def test_explicit_extra_root_is_executable_and_records_trust_method(tmp_path: Pa
     assert evidence["trust_method"] == "explicit_extra_pack_root"
 
 
-def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path) -> None:
+def test_installed_active_revision_is_not_publicly_discovered(tmp_path: Path) -> None:
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
@@ -612,11 +612,11 @@ def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.get("installed_render.renderer")
-    assert candidate.source_kind == "installed"
-    assert candidate.execution_eligible is True
-    assert candidate.eligibility.trust_method == "test"
-    assert candidate.eligibility.accepted_permissions == ("subprocess",)
+    # Installed revisions are storage, not a public discovery authority.
+    assert renderers.inspect("installed_render.renderer") == ()
+    with pytest.raises(RendererRegistryError) as caught:
+        renderers.get("installed_render.renderer")
+    assert caught.value.code == "unknown_capability"
 
 
 @pytest.mark.parametrize("record_mode", ["missing", "corrupt"])
@@ -646,15 +646,16 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
-    assert candidate.execution_eligible is False
+    # A corrupt or missing install record cannot enter the public registry at
+    # all; discovery does not scan the installed store.
+    assert renderers.inspect("corrupt_render.renderer") == ()
     with pytest.raises(RendererRegistryError) as caught:
         renderers.get("corrupt_render.renderer")
-    assert caught.value.code == "execution_ineligible"
+    assert caught.value.code == "unknown_capability"
 
 
 @pytest.mark.parametrize("bad_install_root", [None, []])
-def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
+def test_installed_type_corrupt_audit_is_not_publicly_discovered(
     tmp_path: Path,
     bad_install_root: object,
 ) -> None:
@@ -680,9 +681,10 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
-    assert candidate.execution_eligible is False
-    assert "install" in candidate.eligibility.reason
+    assert renderers.inspect("corrupt_render.renderer") == ()
+    with pytest.raises(RendererRegistryError) as caught:
+        renderers.get("corrupt_render.renderer")
+    assert caught.value.code == "unknown_capability"
 
 
 def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:

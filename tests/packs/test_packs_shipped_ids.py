@@ -51,7 +51,7 @@ class ShippedPackAlignmentTest(unittest.TestCase):
             ("moirae.moirae", "moirae"),
             ("vibecomfy.run", "vibecomfy"),
             ("vibecomfy.validate", "vibecomfy"),
-            ("iteration.prepare", "iteration"),
+            ("iteration.assemble", "iteration"),
             ("iteration.assemble", "iteration"),
             ("youtube.upload", "youtube"),
         ]

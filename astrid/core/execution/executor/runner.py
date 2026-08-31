@@ -1169,6 +1169,7 @@ def _command_subprocess_env(
         **command_env,
         **external_pack_env,
         **project_env,
+        **scoped_env,
         "ASTRID_INTERNAL_INVOCATION": "1",
     }
     # Scoped credential resolution is the only allowed source for secret

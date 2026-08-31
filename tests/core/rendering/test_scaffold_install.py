@@ -277,13 +277,8 @@ def test_fresh_directory_golden_path(tmp_path: Path) -> None:
         assert result.video.sha256 == result2.video.sha256
 
 
-def test_trusted_install_is_execution_eligible_and_smokes(tmp_path: Path) -> None:
-    """A trusted install (ASTRID_HOME + accepted record) is execution-eligible.
-
-    The same scaffold, installed with an accepted trust audit, resolves through
-    ``renderers.get`` with ``source_kind == "installed"`` and renders from the
-    installed revision in under two seconds.
-    """
+def test_installed_scaffold_is_not_publicly_discovered(tmp_path: Path) -> None:
+    """Installed revisions are not a public renderer discovery authority."""
     dest = create_renderer_scaffold("wave", tmp_path / "wave")
     astrid_home = tmp_path / "astrid-home"
     revision = _stage_trusted_install(astrid_home, dest, PACK_ID)
@@ -293,19 +288,10 @@ def test_trusted_install_is_execution_eligible_and_smokes(tmp_path: Path) -> Non
         astrid_home=str(astrid_home),
         include_installed=True,
     ) as (renderers, _planners, _finalizers):
-        candidate = renderers.get(RENDERER_ID)
-        assert candidate.source_kind == "installed"
-        assert candidate.execution_eligible is True
-        assert candidate.eligibility.trust_method == "test"
-        assert candidate.pack_root == revision.resolve()
-
-        evidence = renderers.resolve_evidence(RENDERER_ID)
-        assert evidence["eligible"] is True
-
-        workspace = tmp_path / "workspace-installed"
-        result, _result_path, elapsed = _smoke_render(candidate.pack_root, workspace)
-        assert elapsed < SMOKE_TIMEOUT_SECONDS
-        _assert_valid_render(result, workspace)
+        assert renderers.inspect(RENDERER_ID) == ()
+        with pytest.raises(RendererRegistryError) as caught:
+            renderers.get(RENDERER_ID)
+        assert caught.value.code == "unknown_capability"
 
 
 def test_deterministic_smoke_is_byte_stable_and_under_two_seconds(

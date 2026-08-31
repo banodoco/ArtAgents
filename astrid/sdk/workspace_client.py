@@ -117,8 +117,30 @@ class WorkspaceClient:
     def tombstone_realm(self, *, reason: str | None = None, expected_version: int | None = None) -> Any:
         return self._call_generated("tombstone_realm", reason=reason, expected_version=expected_version)
 
-    def recover_realm(self, *, expected_version: int | None = None) -> Any:
-        return self._call_generated("recover_realm", expected_version=expected_version)
+    def recover_realm(
+        self,
+        *,
+        expected_realm_id: str | None = None,
+        expected_version: int | None = None,
+        confirmation: str | None = None,
+        noninteractive: bool = True,
+    ) -> Any:
+        # The runtime recovery contract fences both realm identity and
+        # lifecycle version.  Older Astrid callers supplied only the version;
+        # resolve the identity through the read-only export so those callers
+        # remain safe and compatible with the current generated client.
+        if expected_realm_id is None:
+            exported = self.export_realm()
+            realm = exported.get("realm") if isinstance(exported, Mapping) else None
+            if isinstance(realm, Mapping):
+                expected_realm_id = str(realm.get("id") or realm.get("realm_id") or "") or None
+        return self._call_generated(
+            "recover_realm",
+            expected_realm_id=expected_realm_id,
+            expected_version=expected_version,
+            confirmation=confirmation,
+            noninteractive=noninteractive,
+        )
 
     def purge_realm(self, confirmation: str) -> Any:
         return self._call_generated("purge_realm", confirmation)
@@ -472,8 +494,24 @@ class WorkspaceClient:
     def register_capability(self, *args: Any, **kwargs: Any) -> Any:
         return self._call_generated("register_capability", *args, **kwargs)
 
-    def claim_task(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str) -> Any:
-        return self._call_generated("claim_task", executor_id=executor_id, capability_ids=capability_ids, idempotency_key=idempotency_key)
+    def claim_task(
+        self,
+        *,
+        executor_id: str,
+        capability_ids: list[str],
+        idempotency_key: str,
+        runtime_epoch: int | None = None,
+    ) -> Any:
+        if runtime_epoch is None:
+            health = self.health()
+            runtime_epoch = int(health.get("runtime_epoch", 0)) if isinstance(health, Mapping) else 0
+        return self._call_generated(
+            "claim_task",
+            executor_id=executor_id,
+            capability_ids=capability_ids,
+            idempotency_key=idempotency_key,
+            runtime_epoch=runtime_epoch,
+        )
 
     def register_executor(self, executor: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("register_executor", executor, idempotency_key=idempotency_key)

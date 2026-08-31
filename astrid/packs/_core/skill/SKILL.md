@@ -534,7 +534,6 @@ orchestrator, or element manifests.
 | `iteration.experiment_import` | Import an unmanaged run root into an experiment without rewriting history or guessing ambiguous associations. |
 | `iteration.experiment_prepare` | Normalize an experiment's provider manifests into a provider-independent review model with diagnostics. |
 | `iteration.experiment_review` | Render a deterministic HTML gallery comparing provider outputs with prompt, parameters, warnings, and diagnostics. |
-| `iteration.prepare` | Collect runtime-owned provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `media.gif_search` | Search GIPHY for GIF or sticker assets and optionally download a selected rendition. |
 | `media.speech_repair_lavasr` | Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass. |

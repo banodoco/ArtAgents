@@ -57,6 +57,7 @@ from astrid.core.rendering.registry import (
     RendererRegistry,
 )
 from astrid.core.rendering.service import RenderService
+from astrid.core.subprocess_env import SubprocessEnvPolicyError
 
 from astrid.sdk.rendering import RenderContext
 
@@ -311,17 +312,17 @@ def test_subprocess_env_scrubbed_timeout_enforced_no_shell_default(
         assert result.returncode == 0
         assert result.stdout.strip() == "MISSING"
 
-        # The renderer's own explicit env entries DO reach the child.
-        result = ctx.run(
-            [
-                sys.executable,
-                "-c",
-                "import os; print(os.environ.get('MY_FFMPEG_TOKEN', 'MISSING'))",
-            ],
-            env={"MY_FFMPEG_TOKEN": "ffmpeg-token-abc"},
-        )
-        assert result.returncode == 0
-        assert result.stdout.strip() == "ffmpeg-token-abc"
+        # Secret-named explicit entries must use the host's declared secret
+        # channel; accepting them as ordinary env would bypass the policy.
+        with pytest.raises(SubprocessEnvPolicyError, match="secret env"):
+            ctx.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ.get('MY_FFMPEG_TOKEN', 'MISSING'))",
+                ],
+                env={"MY_FFMPEG_TOKEN": "ffmpeg-token-abc"},
+            )
 
         # No shell by default: "$HOME" is passed literally, not expanded.
         result = ctx.run(["echo", "$HOME"])

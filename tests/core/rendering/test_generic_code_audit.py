@@ -56,7 +56,7 @@ ALLOWED: dict[tuple[str, int], str] = {
     ("astrid/core/rendering/service.py", 203): "legacy compatibility shim (recovery text)",
     ("astrid/core/rendering/service.py", 207): "legacy compatibility shim (legacy_selectors data)",
     # --- SDK validation error recovery text -------------------------------
-    ("astrid/sdk/exceptions.py", 563): "legacy compatibility shim (ffprobe recovery text)",
+    ("astrid/sdk/exceptions.py", 478): "legacy compatibility shim (ffprobe recovery text)",
     # --- provenance: legacy-engine projection compatibility shim ---------
     ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
     ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",
@@ -65,8 +65,8 @@ ALLOWED: dict[tuple[str, int], str] = {
     ("astrid/core/rendering/provenance.py", 159): "legacy compatibility shim (auto-route detection)",
     ("astrid/core/rendering/provenance.py", 164): "legacy compatibility shim (auto-route reason)",
     # --- registry: programmatic alias default wiring ---------------------
-    ("astrid/core/rendering/registry.py", 45): "registry/default wiring (remotion alias)",
-    ("astrid/core/rendering/registry.py", 46): "registry/default wiring (ffmpeg alias)",
+    ("astrid/core/rendering/registry.py", 44): "registry/default wiring (remotion alias)",
+    ("astrid/core/rendering/registry.py", 45): "registry/default wiring (ffmpeg alias)",
     # --- profile: legacy canvas-discovery compatibility shim -------------
     ("astrid/core/rendering/profile.py", 113): "legacy compatibility shim (remotion canvas discovery)",
 }
