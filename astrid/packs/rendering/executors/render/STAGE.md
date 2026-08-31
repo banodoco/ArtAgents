@@ -146,8 +146,8 @@ and stage are cleaned after success or failure.
 If `assets_registry` is omitted, the facade creates a temporary empty registry.
 This is valid for timelines that do not reference registry media.
 In `timeline_ref` mode the registry cannot be overridden: Astrid uses the
-canonical stored registry and derives current managed-media locators from its
-content hashes. Private snapshots live under
+canonical stored registry of runtime-managed object IDs and content hashes.
+The host supplies verified bytes into an attempt-owned staging root. Private snapshots live under
 `<project>/.astrid/render-snapshots/<authority-hash>/`; unchanged heads reuse
 one directory. They are immutable derived inputs, not timeline authority, and
 can be regenerated from the kernel. Retention tooling must retain directories

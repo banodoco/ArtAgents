@@ -16,10 +16,9 @@ All frame arithmetic delegates to :mod:`astrid.core.timeline.duration`.  The
 only pinned compositor facts kept here are provenance and the generated
 transition registry defaults that accompany the v0.0.6 source snapshot.
 
-Asset classification is complete only when ``project_root`` is supplied: R5's
-classifier then verifies contained files below ``project_root/sources``.  With
-no project root, local entries deterministically remain ``missing`` and URL
-entries remain ``remote``; the model never guesses a base directory or fetches.
+Asset classification is scoped to the snapshot project and the runtime's
+project-scoped object admission. The model never guesses a local root or
+fetches a source locator.
 """
 
 from __future__ import annotations
@@ -28,9 +27,7 @@ import math
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from numbers import Real
-from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urlparse
 
 from astrid.core.timeline.duration import (
     clip_end_frame,
@@ -332,58 +329,14 @@ def _expected_hash(entry: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _rootless_integrity(
-    registry: Mapping[str, Any],
-) -> dict[str, AssetIntegrity]:
-    """Classify only what is knowable without a local project root."""
-
-    results: dict[str, AssetIntegrity] = {}
-    for key, raw_entry in sorted(_registry_entries(registry).items()):
-        entry = raw_entry if isinstance(raw_entry, Mapping) else {}
-        local = entry.get("file")
-        remote: str | None = None
-        if isinstance(local, str) and urlparse(local).scheme:
-            remote = local
-        elif not (isinstance(local, str) and local.strip()):
-            for field in ("url", "sourceUrl", "remoteUrl", "thumbnailUrl", "thumbnail_url"):
-                candidate = entry.get(field)
-                if isinstance(candidate, str) and candidate.strip():
-                    remote = candidate.strip()
-                    break
-        state = "remote" if remote is not None else "missing"
-        reason = (
-            f"remote source — no fetch (scheme: {urlparse(remote).scheme})"
-            if remote is not None
-            else "project_root unavailable; local asset cannot be resolved or verified"
-        )
-        role_value = entry.get("role", entry.get("kind"))
-        role = role_value if isinstance(role_value, str) and role_value else "timeline_media"
-        results[key] = AssetIntegrity(
-            asset_key=key,
-            role=role,
-            state=state,
-            expected_sha256=_expected_hash(entry),
-            observed_sha256=None,
-            path=None,
-            reason=reason,
-            source_id=entry.get("sourceId") if isinstance(entry.get("sourceId"), str) else None,
-            source_version=(
-                entry.get("sourceVersion") if isinstance(entry.get("sourceVersion"), str) else None
-            ),
-        )
-    return results
-
-
 def _media_integrity(
-    registry: Mapping[str, Any], *, project_root: Path | None,
+    registry: Mapping[str, Any], *, project_ref: str,
     runtime_client: Any | None = None,
     media_snapshot: Any | None = None,
 ) -> dict[str, AssetIntegrity]:
-    if project_root is None:
-        return _rootless_integrity(registry)
     classified = classify_registry(
         dict(registry),
-        project_root=Path(project_root),
+        project_ref=project_ref,
         runtime_client=runtime_client,
         media_snapshot=media_snapshot,
     )
@@ -496,15 +449,13 @@ def _shot_models(
 def build_model(
     snapshot: TimelineSnapshot,
     *,
-    project_root: Path | None = None,
     runtime_client: Any | None = None,
     media_snapshot: Any | None = None,
 ) -> TimelineInspectionModel:
     """Normalize one frozen :class:`TimelineSnapshot` without writes.
 
-    ``project_root`` enables full R5 classification.  Omitting it is useful for
-    detached/frozen packs, but local files then remain ``missing`` because no
-    safe ``sources`` anchor exists; remote references remain ``remote``.
+    Media classification is always scoped to the snapshot's project slug and
+    the supplied runtime admission; no filesystem root is accepted.
     """
 
     if not isinstance(snapshot, TimelineSnapshot):
@@ -622,7 +573,7 @@ def build_model(
         registry_keys=frozenset(registry_entries),
         media_integrity=_media_integrity(
             snapshot.registry,
-            project_root=project_root,
+            project_ref=snapshot.project_slug,
             runtime_client=runtime_client,
             media_snapshot=media_snapshot,
         ),

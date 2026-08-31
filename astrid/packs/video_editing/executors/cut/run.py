@@ -42,10 +42,8 @@ from astrid.core.timeline import (
     validate_arrangement_duration_window,
 )
 from astrid.packs.editorial.hype.arrangement_rules import compile_arrangement_plan
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from . import probe
-from . import registry as _registry
 from . import resume as _resume
 from . import timeline_build as _timeline_build
 
@@ -54,11 +52,6 @@ _FFPROBE_VERBOSE = probe._FFPROBE_VERBOSE  # alias for module-level access
 parse_ffprobe_fps = probe.parse_ffprobe_fps
 probe_asset = probe.probe_asset
 probe_video_duration = probe.probe_video_duration
-
-resolve_asset_paths = _registry.resolve_asset_paths
-_url_cache_meta = _registry._url_cache_meta
-build_registry = _registry.build_registry
-rebase_registry_paths = _registry.rebase_registry_paths
 
 # ── re-exports from timeline_build (T80) ─────────────────────────────
 _LEGACY_DEFAULT_CLIP_SEC = _timeline_build._LEGACY_DEFAULT_CLIP_SEC
@@ -217,6 +210,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    raise AstridError(
+        "video_editing.cut source media is retired; use runtime-managed object_id/digest inputs"
+    )
     # m3.5 managed binding seam: detect managed vs unmanaged mode.
     managed = is_managed_mode(args)
     if managed:

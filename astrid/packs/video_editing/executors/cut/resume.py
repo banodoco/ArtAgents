@@ -35,7 +35,6 @@ from astrid.core.timeline import (
 )
 from astrid.core.util.time import utc_now_seconds
 
-from .registry import rebase_registry_paths
 from .timeline_build import _register_cut_outputs
 
 
@@ -101,6 +100,9 @@ def build_resume_metadata(
 
 
 def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
+    raise AstridError(
+        "video_editing.cut resume source media is retired; use runtime-managed object_id/digest inputs"
+    )
     ensure_resume_mode_args(args)
 
     timeline_path = args.timeline.resolve()
@@ -153,7 +155,6 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
     if out_dir == assets_path_in.parent.resolve():
         save_registry(saved_registry, assets_path_out)
     else:
-        saved_registry = rebase_registry_paths(registry, assets_path_in.parent)
         save_registry(saved_registry, assets_path_out)
 
     prior_meta_path = source_dir / "hype.metadata.json"

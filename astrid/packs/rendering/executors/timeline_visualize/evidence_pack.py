@@ -28,11 +28,9 @@ Contract notes (read before changing):
 * **Action-index argv rewrite.**  R9 embeds the caller's manifest path after
   ``--from-view``.  This module rewrites that exact argv element to
   ``manifest.json`` (pack-relative) so a copied pack stays self-contained.
-* **Containment.**  Every write resolves inside ``out_root``; no absolute path
-  is emitted for any pack-internal reference.  The only absolute strings in
-  emitted JSON are ``asset-index.json`` ``contained_path`` values, which are
-  frozen-project provenance the R3 schema explicitly permits
-  (``contained_source_path``).
+* **Containment.** Every write resolves inside ``out_root``; no source path is
+  emitted for any pack-internal reference. Asset entries carry runtime-managed
+  identity and admission state only.
 """
 
 from __future__ import annotations

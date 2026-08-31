@@ -184,7 +184,7 @@ CREATE TABLE media_locations (
   id          TEXT PRIMARY KEY,
   media_id    TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
   realm       TEXT NOT NULL DEFAULT 'managed_local' CHECK
-              (realm IN ('managed_local','external_local','remote')),
+              (realm IN ('managed_local','remote')),
   locator     TEXT NOT NULL,
   verified_at TEXT,
   created_at  TEXT NOT NULL,

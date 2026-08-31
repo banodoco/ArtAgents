@@ -22,7 +22,6 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
-from urllib.parse import urlparse
 
 from astrid.core.env_vars import ASTRID_REMOTION_PROJECT_DIR
 from astrid.core.execution.executor.registry import load_default_registry
@@ -124,7 +123,8 @@ def _asset_extension(asset: Mapping[str, Any]) -> str:
 def _stage_managed_registry(
     *,
     registry: Mapping[str, Any],
-    projects_root: Path,
+    materialized_objects: Mapping[str, str | Path | bytes],
+    materialized_root: Path,
     inputs_dir: Path,
     context: RenderExportExecutionContext,
 ) -> Mapping[str, Any]:
@@ -140,50 +140,38 @@ def _stage_managed_registry(
             raise RenderExportRefused("render_export asset key must be non-empty")
         if not isinstance(raw_asset, Mapping):
             raise RenderExportRefused(f"render_export asset {asset_key!r} is invalid")
-        display_file = raw_asset.get("file")
-        if display_file is not None:
-            if not isinstance(display_file, str) or not display_file:
-                raise RenderExportRefused(
-                    f"render_export asset {asset_key!r} file must be a string"
-                )
-            parsed = urlparse(display_file)
-            if (
-                Path(display_file).is_absolute()
-                or parsed.scheme
-                or parsed.netloc
-                or display_file.startswith("//")
-                or "\x00" in display_file
-                or ".." in Path(display_file).parts
-            ):
-                raise RenderExportRefused(
-                    f"render_export asset {asset_key!r} file must be a safe relative display name"
-                )
-        if any(key in raw_asset for key in ("path", "url", "uri")):
+        if any(key in raw_asset for key in ("file", "path", "url", "uri", "locator", "realm")):
             raise RenderExportRefused(
                 f"render_export asset {asset_key!r} contains an unmanaged locator"
             )
         media_id = _require_string(raw_asset.get("media_id"), f"asset {asset_key} media_id")
         expected = _digest_value(raw_asset.get("content_sha256"))
-        source = (
-            projects_root / ".astrid" / "media" / "sha256" / expected[:2] / expected[2:4] / expected
-        )
-        source = source.resolve()
-        managed_root = (projects_root / ".astrid" / "media" / "sha256").resolve()
-        try:
-            source.relative_to(managed_root)
-        except ValueError as exc:
-            raise RenderExportRefused("render_export managed asset escaped its media tree") from exc
-        if source.is_symlink() or not source.is_file():
-            raise RenderExportRefused(f"render_export managed media {media_id!r} is missing")
-        actual, size = _digest_file(source)
-        if actual != expected:
-            raise RenderExportRefused(f"render_export managed media {media_id!r} digest mismatch")
+        candidates = (media_id, expected, f"sha256:{expected}")
+        value = next((materialized_objects[candidate] for candidate in candidates if candidate in materialized_objects), None)
+        if value is None:
+            raise RenderExportRefused(
+                f"render_export runtime object {media_id!r} has no host materialization"
+            )
         destination = staged_assets / f"{ordinal:04d}{_asset_extension(raw_asset)}"
-        # Managed media is immutable authority. A writable hard link in task
-        # staging would let any downstream in-place write corrupt the CAS
-        # inode, so always create an independent file (fast-copy/COW where the
-        # platform supports it).
-        shutil.copyfile(source, destination)
+        if isinstance(value, bytes):
+            payload = value
+            destination.write_bytes(payload)
+            size = len(payload)
+        else:
+            source = Path(value).expanduser()
+            if source.is_symlink():
+                raise RenderExportRefused(f"render_export object {media_id!r} is a symlink")
+            try:
+                source = source.resolve(strict=True)
+                source.relative_to(materialized_root.resolve(strict=True))
+            except (OSError, ValueError) as exc:
+                raise RenderExportRefused(
+                    f"render_export object {media_id!r} is outside the host materialization root"
+                ) from exc
+            if not source.is_file():
+                raise RenderExportRefused(f"render_export object {media_id!r} is not a regular file")
+            shutil.copyfile(source, destination)
+            size = source.stat().st_size
         staged_digest, staged_size = _digest_file(destination)
         if staged_digest != expected or staged_size != size:
             raise RenderExportRefused(
@@ -195,9 +183,10 @@ def _stage_managed_registry(
             if key
             not in {
                 "file",
-                "path",
                 "url",
                 "uri",
+                "locator",
+                "realm",
                 # These are queue/managed-media provenance fields, not
                 # renderer registry fields; FFmpeg/Remotion reject unknown
                 # asset keys by design.
@@ -313,9 +302,20 @@ class RenderExportTaskAdapter:
             raise RenderExportRefused(
                 "render_export server-owned parameter(s) are not accepted: " + ", ".join(forbidden)
             )
+        raw_materialized = params.get("materialized_objects")
+        if not isinstance(raw_materialized, Mapping):
+            raise RenderExportRefused(
+                "render_export requires the host materialized_objects handoff"
+            )
+        materialized_root = (staging_dir / "managed-objects").resolve()
+        if not materialized_root.is_dir():
+            raise RenderExportRefused(
+                "render_export host materialization root is missing"
+            )
         staged_registry = _stage_managed_registry(
             registry=registry,
-            projects_root=self._projects_root,
+            materialized_objects=dict(raw_materialized),
+            materialized_root=materialized_root,
             inputs_dir=inputs_dir,
             context=context,
         )

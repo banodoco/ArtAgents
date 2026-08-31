@@ -1,9 +1,9 @@
-"""Invocation-scoped asset materialization and local HTTP serving.
+"""Invocation-scoped staging for neutral-runtime managed media objects.
 
-The render host owns this lifecycle.  Local files and URL downloads that
-cannot be streamed remotely are hardlinked (or copied) into a unique staging
-directory.  Only that directory is exposed over loopback HTTP, and both the
-server and staging directory are deterministically cleaned up.
+The generic host supplies verified object bytes in an attempt-local mapping.
+This module verifies their digests, copies them to a disposable render stage,
+and exposes only that stage over loopback HTTP. URLs, project paths, and CAS
+locators are rejected before any bytes are opened.
 """
 
 from __future__ import annotations
@@ -15,65 +15,27 @@ import json
 import os
 import re
 import shutil
-import stat
 import tempfile
 import threading
-import urllib.error
 import urllib.parse
-import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from astrid.core import timeline
-from astrid.core.env_vars import (
-    ASTRID_GATEWAY_RESOLVED_PROJECT,
-    ASTRID_PROJECT_SLUG,
-)
-from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
-from astrid.core.rendering import asset_cache
-
-AssetKind = Literal["local", "cached", "remote"]
-
+from astrid.core.io.media_import import validate_digest
 
 @dataclass
 class MaterializedAsset:
     """One registry asset resolved for the lifetime of a render invocation."""
 
     key: str
-    kind: AssetKind
-    original_reference: str
+    kind: str
     metadata: dict[str, Any]
     local_path: Path | None = None
-    remote_url: str | None = None
     local_url: str | None = None
-
-    @property
-    def mode(self) -> AssetKind:
-        """Compatibility-friendly alias for callers that use mode terminology."""
-
-        return self.kind
-
-
-def _accepts_ranges(url: str) -> bool:
-    """Return whether an HTTP(S) asset can be streamed directly with ranges."""
-
-    request = urllib.request.Request(url, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.headers.get("Accept-Ranges", "").lower() == "bytes"
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
-
-
-def _parse_url_expiry(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
-
 
 def _contained(path: Path, root: Path) -> bool:
     try:
@@ -83,214 +45,11 @@ def _contained(path: Path, root: Path) -> bool:
     return True
 
 
-def _default_allowed_root(registry_path: Path) -> Path | None:
-    """Choose the narrowest useful root for user-declared local assets.
-
-    Managed invocations may legitimately reference sources and runs in
-    different directories of the same project, so their project root is the
-    containment boundary.  A direct/unmanaged invocation falls back to the
-    registry directory for relative references; absolute paths retain their
-    legacy unmanaged behavior because staging removes the broad-root exposure.
-    """
-
-    projects_root = resolve_projects_root().resolve(strict=False)
-    owner = os.environ.get(ASTRID_PROJECT_SLUG) or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT)
-    if owner:
-        return project_dir(owner, root=projects_root).resolve(strict=False)
-
-    if _contained(registry_path, projects_root):
-        relative = registry_path.relative_to(projects_root)
-        if len(relative.parts) >= 2:
-            return (projects_root / relative.parts[0]).resolve(strict=False)
-    for candidate in registry_path.parents:
-        if (candidate / "project.json").is_file():
-            return candidate.resolve(strict=True)
-    return None
-
-
-def _declared_managed_locators(
-    requested: set[Path],
-    *,
-    projects_root: Path,
-    registry: Mapping[str, Any],
-    runtime_admissions: Mapping[str, str] | None = None,
-) -> dict[Path, str]:
-    """Return declared CAS locators admitted by the runtime snapshot.
-
-    A managed render snapshot has already been read and admitted through the
-    workspace runtime.  The renderer is a child process and must not open the
-    runtime database to repeat that authority lookup.  Instead it accepts only
-    exact, digest-shaped paths from that immutable snapshot and re-checks the
-    bytes immediately before staging.  Project ownership is established by
-    snapshot admission; this function is deliberately only the child-process
-    integrity fence.
-    """
-
-    if not requested:
-        return {}
-    managed_root = (projects_root / ".astrid" / "media").resolve(strict=False)
-
-    raw_assets = registry.get("assets", registry)
-    if not isinstance(raw_assets, Mapping):
-        return {}
-    authorized: dict[Path, str] = {}
-    media_ids: dict[str, tuple[Path, str]] = {}
-    declared_paths: dict[Path, tuple[str | None, str | None]] = {}
-    for entry in raw_assets.values():
-        if not isinstance(entry, Mapping):
-            continue
-        raw_file = entry.get("file")
-        if not isinstance(raw_file, str) or not raw_file.strip():
-            continue
-        try:
-            locator = Path(raw_file).expanduser().resolve(strict=False)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            continue
-        raw_recorded = entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
-        recorded_text = (
-            str(raw_recorded).removeprefix("sha256:")
-            if raw_recorded not in (None, "")
-            else None
-        )
-        media_id = entry.get("media_id")
-        media_text = media_id if isinstance(media_id, str) and media_id else None
-        prior_declared = declared_paths.get(locator)
-        if (
-            prior_declared is not None
-            and prior_declared[0] is not None
-            and recorded_text is not None
-            and prior_declared[0] != recorded_text
-        ):
-            raise ValueError(
-                f"managed asset registry contains conflicting aliases for {locator}"
-            )
-        declared_paths[locator] = (
-            prior_declared[0] if prior_declared and prior_declared[0] is not None else recorded_text,
-            media_text,
-        )
-        if locator not in requested or not _contained(locator, managed_root):
-            continue
-        try:
-            relative = locator.relative_to(managed_root)
-        except ValueError:
-            continue
-        parts = relative.parts
-        if len(parts) != 4 or parts[0] != "sha256":
-            continue
-        digest = parts[3]
-        if (
-            len(digest) != 64
-            or any(char not in "0123456789abcdef" for char in digest)
-            or parts[1] != digest[:2]
-            or parts[2] != digest[2:4]
-        ):
-            continue
-        # A digest-shaped path is an integrity locator, not an ownership
-        # credential.  Only a registry entry carrying the runtime-admitted
-        # media identity may authorize staging bytes from the shared CAS.
-        # Without this fence, any project-local registry could point at an
-        # existing (possibly foreign) CAS object by guessing its digest.
-        recorded = raw_recorded
-        content_hash = digest if recorded in (None, "") else str(recorded).removeprefix("sha256:")
-        if len(content_hash) != 64 or content_hash != digest:
-            continue
-        if media_text is None or (runtime_admissions or {}).get(media_text) != content_hash:
-            continue
-        previous = authorized.get(locator)
-        if previous is not None and previous != content_hash:
-            raise ValueError(
-                f"managed asset registry contains conflicting aliases for {locator}: "
-                f"{previous} versus {content_hash}"
-            )
-        if media_text is not None:
-            prior_media = media_ids.get(media_text)
-            if prior_media is not None and prior_media != (locator, content_hash):
-                raise ValueError(
-                    f"managed asset registry contains conflicting entries for media_id {media_text!r}"
-                )
-            media_ids[media_text] = (locator, content_hash)
-        authorized[locator] = content_hash
-    return authorized
-
-
-def _runtime_admissions_for_registry(registry_path: Path) -> dict[str, str]:
-    """Read the immutable runtime admission handoff beside a child snapshot."""
-
-    authority_path = registry_path.parent / "authority.json"
-    try:
-        authority = json.loads(authority_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(authority, Mapping):
-        return {}
-    raw = authority.get("managed_media_admissions")
-    if not isinstance(raw, Mapping):
-        return {}
-    return {
-        str(media_id): str(digest)
-        for media_id, digest in raw.items()
-        if isinstance(media_id, str) and media_id.strip() and isinstance(digest, str)
-    }
-
-
-def _safe_staging_name(key: str, reference: str, index: int) -> str:
-    parsed = urllib.parse.urlparse(reference)
-    candidate = (
-        Path(urllib.parse.unquote(parsed.path)).name if parsed.scheme else Path(reference).name
-    )
-    candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate).strip("._-") or "asset"
+def _safe_staging_name(key: str, object_id: str, index: int) -> str:
+    candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", object_id).strip("._-") or "object"
     candidate = candidate[-120:]
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
     return f"{index:04d}-{digest}-{candidate}"
-
-
-def _hardlink_or_copy(source: Path, destination: Path) -> None:
-    try:
-        os.link(source, destination)
-    except OSError:
-        shutil.copy2(source, destination)
-
-
-def _hardlink_or_copy_checked(source: Path, destination: Path) -> None:
-    """Stage a validated local file without following a later symlink swap."""
-
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(source, flags)
-    try:
-        source_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(source_stat.st_mode):
-            raise FileNotFoundError(f"Asset is not a regular file: {source}")
-        try:
-            os.link(source, destination, follow_symlinks=False)
-            destination_stat = os.stat(destination, follow_symlinks=False)
-            if (
-                stat.S_ISREG(destination_stat.st_mode)
-                and destination_stat.st_dev == source_stat.st_dev
-                and destination_stat.st_ino == source_stat.st_ino
-            ):
-                return
-        except OSError:
-            pass
-        destination.unlink(missing_ok=True)
-        try:
-            with (
-                os.fdopen(os.dup(descriptor), "rb") as input_file,
-                destination.open("xb") as output_file,
-            ):
-                shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
-            os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
-            with contextlib.suppress(OSError):
-                os.utime(
-                    destination,
-                    ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                )
-        except BaseException:
-            destination.unlink(missing_ok=True)
-            raise
-    finally:
-        os.close(descriptor)
 
 
 class AssetMaterializer:
@@ -305,30 +64,26 @@ class AssetMaterializer:
         self,
         registry_path: str | Path,
         *,
-        allowed_root: str | Path | None = None,
-        allowed_managed_paths: Mapping[str | Path, str] | None = None,
+        materialized_objects: Mapping[str, str | Path | bytes] | None = None,
+        materialized_root: str | Path | None = None,
         staging_parent: str | Path | None = None,
-        cache_fetch: Callable[..., Path] | None = None,
-        remote_probe: Callable[[str], bool] | None = None,
     ) -> None:
         requested_registry = Path(registry_path).expanduser()
         if not requested_registry.exists():
             raise FileNotFoundError("hype.assets.json missing — did you run cut.py first?")
         self.registry_path = requested_registry.resolve(strict=True)
 
-        if allowed_root is None:
-            resolved_root = _default_allowed_root(self.registry_path)
-        else:
-            resolved_root = Path(allowed_root).expanduser().resolve(strict=True)
-        if resolved_root is not None and not resolved_root.is_dir():
-            raise NotADirectoryError(f"Asset root is not a directory: {resolved_root}")
-        self.allowed_root = resolved_root
-        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(strict=False)
-        self.allowed_managed_paths = {}
-        for path, content_hash in (allowed_managed_paths or {}).items():
-            candidate = Path(path).expanduser().resolve(strict=False)
-            if _contained(candidate, managed_root):
-                self.allowed_managed_paths[candidate] = str(content_hash)
+        self.materialized_objects = dict(materialized_objects or {})
+        path_values = [value for value in self.materialized_objects.values() if not isinstance(value, bytes)]
+        if path_values and materialized_root is None:
+            raise ValueError("materialized_root is required for path-backed runtime objects")
+        self.materialized_root = (
+            Path(materialized_root).expanduser().resolve(strict=True)
+            if materialized_root is not None
+            else None
+        )
+        if self.materialized_root is not None and not self.materialized_root.is_dir():
+            raise NotADirectoryError(f"materialized object root is not a directory: {self.materialized_root}")
 
         parent: Path | None = None
         if staging_parent is not None:
@@ -340,8 +95,6 @@ class AssetMaterializer:
                 dir=None if parent is None else str(parent),
             )
         ).resolve()
-        self._cache_fetch = cache_fetch
-        self._remote_probe = remote_probe
         self._closed = False
         self.registry: dict[str, Any] = {}
         self.assets: dict[str, MaterializedAsset] = {}
@@ -355,322 +108,83 @@ class AssetMaterializer:
     def needs_server(self) -> bool:
         return any(asset.local_path is not None for asset in self.assets.values())
 
-    def _resolve_local_source(
-        self,
-        key: str,
-        file_value: str,
-        index: int,
-    ) -> Path:
-        raw = Path(file_value)
-        if ".." in raw.parts:
-            raise ValueError(f"Asset {key!r} contains path traversal: {file_value!r}")
-        candidate = raw if raw.is_absolute() else self.registry_path.parent / raw
-        containment_root = self.allowed_root
-        if not raw.is_absolute() and containment_root is None:
-            containment_root = self.registry_path.parent
-        try:
-            resolved = candidate.resolve(strict=True)
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"Asset {key!r} resolved to missing file: {candidate.resolve(strict=False)}"
-            ) from exc
-        if not resolved.is_file():
-            raise FileNotFoundError(f"Asset {key!r} is not a file: {resolved}")
-        if containment_root is not None:
-            try:
-                resolved_relative = resolved.relative_to(containment_root)
-            except ValueError as exc:
-                expected_hash = self.allowed_managed_paths.get(resolved)
-                if expected_hash is None:
-                    raise ValueError(
-                        f"Asset {key!r} at {resolved} is outside the allowed project root "
-                        f"{containment_root} and is not an owned managed media locator"
-                    ) from exc
-                return self._stage_managed_cas(
-                    key,
-                    file_value,
-                    resolved,
-                    expected_hash,
-                    index,
-                )
-            return self._stage_contained_local(
-                key,
-                file_value,
-                containment_root,
-                resolved_relative,
-                index,
-            )
-        return resolved
-
-    def _stage_contained_local(
+    def _materialize_managed_object(
         self,
         key: str,
         reference: str,
-        containment_root: Path,
-        relative: Path,
+        digest: str,
+        value: str | Path | bytes,
         index: int,
     ) -> Path:
-        """Open a project asset component-by-component without symlink traversal."""
+        """Verify and stage bytes already materialized by the runtime host."""
 
-        directory_flags = os.O_RDONLY
-        if hasattr(os, "O_DIRECTORY"):
-            directory_flags |= os.O_DIRECTORY
-        if hasattr(os, "O_NOFOLLOW"):
-            directory_flags |= os.O_NOFOLLOW
-        directory_fd = os.open(containment_root, directory_flags)
-        descriptor: int | None = None
-        source_name = relative.parts[-1]
         try:
-            for component in relative.parts[:-1]:
-                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
-                os.close(directory_fd)
-                directory_fd = next_fd
-            file_flags = os.O_RDONLY
-            if hasattr(os, "O_NOFOLLOW"):
-                file_flags |= os.O_NOFOLLOW
-            descriptor = os.open(source_name, file_flags, dir_fd=directory_fd)
-        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve all primary failures
-            os.close(directory_fd)
-            if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
-                raise FileNotFoundError(
-                    f"Asset {key!r} resolved to missing file: {containment_root / relative}"
-                ) from exc
-            if isinstance(exc, OSError):
-                raise ValueError(
-                    f"Asset {key!r} does not resolve to a contained regular file: "
-                    f"{containment_root / relative}"
-                ) from exc
-            raise
-
-        destination = self.staging_dir / _safe_staging_name(
-            key,
-            reference,
-            index,
-        )
-        try:
-            if descriptor is None:  # pragma: no cover - construction invariant
-                raise RuntimeError("contained asset descriptor was not opened")
-            source_stat = os.fstat(descriptor)
-            if not stat.S_ISREG(source_stat.st_mode):
-                raise FileNotFoundError(
-                    f"Asset {key!r} is not a regular file: {containment_root / relative}"
-                )
-            # Copy from the already-open descriptor. Re-opening or linking
-            # ``source_name`` after the component walk would reintroduce a
-            # symlink/name-swap race between validation and staging.
-            with (
-                os.fdopen(os.dup(descriptor), "rb") as input_file,
-                destination.open("xb") as output_file,
-            ):
-                shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
-            os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
-            with contextlib.suppress(OSError):
-                os.utime(
-                    destination,
-                    ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-                )
-            return destination
-        except BaseException:
-            destination.unlink(missing_ok=True)
-            raise
-        finally:
-            if descriptor is not None:
-                os.close(descriptor)
-            os.close(directory_fd)
-
-    def _stage_managed_cas(
-        self,
-        key: str,
-        reference: str,
-        source: Path,
-        expected_hash: str,
-        index: int,
-    ) -> Path:
-        """Stage a managed CAS file through one no-follow component walk."""
-
-        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(strict=False)
-        try:
-            # ``source`` was resolved during admission; do not resolve it a
-            # second time here, since that would follow a raced symlink before
-            # the descriptor walk gets a chance to reject it.
-            relative = source.relative_to(managed_root)
-        except ValueError as exc:
-            raise ValueError(f"Asset {key!r} is not in the managed CAS root") from exc
-        directory_flags = os.O_RDONLY
-        if hasattr(os, "O_DIRECTORY"):
-            directory_flags |= os.O_DIRECTORY
-        if hasattr(os, "O_NOFOLLOW"):
-            directory_flags |= os.O_NOFOLLOW
-        directory_fd = os.open(managed_root, directory_flags)
-        descriptor: int | None = None
-        try:
-            for component in relative.parts[:-1]:
-                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
-                os.close(directory_fd)
-                directory_fd = next_fd
-            file_flags = os.O_RDONLY
-            if hasattr(os, "O_NOFOLLOW"):
-                file_flags |= os.O_NOFOLLOW
-            descriptor = os.open(relative.parts[-1], file_flags, dir_fd=directory_fd)
-            source_stat = os.fstat(descriptor)
-            if not stat.S_ISREG(source_stat.st_mode):
-                raise FileNotFoundError(f"Asset {key!r} is not a regular file: {source}")
-            destination = self.staging_dir / _safe_staging_name(key, reference, index)
-            try:
-                # Hash exactly the bytes written to the invocation-local
-                # destination.  Hashing first and then seeking/copying leaves
-                # a mutation window where a different byte stream could be
-                # published under the admitted digest.
-                digest = hashlib.sha256()
-                with (
-                    os.fdopen(os.dup(descriptor), "rb") as input_file,
-                    destination.open("xb") as output_file,
-                ):
-                    while chunk := input_file.read(1024 * 1024):
-                        output_file.write(chunk)
-                        digest.update(chunk)
-                actual_hash = digest.hexdigest()
-                if actual_hash != expected_hash:
-                    raise ValueError(
-                        f"Asset {key!r} managed media locator failed integrity check: "
-                        f"expected {expected_hash}, got {actual_hash}"
-                    )
-                os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
-            except BaseException:
-                destination.unlink(missing_ok=True)
-                raise
-            return destination
-        except (FileNotFoundError, NotADirectoryError) as exc:
-            raise FileNotFoundError(f"Asset {key!r} resolved to missing file: {source}") from exc
-        except OSError as exc:
-            raise ValueError(
-                f"Asset {key!r} does not resolve to a contained regular file: {source}"
-            ) from exc
-        finally:
-            if descriptor is not None:
-                os.close(descriptor)
-            os.close(directory_fd)
-
-    def _stage(
-        self,
-        key: str,
-        reference: str,
-        source: Path,
-        index: int,
-        *,
-        trusted_source: bool = False,
-    ) -> Path:
-        if trusted_source:
-            resolved_source = source
-        else:
-            try:
-                resolved_source = source.resolve(strict=True)
-            except FileNotFoundError as exc:
-                raise FileNotFoundError(
-                    f"Asset {key!r} resolved to missing file: {source}"
-                ) from exc
-            if not resolved_source.is_file():
-                raise FileNotFoundError(f"Asset {key!r} is not a file: {resolved_source}")
+            digest = validate_digest(digest.removeprefix("sha256:"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Asset {key!r} has an invalid managed digest") from exc
         destination = self.staging_dir / _safe_staging_name(key, reference, index)
-        if trusted_source:
-            # Local sources were already constrained to the project boundary.
-            # Hold an fd across link/copy and verify inode identity so a later
-            # path swap cannot smuggle an outside file into the stage.
-            _hardlink_or_copy_checked(resolved_source, destination)
-        else:
-            _hardlink_or_copy(resolved_source, destination)
+        if isinstance(value, bytes):
+            payload = value
+            if hashlib.sha256(payload).hexdigest() != digest:
+                raise ValueError(f"Asset {key!r} managed object failed integrity check")
+            destination.write_bytes(payload)
+            return destination
+        source = Path(value).expanduser()
+        if source.is_symlink():
+            raise ValueError(f"Asset {key!r} runtime materialization may not be a symlink")
+        try:
+            resolved = source.resolve(strict=True)
+        except OSError as exc:
+            raise FileNotFoundError(f"Asset {key!r} runtime materialization is unavailable") from exc
+        if self.materialized_root is None or not _contained(resolved, self.materialized_root) or not resolved.is_file():
+            raise ValueError(f"Asset {key!r} is outside the runtime materialized-object root")
+        payload = resolved.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != digest:
+            raise ValueError(f"Asset {key!r} managed object failed integrity check")
+        destination.write_bytes(payload)
         return destination
 
     def _materialize(self) -> None:
-        loaded = timeline.load_registry(self.registry_path)
+        try:
+            loaded = json.loads(self.registry_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("managed asset registry is not valid JSON") from exc
+        if not isinstance(loaded, Mapping):
+            raise ValueError("managed asset registry must be an object")
         self.registry = copy.deepcopy(loaded)
-        if (
-            loaded["assets"]
-            and self.allowed_root is not None
-            and not _contained(self.registry_path, self.allowed_root)
-        ):
-            raise ValueError(
-                f"Asset registry {self.registry_path} is outside the allowed project root "
-                f"{self.allowed_root}"
-            )
-        requested_managed_paths: set[Path] = set()
-        for entry in loaded.get("assets", {}).values():
-            if not isinstance(entry, Mapping) or isinstance(entry.get("url"), str):
-                continue
-            file_value = entry.get("file")
-            if not isinstance(file_value, str) or not file_value:
-                continue
-            raw = Path(file_value).expanduser()
-            requested_managed_paths.add(
-                (raw if raw.is_absolute() else self.registry_path.parent / raw).resolve(
-                    strict=False
+        assets = loaded.get("assets", {})
+        if not isinstance(assets, Mapping):
+            raise ValueError("asset registry assets must be an object")
+        for index, (key, entry) in enumerate(assets.items()):
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"Asset {key!r} must be an object")
+            forbidden = [
+                field
+                for field in (
+                    "url", "sourceUrl", "remoteUrl", "thumbnailUrl", "thumbnail_url",
+                    "file", "path", "source_path", "locator", "realm",
                 )
-            )
-        self.allowed_managed_paths.update(
-            _declared_managed_locators(
-                requested_managed_paths,
-                projects_root=resolve_projects_root(),
-                registry=loaded,
-                runtime_admissions=_runtime_admissions_for_registry(self.registry_path),
-            )
-        )
-        now = datetime.now(timezone.utc)
-        for index, (key, entry) in enumerate(loaded["assets"].items()):
-            descriptor = copy.deepcopy(entry)
-            url = entry.get("url")
-            expires_at = entry.get("url_expires_at")
-            if isinstance(expires_at, str) and _parse_url_expiry(expires_at) <= now:
-                raise RuntimeError(
-                    f"Asset {key} URL expired at {expires_at}; refresh upstream before rendering"
+                if field in entry
+            ]
+            if forbidden:
+                raise ValueError(
+                    f"Asset {key!r} contains retired media locator field(s): {', '.join(forbidden)}"
                 )
-
-            if isinstance(url, str):
-                accepts_ranges = (
-                    self._remote_probe(url)
-                    if self._remote_probe is not None
-                    else _accepts_ranges(url)
-                )
-                if accepts_ranges:
-                    self.assets[key] = MaterializedAsset(
-                        key=key,
-                        kind="remote",
-                        original_reference=url,
-                        metadata=descriptor,
-                        remote_url=url,
-                    )
-                    continue
-                fetch = self._cache_fetch if self._cache_fetch is not None else asset_cache.fetch
-                cached_path = Path(fetch(url, expected_sha256=entry.get("content_sha256")))
-                staged_path = self._stage(key, url, cached_path, index)
-                self.assets[key] = MaterializedAsset(
-                    key=key,
-                    kind="cached",
-                    original_reference=url,
-                    metadata=descriptor,
-                    local_path=staged_path,
-                    remote_url=url,
-                )
-                continue
-
-            file_value = entry.get("file")
-            if not isinstance(file_value, str) or not file_value:
-                raise FileNotFoundError(f"Asset {key!r} has no file path or URL")
-            local_source = self._resolve_local_source(key, file_value, index)
-            if local_source.parent == self.staging_dir:
-                staged_path = local_source
-            else:
-                staged_path = self._stage(
-                    key,
-                    file_value,
-                    local_source,
-                    index,
-                    trusted_source=True,
-                )
+            object_id = entry.get("object_id") or entry.get("media_id")
+            if not isinstance(object_id, str) or not object_id.strip():
+                raise ValueError(f"Asset {key!r} requires a runtime-managed object_id")
+            raw_digest = entry.get("digest") or entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
+            if not isinstance(raw_digest, str) or not raw_digest.strip():
+                raise ValueError(f"Asset {key!r} requires a runtime-managed digest")
+            candidates = (object_id, raw_digest, raw_digest.removeprefix("sha256:"), f"sha256:{raw_digest.removeprefix('sha256:')}")
+            materialized = next((self.materialized_objects[candidate] for candidate in candidates if candidate in self.materialized_objects), None)
+            if materialized is None:
+                raise FileNotFoundError(f"Asset {key!r} has no runtime materialized object")
+            staged_path = self._materialize_managed_object(key, object_id, raw_digest, materialized, index)
             self.assets[key] = MaterializedAsset(
                 key=key,
-                kind="local",
-                original_reference=file_value,
-                metadata=descriptor,
+                kind="managed",
+                metadata=copy.deepcopy(dict(entry)),
                 local_path=staged_path,
             )
 
@@ -678,20 +192,15 @@ class AssetMaterializer:
         self,
         server: "InvocationAssetServer | None" = None,
     ) -> dict[str, Any]:
-        """Return a cloned legacy registry with render-consumable ``file`` URLs."""
+        """Return a cloned render registry with attempt-local file URLs."""
 
         if self._closed:
             raise RuntimeError("Asset materializer is closed")
         resolved = copy.deepcopy(self.registry)
         for key, entry in resolved["assets"].items():
             asset = self.assets[key]
-            if asset.kind == "remote":
-                if asset.remote_url is None:  # pragma: no cover - invariant guard
-                    raise RuntimeError(f"Remote asset {key!r} has no URL")
-                entry["file"] = asset.remote_url
-                continue
             if server is None:
-                raise RuntimeError("A running InvocationAssetServer is required for local assets")
+                raise RuntimeError("a running InvocationAssetServer is required for managed assets")
             if asset.local_path is None:  # pragma: no cover - invariant guard
                 raise RuntimeError(f"Materialized asset {key!r} has no staged path")
             asset.local_url = server.local_url(asset.local_path)
@@ -872,11 +381,6 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
                 remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
-
-# Kept as a module-level alias because older cache/smoke tests subclassed the
-# handler through the render executor's private name.
-_RangeHTTPRequestHandler = RangeHTTPRequestHandler
 
 
 class InvocationAssetServer:

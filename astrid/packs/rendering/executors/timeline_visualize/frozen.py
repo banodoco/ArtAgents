@@ -1632,7 +1632,6 @@ def model_from_frozen(frozen: FrozenView) -> TimelineInspectionModel:
             state=state,
             expected_sha256=row["expected_sha256"],
             observed_sha256=row["observed_sha256"],
-            path=row["contained_path"],
             reason=f"frozen asset integrity state: {state}",
             source_id=row["source_id"],
             source_version=row["source_version"],
@@ -1829,8 +1828,6 @@ def snapshot_from_frozen(frozen: FrozenView, model: TimelineInspectionModel) -> 
             frozen_media_types[identity[2]] = media_type
     for key, integrity in model.media_integrity.items():
         entry: dict[str, Any] = {"role": integrity.role}
-        if integrity.path is not None:
-            entry["file"] = integrity.path
         if integrity.expected_sha256 is not None:
             entry["content_sha256"] = integrity.expected_sha256
         if integrity.source_id is not None:

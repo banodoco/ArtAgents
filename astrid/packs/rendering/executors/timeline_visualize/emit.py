@@ -1406,8 +1406,8 @@ def _inspect_unavailable_reason(state: str) -> str:
             "thumbnail_only — asset is thumbnail-only; there is no original to inspect"
         ),
         "unsupported": (
-            "unsupported — asset path is unsupported (escapes or lies outside "
-            "the frozen project sources root)"
+            "unsupported — asset is not a runtime-managed object admitted for "
+            "this project"
         ),
     }
     return reasons.get(
@@ -1570,7 +1570,6 @@ def emit_asset_index(
                 "integrity_state": integrity.state,
                 "expected_sha256": integrity.expected_sha256,
                 "observed_sha256": integrity.observed_sha256,
-                "contained_path": integrity.path,
             }
         )
     return {

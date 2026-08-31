@@ -23,7 +23,6 @@ from typing import Any, Mapping, Sequence
 from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.foundation.project_paths import resolve_projects_root
-from astrid.core.io.media_import import managed_media_path
 from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.output_policy import (
     DEFAULT_RENDER_OUTPUT_NAME,
@@ -146,14 +145,11 @@ def _rewrite_provenance_output_path(
     *,
     timeline_authority: Mapping[str, Any] | None = None,
 ) -> None:
-    """Point internal-render provenance at the durable managed media path.
+    """Stamp canonical authority without rewriting output locators.
 
-    RenderService creates its sidecar beside the staging output, which is the
-    right workspace for backend validation but not a durable public locator.
-    Once the published media bytes exist its digest-derived managed path is deterministic;
-    rewrite only the sidecar's top-level ``output`` fact before the kernel
-    materializes both files. Direct, non-kernel renders retain the historical
-    workspace path.
+    Output bytes are published by the neutral runtime. The render pack keeps
+    its attempt-local path only as ephemeral execution evidence; it never
+    derives or replaces it with a local CAS/project locator.
     """
     if os.environ.get("ASTRID_INTERNAL_INVOCATION") != "1":
         return
@@ -169,27 +165,6 @@ def _rewrite_provenance_output_path(
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("render provenance must be a JSON object")
-        digest = hashlib.sha256(output.read_bytes()).hexdigest()
-        durable = str(managed_media_path(resolve_projects_root(None), digest))
-        old = str(output)
-
-        def replace_locator(value: Any) -> Any:
-            if isinstance(value, Mapping):
-                return {key: replace_locator(item) for key, item in value.items()}
-            if isinstance(value, list):
-                return [replace_locator(item) for item in value]
-            if value == old:
-                return durable
-            if (
-                isinstance(value, str)
-                and Path(value).name == output.name
-                and ".render-service-" in value
-            ):
-                return durable
-            return value
-
-        payload = replace_locator(payload)
-        payload["output"] = durable
         if timeline_authority is not None:
             payload["canonical_timeline"] = dict(timeline_authority)
         sidecar.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

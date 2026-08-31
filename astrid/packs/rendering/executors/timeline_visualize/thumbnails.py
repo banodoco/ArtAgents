@@ -370,7 +370,6 @@ def sample_filmstrip(
         # deterministic refusal reason instead of a bare FileNotFoundError.
         fresh = verify_now(
             integrity,
-            project_root=Path(project_root),
             runtime_client=runtime_client,
             media_snapshot=media_snapshot,
         )

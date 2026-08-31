@@ -1,15 +1,14 @@
 """Deterministic media discovery, byte identity, probing, and frozen paths (m2 plan step 2).
 
-This module is the pure filesystem half of the media pipeline. It never
+This module is the offline migration/ingest filesystem helper. It never
 touches SQLite, never imports repositories, and never opens a transaction:
 hashing, probing, walking, staging, verification, and atomic publication are
 exactly the preparation work that must stay **outside** ``BEGIN IMMEDIATE``
 (m2 watch item; v10 section 5.3). Plan step 3 adds the publication half —
 per-transaction quarantine staging, staged-byte re-verification, atomic
 rename plus directory fsync, verified reuse of existing digests, explicit
-``external_local`` preparation, missing/mutated location detection, and
-startup GC of unreferenced staging directories — while keeping the same
-purity boundary.
+missing/mutated location detection, and startup GC of unreferenced staging
+directories — while keeping the same purity boundary.
 
 Contracts kept here:
 
@@ -611,12 +610,6 @@ def managed_root(projects_root: str | Path) -> Path:
 # managed digest is re-hashed before it is reused, so no unverified byte ever
 # becomes semantic truth.
 
-MEDIA_LOCATION_REALMS: tuple[str, ...] = ("managed_local", "external_local", "remote")
-"""The frozen ``media_locations.realm`` DDL CHECK vocabulary (v10 decision
-artifact section 7). ``managed_local`` is the default; ``external_local`` is
-always an explicit opt-in (:func:`prepare_external_local`)."""
-
-
 class MediaStagingError(MediaPreparationError):
     """Raised when per-transaction quarantine staging of prepared bytes fails."""
 
@@ -1093,24 +1086,6 @@ def validate_published_presence(projects_root: str | Path, digest: object) -> in
     except OSError:
         raise MediaLocationError(reason="missing", path=managed)
 
-
-
-def prepare_external_local(
-    path: str | Path, *, root: str | Path | None = None
-) -> PreparedMedia:
-    """Explicit ``external_local`` reference-in-place preparation (SD2).
-
-    Managed copy is the default; reference-in-place is **never** a default.
-    Callers must name this function (or otherwise record realm
-    ``external_local`` in ``media_locations``) to opt in. Identity remains
-    the byte SHA-256 — the returned record is byte-identical to
-    :func:`prepare_media_file`, so the repository dedupes and verifies it
-    exactly like a managed candidate — and :func:`verify_media_bytes` gives
-    the same missing/mutated detection for the external path.
-    """
-    return prepare_media_file(path, root=root)
-
-
 def gc_unreferenced_staging(
     projects_root: str | Path,
     live_txn_ids: object,
@@ -1162,7 +1137,6 @@ def gc_unreferenced_staging(
 __all__ = [
     "MANAGED_ROOT_DIRNAME",
     "MEDIA_KINDS",
-    "MEDIA_LOCATION_REALMS",
     "MEDIA_ROOT_RELATIVE",
     "PreparedMedia",
     "PublishedMedia",
@@ -1186,7 +1160,6 @@ __all__ = [
     "managed_root",
     "managed_shard_path",
     "media_crash_point",
-    "prepare_external_local",
     "prepare_media_directory",
     "prepare_media_file",
     "probe_media_file",

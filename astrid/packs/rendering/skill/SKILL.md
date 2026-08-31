@@ -29,8 +29,8 @@ timeline.json + optional assets.json
 ```
 
 1. **Input**: `hype.timeline.json` (clip sequence, effects, animations,
-   transitions) and, when the timeline references media files,
-   `hype.assets.json` (asset registry with file paths).
+   transitions) and, when the timeline references media, `hype.assets.json`
+   (runtime-managed object IDs and verified content digests).
 2. **Selection**: The service resolves a qualified renderer through
    trust-aware registries. Unsupported selectors fail closed with the
    canonical renderer IDs in the recovery details.
@@ -53,11 +53,9 @@ selection and support evidence decide whether this renderer is used.
 The shared render-host asset layer materializes an invocation before the
 Remotion backend renders:
 
-- Local registry paths resolve relative to the registry file and are staged
-  into an invocation-owned directory with project containment checks.
-- Remote URLs that advertise byte ranges stream directly. Other URLs are
-  fetched through the shared cache, optionally verified by `content_sha256`,
-  and staged.
+- The runtime host supplies verified managed-object bytes in an
+  invocation-owned mapping. Paths are accepted only when they are under the
+  explicit attempt staging root; source paths and URLs are rejected.
 - **Range request support**: Implements HTTP `Range` (byte-range) headers
   with proper `206 Partial Content` responses, `Content-Range`, and
   `Accept-Ranges: bytes` headers. This is essential — Remotion's media
@@ -261,10 +259,9 @@ print(result.ok, result.outputs)
 # `client.timelines.create/save` journey; no hand-authored event log is
 # required. Kernel config is materialized privately and pinned to the real
 # immutable stream head version/hash for this run.
-# A project-owned registry `media_id` is enough for visualization to derive
-# and verify the current managed-CAS locator; do not copy `.astrid/media`
-# hash-fanout paths into timeline state. Explicit `file` remains appropriate
-# for project-owned legacy/external sources.
+# A project-owned runtime object ID plus digest is the only supported media
+# reference. The host materializes verified bytes for the attempt; no local
+# path, URL, CAS locator, or external source is copied into timeline state.
 
 ```
 

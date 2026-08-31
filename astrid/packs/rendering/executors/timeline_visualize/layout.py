@@ -910,7 +910,7 @@ def _clip_thumbnail(model: TimelineInspectionModel, clip: ClipModel) -> str | No
     for asset_key in clip.asset_keys:
         integrity = model.media_integrity.get(asset_key)
         if integrity is not None and integrity.state == "verified_original":
-            return integrity.path
+            return None
     return None
 
 
