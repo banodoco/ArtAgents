@@ -243,7 +243,7 @@ def _sandbox_command(argv: list[str], *, staging: Path) -> list[str]:
     profile = "(version 1)\n(deny default)\n(allow process-exec)\n(allow process-fork)\n(allow sysctl-read)\n(allow file-read*)\n(allow file-write* (subpath \"" + escaped + "\"))\n(allow file-write* (literal \"/dev/null\"))\n"
     return [sandbox_exec, "-p", profile, *argv]
 
-def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions: Sequence[Mapping[str, Any]], *, contract_bytes: bytes, schema_manifest_bytes: bytes, output_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
+def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions: Sequence[Mapping[str, Any]], *, contract_bytes: bytes, schema_manifest_bytes: bytes, component_manifest_bytes: bytes | None = None, output_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Execute each declared B11.1 generator twice and attach observations.
 
     Commands are direct argv only.  Each run receives a fresh staging root and
@@ -272,21 +272,28 @@ def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions
                 run_root = base / gid / str(ordinal); checkout = run_root / "checkout"; _clean_git_checkout(source_checkout, checkout, by_component[cid]["integrated_oid"], Path(output_root).expanduser().resolve() if output_root else None); stage = run_root / "staging"; inputs = run_root / "inputs"; stage.mkdir(parents=True); inputs.mkdir()
                 contract_path, schema_path = inputs / "contract.json", inputs / "schema-manifest.json"; contract_path.write_bytes(contract_bytes); schema_path.write_bytes(schema_manifest_bytes)
                 input_digests = {contract_path: _sha256_bytes(contract_bytes), schema_path: _sha256_bytes(schema_manifest_bytes)}
+                component_path = None
+                if component_manifest_bytes is not None:
+                    component_path = inputs / "component-manifest.json"; component_path.write_bytes(component_manifest_bytes); input_digests[component_path] = _sha256_bytes(component_manifest_bytes)
                 checkout_snapshot = _filesystem_snapshot(checkout)
                 executable = str(definition.get("interpreter_path") or definition.get("executable") or "python3")
-                argv = [executable, str(checkout / entrypoint_path), "--contract", str(contract_path), "--schema-manifest", str(schema_path), "--output-root", str(stage)]
+                argv = [executable, str(checkout / entrypoint_path), "--contract", str(contract_path), "--schema-manifest", str(schema_path)]
+                if component_path is not None: argv.extend(["--component-manifest", str(component_path)])
+                argv.extend(["--output-root", str(stage)])
                 before = _dirty_paths(checkout)
                 result = subprocess.run(_sandbox_command(argv, staging=stage), cwd=str(checkout), capture_output=True, check=False, timeout=300, env={"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"})
                 after = _dirty_paths(checkout)
                 if _filesystem_snapshot(source_checkout) != source_snapshot or _dirty_paths(source_checkout) != source_status: raise ReleaseIdentityError("B11.1 generator mutated the reviewed source checkout")
                 if _filesystem_snapshot(checkout) != checkout_snapshot or before != after: raise ReleaseIdentityError("B11.1 generator changed its clean pinned checkout")
                 for path, digest in input_digests.items():
-                    if not path.is_file() or _sha256_bytes(path.read_bytes()) != digest: raise ReleaseIdentityError("B11.1 generator changed its contract or schema input")
+                    if not path.is_file() or _sha256_bytes(path.read_bytes()) != digest: raise ReleaseIdentityError("B11.1 generator changed its contract, schema, or component-manifest input")
                 if result.returncode != 0: raise ReleaseIdentityError(f"B11.1 generator failed: {gid}")
                 inventory = _directory_inventory(stage)
                 if not inventory: raise ReleaseIdentityError("B11.1 generator produced no output")
                 inventories.append(inventory)
-                stable_argv = ["<interpreter>", "<component-checkout>/" + str(definition["entrypoint_path"]), "--contract", "<contract-input>", "--schema-manifest", "<schema-manifest-input>", "--output-root", "<staging-output-root>"]
+                stable_argv = ["<interpreter>", "<component-checkout>/" + str(definition["entrypoint_path"]), "--contract", "<contract-input>", "--schema-manifest", "<schema-manifest-input>"]
+                if component_path is not None: stable_argv.extend(["--component-manifest", "<component-manifest-input>"])
+                stable_argv.extend(["--output-root", "<staging-output-root>"])
                 receipt = {"schema_version": 1, "artifact_kind": "generator-run-receipt", "generator_id": gid, "run_ordinal": ordinal, "argv": stable_argv, "argv_sha256": framed_hash("banodoco.generator-run-argv.v1", stable_argv), "output_rows": inventory, "exit_code": result.returncode}
                 receipts.append(receipt)
             if inventories[0] != inventories[1]: raise ReleaseIdentityError("B11.1 generator runs are not byte-identical")
@@ -299,7 +306,11 @@ def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions
             definition_digest = _sha256_bytes(canonical_bytes(definition)); receipt_rows = []
             for receipt in receipts:
                 raw = canonical_bytes(receipt); receipt_rows.append(_artifact_wrapper(f"GENERATOR-RUN:{gid}:{receipt['run_ordinal']}", "PROD-CMD-PACKET:B11.1", raw, detail_schema_id="generator-run-receipt-v1"))
-            observation = {"schema_version": 1, "row_kind": "OBSERVATION", "generator_id": gid, "component_id": cid, "entrypoint_component_id": cid, "entrypoint_path": str(definition["entrypoint_path"]), "entrypoint_sha256": entrypoint_digest, "interpreter_tool_id": definition.get("interpreter_tool_id", "TOOL-PYTHON"), "argv_formula_id": "GENERATOR-ARGV-V1", "sandbox_policy_id": "GENERATOR-READONLY-STAGING-V1", "generator_definition_sha256": definition_digest, "input_schema_ids": list(definition.get("input_schema_ids", [])), "input_digests": [_sha256_bytes(contract_bytes), _sha256_bytes(schema_manifest_bytes)], "declared_output_roots": list(definition.get("declared_output_roots", ["."])), "tool_ids": list(definition.get("tool_ids", ["TOOL-GIT", "TOOL-PYTHON"])), "output_paths": output_paths, "output_digests": output_digests, "tool_rows": list(definition.get("tool_rows", [])), "run_ordinal": NONE, "argv_carrier": NONE, "argv_sha256": NONE, "clean_checkout_id": NONE, "changed_paths": [], "undeclared_changed_paths": [], "started_at": NONE, "finished_at": NONE, "exit_code": NONE, "stop_class": NONE, "first_run_receipt_sha256": _sha256_bytes(canonical_bytes(receipts[0])), "second_run_receipt_sha256": _sha256_bytes(canonical_bytes(receipts[1])), "run_receipt_evidence_rows": receipt_rows, "provenance_input_bindings": [{"input_id": "CONTRACT-ID", "sha256": _sha256_bytes(contract_bytes)}, {"input_id": "EXECUTION-SCHEMAS-MANIFEST", "sha256": _sha256_bytes(schema_manifest_bytes)}, {"input_id": "GENERATOR-DEFINITION", "sha256": definition_digest}], "producer_id": "PROD-CMD-PACKET:B11.1"}
+            contract_digest = _sha256_bytes(contract_bytes); schema_digest = _sha256_bytes(schema_manifest_bytes); observation_input_digests = [contract_digest, schema_digest]; observation_bindings = [{"input_id": "CONTRACT-ID", "sha256": contract_digest}, {"input_id": "EXECUTION-SCHEMAS-MANIFEST", "sha256": schema_digest}]
+            if component_manifest_bytes is not None:
+                component_digest = _sha256_bytes(component_manifest_bytes); observation_input_digests.append(component_digest); observation_bindings.append({"input_id": "COMPONENT-MANIFEST", "sha256": component_digest})
+            observation_bindings.append({"input_id": "GENERATOR-DEFINITION", "sha256": definition_digest})
+            observation = {"schema_version": 1, "row_kind": "OBSERVATION", "generator_id": gid, "component_id": cid, "entrypoint_component_id": cid, "entrypoint_path": str(definition["entrypoint_path"]), "entrypoint_sha256": entrypoint_digest, "interpreter_tool_id": definition.get("interpreter_tool_id", "TOOL-PYTHON"), "argv_formula_id": "GENERATOR-ARGV-V1", "sandbox_policy_id": "GENERATOR-READONLY-STAGING-V1", "generator_definition_sha256": definition_digest, "input_schema_ids": list(definition.get("input_schema_ids", [])), "input_digests": observation_input_digests, "declared_output_roots": list(definition.get("declared_output_roots", ["."])), "tool_ids": list(definition.get("tool_ids", ["TOOL-GIT", "TOOL-PYTHON"])), "output_paths": output_paths, "output_digests": output_digests, "tool_rows": list(definition.get("tool_rows", [])), "run_ordinal": NONE, "argv_carrier": NONE, "argv_sha256": NONE, "clean_checkout_id": NONE, "changed_paths": [], "undeclared_changed_paths": [], "started_at": NONE, "finished_at": NONE, "exit_code": NONE, "stop_class": NONE, "first_run_receipt_sha256": _sha256_bytes(canonical_bytes(receipts[0])), "second_run_receipt_sha256": _sha256_bytes(canonical_bytes(receipts[1])), "run_receipt_evidence_rows": receipt_rows, "provenance_input_bindings": observation_bindings, "producer_id": "PROD-CMD-PACKET:B11.1"}
             if set(observation) != set(GENERATOR_ROW_FIELDS): raise ReleaseIdentityError("generator observation schema drift")
             observed[cid].append(observation)
     return [{**row, "generator_observation_rows": sorted(observed.get(row["component_id"], []), key=lambda item: item["generator_id"]), "generator_ids": [item["generator_id"] for item in sorted(observed.get(row["component_id"], []), key=lambda item: item["generator_id"])]} for row in rows]
@@ -398,11 +409,11 @@ def _validate_git_identity_bytes(content: bytes, row: Mapping[str, Any]) -> None
     for sub in identity["submodules"]:
         if set(sub) != {"path", "oid", "head_ref", "detached", "git_dir_relative", "common_dir_relative", "dirty_paths"} or not isinstance(sub.get("dirty_paths"), list) or Path(str(sub.get("path"))).is_absolute() or ".." in Path(str(sub.get("path"))).parts: raise ReleaseIdentityError("Git submodule identity evidence schema mismatch")
 
-def create_pre_live_identity(components: Mapping[str, str | os.PathLike[str]], *, metadata: Mapping[str, Any] | None = None, output: str | os.PathLike[str] | None = None, seed_outputs: Mapping[str, bytes | bytearray | Mapping[str, Any] | Sequence[Any]] | None = None, generator_definitions: Sequence[Mapping[str, Any]] | None = None, contract_bytes: bytes | None = None, schema_manifest_bytes: bytes | None = None, registry_rows: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+def create_pre_live_identity(components: Mapping[str, str | os.PathLike[str]], *, metadata: Mapping[str, Any] | None = None, output: str | os.PathLike[str] | None = None, seed_outputs: Mapping[str, bytes | bytearray | Mapping[str, Any] | Sequence[Any]] | None = None, generator_definitions: Sequence[Mapping[str, Any]] | None = None, contract_bytes: bytes | None = None, schema_manifest_bytes: bytes | None = None, component_manifest_bytes: bytes | None = None, registry_rows: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     _assert_clean(components, output); rows = resolve_reviewed_components(components)
     if generator_definitions is not None:
         if contract_bytes is None or schema_manifest_bytes is None: raise ReleaseIdentityError("B11.1 requires complete contract and schema-manifest bytes")
-        rows = run_b11_1(rows, generator_definitions, contract_bytes=contract_bytes, schema_manifest_bytes=schema_manifest_bytes)
+        rows = run_b11_1(rows, generator_definitions, contract_bytes=contract_bytes, schema_manifest_bytes=schema_manifest_bytes, component_manifest_bytes=component_manifest_bytes)
     metadata = dict(metadata or {}); planned = set(components) == {"ASTRID-CLIENT", "NEUTRAL-RUNTIME"}
     if seed_outputs is None: raise ReleaseIdentityError("PRELIVE-MANIFEST requires actual bytes for all 47 seeds")
     definitions = sorted((dict(d) for d in (generator_definitions or [])), key=lambda d: d.get("generator_id", "")); definition_digests = []
@@ -626,11 +637,11 @@ def _load_json_input(path: str | os.PathLike[str], label: str) -> Any:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc: raise ReleaseIdentityError(f"{label} must be readable JSON") from exc
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); pre.add_argument("--seed-dir", required=True); pre.add_argument("--seed-manifest", required=True); pre.add_argument("--generator-manifest"); pre.add_argument("--registry"); pre.add_argument("--contract-file"); pre.add_argument("--schema-manifest-file"); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); pre.add_argument("--seed-dir", required=True); pre.add_argument("--seed-manifest", required=True); pre.add_argument("--generator-manifest"); pre.add_argument("--registry"); pre.add_argument("--contract-file"); pre.add_argument("--schema-manifest-file"); pre.add_argument("--component-manifest-file"); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
     try:
         if args.operation == "pre-live":
-            seed_outputs, seed_metadata = _load_seed_inputs(args.seed_dir, args.seed_manifest); definitions = _load_json_input(args.generator_manifest, "--generator-manifest") if args.generator_manifest else None; definitions = definitions.get("generators", definitions) if isinstance(definitions, Mapping) else definitions; registry = _load_json_input(args.registry, "--registry") if args.registry else None; contract = Path(args.contract_file).read_bytes() if args.contract_file else None; schema = Path(args.schema_manifest_file).read_bytes() if args.schema_manifest_file else None
-            result = create_pre_live_identity(_component_args(args.component), output=args.output, seed_outputs=seed_outputs, metadata=seed_metadata, generator_definitions=definitions, contract_bytes=contract, schema_manifest_bytes=schema, registry_rows=registry)
+            seed_outputs, seed_metadata = _load_seed_inputs(args.seed_dir, args.seed_manifest); definitions = _load_json_input(args.generator_manifest, "--generator-manifest") if args.generator_manifest else None; definitions = definitions.get("generators", definitions) if isinstance(definitions, Mapping) else definitions; registry = _load_json_input(args.registry, "--registry") if args.registry else None; contract = Path(args.contract_file).read_bytes() if args.contract_file else None; schema = Path(args.schema_manifest_file).read_bytes() if args.schema_manifest_file else None; component = Path(args.component_manifest_file).read_bytes() if args.component_manifest_file else None
+            result = create_pre_live_identity(_component_args(args.component), output=args.output, seed_outputs=seed_outputs, metadata=seed_metadata, generator_definitions=definitions, contract_bytes=contract, schema_manifest_bytes=schema, component_manifest_bytes=component, registry_rows=registry)
         elif args.operation == "candidate-core": result = create_candidate_core_identity(args.pre_live, _component_args(args.component), output=args.output)
         else: result = {"ok": True, "identity": load_receipt(args.receipt)["identity"]}
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2)); return 0

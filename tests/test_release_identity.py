@@ -108,14 +108,16 @@ def test_receipt_inside_checkout_and_locator_traversal_are_rejected(tmp_path: Pa
 def test_b11_runs_declared_generator_twice(tmp_path: Path) -> None:
     checkout = _repo(tmp_path, "Astrid")
     script = checkout / "generator.py"
-    script.write_text("import argparse, pathlib\np=argparse.ArgumentParser(); p.add_argument('--contract'); p.add_argument('--schema-manifest'); p.add_argument('--output-root'); a=p.parse_args(); pathlib.Path(a.output_root, 'out.bin').write_bytes(b'\\x00\\xff')\n")
+    script.write_text("import argparse, pathlib\np=argparse.ArgumentParser(); p.add_argument('--contract'); p.add_argument('--schema-manifest'); p.add_argument('--component-manifest'); p.add_argument('--output-root'); a=p.parse_args(); pathlib.Path(a.output_root, 'out.bin').write_bytes(pathlib.Path(a.component_manifest).read_bytes())\n")
     subprocess.run(["git", "-C", str(checkout), "add", "generator.py"], check=True)
     subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "generator"], check=True)
     row = resolve_component("ASTRID-CLIENT", checkout)
-    observed = run_b11_1([row], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
+    component = b'{"manifest_id":"GENERATOR-CONFORMANCE-ID"}\n'
+    observed = run_b11_1([row], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}", component_manifest_bytes=component)
     assert observed[0]["generator_observation_rows"][0]["first_run_receipt_sha256"]
-    assert observed[0]["generator_observation_rows"][0]["output_digests"] == [__import__("hashlib").sha256(b"\x00\xff").hexdigest()]
-    receipt = create_pre_live_identity({"ASTRID-CLIENT": checkout}, seed_outputs=_seeds(), generator_definitions=[{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
+    assert observed[0]["generator_observation_rows"][0]["output_digests"] == [__import__("hashlib").sha256(component).hexdigest()]
+    assert __import__("hashlib").sha256(component).hexdigest() in observed[0]["generator_observation_rows"][0]["input_digests"]
+    receipt = create_pre_live_identity({"ASTRID-CLIENT": checkout}, seed_outputs=_seeds(), generator_definitions=[{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}", component_manifest_bytes=component)
     assert verify_receipt(receipt) == receipt["identity"]
     candidate = create_candidate_core_identity(receipt, {"ASTRID-CLIENT": checkout})
     assert verify_receipt(candidate) == candidate["identity"]
