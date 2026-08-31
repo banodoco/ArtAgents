@@ -12,7 +12,7 @@ sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
-from astrid.core.gateway import dispatch  # noqa: E402
+from astrid.core.gateway import dispatch, main as gateway_main  # noqa: E402
 from astrid.sdk.client import AstridClient  # noqa: E402
 
 
@@ -41,6 +41,42 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         assert task.ok and task.data["capability_id"] == "render.basic"
         assert client.tasks.show(task.data["task_id"]).ok
         client.close()
+    finally:
+        daemon.stop()
+
+
+def test_documented_project_cli_mutations_return_committed_receipts(tmp_path, monkeypatch, capsys):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        client = AstridClient.open()
+        assert client.projects.create(slug="cli", name="CLI", idempotency_key="cli-project").ok
+        first_path, second_path = tmp_path / "first.bin", tmp_path / "second.bin"
+        first_path.write_bytes(b"first")
+        second_path.write_bytes(b"second")
+        first = client.media.import_file(project="cli", path=first_path, idempotency_key="cli-media-1").data
+        second = client.media.import_file(project="cli", path=second_path, idempotency_key="cli-media-2").data
+        ref_a = client.references.create(project="cli", kind="character", name="A", media_id=first["object_id"], idempotency_key="cli-ref-a").data
+        ref_b = client.references.create(project="cli", kind="character", name="B", media_id=second["object_id"], idempotency_key="cli-ref-b").data
+        association = client.references.associate("cli", ref_a["reference_id"], media_id=second["object_id"], idempotency_key="cli-association").data
+        shot = client.shots.create(project="cli", name="Shot", idempotency_key="cli-shot").data
+        first_item = client.shots.add_item("cli", shot["shot_id"], media_id=first["object_id"], idempotency_key="cli-item-1").data
+        second_item = client.shots.add_item("cli", shot["shot_id"], media_id=second["object_id"], idempotency_key="cli-item-2").data
+        assert association["media_references"]
+
+        assert gateway_main(["media", "references", "link", "--project", "cli", "--from", ref_a["reference_id"], "--to", ref_b["reference_id"], "--kind", "related_to", "--idempotency-key", "cli-link", "--json"]) == 0
+        link_result = json.loads(capsys.readouterr().out)
+        assert link_result["receipt"]["command_kind"] == "reference.link"
+
+        assert gateway_main(["media", "references", "set-primary", ref_a["reference_id"], "--project", "cli", "--media-reference", association["media_references"][-1]["association_id"], "--idempotency-key", "cli-primary", "--json"]) == 0
+        primary_result = json.loads(capsys.readouterr().out)
+        assert primary_result["receipt"]["command_kind"] == "reference.primary"
+
+        assert gateway_main(["timelines", "shots", "reorder", shot["shot_id"], "--project", "cli", "--items", f"{second_item['items'][1]['item_id']},{first_item['items'][0]['item_id']}", "--idempotency-key", "cli-reorder", "--json"]) == 0
+        reorder_result = json.loads(capsys.readouterr().out)
+        assert reorder_result["receipt"]["command_kind"] == "shot.item.reorder"
+        assert set(reorder_result) == {"ok", "data", "error", "receipt", "idempotency_key"}
     finally:
         daemon.stop()
 

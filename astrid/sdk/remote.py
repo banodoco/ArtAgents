@@ -9,6 +9,7 @@ from typing import Any
 
 from .contracts import DomainResult, ErrorObject
 from .workspace_client import WorkspaceClient, WorkspaceClientError
+from astrid.core.receipts.service import CommandReceipt
 
 
 class _RemoteFamily:
@@ -20,7 +21,14 @@ class _RemoteFamily:
         if key is None and operation not in reads:
             key = uuid.uuid4().hex
         try:
-            return DomainResult.success(getattr(self._client, operation)(*args, **kwargs), idempotency_key=key or "")
+            value = getattr(self._client, operation)(*args, **kwargs)
+            receipt = None
+            if isinstance(value, dict) and set(value) >= {"data", "receipt"}:
+                receipt = CommandReceipt.from_dict(value["receipt"]) if value["receipt"] is not None else None
+                value = value["data"]
+            elif getattr(value, "receipt", None) is not None:
+                receipt = CommandReceipt.from_dict(value.receipt)
+            return DomainResult.success(value, receipt=receipt, idempotency_key=key or "")
         except WorkspaceClientError as exc:
             return DomainResult.failure(ErrorObject(code=exc.code, message=exc.message, details=exc.details), idempotency_key=key or "")
 
@@ -270,11 +278,14 @@ class RemoteReferences(_RemoteFamily):
     def associate(self, project, ref, *, media_id=None, role="depicts", idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("associate_reference", project, ref, {"media_id": media_id, "role": role, **({"association_id": kwargs["association_id"]} if kwargs.get("association_id") else {})}, key=key, idempotency_key=key)
-    def link(self, *, project, from_reference_id, to_reference_id, kind, idempotency_key=None, **kwargs):
+    def link(self, project, from_reference_id, to_reference_id, kind, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("link_references", project, {"from_reference_id": from_reference_id, "to_reference_id": to_reference_id, "kind": kind, "metadata": kwargs.get("metadata", {})}, key=key, idempotency_key=key)
-    def set_primary(self, project, ref, *, association_id, expected_version=None, idempotency_key=None, **kwargs):
+    def set_primary(self, project, ref, *, association_id=None, media_reference_id=None, expected_version=None, idempotency_key=None, **kwargs):
+        association_id = association_id or media_reference_id
         key = idempotency_key or uuid.uuid4().hex
+        if not association_id:
+            return DomainResult.failure(ErrorObject("validation_error", "media reference association is required", {}), idempotency_key=key)
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("set_primary_reference", project, ref, association_id, key=key, expected_version=version, idempotency_key=key)
@@ -340,9 +351,9 @@ class RemoteShots(_RemoteFamily):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("remove_shot_item", project, shot_id, item_id, key=key, expected_version=version, idempotency_key=key)
-    def reorder(self, project, shot_id, *, item_ids=None, expected_version=None, idempotency_key=None, **kwargs):
+    def reorder(self, project, shot_id, item_ids=None, *, expected_version=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
-        try: version = self._version(shot_id, expected_version)
+        try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("reorder_shot_items", project, shot_id, list(item_ids or []), key=key, expected_version=version, idempotency_key=key)
 
