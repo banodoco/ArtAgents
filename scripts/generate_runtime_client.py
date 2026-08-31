@@ -34,8 +34,6 @@ def main() -> int:
     schema = _input(args.schema_manifest, "--schema-manifest")
     output = Path(args.output_root).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-    root = output / "astrid" / "generated" / "runtime_client"
-    root.mkdir(parents=True, exist_ok=True)
     # The operation projection intentionally uses the canonical OpenAPI text
     # without a YAML dependency.  The contract digest remains authoritative
     # even when an operation line is not present.
@@ -51,14 +49,14 @@ def main() -> int:
         "schema_manifest_sha256": _digest(schema),
         "operations": operations,
     }
-    (root / "runtime_client.py").write_text(
+    (output / "runtime_client.py").write_text(
         '"""Generated B11.1 runtime-client metadata; do not edit."""\n\n'
         + "CONTRACT_SHA256 = " + repr(metadata["contract_sha256"]) + "\n"
         + "SCHEMA_MANIFEST_SHA256 = " + repr(metadata["schema_manifest_sha256"]) + "\n"
         + "OPERATIONS = " + repr(tuple(operations)) + "\n",
         encoding="utf-8",
     )
-    (root / "manifest.json").write_text(json.dumps(metadata, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    (output / "manifest.json").write_text(json.dumps(metadata, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
