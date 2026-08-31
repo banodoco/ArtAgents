@@ -543,7 +543,7 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
     """Reject schema/catalog drift from the frozen 23-table composition."""
     violations: list[str] = []
-    from astrid.core.migrations.catalog import CORE_TABLES, FORBIDDEN_TABLES
+    from astrid.core.schema_packs.catalog import CORE_TABLES, FORBIDDEN_TABLES
     from astrid.core.schema_packs.manifest import load_schema_pack_manifest
     from astrid.packs import STANDARD_SCHEMA_PACKS, build_standard_registry
 

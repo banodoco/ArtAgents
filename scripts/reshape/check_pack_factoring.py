@@ -79,7 +79,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrid.core.migrations.catalog import CORE_MIGRATIONS
+from astrid.core.schema_packs.catalog import CORE_MIGRATIONS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 """The repository root the check copies from (read-only)."""
@@ -479,7 +479,7 @@ from pathlib import Path
 import astrid
 
 from astrid.core.events.registry import register_core_vocabulary
-from astrid.core.migrations.catalog import CORE_TABLES
+from astrid.core.schema_packs.catalog import CORE_TABLES
 from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
 
@@ -783,7 +783,7 @@ _CATALOG_SNIPPET = r"""
 import sys
 
 from astrid.core.events.registry import register_core_vocabulary
-from astrid.core.migrations.catalog import CORE_TABLES
+from astrid.core.schema_packs.catalog import CORE_TABLES
 from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
 

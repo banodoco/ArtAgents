@@ -67,7 +67,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.migrations.catalog import (
+from astrid.core.schema_packs.catalog import (
     CORE_INDEXES,
     CORE_TABLES,
     FORBIDDEN_TABLES,
@@ -670,7 +670,7 @@ _INSTALLED_REQUIRED_FILES = (
     "astrid/__init__.py",
     "astrid/core/__init__.py",
     "astrid/packs/__init__.py",
-    "astrid/core/migrations/sql/core/0001_initial.sql",
+    "astrid/core/schema_packs/catalog.py",
 )
 
 _INSTALLED_SEMANTIC_SUFFIXES = (".json", ".jsonl", ".fsa", ".fsa.json")

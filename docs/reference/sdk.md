@@ -12,10 +12,10 @@ The explicit Astrid CLI launcher may invoke the installed
 `banodoco-local up --profile astrid` command and then construct a client from
 the returned runtime identity. Set `BANODOCO_LOCAL_SOURCE_MANIFEST` and, for
 the launcher client, `BANODOCO_RUNTIME_CREDENTIAL` explicitly.
-The runtime is the sole authority for projects,
-media, timelines, tasks, runs, receipts, and events. `AstridClient` does not
-open a checkout-local database/CAS or execute a pack in-process as the live
-authority.
+The runtime is the sole authority for projects, media, timelines, tasks, runs,
+receipts, and events. `AstridClient` is a runtime client: it does not open a
+checkout-local database or content store and does not execute a pack
+in-process as the live authority.
 
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in

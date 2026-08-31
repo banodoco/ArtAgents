@@ -48,11 +48,9 @@ falls back to the legacy key with a deprecation warning.  Use
 
 ## Session and home
 
-| Constant | Env var | Who sets | Who reads | Effect |
-|---|---|---|---|---|
-| `ASTRID_HOME` | `ASTRID_HOME` | User / CI | `session/paths.py` | Internal authoring/test state directory (default `~/.astrid`); not workspace state. |
-| `ASTRID_SESSION_ID` | `ASTRID_SESSION_ID` | Historical/internal | Legacy session/task code | Retained for historical compatibility; not a Stage1 runtime selector. |
-| `ASTRID_PROJECTS_ROOT` | `ASTRID_PROJECTS_ROOT` | Historical/tests | Legacy local project code | Historical/test-only compatibility variable. It is not read by the live runtime client and must not be used as workspace authority. |
+Astrid Stage1 has no session-binding or home-directory state authority. Do not
+set session identifiers or project-root overrides to configure a product
+command; project and actor context come from the runtime request.
 | `ASTRID_REMOTION_PROJECT_DIR` | `ASTRID_REMOTION_PROJECT_DIR` | Release operator | Remotion renderer | Absolute server-owned Remotion project with `node_modules`; never accepted from task input. |
 | `ASTRID_NODE_EXECUTABLE` | `ASTRID_NODE_EXECUTABLE` | Release operator | Remotion renderer | Absolute server-owned executable Node path. Readiness performs a bounded `--version` probe; never resolved from `PATH` or accepted from task input. |
 | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` | Release operator | Remotion renderer | Absolute server-owned install root containing `banodoco_timeline_schema`; validated by module origin before Remotion-only admission. |

@@ -60,7 +60,7 @@ Location: `astrid/packs/rendering/executors/timeline_visualize/schemas/`.
 
 | Schema | File | Top-level fields |
 |---|---|---|
-| manifest | `manifest.json` | `schema_version` (1), `kind` (`timeline_visualize`), `inputs` (`timeline_source`, optional `source_mode`, `resolved_project`, `resolved_timelines`, `canonical_timeline_identities`, `from_view`, `focus`, `scope`, `layout`, `formats`), `outputs`, `created`, `warnings`, `run_id` (ULID), `run_root`, `snapshots`, `compositor` (`package`, `version`, `source_snapshot_path`, `registry_default_fingerprint`), `scope`, `layouts`, `page_count`, `reading_order`, `entrypoints` (10 keys incl. `action_index`), `optional_formats`, `companions` |
+| manifest | `manifest.json` | `schema_version` (1), `kind` (`timeline_visualize`), runtime-managed timeline identity and version inputs, `outputs`, `created`, `warnings`, `run_id` (ULID), `snapshots`, `compositor` metadata, `scope`, `layouts`, `page_count`, `reading_order`, `entrypoints`, `optional_formats`, `companions` |
 | ground-truth | `ground-truth.json` | `schema_version`, `snapshots`, `project_slug`, `scope`, `objects` (identity triples), `timelines[]` (`timeline_ref`, `durations` (3 named extents), `tracks`, `clips`, `assets`), `frozen_objects`, `frozen_timeline`, `frozen_shots`, `frozen_ranges`, `timestamps.frozen_at` (sentinel, never SNS) |
 | view-map | `view-map.json` | `schema_version`, `snapshots`, `pages[]` (`page_id`, `dimensions`, `layout`, `scope`, `time_bounds`, `object_boxes`, `labels`, `continuation_links`, `reading_order`), `reading_order` |
 | action-index | `action-index.json` | `schema_version`, `snapshots`, `entries{ref: {canonical_ref, relations, actions}}` |
@@ -76,9 +76,9 @@ valid. `source_mode` identifies kernel, explicit legacy, or frozen authority;
 `resolved_timelines` retains the uppercase timeline-visualize v1 ULID
 spelling; `canonical_timeline_identities` supplies the equivalent lowercase
 kernel spelling for comparison with public timeline CLI/SDK DTOs. The required
-`timeline_source` field is historical compatibility data containing the
-project slug, not the raw CLI/SDK legacy path, and must not be used to infer
-source authority.
+Timeline provenance is identified by the runtime-managed timeline reference
+and version/hash. Filesystem timeline paths and historical `timeline_source`
+inputs are not supported and must not be used to infer source authority.
 
 SDK admission records a read-only authority envelope in the immutable task
 spec: the executor-definition digest plus either kernel stream head

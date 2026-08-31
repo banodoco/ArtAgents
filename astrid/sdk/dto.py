@@ -15,9 +15,20 @@ from astrid.core.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from astrid.core.events.stream import (
-    EventStreamRecord,
-)
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class EventStreamRecord:
+    """One runtime-owned event returned by the generated client."""
+
+    source: str
+    line: int
+    timestamp: str | None
+    kind: str | None
+    hash: str | None
+    payload: dict[str, Any]
 
 from .results import (
     Capability,

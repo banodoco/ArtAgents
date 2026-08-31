@@ -175,53 +175,23 @@ except CapabilityInvocationError as e:
 
 ## Step 5 — Read Events from a Run
 
-Astrid records every task run as a hash-chained event log
-(`events.jsonl`).  The SDK provides `read_events()` for offline
-inspection of completed runs and `subscribe_events()` for live
-observation of in-progress runs.
-
-This tutorial uses a committed golden fixture to demonstrate
-`read_events()` without a live executor run (the fixture was recorded
-from a known-good `editorial.arrange` execution):
+The workspace runtime owns event storage, ordering, integrity, and recovery.
+The SDK's generated-client-backed `read_events()` reads a live runtime
+snapshot; Astrid does not read event files or local databases.
 
 ```python
-# Copy the golden fixture into a temporary project layout
-import shutil
-
 PROJECT_SLUG = "demo-agentic-ux"
 RUN_ID = "demo-run-001"
-projects_root = Path("/tmp/astrid-demo-projects")
-
-run_dir = projects_root / PROJECT_SLUG / "runs" / RUN_ID
-run_dir.mkdir(parents=True, exist_ok=True)
-shutil.copy2("examples/agentic_ux/fixtures/golden_events.jsonl",
-             run_dir / "events.jsonl")
-
-# Read and verify the event stream
-events = astrid.read_events(
-    PROJECT_SLUG,
-    RUN_ID,
-    projects_root=projects_root,
-    verify=True,
-)
+events = astrid.read_events(PROJECT_SLUG, RUN_ID)
 
 print(f"Event count: {len(events)}")
 for event in events:
     print(f"  [{event.source}:{event.line}] {event.kind} @ {event.timestamp}")
 ```
 
-Each event is an `EventStreamRecord` with fields:
-- `source` — `"task"`, `"audit"`, or `"kernel"` when the canonical SQLite run stream is used because the optional filesystem projection is absent
-- `line` — one-indexed line number in the event log
-- `timestamp` — ISO-8601 timestamp string (or `None`)
-- `kind` — event kind string (e.g. `"run_started"`, `"step_dispatched"`, `"run_completed"`)
-- `hash` — SHA-256 hash for chain verification (or `None`)
-- `payload` — the raw JSONL event, or canonical kernel fields including the event id, stream sequence, domain data, and integrity hashes
-
-When `verify=True` (the default), `read_events()` validates the hash
-chain before returning. For restored runs this verifies the canonical SQLite
-stream head, sequence, previous-hash links, and recomputed event hashes. A
-broken or mismatched chain raises `CapabilityEventLogError`.
+Each `EventStreamRecord` contains the runtime `source`, sequence `line`,
+`timestamp`, `kind`, `hash`, and event `payload`. Runtime integrity and replay
+checks happen at the service boundary; failures raise typed SDK exceptions.
 
 ### Live event observation
 
@@ -231,7 +201,6 @@ For in-progress runs, use `subscribe_events()` with `follow=True`:
 for event in astrid.subscribe_events(
     PROJECT_SLUG,
     RUN_ID,
-    projects_root=projects_root,
     follow=True,
     poll_interval=0.5,
 ):
@@ -249,16 +218,9 @@ from astrid import CapabilityPreconditionError, CapabilityEventLogError
 
 # Invalid project slug
 try:
-    astrid.read_events("bad/slug", RUN_ID, projects_root=projects_root)
+    astrid.read_events("bad/slug", RUN_ID)
 except CapabilityPreconditionError as e:
     print(f"Precondition: {e}")
-
-# Corrupt event log
-try:
-    astrid.read_events(PROJECT_SLUG, RUN_ID, projects_root=projects_root,
-                       verify=True)
-except CapabilityEventLogError as e:
-    print(f"Event log error: {e}")
 ```
 
 ## Step 6 — Run the Complete Example
@@ -267,9 +229,8 @@ The checked-in example at
 [`examples/agentic_ux/agentic_ux.py`](../../examples/agentic_ux/agentic_ux.py)
 bundles Steps 1–5 into a single argparse-driven script.  It runs
 the full **discover → inspect → invoke → read-events** loop against
-`editorial.arrange`, uses the golden events fixture, and prints a
-deterministic JSON summary with four keys (`discovery`, `inspection`,
-`invocation`, `events`) to stdout.
+`editorial.arrange` and prints a deterministic JSON summary with four keys
+(`discovery`, `inspection`, `invocation`, `events`) to stdout.
 
 ```bash
 python3 examples/agentic_ux/agentic_ux.py \
@@ -299,12 +260,9 @@ user-facing workflows.
   user permissions.  Only invoke capabilities from packs you trust.
   Check `capability.handle.safety` for the `SafetyDeclaration` (network,
   API keys, external binaries, project-file access).
-- **Read-only event access**: `read_events()` and `subscribe_events()`
-  never modify event logs or project state, but they traverse the
-  `projects_root` you provide — only pass paths you control.
-- **Golden fixture**: `examples/agentic_ux/fixtures/golden_events.jsonl`
-  contains hash-chained records with fixed timestamps.  No API keys,
-  machine-specific paths, or secrets — safe for CI.
+- **Runtime event access**: `read_events()` and `subscribe_events()` are
+  read-only generated-client calls to the workspace runtime; no local event
+  file, database, or cache is consulted.
 - **Capability provenance**: inspect `capability.handle.provenance`
   (`.source`, `.pack_id`, `.manifest_path`) before invoking in production.
 

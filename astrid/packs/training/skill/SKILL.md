@@ -10,8 +10,9 @@ description: >
 # Training
 
 The training pack assembles video training datasets and runs LoRA training jobs.
-It builds clip pools, merges them, searches Hugging Face for LoRAs, manages an
-asset cache, and orchestrates end-to-end training runs on RunPod GPUs.
+It builds clip pools, merges them, searches Hugging Face for LoRAs, and
+orchestrates end-to-end training runs on RunPod GPUs. Media inputs must first
+be admitted by the runtime; this pack does not own a URL or filesystem cache.
 
 ## Executors
 
@@ -20,7 +21,6 @@ asset cache, and orchestrates end-to-end training runs on RunPod GPUs.
 | `training.pool_build` | Build the candidate clip pool from triaged source-video scenes. Pipeline step 7. |
 | `training.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. Pipeline step 8. |
 | `training.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
-| `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 
 ## Orchestrators
 
@@ -74,9 +74,6 @@ result = sdk.invoke(
     inputs={"base_model": "black-forest-labs/FLUX.1-dev"},
     out="./loras.json",
 )
-
-# Manage asset cache
-result = sdk.invoke("training.asset_cache", inputs={"action": "list"})
 
 # Build a training dataset
 result = sdk.invoke(

@@ -10,7 +10,7 @@ from astrid import audit
 from astrid.core.audit import AuditContext
 
 
-def test_audit_registers_asset_graph_and_report(tmp_path: Path) -> None:
+def test_audit_collects_ephemeral_provenance_without_ledger(tmp_path: Path) -> None:
     run = tmp_path / "run"
     artifact = run / "frames" / "frame.txt"
     artifact.parent.mkdir(parents=True)
@@ -21,19 +21,11 @@ def test_audit_registers_asset_graph_and_report(tmp_path: Path) -> None:
     output_id = ctx.register_asset(kind="text", path=artifact, label="Output", parents=[source_id])
     ctx.register_node(stage="demo", parents=[source_id], outputs=[output_id])
 
-    events = audit.load_ledger(run)
-    graph = audit.build_graph(events)
-    assert {node["id"] for node in graph["nodes"]} >= {source_id, output_id}
-    assert {"from": source_id, "to": output_id} in graph["edges"]
-
-    report = audit.write_report(run)
-    assert report == run / "audit" / "report.html"
-    html = report.read_text(encoding="utf-8")
-    assert "hello audit" in html
-    assert "Asset Journey" in html
+    assert [row["asset_id"] for row in ctx.records if "asset_id" in row] == [source_id, output_id]
+    assert not (run / "audit" / "ledger.jsonl").exists()
 
 
-def test_graph_collapses_duplicate_stable_ids_and_dedupes_edges(tmp_path: Path) -> None:
+def test_ephemeral_provenance_ids_are_stable(tmp_path: Path) -> None:
     run = tmp_path / "run"
     artifact = run / "asset.txt"
     artifact.parent.mkdir(parents=True)
@@ -44,13 +36,9 @@ def test_graph_collapses_duplicate_stable_ids_and_dedupes_edges(tmp_path: Path) 
     artifact.write_text("v2", encoding="utf-8")
     second_id = ctx.register_asset(kind="text", path=artifact, label="Output", parents=[parent_id])
 
-    graph = audit.build_graph(audit.load_ledger(run))
-
     assert first_id == second_id
-    assert [node["id"] for node in graph["nodes"]].count(first_id) == 1
-    assert graph["edges"].count({"from": parent_id, "to": first_id}) == 1
-    latest = next(node for node in graph["nodes"] if node["id"] == first_id)
-    assert latest["preview"]["text"] == "v2"
+    assert len(ctx.records) == 3
+    assert not (run / "audit" / "ledger.jsonl").exists()
 
 
 def test_audit_redacts_secret_like_values(tmp_path: Path) -> None:
@@ -59,23 +47,14 @@ def test_audit_redacts_secret_like_values(tmp_path: Path) -> None:
         stage="secret-test",
         metadata={"OPENAI_API_KEY": "sk-testsecret1234567890", "nested": {"token": "hf_abcdefghijklmnop"}},
     )
-    event = json.loads(ctx.ledger_path.read_text(encoding="utf-8").splitlines()[0])
+    event = ctx.records[0]
     assert event["metadata"]["OPENAI_API_KEY"] == "<redacted>"
     assert event["metadata"]["nested"]["token"] == "<redacted>"
 
 
-def test_pipeline_audit_cli_json(tmp_path: Path, capsys) -> None:
-    pytest.importorskip("jsonschema")
-    # The legacy gateway `audit` verb was retired with the 8-family CLI; the
-    # audit CLI now lives at astrid.core.audit.cli.main.
-    from astrid.core.audit.cli import main as audit_main
-
-    ctx = AuditContext.for_run(tmp_path / "run")
-    asset_id = ctx.register_asset(kind="source", label="Only source")
-
-    assert audit_main(["--run", str(tmp_path / "run"), "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert any(node["id"] == asset_id for node in payload["nodes"])
+def test_pipeline_audit_cli_is_retired() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        __import__("astrid.core.audit.cli")
 
 
 def test_pipeline_audit_env_propagation_and_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -107,8 +86,7 @@ def test_pipeline_audit_env_propagation_and_fallback(monkeypatch, tmp_path: Path
 
     assert pipeline.run_step(step, step.build_cmd(args), args) == 0
     assert (out / "sentinel.txt").read_text(encoding="utf-8") == str(out)
-    events = [json.loads(line) for line in (out / "audit" / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert any(event.get("registration_source") == "pipeline_fallback" for event in events)
+    assert not (out / "audit" / "ledger.jsonl").exists()
 
 
 def test_ambient_register_outputs_from_producer(monkeypatch, tmp_path: Path) -> None:
@@ -121,9 +99,7 @@ def test_ambient_register_outputs_from_producer(monkeypatch, tmp_path: Path) -> 
 
     scenes.write_outputs([{"index": 1, "start": 0.0, "end": 1.0, "duration": 1.0}], json_path, csv_path)
 
-    events = [json.loads(line) for line in (run / "audit" / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert any(event.get("kind") == "scenes" and event.get("path") == "scenes.json" for event in events)
-    assert any(event.get("event") == "node.created" and event.get("stage") == "scenes" for event in events)
+    assert not (run / "audit" / "ledger.jsonl").exists()
 
 
 def test_ambient_register_outputs_inherits_parent_ids(monkeypatch, tmp_path: Path) -> None:
@@ -136,9 +112,7 @@ def test_ambient_register_outputs_inherits_parent_ids(monkeypatch, tmp_path: Pat
 
     scenes.write_outputs([{"index": 1, "start": 0.0, "end": 1.0, "duration": 1.0}], run / "scenes.json", run / "scenes.csv")
 
-    graph = audit.build_graph(audit.load_ledger(run))
-    scenes_node = next(node for node in graph["nodes"] if node.get("kind") == "scenes")
-    assert {"from": parent_id, "to": scenes_node["id"]} in graph["edges"]
+    assert not (run / "audit" / "ledger.jsonl").exists()
 
 
 def test_shots_writes_universal_result_manifest(tmp_path: Path) -> None:

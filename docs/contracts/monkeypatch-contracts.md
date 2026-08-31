@@ -18,7 +18,11 @@
 
 ---
 
-## 1. session/cli
+## 1. retired session/cli (historical test inventory)
+
+These historical patch paths are no longer supported. Stage1 removed the
+session path helpers and session-binding authority; new tests must inject a
+runtime client instead of restoring these dotted paths.
 
 | Dotted path / attribute | Test file : line | Symbol pinned | How patched |
 |---|---|---|---|
