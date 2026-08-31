@@ -8,31 +8,6 @@ from pathlib import Path
 
 PROJECTS_ROOT_ENV = "ASTRID_PROJECTS_ROOT"
 
-ASTROID_DIR_NAME = ".astrid"
-ASTROID_DATABASE_NAME = "astrid.sqlite3"
-
-
-def _default_projects_root() -> Path:
-    # paths.py lives at astrid/core/project/paths.py -> parents[3] is the repo root.
-    repo_root = Path(__file__).resolve().parents[3]
-    if (repo_root / "pyproject.toml").is_file() or (repo_root / ".git").exists():
-        return repo_root / "projects"
-    # Installed outside a source checkout: fall back to a stable home location.
-    return Path("~/.astrid/projects").expanduser()
-
-
-DEFAULT_PROJECTS_ROOT = _default_projects_root()
-
-
-def derive_database_path(projects_root: str | Path) -> Path:
-    """Return the kernel database path for a projects root.
-
-    The parent directory is intentionally not created by this pure path
-    helper; the writer/bootstrap boundary owns creation.
-    """
-
-    return Path(projects_root) / ASTROID_DIR_NAME / ASTROID_DATABASE_NAME
-
 _SLUG_RE = re.compile(r"^(?=.{1,63}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _EXPERIMENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -44,7 +19,12 @@ class ProjectPathError(ValueError):
 
 def resolve_projects_root(root: str | Path | None = None) -> Path:
     raw = root if root is not None else os.environ.get(PROJECTS_ROOT_ENV)
-    path = Path(raw) if raw else DEFAULT_PROJECTS_ROOT
+    if not raw:
+        raise ProjectPathError(
+            "an explicit projects root or ASTRID_PROJECTS_ROOT is required; "
+            "project paths never fall back to the checkout or home directory"
+        )
+    path = Path(raw)
     return path.expanduser().resolve()
 
 

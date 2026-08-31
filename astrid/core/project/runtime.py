@@ -8,7 +8,6 @@ run-ledger access.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -69,7 +68,11 @@ def step_dir_for(
     paths.validate_run_id(plan_step_id)
     if not isinstance(step_version, int) or isinstance(step_version, bool) or step_version < 1:
         raise ProjectRuntimeError("step_version must be an int >= 1")
-    base = Path(root).expanduser().resolve() if root is not None else Path.cwd().resolve()
+    if root is None:
+        raise ProjectRuntimeError(
+            "runtime staging requires an explicit projects root; cwd is not a project authority"
+        )
+    base = Path(root).expanduser().resolve()
     return base / ".astrid-runtime-staging" / slug / run_id / "steps" / plan_step_id / f"v{step_version}"
 
 

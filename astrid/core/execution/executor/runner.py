@@ -32,8 +32,8 @@ from astrid.core.contracts.project_theme import ProjectStyleSnapshot
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
+from astrid.core.foundation.hash import executor_definition_digest
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.io.cas import executor_definition_digest
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,

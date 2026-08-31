@@ -33,7 +33,6 @@ Pack / worker write paths use:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,7 +41,6 @@ from astrid.core._shared.jsonio import read_json
 from astrid.core.contracts.errors import AstridError
 from astrid.core.events.registry import validate_event_kind
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
-from astrid.core.store.writer import DatabaseWriter
 
 from .eventlog import EventLogBackend, select_timeline_backend
 from .events.schema import TimelineActor, TimelineEvent
@@ -295,9 +293,6 @@ def pack_write_gateway(
     actor_display: str | None = None,
     actor_via: TimelineActor | None = None,
     root: str | Path | None = None,
-    writer: DatabaseWriter | None = None,
-    timeline_repository: Any | None = None,
-    timeline_stream_type: str | None = None,
 ) -> PackWriteResult:
     """Centralized append-then-materialize gateway for pack / worker writes.
 
@@ -343,21 +338,6 @@ def pack_write_gateway(
         provenance (e.g. the human or agent that launched the pack).
     root:
         Project root override.
-    writer:
-        Optional kernel :class:`~astrid.core.store.writer.DatabaseWriter`.
-        When supplied, every ``timeline.config_replaced`` event is
-        additionally committed to the **kernel timeline store** through
-        :meth:`astrid.packs.timeline.repository.TimelineRepository.replace_config`
-        (the declared ``timeline.replace_config`` command) inside one
-        ``UnitOfWork(writer)`` per event, with receipt key
-        ``timeline.replace_config:{timeline_id}:{expected_version}`` —
-        committed **before** the eventlog append (fail-closed: no eventlog
-        event without its kernel receipt). The kernel commit itself runs
-        only after the identity-backed eventlog backend has been resolved
-        and validated, so a backend failure raises with zero mutation on
-        either side. When omitted (packs running
-        without kernel access), the gateway keeps its eventlog-only
-        behavior and no kernel receipt is written.
 
     Returns
     -------
@@ -426,84 +406,7 @@ def pack_write_gateway(
     #     effects, so an append-incapable backend raises before mutation.
     backend.preflight_append(actor=actor, kinds=[spec["kind"] for spec in events])
 
-    # 3. Kernel replace_config commit (m2): when the caller supplies a
-    # kernel writer, every timeline.config_replaced event is additionally
-    # committed to the kernel timeline store through the repository command
-    # (receipt + timeline.config_replaced event) inside one UnitOfWork per
-    # event, BEFORE the eventlog append. This commit runs only AFTER the
-    # eventlog backend has been resolved and validated (step 2), so a
-    # backend failure raises with zero mutation — no orphaned kernel
-    # receipt, no kernel/eventlog divergence. The kernel timeline must
-    # already exist for the project+slug (created through the SDK/kernel
-    # surface); the repository's own not-found/version fences fail closed.
-    # Imports are deferred so this core module never imports
-    # ``astrid.packs`` at module scope.
-    if writer is not None:
-        if timeline_repository is None or not timeline_stream_type:
-            raise TimelineEditError(
-                "pack_write_gateway: a kernel writer requires the injected "
-                "timeline_repository and timeline_stream_type (kernel modules "
-                "must not import astrid.packs)"
-            )
-        from astrid.core.events.service import EventAppendService
-        from astrid.core.receipts.service import ReceiptService
-        from astrid.core.repositories.projects import ProjectRepository
-        from astrid.core.store.uow import UnitOfWork
-
-        kernel_events = EventAppendService(registry)
-        kernel_receipts = ReceiptService()
-        kernel_projects = ProjectRepository(
-            events=kernel_events, receipts=kernel_receipts
-        )
-        kernel_timelines = timeline_repository
-        project_id = kernel_projects.resolve(writer, project_slug)
-
-        def _commit_replace_config(payload: Mapping[str, Any]) -> None:
-            def run(uow: UnitOfWork) -> None:
-                timeline_id = kernel_timelines._resolve_id(
-                    uow, project_id, timeline_slug
-                )
-                head = uow.query_one(
-                    "SELECT head_seq FROM event_streams WHERE id = ?",
-                    (f"{timeline_id}:{timeline_stream_type}",),
-                )
-                if head is None:
-                    raise TimelineEditError(
-                        f"timeline {timeline_slug!r} in project "
-                        f"{project_slug!r} has no kernel event stream"
-                    )
-                config = payload.get("config", {})
-                registry = payload.get("asset_registry")
-                if registry is None:
-                    registry = {"assets": {}}
-                if not isinstance(config, Mapping):
-                    raise TimelineEditError(
-                        "config_replaced payload.config must be a JSON object"
-                    )
-                if not isinstance(registry, Mapping):
-                    raise TimelineEditError(
-                        "config_replaced payload.asset_registry must be a "
-                        "JSON object"
-                    )
-                kernel_timelines.replace_config(
-                    uow,
-                    project_id=project_id,
-                    ref=timeline_slug,
-                    config=dict(config),
-                    registry=dict(registry),
-                    expected_version=int(head["head_seq"]),
-                    idempotency_key=(
-                        f"timeline.replace_config:{timeline_id}:{head['head_seq']}"
-                    ),
-                )
-
-            UnitOfWork(writer).run(run)
-
-        for event_spec in events:
-            if event_spec["kind"] == "timeline.config_replaced":
-                _commit_replace_config(event_spec.get("payload", {}))
-
-    # 4. Append domain events (batch — no per-event materialization).
+    # 3. Append domain events (batch — no per-event materialization).
     event_ids: list[str] = []
     for event_spec in events:
         kind = event_spec["kind"]

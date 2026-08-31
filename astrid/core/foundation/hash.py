@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
+from typing import Any
 
 
 def sha256_file(path: Path) -> str:
@@ -16,4 +18,17 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-__all__ = ["sha256_file"]
+def canonical_json_digest(obj: Any) -> str:
+    """Return the stable digest used by protocol identity contracts."""
+
+    raw = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def executor_definition_digest(executor_def: Any) -> str:
+    """Digest an executor definition without consulting storage."""
+
+    return canonical_json_digest(executor_def.to_dict())
+
+
+__all__ = ["canonical_json_digest", "executor_definition_digest", "sha256_file"]

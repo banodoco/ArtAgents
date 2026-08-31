@@ -1,10 +1,9 @@
-"""Stable I/O primitives.
+"""Neutral I/O namespace.
 
-Content-addressable storage for produces artifacts and related I/O utilities.
+Durable artifact storage is owned by the workspace runtime.  Product code must
+not import a local CAS implementation from this package.
 """
 
 from __future__ import annotations
 
-from .cas import cas_dir, cas_path, hash_file, intern, link_into_produces
-
-__all__ = ["cas_dir", "cas_path", "hash_file", "intern", "link_into_produces"]
+__all__: list[str] = []

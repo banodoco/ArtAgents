@@ -1,13 +1,10 @@
-"""Command receipt kernel: canonical request hashing and idempotency.
+"""Pure command-receipt contract helpers.
 
-``canonical`` provides bounded canonical JSON encoding and semantic request
-hashing; ``service`` persists and replays ``command_receipts`` rows inside
-the kernel unit of work (m1 plan step 9).
+Receipt persistence and replay are runtime operations; this package contains
+only the wire contract and canonicalization primitives.
 """
 
 from __future__ import annotations
-
-import importlib
 
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -22,30 +19,12 @@ from astrid.core.receipts.canonical import (
     strip_generated_fields,
 )
 
-_SERVICE_EXPORTS = {
-    "ReceiptError",
-    "ReceiptMismatchError",
-    "ReceiptService",
-    "ReceiptValidationError",
-}
-
-
-def __getattr__(name: str):
-    """Load persistence-backed receipt services only when requested."""
-    if name in _SERVICE_EXPORTS:
-        return getattr(importlib.import_module("astrid.core.receipts.service"), name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 __all__ = [
     "CanonicalizationError",
     "GENERATED_FIELD_NAMES",
     "MAX_CANONICAL_DEPTH",
     "MAX_CANONICAL_INPUT_BYTES",
     "MAX_CANONICAL_OUTPUT_BYTES",
-    "ReceiptError",
-    "ReceiptMismatchError",
-    "ReceiptService",
-    "ReceiptValidationError",
     "canonical_bytes",
     "canonical_json",
     "parse_json",

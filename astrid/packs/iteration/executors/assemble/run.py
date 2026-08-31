@@ -22,6 +22,7 @@ from astrid.core import modalities, timeline
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.managed_binding import is_managed_mode
+
 SCHEMA_VERSION = 1
 
 QUALITY_FLOOR = 0.6
@@ -84,7 +85,6 @@ def _get_managed_actor_via() -> Any | None:
 def _emit_assemble_managed_events(
     project_slug: str, timeline_slug: str, timeline_config: dict[str, Any],
     *, actor_via: Any | None = None,
-    kernel_binding_factory: Any | None = None,
 ) -> int:
     """Emit timeline.config_replaced event through the pack write gateway.
 
@@ -107,10 +107,6 @@ def _emit_assemble_managed_events(
 
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
-    from astrid.core.timeline.kernel_binding import (
-        close_kernel_binding,
-        gateway_kernel_kwargs,
-    )
 
     actor = TimelineActor(
         type="system",
@@ -125,25 +121,14 @@ def _emit_assemble_managed_events(
             "payload": {"config": config},
         }
     ]
-    # Runtime-owned executions do not discover or compose a local kernel.
-    # Tests/attempt-local callers may inject an explicit binding factory.
-    binding = (
-        kernel_binding_factory(project_slug, timeline_slug)
-        if kernel_binding_factory is not None
-        else None
+    result = pack_write_gateway(
+        project_slug=project_slug,
+        timeline_slug=timeline_slug,
+        timeline_ulid="",
+        timeline_event_stream_id="",
+        events=events,
+        actor=actor,
     )
-    try:
-        result = pack_write_gateway(
-            project_slug=project_slug,
-            timeline_slug=timeline_slug,
-            timeline_ulid="",
-            timeline_event_stream_id="",
-            events=events,
-            actor=actor,
-            **gateway_kernel_kwargs(binding),
-        )
-    finally:
-        close_kernel_binding(binding)
     return result.new_version
 
 

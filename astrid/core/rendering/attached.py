@@ -23,7 +23,6 @@ from astrid.core.execution.executor.registry import ExecutorRegistry, load_defau
 from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.foundation.project_paths import resolve_projects_root, validate_run_id
-from astrid.core.io.cas import link_into_produces
 from astrid.core.project.runtime import ProjectRuntimeError, step_dir_for
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
@@ -250,7 +249,10 @@ def _record_step_outputs(step_root: Path, *, video: Path, provenance: Path) -> N
         target = produces / source.name
         if source == target:
             continue
-        link_into_produces(source, target)
+        # The runtime owns durable artifact storage.  Attached execution only
+        # creates an attempt-local output link; it never opens a local CAS.
+        rel = os.path.relpath(source, target.parent)
+        os.symlink(rel, target)
 
 
 __all__ = ["AttachedRenderError", "invoke_attached_render"]

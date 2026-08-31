@@ -1889,7 +1889,7 @@ def invoke(
     )
     kernel_capability_version: str | None = None
     if capability.capability_type == "executor":
-        from astrid.core.io.cas import executor_definition_digest
+        from astrid.core.foundation.hash import executor_definition_digest
 
         executor_registry, _, _ = registries
         kernel_capability_version = executor_definition_digest(executor_registry.get(capability.id))

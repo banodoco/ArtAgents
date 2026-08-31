@@ -3,7 +3,7 @@
 Plan step 6's boundary: the adapter is **pack code** — kernel code never
 imports it, and the adapter never imports kernel executor internals. It
 implements the injected kernel handler protocol
-(:class:`astrid.core.task_executor.service.TaskHandler`) by duck typing and
+the runtime task-handler protocol by duck typing and
 runs the real image-generation pipeline in-process:
 
 1. **Immutable task spec.** The task's immutable ``spec`` carries the
@@ -36,7 +36,7 @@ runs the real image-generation pipeline in-process:
 
 Import direction is exact: the adapter imports only kernel *public* helpers
 (``astrid.core.pack.entrypoint``, ``astrid.core.generation``) and its own
-pack's ``run`` module; it never imports ``astrid.core.task_executor`` and
+pack's ``run`` module; it never imports a local task executor and
 nothing in the kernel imports this module.
 """
 
@@ -205,7 +205,7 @@ class GenerateImageAdapter:
     Construct with the assigned managed projects root (the same root the
     kernel media staging and managed publication use); the caller injects
     the instance into :meth:`ExecutionService.execute` exactly like any
-    other :class:`~astrid.core.task_executor.service.TaskHandler`.
+    other runtime task handler.
     """
 
     def __init__(self, *, projects_root: str | Path) -> None:

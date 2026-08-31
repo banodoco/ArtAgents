@@ -43,12 +43,14 @@ def workspace_config_path(cwd: str | Path | None = None) -> Path:
         return Path(override).expanduser().resolve() / WORKSPACE_CONFIG_FILENAME
     if cwd is None:
         projects_root = os.environ.get(ASTRID_PROJECTS_ROOT_ENV)
-        if projects_root:
-            base = Path(projects_root).expanduser().resolve()
-        else:
-            base = Path.cwd()
+        if not projects_root:
+            raise ValueError(
+                "workspace config path requires an explicit cwd, "
+                "ASTRID_WORKSPACE_CONFIG_DIR, or ASTRID_PROJECTS_ROOT"
+            )
+        base = Path(projects_root).expanduser().resolve()
     else:
-        base = Path(cwd)
+        base = Path(cwd).expanduser().resolve()
     return base / WORKSPACE_CONFIG_DIRNAME / WORKSPACE_CONFIG_FILENAME
 
 

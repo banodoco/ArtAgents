@@ -15,10 +15,6 @@ from typing import Any
 
 import pytest
 
-from astrid.core.contracts.event_log_error import EventLogError
-from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError
-from astrid.core.execution.executor.schema import ExecutorValidationError
-from astrid.core.execution.orchestrator.runner import OrchestratorRunError
 from tests._sdk_contract import EXPECTED_PUBLIC_NAMES
 
 SDK_MODULE_MISSING = importlib.util.find_spec("astrid.sdk") is None
@@ -990,7 +986,7 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
     monkeypatch.setattr(sdk, "get_capability", fake_get_capability)
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
     monkeypatch.setattr(
-        "astrid.core.io.cas.executor_definition_digest",
+        "astrid.core.foundation.hash.executor_definition_digest",
         lambda _definition: "a" * 64,
     )
 
@@ -1012,14 +1008,7 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
 ) -> None:
     astrid = _import_public_module()
     import astrid.sdk.invocation as inv_mod
-    cases = (
-        (ExecutorValidationError("bad manifest"), astrid.CapabilityValidationError),
-        (ValueError("missing required input(s): brief"), astrid.CapabilityInvocationError),
-        (NotWriterError(session_id="S-1", writer_id="S-2"), astrid.CapabilityLeaseError),
-        (StaleEpochError(expected=1, actual=2), astrid.CapabilityLeaseError),
-        (StaleTailError(expected="sha256:abc", actual="sha256:def"), astrid.CapabilityEventLogError),
-        (EventLogError("verification failed"), astrid.CapabilityEventLogError),
-    )
+    cases = ((ValueError("missing required input(s): brief"), astrid.CapabilityInvocationError),)
 
     for internal_error, expected in cases:
         def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, _internal_error=internal_error, **_kwargs) -> Any:

@@ -16,8 +16,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar, Literal, NoReturn, TypeAlias
 
-from astrid.core.foundation.hash import sha256_file
-from astrid.core.io.cas import canonical_json_digest
+from astrid.core.foundation.hash import canonical_json_digest, sha256_file
 
 
 SCHEMA_VERSION = 1

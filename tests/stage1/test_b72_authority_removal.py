@@ -103,18 +103,7 @@ def test_product_parsers_have_no_repository_imports() -> None:
         assert not any(module.endswith(".repository") for module in imported), relative
 
 
-def test_shots_repository_module_has_no_sqlite_authority_import() -> None:
-    source = _source("astrid/packs/shots/repository.py")
-    tree = ast.parse(source)
-    imported = {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    assert "sqlite3" not in imported
-    assert "astrid.core.store.writer" not in {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module
-    }
+def test_removed_repository_modules_are_absent() -> None:
+    root = Path(__file__).resolve().parents[2]
+    assert not (root / "astrid/packs/shots/repository.py").exists()
+    assert not (root / "astrid/core/repositories").exists()

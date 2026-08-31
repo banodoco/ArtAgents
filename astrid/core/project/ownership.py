@@ -31,12 +31,11 @@ def require_project_owned_artifact(
     must live under ``experiments`` and experiment run roots under ``runs``.
     """
 
-    project_root = project_paths.project_dir(project_slug, root=root).resolve()
-    if not (project_root / "project.json").is_file():
+    if root is None:
         raise ProjectOwnershipError(
-            f"project not found: {project_slug}",
-            recovery_command=f"python3 -m astrid projects create {project_slug}",
+            "project-owned artifact checks require an explicit runtime root"
         )
+    project_root = project_paths.project_dir(project_slug, root=root).resolve()
 
     normalized_type = artifact_type.strip().lower().replace("-", "_")
     if normalized_type == "experiment" or normalized_type.startswith("experiment/"):
@@ -50,7 +49,10 @@ def require_project_owned_artifact(
 
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
+        raise ProjectOwnershipError(
+            f"{artifact_type} input must be an absolute runtime-owned path",
+            recovery_command=f"provide an absolute path under {owned_root}",
+        )
     candidate = candidate.resolve(strict=False)
     try:
         candidate.relative_to(owned_root)

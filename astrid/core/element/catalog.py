@@ -53,12 +53,8 @@ def resolve_active_theme(
     raw = os.environ.get(ACTIVE_THEME_ENV)
     if raw:
         return resolve_theme_dir(raw)
-    if project_slug:
-        from astrid.core.project.project import get_project_theme
-
-        theme = get_project_theme(project_slug, root=root)
-        if theme:
-            return resolve_theme_dir(theme)
+    # Project theme selection is runtime metadata.  The catalog remains a
+    # pure source-checkout/theme lookup and never reads project.json.
     return None
 
 

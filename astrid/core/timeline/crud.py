@@ -16,7 +16,6 @@ except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
 from astrid.core._shared.jsonio import read_json, write_json_atomic
-from astrid.core.project.project import load_project, require_project
 from astrid.core.ids import generate_ulid
 from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
@@ -84,7 +83,6 @@ def create_timeline(
     Milestone 1 keeps create on the legacy write path. This seeds the identity
     sidecar for later eventlog use, but it does not emit ``timeline.created``.
     """
-    require_project(project_slug, root=root)
     slug = validate_timeline_slug(slug)
     human_name = name or slug
 
@@ -130,9 +128,6 @@ def create_timeline(
         },
     )
 
-    if is_default:
-        _set_project_default(project_slug, ulid, root=root)
-
     return {
         "ulid": ulid,
         "slug": slug,
@@ -157,9 +152,6 @@ def list_timelines(
     td = timelines_dir(project_slug, root=root)
     if not td.is_dir():
         return []
-
-    project = load_project(project_slug, root=root)
-    default_ulid = project.get("default_timeline_id")
 
     rows: list[TimelineSummary] = []
     for child in sorted(td.iterdir()):
@@ -202,7 +194,7 @@ def list_timelines(
                 ulid=ulid,
                 slug=display.slug,
                 name=display.name,
-                is_default=(ulid == default_ulid),
+                is_default=display.is_default,
                 run_count=run_count,
                 final_output_count=final_output_count,
                 last_finalized=last_finalized,
@@ -576,9 +568,13 @@ def purge_timeline(
 
     ulid, tdir = found
 
-    # Refuse if this is the project default.
-    project = load_project(project_slug, root=root)
-    if project.get("default_timeline_id") == ulid:
+    # The runtime owns the canonical default; this local projection flag is
+    # the only state used by file-backed timeline tooling.
+    try:
+        is_default = Display.from_json(tdir / "display.json").is_default
+    except (TimelineValidationError, OSError):
+        is_default = False
+    if is_default:
         raise TimelineCrudError(
             f"timeline '{slug}' is the project default; "
             f"set another timeline as default first with 'astrid timelines set-default <other>'"
@@ -613,24 +609,21 @@ def set_default(
 
     new_ulid, new_tdir = found
 
-    # Clear old default.
-    project = load_project(project_slug, root=root)
-    old_ulid = project.get("default_timeline_id")
-    if old_ulid is not None and old_ulid != new_ulid:
-        old_dp = display_path(project_slug, old_ulid, root=root)
-        if old_dp.is_file():
-            try:
-                old_display = Display.from_json(old_dp)
-            except (TimelineValidationError, OSError):
-                old_display = None
-            if old_display is not None and old_display.is_default:
-                cleared = Display(
-                    schema_version=TIMELINE_SCHEMA_VERSION,
-                    slug=old_display.slug,
-                    name=old_display.name,
-                    is_default=False,
-                )
-                cleared.write(old_dp)
+    # Clear old defaults in the local display projections only.
+    for prior in list_timelines(project_slug, root=root, include_tombstoned=True):
+        if not prior.is_default or prior.ulid == new_ulid:
+            continue
+        old_dp = display_path(project_slug, prior.ulid, root=root)
+        try:
+            old_display = Display.from_json(old_dp)
+        except (TimelineValidationError, OSError):
+            continue
+        Display(
+            schema_version=TIMELINE_SCHEMA_VERSION,
+            slug=old_display.slug,
+            name=old_display.name,
+            is_default=False,
+        ).write(old_dp)
 
     # Set new default.
     new_dp = new_tdir / "display.json"
@@ -643,28 +636,9 @@ def set_default(
     )
     updated.write(new_dp)
 
-    # Update project.json.
-    _set_project_default(project_slug, new_ulid, root=root)
-
     return {"ulid": new_ulid, "slug": slug, "display": updated}
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _set_project_default(
-    project_slug: str,
-    ulid: str,
-    *,
-    root: str | Path | None = None,
-) -> None:
-    """Rewrite ``project.json`` so ``default_timeline_id`` points at *ulid*."""
-    from astrid.core.foundation.project_paths import project_json_path
-    from astrid.core.project.schema import validate_project
-
-    pp = project_json_path(project_slug, root=root)
-    payload = validate_project(read_json(pp))
-    payload["default_timeline_id"] = ulid
-    write_json_atomic(pp, validate_project(payload))

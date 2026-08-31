@@ -100,8 +100,8 @@ def test_generic_host_import_does_not_load_execution_storage_authority() -> None
     assert result.stdout.splitlines() == ["False", "False"]
 
 
-def test_task_executor_import_does_not_load_legacy_project_runtime() -> None:
-    """Importing the kernel task boundary must not pull project-run/thread code."""
+def test_project_cli_import_does_not_load_local_authority() -> None:
+    """The supported project CLI is a runtime-client adapter only."""
 
     root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
@@ -109,10 +109,12 @@ def test_task_executor_import_does_not_load_legacy_project_runtime() -> None:
             sys.executable,
             "-c",
             (
-                "import sys; import astrid.core.task_executor.service; "
-                "print('astrid.core.project.run' in sys.modules); "
-                "print(any(name.startswith('astrid.core.threads') for name in sys.modules)); "
-                "print('astrid.core.execution.executor.runner' in sys.modules)"
+                "import sys; import astrid.core.cli.domain_projects; "
+                "import astrid.sdk; import astrid.core.execution.generic_host; "
+                "print('sqlite3' in sys.modules); "
+                "print(any(name.startswith('astrid.core.store') or "
+                "name.startswith('astrid.core.repositories') or "
+                "name.startswith('astrid.core.io.cas') for name in sys.modules))"
             ),
         ],
         cwd=root,
@@ -120,7 +122,62 @@ def test_task_executor_import_does_not_load_legacy_project_runtime() -> None:
         text=True,
         check=True,
     )
-    assert result.stdout.splitlines() == ["False", "False", "False"]
+    assert result.stdout.splitlines() == ["False", "False"]
+
+
+def test_supported_runtime_surface_has_no_deleted_authority_modules() -> None:
+    """Importing supported SDK/CLI/host surfaces stays storage-free."""
+
+    root = Path(__file__).resolve().parents[2]
+    probe = (
+        "import sys; import astrid.sdk.client; "
+        "import astrid.core.cli.domain_projects; "
+        "import astrid.core.execution.generic_host; import astrid.core.project; "
+        "forbidden = ('sqlite3', 'astrid.core.store', 'astrid.core.repositories', "
+        "'astrid.core.kernel.read', 'astrid.core.io.cas', "
+        "'astrid.core.receipts.service', 'astrid.core.events.service'); "
+        "print([name for name in sys.modules if any(name == item or name.startswith(item + '.') for item in forbidden)])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"
+
+
+def test_project_cli_does_not_materialize_a_project_tree(tmp_path: Path) -> None:
+    """Project CLI parsing/dispatch delegates metadata to the runtime only."""
+
+    root = Path(__file__).resolve().parents[2]
+    trace_root = tmp_path / "ambient"
+    script = f"""
+from pathlib import Path
+from astrid.core.cli.domain_projects import build_parser
+from astrid.sdk.contracts import DomainResult
+
+class Projects:
+    def create(self, **kwargs): return DomainResult.success(kwargs, idempotency_key="probe")
+class Client:
+    projects = Projects()
+
+parser = build_parser(Client())
+args = parser.parse_args(["create", "demo", "--name", "Demo", "--json"])
+args.handler(args)
+root = Path({str(trace_root)!r})
+print(root.exists())
+print(sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.exists()) if root.exists() else [])
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines()[-2:] == ["False", "[]"]
 
 
 def test_normal_gateway_sdk_host_backup_timeline_imports_exclude_retired_bridge() -> None:

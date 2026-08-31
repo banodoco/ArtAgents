@@ -65,9 +65,6 @@ def test_normal_astrid_process_never_loads_the_standalone_migrator() -> None:
 def test_canonical_runtime_lanes_have_no_bridge_or_provider_residue() -> None:
     root = Path(__file__).resolve().parents[2]
     for rel in (
-        "astrid/packs/timeline/repository.py",
-        "astrid/packs/shots/repository.py",
-        "astrid/packs/references/repository.py",
         "astrid/core/rendering/remotion_runtime.py",
         "astrid/core/timeline/bundle.py",
         "astrid/core/migrations/runner.py",
