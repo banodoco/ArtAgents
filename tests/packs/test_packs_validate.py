@@ -269,8 +269,8 @@ agent:
         _write(
             root / "pack.yaml",
             """schema_version: 1
-id: builtin
-name: Builtin
+id: example_pack
+name: Example Pack
 version: 0.1.0
 content:
   executors: executors
@@ -278,7 +278,7 @@ content:
   elements: elements
 """,
         )
-        _write(root / "skill" / "SKILL.md", "# Builtin\n")
+        _write(root / "skill" / "SKILL.md", "# Example Pack\n")
 
         template_pairs = (
             ("docs/templates/executor/executor.yaml", "executors/example/executor.yaml"),

@@ -11,7 +11,7 @@ guide builds on the vocabulary in
 | Give a capability a second public name | Alias | In pack manifest | All consumers |
 | Make a local copy you can edit freely | Fork | On disk in local pack | Your project |
 | Redirect a capability id to a replacement | Override | `.overrides.json` in local pack | Your project |
-| Shadow a builtin with a local replacement | Override | `.overrides.json` in local pack | Your project |
+| Shadow a shipped capability with a local replacement | Override | `.overrides.json` in local pack | Your project |
 | Maintain backward-compat after renaming | Alias | In pack manifest | All consumers |
 | Expose an alternate qualified external capability id | Alias with the matching rendering `kind` | In pack manifest | All render-service callers |
 | Redirect one rendering implementation to another | Typed override | `.overrides.json` in local pack | Facade and direct-service calls in your project |
@@ -51,7 +51,7 @@ finalizer aliases are independent rendering-registry namespaces.
 # In astrid/packs/rendering/pack.yaml
 aliases:
   - kind: executor
-    alias: builtin.render
+    alias: legacy.render
     canonical_id: rendering.render
     deprecated: true
     deprecation_message: "Moved to rendering.render — update your references"
@@ -73,12 +73,12 @@ registered with their deprecation metadata and source pack id preserved. Both
 the executor and orchestrator registries wire aliases from discovered packs
 automatically — no separate registration step is needed.
 
-**Backward compatibility:** Old ids like `builtin.*`, `external.*`, and
-declared one-off aliases such as `upload.youtube` remain functional when
-declared as aliases. Registry lookup,
-`inspect --json`, and search all resolve the old id to the canonical definition
-and surface deprecation metadata. The old ids do not need their own capability
-definitions — they are pure alias entries.
+**Backward compatibility:** Old or alternate ids such as `legacy.render`,
+`external.render`, and declared one-off aliases such as `upload.youtube` remain
+functional when declared as aliases. Registry lookup, `inspect --json`, and
+search all resolve the alias to the canonical definition and surface
+deprecation metadata. Alias ids do not need their own capability definitions —
+they are pure alias entries.
 
 **Deprecation metadata is non-fatal.** A deprecated alias still resolves; the
 deprecation flag and message are informational, shown in `inspect` output and
@@ -148,7 +148,7 @@ a thread-safe in-memory mapping of `(type, id) → target_id`, persisted to
 consulted after alias resolution.
 
 **Canonical-id keying:** Override keys are the *canonical* capability id, not
-the alias. When a caller requests `builtin.render` (a legacy alias), the
+the alias. When a caller requests `legacy.render` (a legacy alias), the
 registry first resolves it to `rendering.render` (the canonical id), then
 checks the override store for `("executor", "rendering.render")`. This means
 one override covers all aliases that point to the same canonical target — you
@@ -175,7 +175,7 @@ maps canonical ids to their replacement ids per capability kind:
    `{"executor": {"rendering.render": "local.render"}}`.
 
 Now every consumer that references `rendering.render` (or its legacy alias
-`builtin.render`) gets your customized version transparently.
+`legacy.render`) gets your customized version transparently.
 
 **When to use:** You have a fork (or another pack's capability) and want it to
 be the default resolution for a given id.

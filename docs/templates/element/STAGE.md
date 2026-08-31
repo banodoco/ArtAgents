@@ -26,7 +26,7 @@ and declares a `runtime` adapter. This is the form that
   "schema_version": 1,
   "id": "example-card",
   "kind": "effect",
-  "pack_id": "builtin",
+  "pack_id": "example_pack",
   "inputs": [
     {
       "name": "clip",

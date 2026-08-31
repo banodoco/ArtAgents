@@ -53,7 +53,13 @@ The six DeepSeek agents converged at "HIGH confidence" and each wanted to bolt o
 
 ## 3. The one genuinely missing second primitive: scoped config
 
-A pure capability/artifact waist has **no home for ambient context**. Themes are exactly this need, implemented in the worst way: a module-global mutable `_ACTIVE_THEME_DIR` plus an `HYPE_ACTIVE_THEME` env var threaded into subprocess environments (`core/element/catalog.py`, `project/run.py:97`). A theme is a bundle of `{visual config + assets + element-overrides}`; the override part is just the kernel's `OverrideStore` relabeled.
+A pure capability/artifact waist has **no home for ambient context**. **Historical
+context (resolved by the Stage1 runtime cutover):** themes once used a
+module-global mutable theme directory plus an environment variable threaded
+into subprocess environments. That local authority is retired; current
+execution receives its runtime-owned scope through the workspace boundary. A
+theme is a bundle of `{visual config + assets + element-overrides}`; the
+override part is just the kernel's `OverrideStore` relabeled.
 
 At thousands of packs this generalizes to brand kits, render profiles, locale, safety policy, secrets — all **scoped configuration consumed by many capabilities, none of them a capability themselves**. Threading them as explicit `consumes` ports on every capability *recreates M×N*. So the contract needs exactly **one** more primitive beyond artifacts: **scoped config**, resolved by the kernel per scope (project/user/env) and injected where declared.
 
@@ -125,7 +131,8 @@ if cap is not None:                                    # known capability
 The validator no longer enumerates every effect. A third-party pack's effect is resolved + type-checked through the kernel, not discovered by re-listing. **This is the M×N→M+N proof in one file.** Highest-traffic name-wiring site; immediate, visible payoff; fully reversible.
 
 ### A4–A6 (defer to post-launch)
-- **A4** Scoped-config primitive; reimplement themes on it (kill `_ACTIVE_THEME_DIR` global + env threading); absorb secrets.
+- **A4** Scoped-config primitive; reimplement themes on it (remove the retired
+  module-global theme directory and environment threading); absorb secrets.
 - **A5** Strangler the remaining name-wired seams (orchestrator `child_executors`, model `param_map` → into adapters).
 - **A6** Collapse the registries onto the existing `CapabilityHandle` kernel; `kind` becomes a tag; delete element's per-kind fork/version/override/install (use shared `OverrideStore`).
 

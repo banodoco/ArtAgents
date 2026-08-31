@@ -269,7 +269,7 @@ a capability is renamed or moved to a different pack namespace.
 # In pack.yaml
 aliases:
   - kind: executor
-    alias: builtin.render
+    alias: legacy.render
     canonical_id: rendering.render
     deprecated: true
     deprecation_message: "Moved to rendering.render — update your references"

@@ -1,7 +1,7 @@
-# Built-In Dataset And Training Workflow
+# Dataset And Training Workflow
 
 This workflow is the canonical path for building a reviewed video dataset and
-training an LTX LoRA with the built-in tools. The surviving Seinfeld example
+training an LTX LoRA with Astrid's supported tools. The surviving Seinfeld example
 asset is `docs/examples/seinfeld/vocabulary.yaml`, which is used by the
 training config vocabulary path.
 
@@ -46,13 +46,13 @@ result = sdk.invoke(
         "config": "path/to/your/dataset-config.json",
         "review_decisions": "path/to/your/review-decisions.json",
     },
-    out="runs/builtin-training-fixture",
+    out="runs/training-fixture",
 )
 ```
 
 For unattended runs, pass `--review-decisions <json>`. Without that flag, the
-orchestrator starts `editorial.human_review` (legacy alias:
-`builtin.human_review`) with the generic review UI and waits for submit.
+orchestrator starts `editorial.human_review` with the generic review UI and
+waits for submit.
 
 The dataset run writes only inside the requested `--out` directory:
 

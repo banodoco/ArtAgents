@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "builtin.example_orchestrator",
+  "id": "example_pack.example_orchestrator",
   "name": "Example",
   "kind": "built_in",
   "version": "1.0",
@@ -13,20 +13,20 @@
       "argv": [
         "{python_exec}",
         "-m",
-        "astrid.packs.builtin.orchestrators.example.run",
+        "example_pack.orchestrators.example.run",
         "{orchestrator_args}"
       ]
     }
   },
   "child_executors": [
-    "builtin.example_executor"
+    "example_pack.example_executor"
   ],
   "child_orchestrators": [],
   "cache": {
     "mode": "none"
   },
   "metadata": {
-    "runtime_module": "astrid.packs.builtin.orchestrators.example.run",
+    "runtime_module": "example_pack.orchestrators.example.run",
     "runtime_file": "run.py"
   }
 }

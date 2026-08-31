@@ -64,14 +64,14 @@ Overrides are managed by editing `astrid/packs/local/.overrides.json`:
 - Remove when done — delete the entry.
 
 Now any code, orchestrator, or agent that asks for `rendering.render` (or its
-legacy alias `builtin.render`) gets `local.render` instead. The original is
+legacy alias `legacy.render`) gets `local.render` instead. The original is
 untouched.
 
 Overrides are persisted in `astrid/packs/local/.overrides.json` and survive
 restarts. The `OverrideStore` is thread-safe.
 
 Override keys are the *canonical* capability id, not the alias. When a caller
-requests `builtin.render` (a legacy alias), the registry first resolves it to
+requests `legacy.render` (a legacy alias), the registry first resolves it to
 `rendering.render` (the canonical id), then checks the override store. One
 override covers all aliases that point to the same canonical target.
 
@@ -83,7 +83,7 @@ override covers all aliases that point to the same canonical target.
    `{"executor": {"rendering.render": "local.render"}}`.
 
 Now every consumer that references `rendering.render` (or its legacy alias
-`builtin.render`) gets your customized version transparently.
+`legacy.render`) gets your customized version transparently.
 
 ## Detecting Local Edits (Dirty Check)
 

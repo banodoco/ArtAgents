@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "builtin.example_executor",
+  "id": "example_pack.example_executor",
   "name": "Example",
   "kind": "built_in",
   "version": "1.0",
@@ -25,7 +25,7 @@
     "argv": [
       "{python_exec}",
       "-m",
-      "astrid.packs.builtin.executors.example.run",
+      "example_pack.executors.example.run",
       "--input",
       "{input}",
       "--out",
@@ -40,7 +40,7 @@
     "network": false
   },
   "metadata": {
-    "runtime_module": "astrid.packs.builtin.executors.example.run",
+    "runtime_module": "example_pack.executors.example.run",
     "runtime_file": "run.py"
   }
 }
