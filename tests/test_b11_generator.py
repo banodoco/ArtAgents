@@ -84,3 +84,85 @@ def test_runtime_client_generator_check_rejects_client_and_manifest_mutation(tmp
     mutated_component.write_text(json.dumps(changed, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
     changed_check = [sys.executable, str(root / "scripts" / "generate_runtime_client.py"), "--contract", str(contract), "--schema-manifest", str(schema), "--component-manifest", str(mutated_component), "--check", "--source-root", str(source)]
     assert subprocess.run(changed_check, capture_output=True, text=True).returncode != 0
+
+
+def test_runtime_client_generator_check_rejects_source_path_escape(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    configured = os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
+    candidates = ([Path(configured).expanduser()] if configured else []) + sorted(root.parent.glob("*runtime*"))
+    runtime = next((candidate for candidate in candidates if (candidate / "contract" / "component-manifest.json").is_file()), None)
+    if runtime is None:
+        pytest.fail("set BANODOCO_RUNTIME_CHECKOUT or provide a sibling runtime checkout")
+    contract = runtime / "contract" / "openapi" / "workspace-v1.yaml"
+    schema = runtime / "contract" / "manifest.json"
+    original = json.loads((runtime / "contract" / "component-manifest.json").read_text())
+    source = tmp_path / "source"
+    source.mkdir()
+
+    for index, (field, escaped) in enumerate(
+        (candidate for field in ("source", "metadata_source") for candidate in ((field, "../outside.py"), (field, str(tmp_path / "absolute.py"))))
+    ):
+        changed = json.loads(json.dumps(original))
+        for client in changed["clients"]:
+            if client["generator"] == "GENERATOR-PYTHON-ASTRID":
+                client[field] = escaped
+        component = tmp_path / f"component-{index}.json"
+        component.write_text(json.dumps(changed, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+        command = [
+            sys.executable,
+            str(root / "scripts" / "generate_runtime_client.py"),
+            "--contract",
+            str(contract),
+            "--schema-manifest",
+            str(schema),
+            "--component-manifest",
+            str(component),
+            "--check",
+            "--source-root",
+            str(source),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode != 0
+        expected_label = "client source" if field == "source" else "metadata source"
+        assert expected_label in result.stderr
+
+
+def test_runtime_client_generator_check_rejects_source_symlink_escape(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    configured = os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
+    candidates = ([Path(configured).expanduser()] if configured else []) + sorted(root.parent.glob("*runtime*"))
+    runtime = next((candidate for candidate in candidates if (candidate / "contract" / "component-manifest.json").is_file()), None)
+    if runtime is None:
+        pytest.fail("set BANODOCO_RUNTIME_CHECKOUT or provide a sibling runtime checkout")
+    contract = runtime / "contract" / "openapi" / "workspace-v1.yaml"
+    schema = runtime / "contract" / "manifest.json"
+    original = json.loads((runtime / "contract" / "component-manifest.json").read_text())
+    for index, field in enumerate(("source", "metadata_source")):
+        changed = json.loads(json.dumps(original))
+        source = tmp_path / f"source-{index}"
+        source.mkdir()
+        outside = tmp_path / f"outside-{index}"
+        outside.mkdir()
+        (source / "linked").symlink_to(outside, target_is_directory=True)
+        for client in changed["clients"]:
+            if client["generator"] == "GENERATOR-PYTHON-ASTRID":
+                client[field] = "linked/runtime_client.py"
+        component = tmp_path / f"component-symlink-{index}.json"
+        component.write_text(json.dumps(changed, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+        command = [
+            sys.executable,
+            str(root / "scripts" / "generate_runtime_client.py"),
+            "--contract",
+            str(contract),
+            "--schema-manifest",
+            str(schema),
+            "--component-manifest",
+            str(component),
+            "--check",
+            "--source-root",
+            str(source),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode != 0
+        expected_label = "client source" if field == "source" else "metadata source"
+        assert expected_label in result.stderr

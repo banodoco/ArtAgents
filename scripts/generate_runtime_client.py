@@ -86,6 +86,30 @@ def _safe_relative(value: str, label: str) -> str:
     return path.as_posix()
 
 
+def _contained_source_path(root: Path, value: str, label: str) -> Path:
+    """Validate a checked-in source path without following a symlink escape."""
+    relative = Path(_safe_relative(value, label))
+    source_root = root.resolve()
+    candidate = root / relative
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise SystemExit(f"{label} must not traverse a symlink")
+    try:
+        candidate.resolve(strict=False).relative_to(source_root)
+    except ValueError as exc:
+        raise SystemExit(f"{label} must be contained by source root") from exc
+    return candidate
+
+
+def _validate_client_sources(root: Path, client: Mapping[str, Any]) -> dict[str, Path]:
+    return {
+        "source": _contained_source_path(root, str(client["source"]), "client source"),
+        "metadata_source": _contained_source_path(root, str(client["metadata_source"]), "metadata source"),
+    }
+
+
 def _validate_manifest(manifest: Mapping[str, Any], schema: Mapping[str, Any]) -> Mapping[str, Any]:
     if manifest.get("schema_version") != 1 or manifest.get("manifest_id") != "GENERATOR-CONFORMANCE-ID":
         raise SystemExit("component manifest identity is invalid")
@@ -246,12 +270,20 @@ def _write_files(root: Path, files: Mapping[str, bytes]) -> None:
         target.write_bytes(data)
 
 
-def _check_files(root: Path, files: Mapping[str, bytes], client: Mapping[str, Any], *, fixture_root: Path | None) -> int:
+def _check_files(
+    root: Path,
+    files: Mapping[str, bytes],
+    client: Mapping[str, Any],
+    *,
+    fixture_root: Path | None,
+    source_paths: Mapping[str, Path] | None = None,
+) -> int:
     expected_source = files[_safe_relative(str(client["output"]), "client output")]
     expected_metadata = files[_safe_relative(str(client["metadata_output"]), "metadata output")]
+    source_paths = source_paths or _validate_client_sources(root, client)
     checked = {
-        Path(str(client["source"])).as_posix(): expected_source,
-        Path(str(client["metadata_source"])).as_posix(): expected_metadata,
+        source_paths["source"]: expected_source,
+        source_paths["metadata_source"]: expected_metadata,
     }
     if fixture_root is not None:
         for relative, data in files.items():
@@ -284,11 +316,12 @@ def main() -> int:
     schema_path, schema_bytes, schema = _json_input(args.schema_manifest, "--schema-manifest", canonical=False)
     _, component_bytes, manifest = _json_input(_component_path(schema_path, args.component_manifest), "--component-manifest")
     client = _validate_manifest(manifest, schema)
-    files = _render_files(manifest, component_bytes, contract, schema_bytes)
     source_root = Path(args.source_root).expanduser().resolve()
+    source_paths = _validate_client_sources(source_root, client)
+    files = _render_files(manifest, component_bytes, contract, schema_bytes)
     fixture_root = Path(args.fixture_root).expanduser().resolve() if args.fixture_root else None
     if args.check:
-        return _check_files(source_root, files, client, fixture_root=fixture_root)
+        return _check_files(source_root, files, client, fixture_root=fixture_root, source_paths=source_paths)
     if not args.output_root:
         raise SystemExit("--output-root is required unless --check is set")
     _write_files(Path(args.output_root).expanduser().resolve(), files)
