@@ -20,7 +20,7 @@ worker file is auditable in isolation):
 * **Contract #4 — update-task-status with result_data**: reigh-app commit
   ``ee2e6f10c`` added a ``task-status`` GET endpoint that surfaces
   ``tasks.result_data`` to the UI poller. AA's worker writes
-  ``result_data={config_version, correlation_id, timeline_id}`` on success and
+  ``result_data={config_version, correlation_id, timeline_id, baseline_snapshot}`` on success and
   ``{correlation_id}`` on failure via :mod:`astrid.core.integrations.reigh.task_client`'s
   ``update_task_status``. AA NEVER calls ``/functions/v1/complete-task`` and
   NEVER calls ``/functions/v1/task-status``.
@@ -28,8 +28,9 @@ worker file is auditable in isolation):
 Status enum casing is Title Case ONLY (``Queued | In Progress | Complete |
 Failed | Cancelled``). All emitted clips carry the SD-003 fields ``source_uuid,
 generation, pool_id, clip_order`` — there is no new structured ``source: ...``
-field. SD-008 baseline_snapshot is a sha256 hex string written at exactly
-``runs/<run_id>.json#metadata.baseline_snapshot``.
+field. SD-008 baseline_snapshot is a sha256 hex string carried in the runtime
+task settlement as ``result_data.baseline_snapshot``. Local ``run.json``
+projection writes are retired.
 """
 
 from __future__ import annotations
@@ -175,7 +176,7 @@ def _write_baseline_snapshot(
     project_slug: str | None,
     run_id: str,
     payload: Any,
-) -> str | None:
+) -> str:
     """Return the baseline digest for runtime settlement metadata.
 
     The worker used to write ``run.json`` as a local ledger projection.  That
@@ -244,11 +245,13 @@ def _worker_append_events(
     from astrid.core.timeline import canonical_timeline_config
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
-    from astrid.core.timeline.paths import find_timeline_by_event_stream_id
     from astrid.core.timeline.kernel_binding import (
         close_kernel_binding as _close_kernel_binding,
+    )
+    from astrid.core.timeline.kernel_binding import (
         gateway_kernel_kwargs as _gateway_kernel_kwargs,
     )
+    from astrid.core.timeline.paths import find_timeline_by_event_stream_id
 
     # Resolve a local timeline slug from the remote timeline_id (event-stream UUID).
     found = find_timeline_by_event_stream_id(project_slug, timeline_id)
@@ -422,7 +425,7 @@ class BanodocoWorker:
         # cannot silently leak past the claim loop or the task will appear
         # to succeed without provenance.
         try:
-            _write_baseline_snapshot(
+            baseline_snapshot = _write_baseline_snapshot(
                 project_slug=self.config.project_slug,
                 run_id=run_id,
                 payload=snapshot_payload,
@@ -483,6 +486,7 @@ class BanodocoWorker:
             config_version=config_version,
             timeline_id=timeline_id,
             correlation_id=correlation_id,
+            baseline_snapshot=baseline_snapshot,
             service_role_key=service_role_key,
         )
 
@@ -495,12 +499,14 @@ class BanodocoWorker:
         config_version: int,
         timeline_id: str,
         correlation_id: str,
+        baseline_snapshot: str,
         service_role_key: str,
     ) -> None:
         result_data = {
             "config_version": config_version,
             "correlation_id": correlation_id,
             "timeline_id": timeline_id,
+            "baseline_snapshot": baseline_snapshot,
         }
         update_task_status(
             task_id,

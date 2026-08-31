@@ -8,7 +8,6 @@ status reporting via update-task-status.
 
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import unittest
@@ -27,7 +26,6 @@ from astrid.core.integrations.worker.banodoco_worker import (
     canonical_json,
     sha256_hex,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -215,7 +213,7 @@ class BanodocoWorkerTest(unittest.TestCase):
 
         Sets up a real project + managed timeline so _worker_append_events
         can resolve the local backend.  Proves the success payload shape
-        {config_version, correlation_id, timeline_id} with config_version
+        {config_version, correlation_id, timeline_id, baseline_snapshot} with config_version
         from the event-stream version.
         """
         tmp_root = Path(tempfile.mkdtemp(prefix="bw-event-test-", dir=ROOT))
@@ -231,8 +229,8 @@ class BanodocoWorkerTest(unittest.TestCase):
             create_timeline("event-demo", "event-timeline")
 
             # Read the identity UUID so the claim's timeline_id matches.
-            from astrid.core.timeline.paths import find_timeline_by_slug, assembly_identity_path
             from astrid.core._shared.jsonio import read_json
+            from astrid.core.timeline.paths import assembly_identity_path, find_timeline_by_slug
 
             found = find_timeline_by_slug("event-demo", "event-timeline")
             self.assertIsNotNone(found)
@@ -259,11 +257,38 @@ class BanodocoWorkerTest(unittest.TestCase):
             # Status must be Complete with correct payload shape.
             self.assertEqual(self.recorder.calls[0]["status"], "Complete")
             rd = self.recorder.calls[0]["result_data"]
-            self.assertEqual(set(rd.keys()), {"config_version", "correlation_id", "timeline_id"})
+            self.assertEqual(
+                set(rd.keys()),
+                {"config_version", "correlation_id", "timeline_id", "baseline_snapshot"},
+            )
             self.assertIsInstance(rd["config_version"], int)
             self.assertGreater(rd["config_version"], 0)
             self.assertEqual(rd["correlation_id"], "corr")
             self.assertEqual(rd["timeline_id"], real_timeline_id)
+            self.assertEqual(
+                rd["baseline_snapshot"],
+                sha256_hex(canonical_json(self.provider._timeline)),
+            )
+
+    def test_non_serializable_snapshot_fails_without_completion(self) -> None:
+        """Natural baseline serialization errors cannot produce success."""
+        self._start(self._patch_common())
+        worker = self._make_worker(project_slug="event-demo")
+        claim = _claim(
+            params={
+                "timeline_id": "tl-1",
+                "correlation_id": "corr-serialization",
+                "intent": "passthrough",
+                "current_timeline": {"clips": [object()]},
+            }
+        )
+        with patch.object(bw_mod, "_worker_append_events") as append:
+            worker._handle_claim(claim, service_role_key="srv-key")
+
+        append.assert_not_called()
+        self.assertEqual(len(self.recorder.calls), 1)
+        self.assertEqual(self.recorder.calls[0]["status"], "Failed")
+        self.assertIn("baseline snapshot write failed", self.recorder.calls[0]["error"])
 
     def test_snapshot_fast_path_uses_current_timeline_param(self) -> None:
         """m3.5: snapshot fast-path still works with current_timeline param.

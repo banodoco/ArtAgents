@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from unittest.mock import MagicMock, patch, call
-
-import pytest
+from unittest.mock import patch
 
 from astrid.core.integrations.reigh.task_client import ClaimResult
 from astrid.core.integrations.reigh.worker_jwt import VerifiedJwt
@@ -353,3 +351,4 @@ class TestFullHappyPath:
         call = recorder.calls[0]
         assert call["status"] == "Complete"
         assert call["result_data"]["config_version"] == 42
+        assert call["result_data"]["baseline_snapshot"] == "abc123"

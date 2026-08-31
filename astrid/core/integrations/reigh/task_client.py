@@ -158,8 +158,8 @@ def update_task_status(
     ``result_data`` is the optional ``Record<string, unknown>`` persisted to
     ``tasks.result_data`` (commit ee2e6f10c). The new ``task-status`` GET
     endpoint surfaces this dict back to reigh-app's poller — AA's worker
-    populates ``{config_version, correlation_id, timeline_id}`` here on
-    completion and ``{correlation_id}`` on failure.
+    populates ``{config_version, correlation_id, timeline_id, baseline_snapshot}``
+    here on completion and ``{correlation_id}`` on failure.
     """
 
     if status not in ALLOWED_STATUSES:

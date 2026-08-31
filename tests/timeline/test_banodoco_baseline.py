@@ -1,13 +1,9 @@
-"""Regression for SD-008 baseline_snapshot write-failure propagation.
+"""Regression coverage for SD-008 runtime baseline settlement provenance.
 
-Pre-fix bug: ``_write_baseline_snapshot`` swallowed write failures via a bare
-``except Exception``, logged a warning, and returned a success-shaped digest.
-The claim loop never noticed and posted Complete with stale provenance.
+The baseline digest is carried in runtime settlement ``result_data``; failures
+must route the claim to Failed without a success-shaped settlement.
 
-The fix re-raises from ``_write_baseline_snapshot`` (None is reserved ONLY
-for the "no project slug" branch) and wraps the single caller in the claim
-loop in a try/except that calls ``self._fail(...)`` mirroring the existing
-load_timeline failure pattern.
+Local ``run.json`` writes are retired and are never used as authority.
 """
 
 from __future__ import annotations
