@@ -43,7 +43,9 @@ class _Runtime:
         }
         self.projects = SimpleNamespace(show=lambda _ref: _result(self.project))
         self.timelines = SimpleNamespace(show=self._show_timeline, list=self._list_timelines)
-        self.media = SimpleNamespace(list=lambda _project: _result(self.media_rows))
+        # Remote SDK list reads expose the generated client's JSON-safe page
+        # pair, including the terminal null cursor.
+        self.media = SimpleNamespace(list=lambda _project: _result([self.media_rows, None]))
         self.shots = SimpleNamespace(show=self._show_shot)
 
     def _show_timeline(self, _project: str, ref: str):
@@ -58,7 +60,7 @@ class _Runtime:
         return _result(row or self.timeline)
 
     def _list_timelines(self, _project: str, **_kwargs: object):
-        return _result([self.timeline, *self.extra_timelines.values()])
+        return _result([[self.timeline, *self.extra_timelines.values()], None])
 
     def _show_shot(self, _project: str, ref: str):
         row = self.shot_rows.get(ref)

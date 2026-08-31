@@ -92,20 +92,28 @@ class _RemoteFamily:
         except WorkspaceClientError as exc:
             return DomainResult.failure(ErrorObject(code=exc.code, message=exc.message, details=exc.details), idempotency_key=key or "")
 
-    @staticmethod
-    def _page(result: DomainResult[Any]) -> DomainResult[Any]:
-        """Expose generated ``(items, cursor)`` reads as JSON-safe items."""
-        value = result.data
-        if result.ok and isinstance(value, list) and len(value) == 2 and isinstance(value[0], list) and value[1] is None:
-            return DomainResult.success(value[0], receipt=result.receipt, idempotency_key=result.idempotency_key)
-        return result
+
+def _page_items(value: Any) -> list[Any] | None:
+    """Return rows from the generated client's canonical page pair.
+
+    ``WorkspaceClient`` converts the generated ``(items, next_cursor)`` tuple
+    to the JSON-safe ``[items, next_cursor]`` value carried by ``DomainResult``.
+    The pair is the one remote read shape, including terminal pages; accepting
+    a bare item list would hide a contract mismatch and lose pagination state.
+    """
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    items, next_cursor = value
+    if not isinstance(items, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
+        return None
+    return items
 
 
 class RemoteProjects(_RemoteFamily):
     def create(self, *, slug: str, name: str, metadata: Mapping[str, Any] | None = None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("create_project", name, key=key, idempotency_key=key, slug=slug, metadata=metadata)
-    def list(self): return self._page(self._typed("list_projects"))
+    def list(self): return self._typed("list_projects")
     def show(self, ref): return self._typed("get_project", ref)
     def update(self, ref, *, name=None, metadata=None, expected_version=None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
@@ -122,7 +130,7 @@ class RemoteTimelines(_RemoteFamily):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("create_timeline_document", project, timeline_id or uuid.uuid4().hex, key=key, config=config, registry=registry, slug=slug, name=name, idempotency_key=key)
     def list(self, project, *, cursor=None, limit=50):
-        return self._page(self._typed("list_timelines", project, cursor=cursor, limit=limit))
+        return self._typed("list_timelines", project, cursor=cursor, limit=limit)
     def show(self, project, ref):
         # The runtime read endpoint is id-addressed while the product CLI is
         # deliberately slug-friendly. Resolve the project-local slug to the
@@ -132,10 +140,8 @@ class RemoteTimelines(_RemoteFamily):
         listed = self.list(project)
         if not listed.ok:
             return listed
-        rows = listed.data.get("items", []) if isinstance(listed.data, Mapping) else listed.data
-        if isinstance(rows, list) and len(rows) == 2 and isinstance(rows[0], list) and rows[1] is None:
-            rows = rows[0]
-        if not isinstance(rows, (list, tuple)):
+        rows = _page_items(listed.data)
+        if rows is None:
             return DomainResult.failure(ErrorObject("not_found", "timeline not found", {"project": str(project), "ref": str(ref)}))
         match = next(
             (
@@ -208,11 +214,11 @@ class RemoteMedia(_RemoteFamily):
             items.append(result.data)
         return DomainResult.success(items, idempotency_key=idempotency_key or "")
     def list(self, project):
-        return self._page(self._typed("list_project_objects", project))
+        return self._typed("list_project_objects", project)
     def show(self, project, ref):
         listed = self.list(project)
         if not listed.ok: return listed
-        rows = listed.data
+        rows = _page_items(listed.data) or []
         if not any(isinstance(item, dict) and str(ref) in {str(item.get("digest")), str(item.get("object_id"))} for item in (rows or [])):
             return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
         return self._typed("get_object", ref)

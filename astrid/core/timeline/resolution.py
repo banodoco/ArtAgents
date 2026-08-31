@@ -69,7 +69,11 @@ def _runtime_rows(runtime_client: Any | None, project_ref: str, media_snapshot: 
             return []
         try:
             result = runtime_client.media.list(project_ref)
-            rows = result.data if result.ok else []
+            if not result.ok or not isinstance(result.data, list) or len(result.data) != 2:
+                return []
+            rows, next_cursor = result.data
+            if not isinstance(rows, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
+                return []
         except Exception:  # noqa: BLE001 - a runtime read failure is fail-closed
             return []
     if isinstance(rows, Mapping):

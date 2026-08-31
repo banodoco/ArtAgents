@@ -158,10 +158,11 @@ def _runtime_media_admissions(client: Any, project_ref: str) -> dict[str, str]:
         return {}
     if not result.ok:
         return {}
-    rows = result.data
-    if isinstance(rows, Mapping):
-        rows = rows.get("items", rows.get("media", rows))
-    if not isinstance(rows, (list, tuple, set)):
+    page = result.data
+    if not isinstance(page, list) or len(page) != 2:
+        return {}
+    rows, next_cursor = page
+    if not isinstance(rows, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
         return {}
     admitted: dict[str, str] = {}
     for row in rows:
@@ -454,7 +455,8 @@ def resolve_managed_render_snapshot(
         )
     listed = client.timelines.list(project_ref)
     if listed.ok:
-        rows = listed.data[0] if isinstance(listed.data, tuple) else listed.data
+        page = listed.data
+        rows = page[0] if isinstance(page, list) and len(page) == 2 else []
         for row in rows or []:
             if row.get("timeline_id") == timeline_data.get("timeline_id") and row.get("archived_at"):
                 raise ValueError(
