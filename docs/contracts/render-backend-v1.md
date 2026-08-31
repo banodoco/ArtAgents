@@ -47,11 +47,11 @@ are parsed without importing or executing backend code. Normal pack
 precedence, conflicts, aliases, overrides, and permissions apply. Only an
 execution-eligible discovered candidate may run:
 
-- source and local packs are eligible;
+- source and project-local packs are eligible;
 - an extra pack root is eligible only when explicitly supplied;
 - environment-discovered packs remain inspectable but are not executable;
-- an installed pack is eligible only when its active revision and installation
-  trust audit are valid and its required permissions have been accepted;
+- there is no installed-pack overlay or installer in the Stage1 product
+  surface; source checkout discovery and validation are authoritative;
 - corrupt, missing, mismatched, inactive, or insufficient-permission records
   fail closed.
 
@@ -438,7 +438,7 @@ keys are REQUIRED on every capability resolution record:
 `{from, to}` with `to` equal to the resolution id (an override records what
 selected this implementation — the DTO rejects `{from, to}` shapes whose `to`
 differs, and rejects any other shape), or `null`; `trust_eligibility` records
-the derived source/install trust decision; `support_decision` is a versioned
+the derived source trust decision; `support_decision` is a versioned
 `SupportReport` or `null` (when no request-sensitive probe ran, e.g. for a
 finalizer). Every non-null `support_decision.backend` MUST equal the
 capability ID — the DTO rejects a mismatch for planner, renderer, and
@@ -856,7 +856,8 @@ destination itself.
 
 ### 3. Validate and invoke through the facade
 
-After installing or placing the pack in an eligible pack root:
+After authoring the pack in a source checkout, validate it and place its
+parent directory in an explicit eligible pack root:
 
 ```python
 import astrid.sdk as sdk
@@ -899,18 +900,14 @@ python3 -m pytest -q test_renderer.py
 # 3. Statically validate the pack (manifest schemas, content roots, rendering extensions)
 python3 -m astrid.core.rendering.cli validate .
 
-# 4. Preview the trust summary, then trusted-install the pack
-python3 -m astrid.core.pack.cli install . --dry-run
-python3 -m astrid.core.pack.cli install . --trust --yes
+# 4. Discover and inspect the editable source checkout (no installer)
+python3 -m astrid.core.rendering.cli list --pack-root ..
+python3 -m astrid.core.rendering.cli inspect acme_wave.wave --pack-root ..
 
-# 5. Confirm discovery and inspect the installed revision
-python3 -m astrid.core.rendering.cli list
-python3 -m astrid.core.rendering.cli inspect acme_wave.wave
+# 5. Deterministic smoke render through the public service
+python3 -m astrid.core.rendering.cli smoke acme_wave.wave --pack-root .. --out ./out/smoke.mp4
 
-# 6. Deterministic smoke render through the public service
-python3 -m astrid.core.rendering.cli smoke acme_wave.wave --out ./out/smoke.mp4
-
-# 7. Debug a captured failure bundle (see "The replay verb" above)
+# 6. Debug a captured failure bundle (see "The replay verb" above)
 python3 -m astrid.core.rendering.cli replay <bundle-dir>
 ```
 
@@ -926,8 +923,8 @@ the first-party `rendering` pack id to avoid colliding with the built-in
 pack. `renderers list` prints every discovered renderer/planner/finalizer
 qualified id, `renderers inspect <id>` shows one candidate's manifest fields,
 source pack, and trust eligibility, and both accept `--pack-root PATH`
-(repeatable) to discover an extra pack root such as the parent of a
-scaffolded-but-not-installed pack.
+(repeatable) to discover an extra pack root such as the parent of an
+editable scaffolded pack.
 
 `renderer.yaml` declares `command: [python3, render.py]`, `operations:
 [support, render]`, and the `project_files` + `subprocess` permissions

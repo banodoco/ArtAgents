@@ -234,7 +234,7 @@ audit environment reads at runtime.
 
 #### Permissions in the Trust Summary
 
-When a user installs or inspects a pack, the declared permissions appear in
+When a user discovers or inspects a pack, the declared permissions appear in
 the trust summary alongside the v1 trust block:
 
 ```
@@ -251,13 +251,13 @@ the trust summary alongside the v1 trust block:
     - runs_with_user_process_permissions=true
     - permission_enforcement=disclosure_only
   Disclosure:
-    - Astrid v1 does not sandbox installed packs.
+    - Astrid v1 does not sandbox source-discovered packs.
     - Permission declarations are disclosure-only and not enforced.
-    - Installed pack code runs with your user's process permissions.
+    - Source-discovered pack code runs with your user's process permissions.
 ```
 
-This is the information users see before they type `trust <pack_id>` to
-acknowledge the trust summary and proceed with installation.
+This is the information users see when inspecting a source checkout before
+invoking one of its execution-eligible capabilities.
 
 ### Pack-Level Aliases
 
@@ -352,9 +352,9 @@ artifact, profile, audio, finalization, and provenance contract in
 To author a renderer without hand-writing the pack layout, scaffold the
 canonical four-file pack (`pack.yaml`, `renderer.yaml`, `render.py`,
 `test_renderer.py`) with `python3 -m astrid.core.rendering.cli create <name> <dest>`,
-then follow the golden path — generated test → `renderers validate` → trusted
-`python3 -m astrid.core.pack.cli install` → `renderers list`/`inspect` →
-`renderers smoke` → provenance
+then follow the golden path — generated test → `renderers validate` → source
+checkout discovery with `renderers list`/`inspect --pack-root <parent>` →
+`renderers smoke --pack-root <parent>` → provenance
 sidecar — in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 The scaffold destination directory name becomes the pack id (and must match
@@ -412,10 +412,12 @@ The recommended workflow for creating a pack:
 For a pack that contributes a timeline renderer (rather than an executor),
 use `python3 -m astrid.core.rendering.cli create <name> <dest>` instead of
 authoring an executor component; the scaffold writes the four-file renderer
-pack and is installable as-is. Validate with
+pack and is discoverable from its source checkout as-is. Validate with
 `python3 -m astrid.core.rendering.cli validate <path>`, discover with
-`python3 -m astrid.core.rendering.cli list` / `inspect <id>`, and smoke with
-`python3 -m astrid.core.rendering.cli smoke <id>`. See the golden path in
+`python3 -m astrid.core.rendering.cli list --pack-root <parent>` /
+`inspect <id> --pack-root <parent>`, and smoke with
+`python3 -m astrid.core.rendering.cli smoke <id> --pack-root <parent>`.
+See the golden path in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 
 All scaffold commands validate their output. A round-trip of

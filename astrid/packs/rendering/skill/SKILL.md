@@ -385,10 +385,9 @@ python3 -m astrid.core.rendering.cli create wave acme_wave
 cd acme_wave
 python3 -m pytest -q test_renderer.py     # generated deterministic test
 python3 -m astrid.core.rendering.cli validate .    # static validation
-python3 -m astrid.core.pack.cli install . --trust --yes   # trusted install
-python3 -m astrid.core.rendering.cli list          # discovery from installed revision
-python3 -m astrid.core.rendering.cli inspect acme_wave.wave
-python3 -m astrid.core.rendering.cli smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
+python3 -m astrid.core.rendering.cli list --pack-root ..  # source checkout discovery
+python3 -m astrid.core.rendering.cli inspect acme_wave.wave --pack-root ..
+python3 -m astrid.core.rendering.cli smoke acme_wave.wave --pack-root .. --out ./out/smoke.mp4  # smoke
 python3 -m astrid.core.rendering.cli replay <bundle-dir>   # replay a captured failure bundle
 ```
 

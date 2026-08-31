@@ -269,8 +269,9 @@ a pack directory, `smoke <id>` runs a deterministic direct-service render
 against an execution-eligible candidate, and `replay <bundle-dir>` re-runs a
 captured failure bundle with its pinned digests (refusing silent backend
 substitution and bundle tampering unless `--acknowledge-drift` is passed). A
-trusted install uses `python3 -m astrid.core.pack.cli install --trust --yes`,
-and a failed invocation is debugged from its
+source checkout is validated with `renderers validate`, then discovered and
+smoke-tested with `renderers list`/`inspect`/`smoke` and an explicit
+`--pack-root <parent>`; a failed invocation is debugged from its
 retained replay bundle. See the golden path in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path)
 and the worked `replay` example in

@@ -16,6 +16,13 @@ LIVE_DOCS = (
     ROOT / "astrid" / "packs" / "_core" / "skill" / "SKILL.md",
 )
 
+AUTHORITATIVE_PACK_DOCS = (
+    ROOT / "astrid" / "packs" / "rendering" / "skill" / "SKILL.md",
+    ROOT / "docs" / "packs" / "creating-packs.md",
+    ROOT / "docs" / "packs" / "aliases-vs-forks-vs-overrides.md",
+    ROOT / "docs" / "contracts" / "render-backend-v1.md",
+)
+
 
 def test_live_docs_do_not_publish_retired_local_authority() -> None:
     """Retired contracts may mention history, but live docs must not prescribe it."""
@@ -47,3 +54,17 @@ def test_live_docs_name_runtime_bootstrap_and_authority() -> None:
     assert "banodoco-local up --profile astrid" in (
         ROOT / "docs" / "getting-started.md"
     ).read_text(encoding="utf-8")
+
+
+def test_authoritative_pack_docs_do_not_prescribe_retired_installer() -> None:
+    """Stage1 pack authoring is source checkout discovery and validation."""
+
+    retired_installer = re.compile(
+        r"python3\s+-m\s+astrid\.core\.pack\.cli\s+install\b", re.I
+    )
+    offenders = [
+        f"{path.relative_to(ROOT)}: retired pack installer"
+        for path in AUTHORITATIVE_PACK_DOCS
+        if retired_installer.search(path.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, "retired pack installer guidance found:\n" + "\n".join(offenders)

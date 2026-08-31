@@ -32,8 +32,9 @@ Rules:
     ``astrid.core.session`` authorities, the deleted
     ``astrid.core.cli.{timeline,project,session}`` CLI modules, and the
     retired provider integrations.
-    The legacy modules stay in-tree as dead code for non-product consumers;
-    only their import from a product path is forbidden (m6 plan step 8).
+    These retired modules and integrations are deleted from the product
+    checkout; historical references are not an import or runtime authority
+    (m6 plan step 8).
 
 ``schema_ownership``
     Parsed from migration SQL plus manifest-declared table ownership:
@@ -122,9 +123,9 @@ REMOVED_AUTHORITY_MODULES = (
 The m6 cutover removes these authorities from the product surface: the
 legacy file/JSONL/FSA authorities (``eventlog``), the legacy thread/session
 kernels, the deleted timeline/project/session CLI modules, and the removed
-Reigh Supabase/data-provider integrations. The modules stay in-tree as dead
-code for non-product consumers; only their import from a product path is a
-lint error.
+Reigh Supabase/data-provider integrations. Those integrations are deleted from
+the product checkout; historical references are not an import or runtime
+authority, and any attempted product import is a lint error.
 """
 
 # Product paths scanned by ``lint_removed_authorities``: the eight-family
