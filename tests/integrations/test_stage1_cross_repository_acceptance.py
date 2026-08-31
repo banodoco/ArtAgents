@@ -90,7 +90,21 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
     def connect():
         monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])
         monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(support / "credentials" / "owner.token"))
-        return AstridClient.open(), WorkspaceClient(metadata["endpoint"], (support / "credentials" / "owner.token").read_text().strip())
+        credential = support / "credentials" / "owner.token"
+        # This acceptance is intentionally below a directly-started daemon;
+        # use the complete explicit client contract rather than the retired
+        # ambient AstridClient.open() inference path.
+        astrid = AstridClient.open(
+            endpoint=metadata["endpoint"],
+            credential=credential,
+            realm_id=metadata["realm_id"],
+            actor_id="owner",
+            client_name="astrid-cross-repository-acceptance",
+            client_version="stage1",
+            protocol_version="workspace.v1",
+        )
+        token = credential.read_text(encoding="utf-8").strip()
+        return astrid, WorkspaceClient(metadata["endpoint"], token)
 
     try:
         astrid, generated = connect()
@@ -110,7 +124,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert ranged.status == 206 and ranged.data == b"managed"
         assert generated.head_object(object_id).etag
 
-        timeline = astrid.timelines.create(project=project_id, slug="main", idempotency_key="timeline")
+        timeline = astrid.timelines.create(project=project_id, slug="main", config={}, registry={}, idempotency_key="timeline")
         assert timeline.ok
         timeline_id = timeline.data["timeline_id"]
         shot = astrid.shots.create(
@@ -182,7 +196,6 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert {event.event_type for event in events} >= {"task.admitted", "task.completed"}
         assert generated.get_object("sha256:" + hashlib.sha256(b"hello").hexdigest()).data == b"hello"
 
-        astrid.close()
         _stop_runtime(daemon)
         daemon, metadata = _start_runtime(realm, support)
         reopened, restarted_generated = connect()
@@ -190,7 +203,6 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert reopened.timelines.show(project_id, timeline_id).ok
         assert restarted_generated.get_task(task.task_id).state == "succeeded"
         assert restarted_generated.get_object(object_id).data == b"managed-media"
-        reopened.close()
     finally:
         _stop_runtime(daemon)
 
@@ -206,9 +218,16 @@ def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypa
         for module_name in list(sys.modules):
             if module_name == "banodoco_workspace_client" or module_name.startswith("banodoco_workspace_client."):
                 sys.modules.pop(module_name, None)
-        astrid = AstridClient.open()
+        astrid = AstridClient.open(
+            endpoint=metadata["endpoint"],
+            credential=support / "credentials" / "owner.token",
+            realm_id=metadata["realm_id"],
+            actor_id="owner",
+            client_name="astrid-cross-repository-acceptance",
+            client_version="stage1",
+            protocol_version="workspace.v1",
+        )
         if not hasattr(astrid._remote.shots._client._generated, "create_project_shot"):
-            astrid.close()
             pytest.skip("runtime contract does not expose project shot operations")
         project = astrid.projects.create(slug="b71", name="B71", idempotency_key="b71-project")
         other = astrid.projects.create(slug="b71-other", name="B71 Other", idempotency_key="b71-other")
@@ -223,8 +242,8 @@ def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypa
         reference = astrid.references.create(project=project_id, reference_id="b71-reference", kind="character", name="B71", media_id=media.data["object_id"], idempotency_key="b71-reference")
         assert shot.ok and reference.ok
         assert astrid.shots.create(project=project_id, shot={"shot_id": "b71-shot", "name": "B71 Shot"}, idempotency_key="b71-shot").data["shot_id"] == "b71-shot"
-        assert astrid.shots.list(project_id).data[0]["shot_id"] == "b71-shot"
-        assert astrid.shots.list(other_id).data == []
+        assert astrid.shots.list(project_id).data[0][0]["shot_id"] == "b71-shot"
+        assert astrid.shots.list(other_id).data[0] == []
         source2 = tmp_path / "b71-2.bin"
         source2.write_bytes(b"b71-media-2")
         media2 = astrid.media.import_file(project=project_id, path=source2, idempotency_key="b71-media-2")
@@ -246,13 +265,19 @@ def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypa
         primary = astrid.references.set_primary(project_id, "b71-reference", association_id=association.data["media_references"][-1]["association_id"], expected_version=association.data["version"], idempotency_key="b71-primary")
         link = astrid.references.link(project=project_id, from_reference_id="b71-reference", to_reference_id="b71-reference-2", kind="associated_with", idempotency_key="b71-link")
         assert association.ok and secondary.ok and primary.ok and link.ok
-        astrid.close()
         _stop_runtime(daemon)
         daemon, metadata = _start_runtime(realm, support, runtime)
         monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])
-        reopened = AstridClient.open()
+        reopened = AstridClient.open(
+            endpoint=metadata["endpoint"],
+            credential=support / "credentials" / "owner.token",
+            realm_id=metadata["realm_id"],
+            actor_id="owner",
+            client_name="astrid-cross-repository-acceptance",
+            client_version="stage1",
+            protocol_version="workspace.v1",
+        )
         assert reopened.shots.show(project_id, "b71-shot").ok
         assert reopened.references.show(project_id, "b71-reference").ok
-        reopened.close()
     finally:
         _stop_runtime(daemon)
