@@ -1240,14 +1240,13 @@ class GenericPackHost:
         # The loopback endpoint is the only network destination the child
         # needs to reach; the broker itself enforces the upstream route set.
         effective["proxy"] = broker.endpoint
-        destinations = effective.get("allowed_destinations", ())
-        if isinstance(destinations, str):
-            destinations = (destinations,)
-        effective["allowed_destinations"] = list(dict.fromkeys([
-            *(str(item) for item in (destinations or ())),
-            broker.endpoint,
-            *dynamic_routes,
-        ]))
+        # The child is allowed to connect only to the host-owned loopback
+        # broker.  The upstream route set belongs to the broker, not to the
+        # provider process: retaining it here would let a Python provider
+        # connect directly to an allowlisted upstream and still pass the
+        # application socket hook.  The broker separately enforces
+        # ``routes`` and signs the observed route evidence.
+        effective["allowed_destinations"] = [broker.endpoint]
         effective["broker"] = {**dict(descriptor), "evidence_path": str(evidence_path)}
         return _NetworkBrokerContext(broker=broker, policy=effective, evidence_key=evidence_key, auth_token=auth_token)
 
