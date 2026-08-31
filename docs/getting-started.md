@@ -64,9 +64,9 @@ state, receipts, and events are authoritative only in the workspace runtime.
 The SDK never opens a local Astrid database or content-addressed store.
 
 Historical pre-runtime project trees and local-store migration plans are not
-part of the Stage1 live path. If you have one, use its separately documented
-historical migration procedure or import its files as ordinary attempt-local
-artifacts; do not treat it as current workspace state.
+part of the Stage1 live path. Preserve them as immutable source artifacts and
+do not treat them as current workspace state; the product checkout has no
+historical migration command or local-store writer.
 
 For the complete project, timeline, media, recovery, and failure journeys,
 continue with [CLI journeys](guides/cli-journeys.md). For renderer-specific

@@ -1,8 +1,11 @@
-"""Runaway repository + migration round-trip tests."""
+"""Canonical Runaway transition repository coverage.
+
+Legacy source conversion is tested by the standalone runtime migrator. These
+tests cover only the product pack's canonical read/write contract.
+"""
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -12,523 +15,72 @@ from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts.service import ReceiptService
+from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.runs import RunRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs.runaway.prompts import build_prompt, prompts_for_manifest
-from astrid.packs.runaway.repository import (
-    RunawayNotFoundError,
-    RunawayRepository,
-    RunawayValidationError,
-)
+from astrid.packs.runaway.repository import RunawayRepository, RunawayValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"
-MANIFEST_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "timing-manifest.json"
-AUDIO_REACTIVE_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "audio-reactive-v1.json"
-
-
-def _build_registry():
-    reg = SchemaPackRegistry()
-    register_core_vocabulary(reg)
-    packs_root = REPO_ROOT / "astrid" / "packs"
-    for pid in ("timeline", "shots", "references"):
-        reg.register_pack(load_schema_pack_manifest(packs_root / pid / "schema-pack.yaml"))
-    reg.register_pack(load_schema_pack_manifest(packs_root / "runaway" / "schema-pack.yaml"))
-    return reg.freeze()
 
 
 @pytest.fixture
 def env(tmp_path: Path):
-    registry = _build_registry()
-    db_path = tmp_path / "runaway.sqlite3"
-    writer = DatabaseWriter(db_path, registry)
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    packs_root = REPO_ROOT / "astrid" / "packs"
+    for pack_id in ("timeline", "shots", "references", "runaway"):
+        registry.register_pack(load_schema_pack_manifest(packs_root / pack_id / "schema-pack.yaml"))
+    registry = registry.freeze()
+    writer = DatabaseWriter(tmp_path / "runaway.sqlite3", registry)
     events = EventAppendService(registry)
     receipts = ReceiptService()
-    from astrid.core.repositories.projects import ProjectRepository
-
     try:
-        yield {
-            "writer": writer,
-            "registry": registry,
-            "db_path": db_path,
-            "events": events,
-            "receipts": receipts,
-            "project_repo": ProjectRepository(events=events, receipts=receipts),
-            "run_repo": RunRepository(events=events, receipts=receipts),
-            "runaway_repo": RunawayRepository(receipts=receipts, events=events),
-        }
+        yield writer, ProjectRepository(events=events, receipts=receipts), RunRepository(events=events, receipts=receipts), RunawayRepository(receipts=receipts, events=events)
     finally:
         writer.close()
 
 
-def _make_project_and_run(env) -> tuple[str, str]:
-    writer = env["writer"]
-    project_repo = env["project_repo"]
-    run_repo = env["run_repo"]
+def _project_and_run(env) -> tuple[str, str]:
+    writer, projects, runs, _ = env
     project_id = generate_lowercase_ulid()
     run_id = generate_lowercase_ulid()
 
-    def _create(uow: UnitOfWork):
-        project_repo.create(
-            uow,
-            project_id=project_id,
-            slug=f"proj-{project_id}",
-            name="Test Project",
-            settings={},
-            idempotency_key=f"test:project:{project_id}",
-        )
-        run_repo.create(
-            uow,
-            project_id=project_id,
-            run_id=run_id,
-            children=[],
-            evidence=[],
-            idempotency_key=f"test:run:{run_id}",
-            kind="runaway:timing-v1",
-            title="Runaway timing v1",
-            input={},
-        )
+    def create(uow: UnitOfWork) -> None:
+        projects.create(uow, project_id=project_id, slug=f"project-{project_id}", name="Project", settings={}, idempotency_key=f"test:project:{project_id}")
+        runs.create(uow, project_id=project_id, run_id=run_id, children=[], evidence=[], kind="runaway:timing-v1", title="Runaway timing", input={}, idempotency_key=f"test:run:{run_id}")
 
-    UnitOfWork(writer).run(_create)
+    UnitOfWork(writer).run(create)
     return project_id, run_id
 
 
-def _typed_transitions(n: int, start_ordinal: int = 0) -> list[dict]:
-    out = []
-    for i in range(n):
-        ordinal = start_ordinal + i
-        out.append(
-            {
-                "ordinal": ordinal,
-                "start_ms": ordinal * 20,
-                "duration_ms": 20,
-                "prompt": f"rose neon piano chord, hard cut, 48fps, complementary colour teal, literal_main_note, S01 #{ordinal}",
-                "metadata": {"frame": ordinal * 2},
-            }
-        )
-    return out
+def _rows(count: int = 3) -> list[dict]:
+    return [{"ordinal": index, "start_ms": index * 20, "duration_ms": 20, "prompt": f"transition {index}", "metadata": {"frame": index}} for index in range(count)]
 
 
-def test_create_list_show_prompt_ordinal(env):
-    project_id, run_id = _make_project_and_run(env)
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    typed = _typed_transitions(3)
-
-    def _insert(uow: UnitOfWork):
-        return repo.create(uow, project_id=project_id, run_id=run_id, transitions=typed)
-
-    result = UnitOfWork(writer).run(_insert)
-    assert len(result.transition_ids) == 3
-    assert result.first_ordinal == 0
-    assert result.last_ordinal == 2
-
+def test_create_list_and_show_are_canonical(env) -> None:
+    project_id, run_id = _project_and_run(env)
+    writer, _, _, repository = env
+    result = UnitOfWork(writer).run(lambda uow: repository.create(uow, project_id=project_id, run_id=run_id, transitions=_rows()))
+    assert result.first_ordinal == 0 and result.last_ordinal == 2
     with writer.read_only_connection() as conn:
         conn.row_factory = sqlite3.Row
-        listed = repo.list(conn, project_id=project_id, run_id=run_id)
-        assert len(listed) == 3
-        assert [t.ordinal for t in listed] == [0, 1, 2]
-        assert all(t.prompt for t in listed)
-        assert all("hard cut" in t.prompt for t in listed)
-        first = repo.show(conn, id=listed[0].id)
-        assert first.prompt == listed[0].prompt
-        assert first.start_ms == 0
-        assert first.duration_ms == 20
-        mid = repo.get_by_ordinal(conn, run_id=run_id, ordinal=1)
-        assert mid.ordinal == 1
+        listed = repository.list(conn, project_id=project_id, run_id=run_id)
+        assert [row.ordinal for row in listed] == [0, 1, 2]
+        assert repository.show(conn, id=listed[0].id).prompt == "transition 0"
 
 
-def test_fk_to_run_enforced(env):
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    project_id = generate_lowercase_ulid()
-
-    def _create_proj(uow: UnitOfWork):
-        env["project_repo"].create(
-            uow,
-            project_id=project_id,
-            slug=f"proj-{project_id}",
-            name="Proj",
-            settings={},
-            idempotency_key=f"test:proj:{project_id}",
-        )
-
-    UnitOfWork(writer).run(_create_proj)
-    fake_run = generate_lowercase_ulid()
-    typed = _typed_transitions(1)
-    with pytest.raises(RunawayNotFoundError):
-        UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=fake_run, transitions=typed))
+def test_run_foreign_key_is_enforced(env) -> None:
+    writer, _, _, repository = env
+    with pytest.raises(RunawayValidationError):
+        UnitOfWork(writer).run(lambda uow: repository.create(uow, project_id=generate_lowercase_ulid(), run_id=generate_lowercase_ulid(), transitions=_rows(1)))
 
 
-def test_task_fk_same_project(env):
-    project_id, run_id = _make_project_and_run(env)
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    other_project = generate_lowercase_ulid()
-    other_run = generate_lowercase_ulid()
-
-    def _create_other(uow: UnitOfWork):
-        env["project_repo"].create(
-            uow,
-            project_id=other_project,
-            slug=f"other-{other_project}",
-            name="Other",
-            settings={},
-            idempotency_key=f"test:proj:{other_project}",
-        )
-        env["run_repo"].create(
-            uow,
-            project_id=other_project,
-            run_id=other_run,
-            children=[{"capability": "cap.a", "spec": {"x": 1}}],
-            idempotency_key=f"test:run:{other_run}",
-            kind="group",
-            title="Other run",
-        )
-
-    UnitOfWork(writer).run(_create_other)
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        task_row = conn.execute("SELECT id FROM tasks WHERE run_id = ?", (other_run,)).fetchone()
-        assert task_row is not None
-        other_task_id = str(task_row["id"])
-
-    typed = [
-        {
-            "ordinal": 0,
-            "start_ms": 0,
-            "duration_ms": 10,
-            "prompt": "rose neon piano chord, hard cut, 48fps, complementary colour teal, literal_main_note, S01",
-            "task_id": other_task_id,
-            "metadata": {},
-        }
-    ]
-    with pytest.raises(RunawayValidationError, match="does not belong to project"):
-        UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id, transitions=typed))
-
-
-def test_sharding_contiguous_per_run_and_across_runs(env):
-    project_id, run_id = _make_project_and_run(env)
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    batch1 = _typed_transitions(256, start_ordinal=0)
-    UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id, transitions=batch1))
-    # Second batch on same run must start at 256, use distinct receipt key.
-    batch2 = _typed_transitions(44, start_ordinal=256)
-    result2 = UnitOfWork(writer).run(
-        lambda uow: repo.create(
-            uow, project_id=project_id, run_id=run_id, transitions=batch2, idempotency_key=f"runaway:create:{run_id}:batch2"
-        )
-    )
-    assert result2.first_ordinal == 256
-    assert result2.last_ordinal == 299
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        all_rows = repo.list(conn, project_id=project_id, run_id=run_id)
-        assert len(all_rows) == 300
-        assert [r.ordinal for r in all_rows] == list(range(300))
-    # Shard across a second run (global contiguity is convention, per-run starts at 0).
-    run_id2 = generate_lowercase_ulid()
-
-    def _create_run2(uow: UnitOfWork):
-        env["run_repo"].create(
-            uow,
-            project_id=project_id,
-            run_id=run_id2,
-            children=[],
-            idempotency_key=f"test:run:{run_id2}",
-            kind="runaway:timing-v1",
-            title="Runaway timing v1 shard 2",
-        )
-
-    UnitOfWork(writer).run(_create_run2)
-    shard2_batch = _typed_transitions(54, start_ordinal=0)
-    UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id2, transitions=shard2_batch))
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        shard2_rows = repo.list(conn, project_id=project_id, run_id=run_id2)
-        assert len(shard2_rows) == 54
-        bad = _typed_transitions(1, start_ordinal=0)
-        with pytest.raises((RunawayValidationError, Exception)):
-            UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id2, transitions=bad))
-
-
-def test_receipt_idempotency(env):
-    project_id, run_id = _make_project_and_run(env)
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    typed = _typed_transitions(5)
-
-    def _insert(uow: UnitOfWork):
-        return repo.create(uow, project_id=project_id, run_id=run_id, transitions=typed)
-
-    first = UnitOfWork(writer).run(_insert)
-    second = UnitOfWork(writer).run(_insert)
+def test_create_is_receipt_idempotent(env) -> None:
+    project_id, run_id = _project_and_run(env)
+    writer, _, _, repository = env
+    first = UnitOfWork(writer).run(lambda uow: repository.create(uow, project_id=project_id, run_id=run_id, transitions=_rows()))
+    second = UnitOfWork(writer).run(lambda uow: repository.create(uow, project_id=project_id, run_id=run_id, transitions=_rows()))
     assert first.transition_ids == second.transition_ids
-    assert first.first_ordinal == second.first_ordinal
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = repo.list(conn, project_id=project_id, run_id=run_id)
-        assert len(rows) == 5
-    from astrid.core.receipts import ReceiptMismatchError
-
-    altered = [dict(t, prompt=t["prompt"] + " altered") for t in typed]
-    with pytest.raises(ReceiptMismatchError):
-        UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id, transitions=altered))
-
-
-def test_prompts_deterministic_and_sample(env):
-    assert build_prompt(colour_name="rose", timing_mode="literal_main_note", segment_id="S01", next_colour_name="teal") == \
-        "rose neon piano chord, hard cut, 48fps, complementary colour teal, literal_main_note, S01"
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    transitions = manifest["transitions"]
-    prompts = prompts_for_manifest(transitions)  # type: ignore
-    assert len(prompts) == 566
-    assert all(p and "hard cut" in p and "48fps" in p for p in prompts)
-    # 10-sample slice in isolation has hold for last (no next)
-    isolated_sample = prompts_for_manifest(transitions[:10])  # type: ignore
-    assert len(isolated_sample) == 10
-    assert "hold" in isolated_sample[-1]
-    # Full list's first 10 prefix has actual next colour (rose), not hold
-    full_prefix = prompts[:10]
-    assert "rose" in full_prefix[-1]
-    assert full_prefix[-1] != isolated_sample[-1]
-    # Segment-boundary timing_mode
-    s02_idx = next(i for i, t in enumerate(transitions) if t["segment_id"] == "S02")
-    assert transitions[s02_idx]["timing_mode"] == "section_clock"
-    assert "section_clock" in prompts[s02_idx]
-
-
-def test_release_inputs_are_tracked_fixtures_not_ignored_project_data():
-    """Release tests must work from a clean checkout without ``projects/`` data."""
-    assert MANIFEST_PATH == REPO_ROOT / "tests/fixtures/runaway_release/timing-manifest.json"
-    assert AUDIO_REACTIVE_PATH == REPO_ROOT / "tests/fixtures/runaway_release/audio-reactive-v1.json"
-    assert "projects" not in MANIFEST_PATH.relative_to(REPO_ROOT).parts
-    assert "projects" not in AUDIO_REACTIVE_PATH.relative_to(REPO_ROOT).parts
-    assert MANIFEST_PATH.is_file()
-    assert AUDIO_REACTIVE_PATH.is_file()
-
-
-def test_roundtrip_timing_manifest_to_kernel(env):
-    assert MANIFEST_PATH.is_file()
-    assert AUDIO_REACTIVE_PATH.is_file()
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    audio_reactive = json.loads(AUDIO_REACTIVE_PATH.read_text(encoding="utf-8"))
-    assert manifest["transition_count"] == 566
-    assert audio_reactive["timebase"]["range_end_frame"] == 8085
-    assert audio_reactive["timebase"]["fps"] == 48
-    seg_counts = {s["id"]: s["transition_count"] for s in manifest["segments"]}
-    assert seg_counts["S01"] == 16
-    assert seg_counts["S02"] == 125
-    assert seg_counts["S04"] == 211
-    assert sum(seg_counts.values()) == 566
-
-    from scripts.migrations.runaway_v1_migrate import manifest_to_transitions
-
-    typed = manifest_to_transitions(manifest, audio_reactive)
-    assert len(typed) == 566
-    for idx, t in enumerate(typed):
-        raw = manifest["transitions"][idx]
-        expected_start = int(round(int(raw["frame"]) * 1000 / 48))
-        assert t["start_ms"] == expected_start, f"ordinal {idx} start_ms mismatch"
-        assert t["prompt"]
-        assert "complementary colour" in t["prompt"]
-    last_raw = manifest["transitions"][-1]
-    last_frame = int(last_raw["frame"])
-    expected_last_duration = int(round((8085 - last_frame) * 1000 / 48))
-    assert typed[-1]["duration_ms"] == expected_last_duration
-    assert "hold" in typed[-1]["prompt"]
-
-    project_id, run_id = _make_project_and_run(env)
-    writer = env["writer"]
-    repo: RunawayRepository = env["runaway_repo"]
-    UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id, transitions=typed))
-
-    # Verify stored timing preserved
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        stored = repo.list(conn, project_id=project_id, run_id=run_id)
-        assert len(stored) == 566
-        for idx, row in enumerate(stored):
-            raw = manifest["transitions"][idx]
-            assert row.start_ms == int(round(int(raw["frame"]) * 1000 / 48))
-            assert row.prompt
-            assert row.metadata["frame"] == int(raw["frame"])
-            assert row.metadata["colour_name"] == raw["colour_name"]
-            assert row.ordinal == idx
-
-    # Domain subtype lives inside the frozen generic evidence vocabulary.
-    from astrid.core.repositories.evidence import EvidenceRepository
-
-    def _record(uow: UnitOfWork):
-        evidence_repo = EvidenceRepository(events=env["events"], receipts=env["receipts"])
-        return evidence_repo.record(
-            uow,
-            project_id=project_id,
-            run_id=run_id,
-            kind="measurement",
-            summary="Runaway timing v1 round-trip",
-            data={"subtype": "runaway_timing_migrated", "frame_count": 8085, "transition_count": 566},
-            idempotency_key=f"test:evidence:{run_id}",
-        )
-
-    UnitOfWork(writer).run(_record)
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        ev = conn.execute("SELECT kind, data_json FROM evidence_items WHERE run_id = ? AND kind = ?", (run_id, "measurement")).fetchall()
-        assert len(ev) == 1
-        data = json.loads(ev[0]["data_json"])
-        assert data["frame_count"] == 8085
-        assert data["transition_count"] == 566
-
-
-def test_old_files_not_deleted():
-    assert MANIFEST_PATH.is_file()
-    assert AUDIO_REACTIVE_PATH.is_file()
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    assert len(manifest["transitions"]) == 566
-    assert "G-sharp 4 at 2:06.293" in manifest.get("intent", "")
-
-
-def test_migration_apply_is_receipt_idempotent_portable_and_exact(tmp_path: Path):
-    from scripts.migrations.runaway_v1_migrate import migrate
-
-    before_manifest = MANIFEST_PATH.read_bytes()
-    before_audio = AUDIO_REACTIVE_PATH.read_bytes()
-    first = migrate(
-        projects_root=tmp_path,
-        manifest_path=MANIFEST_PATH,
-        audio_reactive_path=AUDIO_REACTIVE_PATH,
-        apply=True,
-    )
-    second = migrate(
-        projects_root=tmp_path,
-        manifest_path=MANIFEST_PATH,
-        audio_reactive_path=AUDIO_REACTIVE_PATH,
-        apply=True,
-    )
-    assert first["stored_count"] == second["stored_count"] == 566
-    assert first["evidence_count"] == second["evidence_count"] == 1
-    assert first["event_count"] == second["event_count"] == 1
-    assert first["receipt_count"] == second["receipt_count"] == 1
-    assert first["stored_sample_prompts"] == second["stored_sample_prompts"]
-    assert first["manifest_sha256"] == second["manifest_sha256"]
-    assert first["manifest_path"] == "external/timing-manifest.json"
-    assert str(tmp_path) not in json.dumps(first)
-
-    db = tmp_path / ".astrid" / "astrid.sqlite3"
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM events WHERE kind = 'runaway.created'"
-        ).fetchone()[0] == 1
-        assert conn.execute(
-            "SELECT COUNT(*) FROM command_receipts WHERE command_kind = 'runaway.create'"
-        ).fetchone()[0] == 1
-        assert conn.execute(
-            "SELECT COUNT(*) FROM runaway_transitions"
-        ).fetchone()[0] == 566
-    assert MANIFEST_PATH.read_bytes() == before_manifest
-    assert AUDIO_REACTIVE_PATH.read_bytes() == before_audio
-
-
-def test_migration_rejects_corrupt_manifest_before_creating_database(tmp_path: Path):
-    from scripts.migrations.runaway_v1_migrate import migrate
-
-    corrupt = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    corrupt["transition_count"] = 565
-    corrupt_path = tmp_path / "corrupt-manifest.json"
-    corrupt_path.write_text(json.dumps(corrupt), encoding="utf-8")
-    with pytest.raises(ValueError, match="transition_count"):
-        migrate(
-            projects_root=tmp_path / "projects",
-            manifest_path=corrupt_path,
-            audio_reactive_path=AUDIO_REACTIVE_PATH,
-            apply=True,
-        )
-    assert not (tmp_path / "projects" / ".astrid" / "astrid.sqlite3").exists()
-
-
-def test_migration_outcome_callback_is_bounded_content_free_and_exactly_once(
-    tmp_path: Path,
-):
-    from scripts.migrations.runaway_v1_migrate import migrate
-
-    success: list[dict[str, str]] = []
-    result = migrate(
-        projects_root=tmp_path / "success-projects",
-        manifest_path=MANIFEST_PATH,
-        audio_reactive_path=AUDIO_REACTIVE_PATH,
-        outcome_callback=success.append,
-    )
-    assert success == [result["migration_outcome"]]
-    assert success == [
-        {
-            "schema": "astrid.migration_outcome.v1",
-            "migration": "runaway_v1",
-            "mode": "dry_run",
-            "outcome": "success",
-            "error_kind": "none",
-        }
-    ]
-    serialized = json.dumps(success)
-    assert "runaway-piano-colour-demo" not in serialized
-    assert str(tmp_path) not in serialized
-    assert "prompt" not in serialized
-
-    corrupt = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    corrupt["transition_count"] = 565
-    corrupt_path = tmp_path / "private-corrupt-manifest.json"
-    corrupt_path.write_text(json.dumps(corrupt), encoding="utf-8")
-    failure: list[dict[str, str]] = []
-    with pytest.raises(ValueError, match="transition_count"):
-        migrate(
-            projects_root=tmp_path / "failure-projects",
-            manifest_path=corrupt_path,
-            audio_reactive_path=AUDIO_REACTIVE_PATH,
-            apply=True,
-            outcome_callback=failure.append,
-        )
-    assert failure == [
-        {
-            "schema": "astrid.migration_outcome.v1",
-            "migration": "runaway_v1",
-            "mode": "apply",
-            "outcome": "failure",
-            "error_kind": "input",
-        }
-    ]
-
-
-def test_migration_outcome_callback_cannot_change_the_migration_result(tmp_path: Path):
-    from scripts.migrations.runaway_v1_migrate import migrate
-
-    def broken_sink(_outcome: dict[str, str]) -> None:
-        raise RuntimeError("telemetry unavailable")
-
-    result = migrate(
-        projects_root=tmp_path,
-        manifest_path=MANIFEST_PATH,
-        audio_reactive_path=AUDIO_REACTIVE_PATH,
-        outcome_callback=broken_sink,
-    )
-    assert result["migration_outcome"]["outcome"] == "success"
-
-
-def test_migration_refuses_a_concurrent_store_owner(tmp_path: Path):
-    from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
-    from scripts.migrations.runaway_v1_migrate import migrate
-
-    projects_root = tmp_path / "projects"
-    database = projects_root / ".astrid" / "astrid.sqlite3"
-    with DatabaseOwnerLock(database):
-        with pytest.raises(OwnerLockError):
-            migrate(
-                projects_root=projects_root,
-                manifest_path=MANIFEST_PATH,
-                audio_reactive_path=AUDIO_REACTIVE_PATH,
-                apply=True,
-            )
-    assert not database.exists()

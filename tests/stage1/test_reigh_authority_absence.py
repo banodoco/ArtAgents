@@ -18,9 +18,6 @@ def test_retired_authority_packages_and_routes_are_not_present() -> None:
         "astrid/core/timeline/eventlog/supabase.py",
         "astrid/core/contracts/remote_timeline.py",
         "astrid/core/timeline/eventlog/reigh_events.py",
-        "scripts/migrations/sprint-2/migrate_timelines.py",
-        "scripts/migrations/sprint-2",
-        "scripts/migrations/v10",
         "scripts/reshape/editor_browser_smoke",
     ):
         assert not (root / rel).exists(), rel
@@ -44,6 +41,25 @@ def test_normal_capability_sources_have_no_reigh_ids_or_credentials() -> None:
     assert all(not key.startswith("reigh.") for key in exemptions["exemptions"])
     assert importlib.util.find_spec("astrid.core.integrations.reigh") is None
     assert importlib.util.find_spec("astrid.core.integrations.worker") is None
+
+
+def test_normal_astrid_process_never_loads_the_standalone_migrator() -> None:
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import astrid; import astrid.sdk; import astrid.core.gateway; "
+                "print([name for name in sys.modules if name.startswith('tools.astrid_migrate')])"
+            ),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"
 
 
 def test_canonical_runtime_lanes_have_no_bridge_or_provider_residue() -> None:

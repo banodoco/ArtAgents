@@ -18,7 +18,7 @@ from astrid.packs.rendering.backends.ffmpeg.audio_reactive_colour import (
 )
 from astrid.packs.typed_timeline.common import load_admitted_rows
 from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
-from scripts.migrations.runaway_v1_migrate import manifest_to_transitions
+from astrid.packs.runaway.prompts import prompts_for_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"
@@ -36,7 +36,40 @@ FULL_RENDER_ENV = "ASTRID_RUN_FULL_RENDER_ACCEPTANCE"
 def _runaway_rows() -> list[dict]:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     audio = json.loads(AUDIO_REACTIVE.read_text(encoding="utf-8"))
-    return manifest_to_transitions(manifest, audio)
+    transitions = manifest["transitions"]
+    prompts = prompts_for_manifest(transitions)
+    fps = manifest["clock"]["fps"]
+    end_frame = audio["timebase"]["range_end_frame"]
+    rows = []
+    for ordinal, transition in enumerate(transitions):
+        frame = transition["frame"]
+        next_frame = transitions[ordinal + 1]["frame"] if ordinal + 1 < len(transitions) else end_frame
+        metadata = {key: value for key, value in {
+            "segment_id": transition.get("segment_id"),
+            "segment_label": transition.get("segment_label"),
+            "timing_mode": transition.get("timing_mode"),
+            "colour_name": transition.get("colour_name"),
+            "colour_hex": transition.get("colour_hex"),
+            "colour_index": transition.get("colour_index"),
+            "source_time_seconds": transition.get("source_time_seconds"),
+            "grid_index": transition.get("grid_index"),
+            "grid_time_seconds": transition.get("grid_time_seconds"),
+            "frame": frame,
+            "frame_time_seconds": transition.get("frame_time_seconds"),
+            "frame_error_ms": transition.get("frame_error_ms"),
+            "manifest_id": transition.get("id"),
+            "command_time_seconds": transition.get("command_time_seconds"),
+            "fps": fps,
+            "range_end_frame": end_frame,
+        }.items() if value is not None}
+        rows.append({
+            "ordinal": ordinal,
+            "start_ms": int(round(frame * 1000 / fps)),
+            "duration_ms": int(round((next_frame - frame) * 1000 / fps)),
+            "prompt": prompts[ordinal],
+            "metadata": metadata,
+        })
+    return rows
 
 
 def _small_rows() -> list[dict]:

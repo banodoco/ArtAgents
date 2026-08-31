@@ -232,7 +232,6 @@ timeout_method = "signal"
 # project, needs heavy deps like torch, and is not part of Astrid's suite).
 testpaths = [
     "tests",
-    "scripts/migrations",
 ]
 norecursedirs = [
     "astrid/packs/*/ai_toolkit/upstream",

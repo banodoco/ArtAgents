@@ -213,7 +213,7 @@ sprints may add Recraft, Ideogram, etc.).
 ## Validation rules
 
 1. **schema_version** must be `2`.  Reject `1` with a clear error pointing
-   at the sprint-2 migration (rewrite entries in v2 shape).
+   at the schema normalization step (rewrite entries in v2 shape).
 2. **No duplicate model IDs**.
 3. **At least one mode per model**.
 4. **Mode names** must be canonical (`t2i`, `i2i`, `edit`, `inpaint`,
