@@ -330,6 +330,9 @@ def _hivemind_source_preflight(record: "CapabilityRecord") -> dict[str, Any] | N
         return {"ok": False, "reason": "hivemind source checkout is dirty"}
     if not revision:
         return {"ok": False, "reason": "hivemind source checkout has no pinned revision"}
+    expected_revision = str(record.definition.metadata.get("commit_sha") or "")
+    if expected_revision and revision != expected_revision:
+        return {"ok": False, "reason": "hivemind source revision does not match pinned commit", "revision": revision, "expected_revision": expected_revision}
     return {"ok": True, "checkout": str(checkout), "revision": revision}
 
 
@@ -447,6 +450,29 @@ def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path)
         pass
     metadata.setdefault("source_pack", pack_id)
     metadata.setdefault("pack_root", str(pack_root))
+    if pack_id == "hivemind":
+        install_record = pack_root / ".astrid" / "install.json"
+        if install_record.is_file():
+            try:
+                install_payload = json.loads(install_record.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                install_payload = {}
+            if isinstance(install_payload, Mapping):
+                metadata.setdefault("source_type", install_payload.get("source_type", "git"))
+                metadata.setdefault("commit_sha", install_payload.get("commit_sha", ""))
+        if not metadata.get("commit_sha"):
+            checkout = next((candidate for candidate in (pack_root, *pack_root.parents) if (candidate / ".git").exists()), None)
+            if checkout is not None:
+                try:
+                    revision = subprocess.run(
+                        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+                        capture_output=True, text=True, check=True, timeout=5,
+                    ).stdout.strip()
+                except (OSError, subprocess.SubprocessError):
+                    revision = ""
+                if revision:
+                    metadata.setdefault("source_type", "git")
+                    metadata.setdefault("commit_sha", revision)
     return replace(definition, metadata=metadata)
 
 
@@ -497,6 +523,8 @@ class CapabilityRecord:
             "outputs": [output.__dict__ for output in self.definition.outputs],
             "capability_digest": self.capability_digest,
             "source_digest": self.source_digest,
+            "source_type": self.definition.metadata.get("source_type", "local"),
+            "commit_sha": self.definition.metadata.get("commit_sha", ""),
             "dependency_digest": self.dependency_digest,
             "source_root": str(self.source_root),
             "source_roots": [str(root) for root in source_roots],
@@ -1206,6 +1234,12 @@ class GenericPackHost:
                 no_proxy = policy.get("no_proxy")
                 if no_proxy:
                     env["NO_PROXY"] = str(no_proxy)
+                # Native provider wrappers consume an explicit, host-issued
+                # name rather than trusting ambient proxy variables.
+                env["ASTRID_BROKER_PROXY"] = proxy
+            broker = policy.get("broker")
+            if isinstance(broker, Mapping) and broker.get("evidence_path"):
+                env["ASTRID_NETWORK_BROKER_EVIDENCE"] = str(broker["evidence_path"])
         return env, secrets
 
     @staticmethod
@@ -1531,6 +1565,19 @@ class GenericPackHost:
         root.mkdir(parents=True, exist_ok=True)
         settled = False
         network_evidence_key: str | None = None
+        # Every network attempt gets a fresh host-issued nonce.  It is part of
+        # the immutable admission presented to an observable broker, so a
+        # handshake captured from another task cannot be replayed.
+        network_admission = {
+            "capability_digest": record.capability_digest,
+            "source_digest": record.source_digest,
+            "dependency_digest": record.dependency_digest,
+            "version": record.definition.version,
+            "source_root": str(record.source_root),
+            "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
+            "network_nonce": secrets_module.token_urlsafe(24),
+            "allowed_routes": list((_network_policy(record) or {}).get("allowed_routes", (_network_policy(record) or {}).get("allowed_destinations", ()))),
+        }
         try:
             inputs = self._materialize_inputs(spec, root)
             output_root = root / "outputs"
@@ -1584,26 +1631,14 @@ class GenericPackHost:
                         output_root,
                         root,
                         cancelled=cancelled,
-                        admission={
-                            "capability_digest": record.capability_digest,
-                            "source_digest": record.source_digest,
-                            "source_root": str(record.source_root),
-                            "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
-                        },
+                        admission=network_admission,
                     )
                     network_evidence_key = getattr(result, "network_evidence_key", None)
                 else:
                     # Dispatch through the process boundary.  The immutable
                     # admitted definition is serialized for the child so a
                     # registry reload cannot silently select a different pack.
-                    worker_admission = {
-                        "capability_digest": record.capability_digest,
-                        "source_digest": record.source_digest,
-                        "dependency_digest": record.dependency_digest,
-                        "version": record.definition.version,
-                        "source_root": str(record.source_root),
-                        "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
-                    }
+                    worker_admission = network_admission
                     worker_env, worker_secrets = self._child_environment(record, root, admission=worker_admission)
                     network_evidence_key = worker_env.get("ASTRID_NETWORK_EVIDENCE_KEY")
                     try:
@@ -1645,12 +1680,7 @@ class GenericPackHost:
             network_evidence = self._network_evidence(
                 root,
                 evidence_key=network_evidence_key,
-                admission=worker_admission if record.definition.command is None else {
-                    "capability_digest": record.capability_digest,
-                    "source_digest": record.source_digest,
-                    "source_root": str(record.source_root),
-                    "source_roots": [str(root) for root in _admitted_source_roots(record.source_root, record.definition)],
-                },
+                admission=worker_admission if record.definition.command is None else network_admission,
                 # Every network-required settlement needs signed evidence. A
                 # Python child emits it through the hook; a native child must
                 # have its admitted proxy/broker emit the same contract.

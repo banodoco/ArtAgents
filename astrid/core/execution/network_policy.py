@@ -136,6 +136,23 @@ def _write_evidence() -> None:
         "redirects": _policy_bool(_POLICY, "redirects", _policy_bool(_POLICY, "allow_redirects", False)),
         "proxy": bool(_POLICY.get("proxy")),
     }}
+    broker_path = os.environ.get("ASTRID_NETWORK_BROKER_EVIDENCE", "")
+    if broker_path:
+        try:
+            broker_value = json.loads(Path(broker_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            broker_value = None
+        if isinstance(broker_value, Mapping):
+            broker_unsigned = {key: value for key, value in broker_value.items() if key not in {"signature", "signature_algorithm"}}
+            broker_canonical = json.dumps(broker_unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            broker_valid = (
+                bool(_EVIDENCE_KEY)
+                and broker_value.get("signature_algorithm") == "hmac-sha256"
+                and hmac.compare_digest(str(broker_value.get("signature", "")), hmac.new(_EVIDENCE_KEY.encode(), broker_canonical, hashlib.sha256).hexdigest())
+                and dict(broker_value.get("admission") or {}) == dict(_ADMISSION)
+            )
+            if broker_valid:
+                payload["broker_evidence"] = broker_value
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     if not _EVIDENCE_KEY:
         # A hook without its host-issued key cannot make settlement evidence
@@ -213,7 +230,14 @@ def _validated_descendant_owner() -> bool:
     if not isinstance(raw, Mapping):
         return False
     kind = str(raw.get("kind", raw.get("owner", ""))).lower()
-    return kind in {"proxy", "broker", "os", "os_firewall", "sandbox"} and bool(raw.get("validated")) and bool(raw.get("observable"))
+    if kind not in {"proxy", "broker", "os", "os_firewall", "sandbox"}:
+        return False
+    if not bool(raw.get("validated")) or not bool(raw.get("observable")):
+        return False
+    # A declaration alone is not a route.  Require an explicit endpoint or a
+    # host-issued broker descriptor, plus a named allowlisted route/wrapper.
+    endpoint = _POLICY.get("proxy") or _POLICY.get("broker")
+    return bool(endpoint) and bool(raw.get("route")) and bool(raw.get("wrapper"))
 
 
 def _command_label(command: Any) -> str:
@@ -268,9 +292,12 @@ def _broker_handshake() -> None:
     admission_digest = hashlib.sha256(
         json.dumps(_ADMISSION, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     ).hexdigest()
+    nonce = str(_ADMISSION.get("network_nonce") or _ADMISSION.get("nonce") or "")
     try:
         with socket.create_connection((parsed.hostname, parsed.port), timeout=3) as connection:
-            connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest}\n".encode("ascii"))
+            # The digest binds the complete host admission; the nonce makes a
+            # replayed handshake from another attempt fail closed.
+            connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest} {nonce}\n".encode("ascii"))
             response = connection.recv(64).decode("ascii", "replace").strip()
     except OSError as exc:
         _record("broker_handshake", host=parsed.hostname, port=parsed.port, allowed=False, detail=str(exc))

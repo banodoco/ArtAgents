@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import json
 import re
+import subprocess
 from difflib import SequenceMatcher
 from collections.abc import Mapping
 from dataclasses import replace
@@ -161,6 +163,41 @@ def _pack_record(discovered_pack: Any) -> dict[str, Any]:
         payload["trust"] = trust_summary["trust"]
     payload["source_kind"] = discovered_pack.source_kind
     payload["priority_index"] = discovered_pack.priority_index
+    root = Path(str(getattr(discovered_pack.pack, "root", ""))).resolve()
+    install_record = root / ".astrid" / "install.json"
+    install_payload: dict[str, Any] = {}
+    if install_record.is_file():
+        try:
+            candidate = json.loads(install_record.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            candidate = {}
+        if isinstance(candidate, dict):
+            install_payload = candidate
+    payload["source_type"] = install_payload.get("source_type") or ("git" if (root / ".git").exists() else discovered_pack.source_kind)
+    payload["commit_sha"] = install_payload.get("commit_sha", "")
+    if not payload["commit_sha"]:
+        checkout = next((item for item in (root, *root.parents) if (item / ".git").exists()), None)
+        if checkout is not None:
+            try:
+                payload["commit_sha"] = subprocess.run(
+                    ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+                    capture_output=True, text=True, check=True, timeout=5,
+                ).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                payload["commit_sha"] = ""
+    payload["source_digest"] = install_payload.get("source_digest", "")
+    if not payload["source_digest"]:
+        checkout = next((item for item in (root, *root.parents) if (item / ".git").exists()), None)
+        if checkout is not None and payload["commit_sha"]:
+            try:
+                tracked = subprocess.run(
+                    ["git", "-C", str(checkout), "ls-tree", "-r", "--full-tree", "HEAD"],
+                    capture_output=True, text=True, check=True, timeout=10,
+                ).stdout
+                import hashlib
+                payload["source_digest"] = hashlib.sha256(tracked.encode("utf-8")).hexdigest()
+            except (OSError, subprocess.SubprocessError):
+                payload["source_digest"] = ""
     return _json_safe_mapping(payload)
 
 
