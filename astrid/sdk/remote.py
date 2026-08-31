@@ -255,34 +255,28 @@ class RemoteReferences(_RemoteFamily):
     def show(self, project, ref): return self._typed("get_project_reference", project, ref)
     def _version(self, ref, expected_version, project=None):
         if expected_version is not None: return int(expected_version)
-        try:
-            current = self._client.get_project_reference(project, ref) if project else self._client.get_reference(ref)
-        except WorkspaceClientError:
-            current = self._client.get_reference(ref)
+        current = self._client.get_project_reference(project, ref) if project is not None else self._client.get_reference(ref)
         return int(current.get("version", 1))
     def update(self, project, ref, *, expected_version=None, object_id=None, role=None, idempotency_key=None, **kwargs):
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("update_project_reference", project, ref, key=key, expected_version=version, name=kwargs.get("name"), description=kwargs.get("description"), metadata=kwargs.get("metadata"), idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("update_project_reference", project, ref, key=key, expected_version=version, name=kwargs.get("name"), description=kwargs.get("description"), metadata=kwargs.get("metadata"), idempotency_key=key)
         return self._typed("update_reference", ref, key=key, expected_version=version, object_id=object_id, role=role)
     def archive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("archive_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("archive_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
         return self._typed("archive_reference", ref, key=key, expected_version=version, idempotency_key=key)
     def unarchive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("recover_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("recover_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
         return self._typed("recover_reference", ref, key=key, expected_version=version, idempotency_key=key)
     def associate(self, project, ref, *, media_id=None, role="depicts", idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
@@ -321,34 +315,28 @@ class RemoteShots(_RemoteFamily):
         return self._typed("create_project_shot", project, body, key=key, idempotency_key=key)
     def _version(self, shot_id, expected_version, project=None):
         if expected_version is not None: return int(expected_version)
-        try:
-            current = self._client.get_project_shot(project, shot_id) if project else self._client.get_shot(shot_id)
-        except WorkspaceClientError:
-            current = self._client.get_shot(shot_id)
+        current = self._client.get_project_shot(project, shot_id) if project is not None else self._client.get_shot(shot_id)
         return int(current.get("version", 1))
     def update(self, project, shot_id, *, expected_version=None, start_ms=None, duration_ms=None, reference_ids=None, idempotency_key=None, **kwargs):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("update_project_shot", project, shot_id, key=key, expected_version=version, name=kwargs.get("name"), metadata=kwargs.get("metadata"), idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("update_project_shot", project, shot_id, key=key, expected_version=version, name=kwargs.get("name"), metadata=kwargs.get("metadata"), idempotency_key=key)
         return self._typed("update_shot", shot_id, key=key, expected_version=version, start_ms=start_ms, duration_ms=duration_ms, reference_ids=reference_ids)
     def archive(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("archive_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("archive_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
         return self._typed("archive_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
     def recover(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project:
-            result = self._typed("recover_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
-            if result.ok or result.error.code not in {"not_found", "route_not_found", "transport_error"}: return result
+        if project is not None:
+            return self._typed("recover_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
         return self._typed("recover_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
 
     unarchive = recover

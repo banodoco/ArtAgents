@@ -81,6 +81,104 @@ def test_documented_project_cli_mutations_return_committed_receipts(tmp_path, mo
         daemon.stop()
 
 
+def test_project_shot_scope_never_falls_back_to_legacy_collision(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+
+    def assert_not_found(result):
+        assert not result.ok
+        assert result.error is not None and result.error.code == "not_found"
+        assert result.receipt is None
+
+    try:
+        client = AstridClient.open()
+        owner = client.projects.create(slug="shot-owner", name="Shot owner", idempotency_key="shot-owner").data
+        other = client.projects.create(slug="shot-other", name="Shot other", idempotency_key="shot-other").data
+        timeline = client.timelines.create(project=owner["project_id"], slug="legacy", idempotency_key="legacy-timeline").data
+        legacy = client.shots.create(
+            timeline_id=timeline["timeline_id"],
+            shot={"shot_id": "collision", "start_ms": 0, "duration_ms": 100, "reference_ids": []},
+            idempotency_key="legacy-shot",
+        )
+        assert legacy.ok
+        before = client._remote._transport.get_shot("collision")
+
+        # A project-scoped read and every version-resolving mutation must stay
+        # in the project route.  The colliding legacy child is not in other.
+        assert_not_found(client.shots.show(other["project_id"], "collision"))
+        assert_not_found(client.shots.update(other["project_id"], "collision", duration_ms=200, idempotency_key="wrong-update"))
+        assert_not_found(client.shots.archive(other["project_id"], "collision", idempotency_key="wrong-archive"))
+        assert_not_found(client.shots.recover(other["project_id"], "collision", idempotency_key="wrong-recover"))
+        assert client._remote._transport.get_shot("collision") == before
+
+        # Project-owned mutations remain receipt-bearing on success.
+        owned = client.shots.create(project=other["project_id"], name="Owned", idempotency_key="owned-shot")
+        assert owned.ok and owned.receipt is not None
+        updated = client.shots.update(other["project_id"], owned.data["shot_id"], name="Owned 2", idempotency_key="owned-update")
+        assert updated.ok and updated.receipt is not None
+        archived = client.shots.archive(other["project_id"], owned.data["shot_id"], idempotency_key="owned-archive")
+        assert archived.ok and archived.receipt is not None
+        recovered = client.shots.recover(other["project_id"], owned.data["shot_id"], idempotency_key="owned-recover")
+        assert recovered.ok and recovered.receipt is not None
+    finally:
+        daemon.stop()
+
+
+def test_project_reference_scope_never_falls_back_to_legacy_collision(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+
+    def assert_not_found(result):
+        assert not result.ok
+        assert result.error is not None and result.error.code == "not_found"
+        assert result.receipt is None
+
+    try:
+        client = AstridClient.open()
+        owner = client.projects.create(slug="reference-owner", name="Reference owner", idempotency_key="reference-owner").data
+        other = client.projects.create(slug="reference-other", name="Reference other", idempotency_key="reference-other").data
+        owner_path, other_path = tmp_path / "owner.bin", tmp_path / "other.bin"
+        owner_path.write_bytes(b"owner")
+        other_path.write_bytes(b"other")
+        owner_media = client.media.import_file(project=owner["project_id"], path=owner_path, idempotency_key="owner-media").data
+        other_media = client.media.import_file(project=other["project_id"], path=other_path, idempotency_key="other-media").data
+        timeline = client.timelines.create(project=owner["project_id"], slug="legacy", idempotency_key="legacy-timeline").data
+        legacy = client.references.create(
+            timeline_id=timeline["timeline_id"],
+            reference_id="collision",
+            object_id=owner_media["object_id"],
+            idempotency_key="legacy-reference",
+        )
+        assert legacy.ok
+        before = client._remote._transport.get_reference("collision")
+
+        assert_not_found(client.references.show(other["project_id"], "collision"))
+        assert_not_found(client.references.update(other["project_id"], "collision", role="hacked", idempotency_key="wrong-update"))
+        assert_not_found(client.references.archive(other["project_id"], "collision", idempotency_key="wrong-archive"))
+        assert_not_found(client.references.unarchive(other["project_id"], "collision", idempotency_key="wrong-recover"))
+        assert client._remote._transport.get_reference("collision") == before
+
+        owned = client.references.create(
+            project=other["project_id"],
+            reference_id="owned-reference",
+            kind="character",
+            name="Owned",
+            media_id=other_media["object_id"],
+            idempotency_key="owned-reference",
+        )
+        assert owned.ok and owned.receipt is not None
+        updated = client.references.update(other["project_id"], "owned-reference", name="Owned 2", idempotency_key="owned-update")
+        assert updated.ok and updated.receipt is not None
+        archived = client.references.archive(other["project_id"], "owned-reference", idempotency_key="owned-archive")
+        assert archived.ok and archived.receipt is not None
+        recovered = client.references.unarchive(other["project_id"], "owned-reference", idempotency_key="owned-recover")
+        assert recovered.ok and recovered.receipt is not None
+    finally:
+        daemon.stop()
+
+
 def test_remote_reads_are_scoped_and_unsupported_operations_fail_honestly(tmp_path, monkeypatch):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
@@ -235,12 +333,14 @@ def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_pa
         reference = client.references.create(timeline_id=timeline, reference_id="reference", object_id=first["object_id"], idempotency_key="reference").data
         assert client.shots.list(project_id).data[0]["shot_id"] == shot["shot_id"]
         assert client.references.list(project_id).data[0]["reference_id"] == reference["reference_id"]
-        assert client.shots.update(project_id, shot["shot_id"], start_ms=10).ok
-        assert client.shots.archive(project_id, shot["shot_id"], idempotency_key="shot-archive").ok
-        assert client.shots.recover(project_id, shot["shot_id"], idempotency_key="shot-recover").ok
-        assert client.references.update(project_id, reference["reference_id"], role="primary").ok
-        assert client.references.archive(project_id, reference["reference_id"], idempotency_key="reference-archive").ok
-        assert client.references.unarchive(project_id, reference["reference_id"], idempotency_key="reference-recover").ok
+        # Legacy timeline children use the explicit no-project SDK routes;
+        # project-scoped adapters never infer this compatibility path.
+        assert client.shots.update(None, shot["shot_id"], start_ms=10).ok
+        assert client.shots.archive(None, shot["shot_id"], idempotency_key="shot-archive").ok
+        assert client.shots.recover(None, shot["shot_id"], idempotency_key="shot-recover").ok
+        assert client.references.update(None, reference["reference_id"], role="primary").ok
+        assert client.references.archive(None, reference["reference_id"], idempotency_key="reference-archive").ok
+        assert client.references.unarchive(None, reference["reference_id"], idempotency_key="reference-recover").ok
 
         task = client.tasks.create(project_id=project_id, capability="render.basic", spec={"prompt": "editor"}, idempotency_key="task").data
         assert client.tasks.list(project_id).data[0]["task_id"] == task["task_id"]
