@@ -559,10 +559,10 @@ class AutoHealTest(unittest.TestCase):
         self.assertEqual(skill_md.read_bytes(), before, "auto-heal must not edit _core SKILL.md")
 
 
-class InstalledDiscoveryTest(unittest.TestCase):
-    """list_skills() must layer in installed packs via shared metadata."""
+class ExternalDiscoveryTest(unittest.TestCase):
+    """External skills enter discovery only through the canonical opt-in path."""
 
-    def _write_installed_pack(self, root: Path, pack_id: str) -> Path:
+    def _write_external_pack(self, root: Path, pack_id: str) -> Path:
         pack_root = root / pack_id
         skill_dir = pack_root / "skill"
         skill_dir.mkdir(parents=True)
@@ -576,31 +576,25 @@ class InstalledDiscoveryTest(unittest.TestCase):
         )
         return pack_root
 
-    def test_installed_pack_is_not_a_default_discovery_authority(self) -> None:
+    def test_external_pack_is_not_a_default_discovery_authority(self) -> None:
         with TemporaryDirectory() as tmp:
-            pack_root = self._write_installed_pack(Path(tmp), "installed_demo")
-            with mock.patch(
-                "astrid.core.pack.store.installed_pack_roots",
-                return_value=(pack_root,),
-            ):
+            self._write_external_pack(Path(tmp), "external_demo")
+            # A pack outside the source tree is not consulted by default
+            # discovery; only the canonical source-tree scan is implicit.
+            with mock.patch.dict("os.environ", {"ASTRID_PACKS_PATH": ""}, clear=False):
                 descriptors = discovery.list_skills()
             pack_ids = [d.pack_id for d in descriptors]
-            self.assertNotIn("installed_demo", pack_ids)
+            self.assertNotIn("external_demo", pack_ids)
             self.assertIn("_core", pack_ids)
 
-    def test_explicit_packs_dir_does_not_pull_installed(self) -> None:
+    def test_explicit_packs_dir_does_not_pull_external(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            installed_root = root / "installed"
-            installed_root.mkdir()
-            pack_root = self._write_installed_pack(installed_root, "installed_demo")
+            external_root = root / "external"
+            self._write_external_pack(external_root, "external_demo")
             scan_dir = root / "scan"
             scan_dir.mkdir()
-            with mock.patch(
-                "astrid.core.pack.store.installed_pack_roots",
-                return_value=(pack_root,),
-            ):
-                descriptors = discovery.list_skills(scan_dir)
+            descriptors = discovery.list_skills(scan_dir)
             self.assertEqual(descriptors, [])
 
 
