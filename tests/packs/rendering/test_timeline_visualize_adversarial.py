@@ -145,7 +145,7 @@ def _rewrite_pack_file_with_valid_hashes(manifest_path: Path, name: str, value: 
     ledger_path.write_bytes(_json_bytes(ledger, ordered=True))
 
 
-def _write_transcript_run_metadata(
+def _write_transcript_sources_metadata(
     project_root: Path,
     timeline: Path,
     *,
@@ -155,52 +155,31 @@ def _write_transcript_run_metadata(
     source_id: str = "transcript:run",
     media_asset: str = "plant-frame-1",
 ) -> None:
-    """Run-declared hype metadata plumbing (B8): the declaration records
-    *declared_digest* while *actual_bytes* are what exists on disk."""
-    run_root = project_root / "runs" / run_id
-    artifact_root = run_root / "artifacts"
-    transcript_path = artifact_root / "transcript.json"
+    """Write a project-owned hash-bound transcript declaration.
+
+    Local run.json projections are retired; source declarations exercise the
+    same attachment integrity contract without reintroducing that authority.
+    """
+    del timeline, run_id
+    transcript_path = project_root / "sources" / "transcript.json"
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_bytes(actual_bytes)
-    metadata_path = artifact_root / "hype.metadata.json"
-    metadata_path.write_text(
+    (project_root / "sources.json").write_text(
         json.dumps(
             {
                 "version": 1,
-                "pipeline": {},
-                "clips": {},
-                "sources": {media_asset: {"transcript_ref": "transcript.json"}},
-                "transcript": {
-                    "schema_version": 1,
-                    "source_id": source_id,
-                    "source_version": "1",
-                    "file": "transcript.json",
-                    "sha256": declared_digest,
-                    "media": {"asset_key": media_asset},
-                    "producer": "editorial.transcribe",
-                    "producer_version": "1",
-                    "model": "whisper-1",
+                "sources": {
+                    source_id: {
+                        "kind": "transcript",
+                        "source_version": "1",
+                        "file": "transcript.json",
+                        "content_sha256": declared_digest,
+                        "media": {"asset_key": media_asset},
+                        "producer": "editorial.transcribe",
+                        "producer_version": "1",
+                        "model": "whisper-1",
+                    }
                 },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (run_root / "run.json").write_text(
-        json.dumps(
-            {
-                "out": f"runs/{run_id}",
-                "artifacts": {"metadata": {"path": f"runs/{run_id}/artifacts/hype.metadata.json"}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    (timeline / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contributing_runs": [run_id],
-                "final_outputs": [],
-                "tombstoned_at": None,
             }
         ),
         encoding="utf-8",
@@ -329,7 +308,7 @@ def test_changed_transcript_attachment_hash_mismatch_is_surfaced(
     declared_digest = _sha256(declared)
     assert declared_digest != _sha256(actual)
 
-    _write_transcript_run_metadata(
+    _write_transcript_sources_metadata(
         project_root,
         timeline,
         declared_digest=declared_digest,

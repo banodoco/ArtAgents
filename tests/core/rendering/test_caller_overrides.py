@@ -7,10 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core.pack.override import OverrideStore
 from astrid.core.project.project import create_project
-from astrid.core.project.run import write_run_record
 from astrid.core.rendering import attached
 from astrid.core.rendering.provenance import assemble_provenance_v2
 from astrid.core.execution.executor.registry import ExecutorRegistry
@@ -22,6 +20,7 @@ from tests.core.rendering.test_service import (
     _plan,
     _request,
 )
+from tests.core.rendering.test_attached_render import _patch_runtime_parent
 
 
 def test_executor_override_affects_attached_facade_call(
@@ -29,15 +28,8 @@ def test_executor_override_affects_attached_facade_call(
 ) -> None:
     projects_root = tmp_path / "projects"
     create_project("demo", root=projects_root)
-    write_run_record(
-        "demo",
-        "parent-run",
-        root=projects_root,
-        tool_id="demo.parent",
-        kind="orchestrator",
-        status=RunStatus.RUNNING,
-    )
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    _patch_runtime_parent(monkeypatch)
 
     from astrid.core.execution.executor.registry import load_default_registry
 

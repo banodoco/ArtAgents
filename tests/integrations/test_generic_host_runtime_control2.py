@@ -131,8 +131,29 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
                     }
                 ],
                 "isolation": {"mode": "subprocess", "network": True},
-                "metadata": {"adapter_family": "provider", "resource_keys": ["provider"],
-                              "network_policy": {"allowed_protocols": ["dns", "tcp"], "allowed_destinations": []}},
+                "metadata": {
+                    "adapter_family": "provider",
+                    "resource_keys": ["provider"],
+                    "network_policy": {
+                        "allowed_protocols": ["dns", "tcp"],
+                        "allowed_destinations": [],
+                        "broker": {
+                            "host_managed": True,
+                            "kind": "broker",
+                            "enforced": True,
+                            "observable": True,
+                            "route": "fixture",
+                            "wrapper": "astrid-generic-host",
+                        },
+                        "descendant_enforcement": {
+                            "kind": "broker",
+                            "validated": True,
+                            "observable": True,
+                            "route": "fixture",
+                            "wrapper": "astrid-generic-host",
+                        },
+                    },
+                },
             }
         ),
         encoding="utf-8",

@@ -87,8 +87,8 @@ def _common_patches(recorder: _StatusRecorder):
         patch.object(bw_mod, "_verify_project_ownership", return_value=None),
         patch.object(
             bw_mod,
-            "write_run_record",
-            return_value={"metadata": {"baseline_snapshot": "abc123"}},
+            "_write_baseline_snapshot",
+            return_value="abc123",
         ),
     ]
 
@@ -245,7 +245,7 @@ class TestBaselineSnapshotFailureRoutesToFail:
             patch.object(bw_mod, "claim_next_task", side_effect=[claim, None]),
             patch.object(
                 bw_mod,
-                "write_run_record",
+                "_write_baseline_snapshot",
                 side_effect=RuntimeError("disk full"),
             ),
         ]
@@ -290,7 +290,7 @@ class TestBaselineSnapshotFailureRoutesToFail:
             patch.object(bw_mod, "verify_user_jwt", return_value=_VERIFIED_JWT),
             patch.object(bw_mod, "_verify_project_ownership", return_value=None),
             patch.object(bw_mod, "claim_next_task", side_effect=[claim, None]),
-            patch.object(bw_mod, "write_run_record", side_effect=RuntimeError("no space")),
+            patch.object(bw_mod, "_write_baseline_snapshot", side_effect=RuntimeError("no space")),
         ]
         for p in patches:
             p.start()

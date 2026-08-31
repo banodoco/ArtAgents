@@ -304,26 +304,17 @@ class BanodocoWorkerTest(unittest.TestCase):
         self.assertIn("intent dispatch failed", self.recorder.calls[0]["error"])
         self.assertEqual(self.recorder.calls[0]["result_data"], {"correlation_id": "corr"})
 
-    def test_baseline_snapshot_written_to_run_record(self) -> None:
-        # Use a real project_slug + temp projects root; mock the rest.
+    def test_baseline_snapshot_is_not_written_to_local_run_record(self) -> None:
+        """Baseline provenance is returned for runtime settlement, not run.json."""
         tmp_root = Path(tempfile.mkdtemp(prefix="bw-baseline-test-", dir=ROOT))
         self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
-        from astrid.core.foundation import project_paths
-        from astrid.core.project.project import create_project
-
-        with patch.dict("os.environ", {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)}):
-            create_project("baseline-demo")
-            self._start(self._patch_common())
-            worker = self._make_worker(project_slug="baseline-demo")
-            claim = _claim()
-            worker._handle_claim(claim, service_role_key="srv-key")
-            run_record_path = tmp_root / "baseline-demo" / "runs" / claim.run_id / "run.json"
-            self.assertTrue(run_record_path.exists(), f"missing run record at {run_record_path}")
-            payload = json.loads(run_record_path.read_text(encoding="utf-8"))
-            digest = payload.get("metadata", {}).get("baseline_snapshot")
-            self.assertIsInstance(digest, str)
-            self.assertEqual(len(digest), 64)
-            self.assertTrue(all(ch in "0123456789abcdef" for ch in digest))
+        digest = bw_mod._write_baseline_snapshot(
+            project_slug="baseline-demo", run_id="run-1", payload={"clips": []}
+        )
+        self.assertIsInstance(digest, str)
+        self.assertEqual(len(digest), 64)
+        self.assertTrue(all(ch in "0123456789abcdef" for ch in digest))
+        self.assertFalse((tmp_root / "baseline-demo" / "runs" / "run-1" / "run.json").exists())
 
 
 class CanonicalHashTest(unittest.TestCase):

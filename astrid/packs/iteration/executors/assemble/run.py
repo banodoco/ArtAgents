@@ -32,6 +32,10 @@ class AssembleError(RuntimeError):
     pass
 
 
+class RuntimeArtifactError(ValueError):
+    """A structured, recoverable runtime-object materialization failure."""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Assemble iteration inputs into render adapter files.")
     parser.add_argument("--prepare-dir", required=True, help="Legacy directory containing iteration manifest and quality inputs.")
@@ -523,7 +527,7 @@ def _materialize_runtime_artifact(
         )
         if hasattr(response, "ok") and hasattr(response, "data"):
             if not bool(response.ok):
-                raise ValueError(str(getattr(response, "error", None) or "runtime object read failed"))
+                raise RuntimeArtifactError(str(getattr(response, "error", None) or "runtime object read failed"))
             response = response.data
         data = response if isinstance(response, (bytes, bytearray)) else getattr(response, "data", None)
         if data is None and isinstance(response, Mapping):
@@ -531,16 +535,16 @@ def _materialize_runtime_artifact(
             if data is None:
                 data = response.get("bytes")
         if not isinstance(data, (bytes, bytearray)):
-            raise ValueError("runtime object response did not contain bytes")
+            raise RuntimeArtifactError("runtime object response did not contain bytes")
         data = bytes(data)
         actual_digest = hashlib.sha256(data).hexdigest()
         if actual_digest != digest:
-            raise ValueError(f"digest mismatch (expected {digest}, got {actual_digest})")
+            raise RuntimeArtifactError(f"digest mismatch (expected {digest}, got {actual_digest})")
         expected_size = artifact.get("size")
         if expected_size is not None and int(expected_size) != len(data):
-            raise ValueError(f"size mismatch (expected {expected_size}, got {len(data)})")
+            raise RuntimeArtifactError(f"size mismatch (expected {expected_size}, got {len(data)})")
         if materialize_dir is None:
-            raise ValueError("no assembly staging directory is available")
+            raise RuntimeArtifactError("no assembly staging directory is available")
         materialize_dir.mkdir(parents=True, exist_ok=True)
         suffix = _runtime_artifact_suffix(artifact)
         destination = materialize_dir / f"{ordinal:04d}-{digest[:16]}{suffix}"

@@ -391,16 +391,14 @@ def test_frozen_child_resolves_ts_and_sp_without_live_transcript(
     )
 
 
-def test_run_declared_hype_metadata_reaches_transcript_discovery(
+def test_runtime_compatible_sources_metadata_reaches_transcript_discovery(
     tmp_projects_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A project-owned source declaration feeds the runtime-backed view."""
     slug = "speech-pipeline-metadata"
     project_root, timeline = _prepare_project(tmp_projects_root, slug)
-    run_id = "pipeline-transcript"
-    run_root = project_root / "runs" / run_id
-    artifact_root = run_root / "artifacts"
-    transcript_path = artifact_root / "transcript.json"
+    transcript_path = project_root / "sources" / "transcript.json"
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(
         json.dumps(
@@ -413,51 +411,22 @@ def test_run_declared_hype_metadata_reaches_transcript_discovery(
         encoding="utf-8",
     )
     digest = hashlib.sha256(transcript_path.read_bytes()).hexdigest()
-    metadata_path = artifact_root / "hype.metadata.json"
-    metadata_path.write_text(
+    (project_root / "sources.json").write_text(
         json.dumps(
             {
                 "version": 1,
-                "pipeline": {},
-                "clips": {},
                 "sources": {
-                    "plant-frame-1": {"transcript_ref": "transcript.json"}
-                },
-                "transcript": {
-                    "schema_version": 1,
-                    "source_id": "transcript:run",
-                    "source_version": "1",
-                    "file": "transcript.json",
-                    "sha256": digest,
-                    "media": {"asset_key": "plant-frame-1"},
-                    "producer": "editorial.transcribe",
-                    "producer_version": "1",
-                    "model": "whisper-1",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (run_root / "run.json").write_text(
-        json.dumps(
-            {
-                "out": f"runs/{run_id}",
-                "artifacts": {
-                    "metadata": {
-                        "path": f"runs/{run_id}/artifacts/hype.metadata.json"
+                    "transcript:run": {
+                        "kind": "transcript",
+                        "source_version": "1",
+                        "file": "transcript.json",
+                        "content_sha256": digest,
+                        "media": {"asset_key": "plant-frame-1"},
+                        "producer": "editorial.transcribe",
+                        "producer_version": "1",
+                        "model": "whisper-1",
                     }
                 },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (timeline / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contributing_runs": [run_id],
-                "final_outputs": [],
-                "tombstoned_at": None,
             }
         ),
         encoding="utf-8",

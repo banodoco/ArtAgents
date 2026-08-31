@@ -23,6 +23,8 @@ from astrid.core.integrations.worker.banodoco_worker import (
     BanodocoWorker,
     WorkerConfig,
     _write_baseline_snapshot,
+    canonical_json,
+    sha256_hex,
 )
 
 
@@ -68,27 +70,28 @@ class _StatusRecorder:
 
 
 class WriteBaselineSnapshotPropagationTest(unittest.TestCase):
-    """Direct unit test of ``_write_baseline_snapshot`` exception propagation."""
+    """Direct unit tests of the runtime settlement digest helper."""
 
-    def test_write_run_record_failure_propagates(self) -> None:
-        boom = RuntimeError("disk full")
-        with patch.object(bw_mod, "write_run_record", side_effect=boom):
-            with self.assertRaises(RuntimeError) as ctx:
-                _write_baseline_snapshot(
-                    project_slug="some-project",
-                    run_id="run-1",
-                    payload={"clips": []},
-                )
-        self.assertIs(ctx.exception, boom)
-
-    def test_no_project_slug_returns_none(self) -> None:
-        """None remains reserved for the 'no project slug configured' branch."""
-        result = _write_baseline_snapshot(
-            project_slug=None,
+    def test_baseline_snapshot_is_a_runtime_settlement_digest(self) -> None:
+        digest = _write_baseline_snapshot(
+            project_slug="some-project",
             run_id="run-1",
             payload={"clips": []},
         )
-        self.assertIsNone(result)
+        self.assertEqual(digest, sha256_hex(canonical_json({"clips": []})))
+        self.assertEqual(
+            digest,
+            _write_baseline_snapshot(
+                project_slug=None,
+                run_id="other-run",
+                payload={"clips": []},
+            ),
+        )
+
+    def test_no_project_slug_still_returns_digest(self) -> None:
+        """The digest is independent of the deprecated local project hint."""
+        result = _write_baseline_snapshot(project_slug=None, run_id="run-1", payload={"clips": []})
+        self.assertIsInstance(result, str)
 
 
 class ClaimLoopWrappingBaselineFailureTest(unittest.TestCase):
@@ -119,10 +122,11 @@ class ClaimLoopWrappingBaselineFailureTest(unittest.TestCase):
                     raw_claims={"sub": "user-1"},
                 ),
             ),
-            # write_run_record raises — the snapshot helper must propagate.
+            # Runtime settlement digest generation raises — the claim loop
+            # must route the failure through _fail.
             patch.object(
                 bw_mod,
-                "write_run_record",
+                "_write_baseline_snapshot",
                 side_effect=RuntimeError("snapshot write failed: disk full"),
             ),
         ]

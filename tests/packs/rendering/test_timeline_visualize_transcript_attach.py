@@ -201,7 +201,7 @@ def test_sources_json_path_outside_sources_is_uncontained(
     assert result.file is None
 
 
-def test_run_artifact_uses_declared_out_path_not_cwd(
+def test_legacy_run_artifact_is_not_a_local_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = tmp_path / "project"
@@ -222,15 +222,13 @@ def test_run_artifact_uses_declared_out_path_not_cwd(
     _write(unrelated_cwd / "attached.json", b"wrong nearby file")
     monkeypatch.chdir(unrelated_cwd)
 
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.integrity == "ok"
-    assert result.file == (declared_out / "attached.json").resolve()
+    # Runtime-owned run/object APIs are the only run authority.  A local
+    # run.json projection must not be read or used as a fallback.
+    assert discover_attachment(project) is None
 
 
 @pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
-def test_run_artifact_path_outside_owning_run_is_uncontained(
+def test_legacy_run_artifact_path_is_ignored(
     tmp_path: Path,
     outside_kind: str,
 ) -> None:
@@ -249,14 +247,10 @@ def test_run_artifact_path_outside_owning_run_is_uncontained(
         },
     )
 
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.integrity == "uncontained"
-    assert result.file is None
+    assert discover_attachment(project) is None
 
 
-def test_run_artifact_contained_absolute_path_is_allowed(tmp_path: Path) -> None:
+def test_legacy_run_artifact_contained_absolute_path_is_ignored(tmp_path: Path) -> None:
     project = tmp_path / "project"
     run_root = project / "runs" / "R19"
     transcript = run_root / "evidence" / "absolute.json"
@@ -271,14 +265,10 @@ def test_run_artifact_contained_absolute_path_is_allowed(tmp_path: Path) -> None
         },
     )
 
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.integrity == "ok"
-    assert result.file == transcript.resolve()
+    assert discover_attachment(project) is None
 
 
-def test_run_artifact_with_uncontained_declared_out_is_refused(tmp_path: Path) -> None:
+def test_legacy_run_artifact_with_uncontained_declared_out_is_ignored(tmp_path: Path) -> None:
     project = tmp_path / "project"
     run_root = project / "runs" / "R19"
     outside_out = project / "runs" / "other"
@@ -293,11 +283,7 @@ def test_run_artifact_with_uncontained_declared_out_is_refused(tmp_path: Path) -
         },
     )
 
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.integrity == "uncontained"
-    assert result.file is None
+    assert discover_attachment(project) is None
 
 
 def test_pipeline_metadata_precedes_sources_json(tmp_path: Path) -> None:

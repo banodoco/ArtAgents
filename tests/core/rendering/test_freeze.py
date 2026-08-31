@@ -48,6 +48,7 @@ from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_S
 # `tests/` is a package, and this import style is used repo-wide).
 from tests.core.rendering.test_attached_render import (
     _fake_success,
+    _patch_runtime_parent,
     _Registry,
     _seed_parent,
     _Service,
@@ -300,7 +301,8 @@ def test_freeze_attached_render_creates_only_its_intended_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = tmp_path / "projects"
-    _seed_parent(projects_root)  # the orchestrator's parent run record
+    _seed_parent(projects_root)
+    _patch_runtime_parent(monkeypatch)
     calls: list[object] = []
     monkeypatch.setattr(attached, "run_executor", _fake_success(calls))
     output = tmp_path / "freeze-attached" / "preview.mp4"
@@ -316,16 +318,13 @@ def test_freeze_attached_render_creates_only_its_intended_ledger(
         executor_registry=_Registry(),
     )
 
-    # Exactly one ledger exists anywhere: the parent run record.  The
-    # attached render records outputs under that run's step tree and never
-    # creates a new run.json of its own.
-    assert list(projects_root.rglob("run.json")) == [
-        projects_root / "demo" / "runs" / "parent-run" / "run.json"
-    ]
+    # Parent identity is runtime-owned; attached rendering never creates a
+    # local run.json projection.
+    assert list(projects_root.rglob("run.json")) == []
     produces = (
         projects_root
+        / ".astrid-runtime-staging"
         / "demo"
-        / "runs"
         / "parent-run"
         / "steps"
         / "freeze-child"

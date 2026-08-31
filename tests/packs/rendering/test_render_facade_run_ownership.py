@@ -23,7 +23,6 @@ from astrid.core.execution.executor.runner import (
 )
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
-from astrid.core.project.run import write_run_record
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.timeline.crud import create_timeline
 
@@ -81,14 +80,8 @@ def _write_project_inputs(projects_root: Path) -> dict[str, str]:
 
 
 def _attach_task_run(monkeypatch: pytest.MonkeyPatch, timeline: dict) -> None:
-    """Create a legacy parent projection used to detect secondary writes."""
-    write_run_record(
-        "demo",
-        PARENT_RUN_ID,
-        kind="task",
-        status="running",
-        timeline_id=timeline["ulid"],
-    )
+    """Set the runtime-owned parent binding without a local projection."""
+    del timeline
     monkeypatch.setenv(TASK_PROJECT_ENV, "demo")
     monkeypatch.setenv(TASK_RUN_ID_ENV, PARENT_RUN_ID)
     monkeypatch.setenv(TASK_STEP_ID_ENV, TASK_STEP_ID)
@@ -193,9 +186,7 @@ def test_attached_runner_does_not_create_a_secondary_filesystem_ledger(
     assert result.returncode == 0
     assert result.run_root is None
     assert (staging / "hype.mp4").read_bytes() == b"fake-mp4"
-    assert _run_jsons(projects_root) == [
-        projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"
-    ]
+    assert _run_jsons(projects_root) == []
     assert not (staging / "run.json").exists()
 
 

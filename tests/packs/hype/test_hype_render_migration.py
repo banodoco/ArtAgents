@@ -7,12 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.project import create_project
-from astrid.core.project.run import write_run_record
 from astrid.core.rendering import attached
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.packs.video_editing.orchestrators.hype import steps
+from tests.core.rendering.test_attached_render import _patch_runtime_parent
 
 
 class _Registry:
@@ -82,15 +81,8 @@ def test_hype_attached_render_writes_default_pair_and_only_parent_ledger(
 ) -> None:
     projects_root = tmp_path / "projects"
     create_project("demo", root=projects_root)
-    write_run_record(
-        "demo",
-        "hype-parent",
-        root=projects_root,
-        tool_id="video_editing.hype",
-        kind="orchestrator",
-        status=RunStatus.RUNNING,
-    )
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    _patch_runtime_parent(monkeypatch, run_id="hype-parent")
     for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)
 
@@ -132,5 +124,6 @@ def test_hype_attached_render_writes_default_pair_and_only_parent_ledger(
     assert request.executor_id == "rendering.render"
     assert request.inputs["output_name"] == "hype.mp4"
     assert calls[0][1].id == "local.hype-render"
-    ledgers = sorted(projects_root.rglob("run.json"))
-    assert ledgers == [projects_root / "demo" / "runs" / "hype-parent" / "run.json"]
+    # The parent is runtime-owned; attached rendering creates only the step
+    # outputs and never a local run.json projection.
+    assert sorted(projects_root.rglob("run.json")) == []

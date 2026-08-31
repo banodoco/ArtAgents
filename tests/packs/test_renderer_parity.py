@@ -27,7 +27,7 @@ from astrid.core.foundation import project_paths
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.project.project import create_project
-from astrid.core.project.run import step_dir_for, write_run_record
+from astrid.core.project.run import step_dir_for
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
@@ -714,13 +714,6 @@ def test_public_facade_standalone_and_attached_run_ownership(
     _fake_render_process(monkeypatch)
 
     if attached:
-        write_run_record(
-            "demo",
-            PARENT_RUN_ID,
-            kind="task",
-            status="running",
-            timeline_id=timeline_record["ulid"],
-        )
         monkeypatch.setenv(TASK_PROJECT_ENV, "demo")
         monkeypatch.setenv(TASK_RUN_ID_ENV, PARENT_RUN_ID)
         monkeypatch.setenv(TASK_STEP_ID_ENV, TASK_STEP_ID)
@@ -755,8 +748,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     assert result.returncode == 0
     run_jsons = sorted((projects_root / "demo" / "runs").glob("**/run.json"))
     if attached:
-        expected_parent = projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"
-        assert run_jsons == [expected_parent]
+        assert run_jsons == []
         assert result.run_root == staging_root
         assert not (staging_root / "run.json").exists()
     else:
