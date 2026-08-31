@@ -72,7 +72,7 @@ def _dispatch_doctor(args: list[str]) -> int:
     from astrid.sdk.workspace_client import WorkspaceClientError
 
     try:
-        with AstridClient.open(auto_bootstrap=False) as client:
+        with AstridClient.open_from_launcher() as client:
             report = client.doctor()
     except (ServiceUnavailableError, WorkspaceClientError) as exc:
         payload = {
@@ -124,6 +124,7 @@ def _dispatch_backup(args: list[str]) -> int:
     tombstone.add_argument("--expected-version", type=int, default=None)
     tombstone.add_argument("--json", action="store_true")
     recover = sub.add_parser("recover", add_help=False)
+    recover.add_argument("--expected-realm-id", required=True)
     recover.add_argument("--expected-version", type=int, default=None)
     recover.add_argument("--json", action="store_true")
     purge = sub.add_parser("purge", add_help=False)
@@ -148,7 +149,7 @@ def _dispatch_backup(args: list[str]) -> int:
         from astrid.sdk.exceptions import ServiceUnavailableError
         from astrid.sdk.workspace_client import WorkspaceClientError
 
-        with AstridClient.open(auto_bootstrap=False) as client:
+        with AstridClient.open_from_launcher() as client:
             if parsed.operation == "create":
                 destination = parsed.destination or parsed.out
                 if not destination: parser.error("backup create requires DESTINATION or --out")
@@ -162,7 +163,7 @@ def _dispatch_backup(args: list[str]) -> int:
             elif parsed.operation == "tombstone":
                 result = client.tombstone_realm(reason=parsed.reason, expected_version=parsed.expected_version)
             elif parsed.operation == "recover":
-                result = client.recover_realm(expected_version=parsed.expected_version)
+                result = client.recover_realm(expected_realm_id=parsed.expected_realm_id, expected_version=parsed.expected_version)
             else:
                 result = client.purge_realm(parsed.confirmation)
     except ServiceUnavailableError as exc:
@@ -205,7 +206,7 @@ def _dispatch_product(args: list[str]) -> int:
     from astrid.sdk.client import AstridClient
 
     try:
-        with AstridClient.open() as client:
+        with AstridClient.open_from_launcher() as client:
             return run_product_family(family, rest, client=client)
     except Exception as exc:
         from astrid.sdk.exceptions import ServiceUnavailableError

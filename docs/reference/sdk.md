@@ -5,12 +5,13 @@ schema inspection, generation, and runtime-backed invocation. Import the
 top-level package — the supported SDK surface is available from `import
 astrid`.
 
-Stage1 runtime boundary: product clients resolve the configured editable
-runtime source (`BANODOCO_RUNTIME_CHECKOUT` or
-`BANODOCO_LOCAL_SOURCE_MANIFEST`), invoke `banodoco-local up --profile astrid`
-on first use or reconnect, and then use the generated workspace client.
-`BANODOCO_RUNTIME_ENDPOINT` (or `BANODOCO_RUNTIME_DISCOVERY`) plus
-`BANODOCO_RUNTIME_CREDENTIAL` may be supplied for an already-running runtime.
+Stage1 runtime boundary: ordinary SDK clients require an explicit endpoint,
+credential, realm id, actor id, client identity, and `workspace.v1` protocol
+version. They never infer a checkout, mutate `sys.path`, or launch a process.
+The explicit Astrid CLI launcher may invoke the installed
+`banodoco-local up --profile astrid` command and then construct a client from
+the returned runtime identity. Set `BANODOCO_LOCAL_SOURCE_MANIFEST` and, for
+the launcher client, `BANODOCO_RUNTIME_CREDENTIAL` explicitly.
 The runtime is the sole authority for projects,
 media, timelines, tasks, runs, receipts, and events. `AstridClient` does not
 open a checkout-local database/CAS or execute a pack in-process as the live
@@ -268,34 +269,13 @@ except astrid.CapabilityInvocationError as e:
 
 ### Event Observation
 
-`read_events()` returns a verified, read-only snapshot from the workspace
-runtime's event stream. The SDK does not scan local `events.jsonl` files or
-fall back to a checkout SQLite stream. `subscribe_events()` is likewise a
-runtime observation request; it does not tail a local projection.
+Events are read through the canonical runtime operations on an explicitly
+connected client: `client.runs.events(run_id)` or
+`client.tasks.events(task_id)`. The SDK does not expose local-file readers,
+checkout fallbacks, or subscription aliases. The returned runtime resources
+remain unchanged; callers choose their own polling policy.
 
-```python
-import astrid
-
-# Offline inspection of a completed run
-events = astrid.read_events(
-    "my-project",
-    "my-run-id",
-    verify=True,
-)
-for event in events:
-    print(event.kind, event.timestamp)
-
-# Live observation of an in-progress run
-for event in astrid.subscribe_events(
-    "my-project",
-    "my-run-id",
-    follow=True,
-    poll_interval=0.5,
-):
-    print(f"[{event.kind}] {event.payload.get('command', '')}")
-```
-
-Each event is an `EventStreamRecord` with fields:
+Each event resource contains:
 
 | Field | Type | Description |
 |---|---|---|
@@ -306,18 +286,7 @@ Each event is an `EventStreamRecord` with fields:
 | `hash` | `str \| None` | SHA-256 hash for chain verification |
 | `payload` | `dict[str, Any]` | Runtime event payload and integrity metadata |
 
-When `verify=True` (the default), the runtime stream is verified before
-returning or yielding. A broken or mismatched chain raises
-`CapabilityEventLogError`.
-An invalid project slug raises `CapabilityPreconditionError`.
-
-`subscribe_events()` accepts two additional keyword arguments:
-
-- `follow: bool = False` — when `True`, the generator polls for new events
-  instead of exiting after consuming the current file.
-- `poll_interval: float = 0.1` — seconds between polls when following.
-- `idle_polls: int | None = None` — maximum consecutive empty polls before
-  the generator exits. `None` means block indefinitely.
+Integrity, ordering, and retention are runtime responsibilities.
 
 ## DTO Reference
 
@@ -516,7 +485,7 @@ All 11 SDK exceptions are public and importable from `astrid`.
 `CapabilityMissingInputError` is a subclass of `CapabilityValidationError` and
 carries the names of missing required inputs. `CapabilityInvocationError`
 preserves the original runner exception as `__cause__`.
-`CapabilityEventLogError` is raised by `read_events()` when the hash chain is
+`CapabilityEventLogError` is raised by a runtime event read when the hash chain is
 broken; `CapabilityPreconditionError` is raised when a project slug or
 prerequisite check fails. `CapabilityLeaseError` is raised when the writer
 lease cannot be acquired. `CapabilityRuntimeError` signals an unexpected

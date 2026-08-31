@@ -9,8 +9,6 @@ EXPECTED_PUBLIC_NAMES = (
     "renderer_main",
     "support",
     "RenderContext",
-    "read_events",
-    "subscribe_events",
     "Capability",
     "DiscoveryResult",
     "EventStreamRecord",

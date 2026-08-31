@@ -188,7 +188,7 @@ def _validate_parent_run(
         from astrid.sdk.client import AstridClient
 
         with AstridClient.open() as client:
-            result = client.runs.show(project, run_id)
+            result = client.runs.show(run_id)
             if not result.ok or not isinstance(result.data, Mapping):
                 raise ProjectRuntimeError("runtime did not return the parent run")
             record = dict(result.data)

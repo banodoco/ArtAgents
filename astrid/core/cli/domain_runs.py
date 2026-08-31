@@ -20,7 +20,7 @@ Verbs (exactly these five, one SDK call each):
   eligible child to the terminal ``cancelled`` state through the shared
   task-cancel predicate, with the same idempotency-key contract as other
   mutations;
-- ``retry-failed <run_id>`` — one ``client.runs.retry_failed`` call;
+- ``retry <run_id>`` — one ``client.runs.retry`` call;
   repeatable ``--task <id>`` restricts the retry to an explicit ordinal
   subset, and when omitted every eligible failed/expired child is retried;
 - ``events <run_id>`` — one ``client.runs.events`` call returning the run's
@@ -68,9 +68,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=False,
+        required=True,
         default=None,
-        help="Owning project id or slug (defaults to the selected project).",
+        help="Owning project id or immutable slug.",
     )
 
 
@@ -83,26 +83,20 @@ def _cmd_list(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_show(parsed: argparse.Namespace) -> int:
-    result = parsed.client.runs.show(
-        parsed.project,
-        parsed.run_id,
-        include_evidence=parsed.evidence,
-    )
+    result = parsed.client.runs.show(parsed.run_id)
     return print_result(result, as_json=parsed.json)
 
 
 def _cmd_cancel(parsed: argparse.Namespace) -> int:
     result = parsed.client.runs.cancel(
-        parsed.project,
         parsed.run_id,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
 
 
-def _cmd_retry_failed(parsed: argparse.Namespace) -> int:
-    result = parsed.client.runs.retry_failed(
-        parsed.project,
+def _cmd_retry(parsed: argparse.Namespace) -> int:
+    result = parsed.client.runs.retry(
         parsed.run_id,
         selected_task_ids=parsed.task,
         idempotency_key=parsed.idempotency_key,
@@ -111,7 +105,7 @@ def _cmd_retry_failed(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_events(parsed: argparse.Namespace) -> int:
-    result = parsed.client.runs.events(parsed.project, parsed.run_id)
+    result = parsed.client.runs.events(parsed.run_id)
     return print_result(result, as_json=parsed.json)
 
 
@@ -144,7 +138,7 @@ def _configure_cancel(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_cancel)
 
 
-def _configure_retry_failed(subparser: argparse.ArgumentParser) -> None:
+def _configure_retry(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     subparser.add_argument("run_id", help="Exact project-scoped run id.")
     subparser.add_argument(
@@ -157,7 +151,7 @@ def _configure_retry_failed(subparser: argparse.ArgumentParser) -> None:
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)
-    subparser.set_defaults(handler=_cmd_retry_failed)
+    subparser.set_defaults(handler=_cmd_retry)
 
 
 def _configure_events(subparser: argparse.ArgumentParser) -> None:
@@ -189,10 +183,10 @@ COMMANDS: tuple[CommandSpec, ...] = (
         configure=_configure_cancel,
     ),
     CommandSpec(
-        "retry-failed",
+        "retry",
         help="Retry a run's eligible failed/expired children "
         "(optional --task subset; one SDK call).",
-        configure=_configure_retry_failed,
+        configure=_configure_retry,
     ),
     CommandSpec(
         "events",
@@ -214,7 +208,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astrid runs",
         description=(
-            "Run list/show/cancel/retry-failed/events (product family); "
+            "Run list/show/cancel/retry/events (product family); "
             "the singular 'run' alias is not a product family."
         ),
     )

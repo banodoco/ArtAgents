@@ -6,7 +6,7 @@ import importlib
 
 _SDK_EXPORTS = (
     # Curated public SDK surface (m4 plan step 19, task T20): lazy
-    # discovery, typed invoke, generate, render, event reads, and the
+    # discovery, typed invoke, generate, and render, and the
     # public DTO/exception taxonomy. The raw runner seams
     # (``run_executor``/``run_orchestrator``) and caller registry-injection
     # helpers are internal to ``astrid.sdk`` and are never exported here.
@@ -20,8 +20,6 @@ _SDK_EXPORTS = (
     "renderer_main",
     "support",
     "RenderContext",
-    "read_events",
-    "subscribe_events",
     "Capability",
     "DiscoveryResult",
     "EventStreamRecord",

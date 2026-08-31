@@ -80,7 +80,7 @@ def _cmd_create(parsed: argparse.Namespace) -> int:
     result = parsed.client.projects.create(
         slug=parsed.slug,
         name=parsed.name,
-        settings=parsed.settings,
+        metadata=parsed.settings,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
@@ -100,7 +100,7 @@ def _cmd_update(parsed: argparse.Namespace) -> int:
     result = parsed.client.projects.update(
         parsed.ref,
         name=parsed.name,
-        settings=parsed.settings,
+        metadata=parsed.settings,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
@@ -108,7 +108,7 @@ def _cmd_update(parsed: argparse.Namespace) -> int:
 
 def _cmd_select(parsed: argparse.Namespace) -> int:
     result = parsed.client.projects.select(
-        parsed.ref, scope=parsed.scope, cwd=parsed.cwd
+        parsed.ref, scope=parsed.scope
     )
     return print_result(result, as_json=parsed.json)
 

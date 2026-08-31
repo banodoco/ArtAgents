@@ -305,14 +305,9 @@ def _runtime_client_context(client: Any | None = None):
 def _resolve_runtime_project(client: Any, project_slug: str | None) -> str:
     if project_slug:
         return str(project_slug)
-    selected = getattr(client, "selected_project_ref", None)
-    if callable(selected):
-        value = selected()
-        if value:
-            return str(value)
     raise IterationVideoError(
         "iteration video requires a runtime project; pass --project <project> "
-        "or select a current project in the workspace runtime"
+        "explicitly"
     )
 
 

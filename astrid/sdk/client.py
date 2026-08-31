@@ -8,7 +8,7 @@ local application. Runtime discovery and credentials are resolved by
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import Any, Self
 
 __all__ = ["AstridClient"]
@@ -21,14 +21,21 @@ class AstridClient:
         self._remote = remote
 
     @classmethod
-    def open(cls, *, auto_bootstrap: bool = True) -> Self:
-        """Discover, ensure, and connect to the selected workspace runtime.
+    def open(
+        cls,
+        *,
+        endpoint: str | None = None,
+        credential: str | Path | None = None,
+        realm_id: str | None = None,
+        actor_id: str | None = None,
+        client_name: str | None = None,
+        client_version: str | None = None,
+        protocol_version: str | None = None,
+    ) -> Self:
+        """Connect using a fully explicit, validated runtime context.
 
-        Product commands and SDK callers get the normal beta behavior: when
-        the endpoint is absent or unhealthy, the configured neutral
-        ``banodoco-local`` launcher is invoked and the connection is retried.
-        Operational read-only routes such as ``doctor`` can pass
-        ``auto_bootstrap=False`` to preserve their side-effect-free contract.
+        Cold launch belongs to the explicit Astrid launcher boundary. An
+        ordinary SDK construction never retries by invoking a process.
         """
         from astrid.sdk.exceptions import ServiceUnavailableError
         from astrid.sdk.remote import RemoteAstridClient
@@ -38,21 +45,32 @@ class AstridClient:
             resolve_runtime_connection,
         )
 
+        if protocol_version != "workspace.v1":
+            raise ServiceUnavailableError(
+                "unsupported runtime protocol; run `banodoco-local up --profile astrid`",
+                details={"next_action": "banodoco-local up --profile astrid"},
+            )
+        if not all(isinstance(value, str) and value.strip() for value in (endpoint, realm_id, actor_id, client_name, client_version)) or not isinstance(credential, (str, Path)) or (isinstance(credential, str) and not credential.strip()):
+            raise ServiceUnavailableError(
+                "runtime realm, actor, and client identity are required; run `banodoco-local up --profile astrid`",
+                details={"next_action": "banodoco-local up --profile astrid"},
+            )
+
         def unavailable(exc: Exception) -> ServiceUnavailableError:
             return ServiceUnavailableError(
                 "runtime unavailable; run `banodoco-local up --profile astrid`",
                 details={
                     "next_action": "banodoco-local up --profile astrid",
-                    "reason": getattr(exc, "code", "unavailable"),
+                    "reason": exc.__dict__.get("code", "unavailable"),
                 },
             )
 
-        def connect(endpoint: str, token: str) -> Any:
-            workspace = WorkspaceClient(endpoint, token)
+        def connect(endpoint_value: str, token: str) -> Any:
+            workspace = WorkspaceClient(endpoint_value, token)
             workspace.health()
-            workspace.handshake(
-                "astrid-sdk",
-                "0.1.0",
+            handshake = workspace.handshake(
+                client_name,
+                client_version,
                 [
                     "projects:read",
                     "projects:write",
@@ -62,37 +80,65 @@ class AstridClient:
                     "tasks:write",
                 ],
             )
+            if handshake is None or handshake.get("realm_id") != realm_id or handshake.get("actor_id") != actor_id:
+                raise WorkspaceClientError(0, "identity_mismatch", "runtime realm or actor identity does not match the explicit client context")
             return workspace
 
         try:
-            endpoint, token = resolve_runtime_connection()
-            workspace = connect(endpoint, token)
+            endpoint_value, token = resolve_runtime_connection(endpoint, credential)
+            workspace = connect(endpoint_value, token)
             return cls(remote=RemoteAstridClient(workspace))
         except WorkspaceClientError as exc:
-            if not auto_bootstrap or os.environ.get("BANODOCO_ASTRID_AUTO_BOOTSTRAP", "1").strip().lower() in {"0", "false", "no", "off"}:
-                raise unavailable(exc) from exc
-            try:
-                from astrid.sdk.autobootstrap import ensure_runtime
+            raise unavailable(exc) from exc
 
-                ensure_runtime()
-                endpoint, token = resolve_runtime_connection()
-                workspace = connect(endpoint, token)
-                return cls(remote=RemoteAstridClient(workspace))
-            except Exception as retry_exc:
-                raise unavailable(retry_exc) from retry_exc
+    @classmethod
+    def open_from_launcher(
+        cls,
+        *,
+        credential: str | Path | None = None,
+        client_name: str = "astrid",
+        client_version: str = "stage1",
+        protocol_version: str = "workspace.v1",
+    ) -> Self:
+        """Launch the neutral runtime at Astrid's explicit CLI boundary.
 
-    def close(self) -> None:
-        self._remote.close()
+        The credential is still explicit: the launcher may supply it as a
+        path/token, or the caller may opt into the documented
+        ``BANODOCO_RUNTIME_CREDENTIAL`` setting.  No SDK operation invokes
+        this method implicitly.
+        """
+        import os
+
+        from astrid.sdk.autobootstrap import AutoBootstrapError, ensure_runtime
+        from astrid.sdk.exceptions import ServiceUnavailableError
+
+        try:
+            result = ensure_runtime()
+        except AutoBootstrapError as exc:
+            raise ServiceUnavailableError(
+                str(exc), details={"next_action": "banodoco-local up --profile astrid"}
+            ) from exc
+        credential_value = credential if credential is not None else os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "")
+        if not credential_value:
+            raise ServiceUnavailableError(
+                "runtime credential is required; run `banodoco-local up --profile astrid`",
+                details={"next_action": "banodoco-local up --profile astrid"},
+            )
+        return cls.open(
+            endpoint=str(result.get("endpoint", "")),
+            credential=credential_value,
+            realm_id=str(result.get("realm_id", "")),
+            actor_id=str(result.get("actor_id", "")),
+            client_name=client_name,
+            client_version=client_version,
+            protocol_version=protocol_version,
+        )
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        self.close()
-
-    def selected_project_ref(self, **kwargs: Any) -> str | None:
-        """Runtime selection is resolved by the host, not local preferences."""
-        return self._remote.selected_project_ref(**kwargs)
+        return None
 
     @property
     def projects(self) -> Any:
@@ -126,8 +172,8 @@ class AstridClient:
     def generations(self) -> Any:
         return self._remote.generations
 
-    def handshake(self, **kwargs: Any) -> Any:
-        return self._remote.handshake(**kwargs)
+    def handshake(self, client_name: str, client_version: str, requested_scopes: list[str]) -> Any:
+        return self._remote.handshake(client_name, client_version, requested_scopes)
 
     def doctor(self) -> Any:
         return self._remote.doctor()
@@ -141,11 +187,11 @@ class AstridClient:
     def export_realm(self) -> Any:
         return self._remote.export_realm()
 
-    def tombstone_realm(self, **kwargs: Any) -> Any:
-        return self._remote.tombstone_realm(**kwargs)
+    def tombstone_realm(self, *, reason: str | None = None, expected_version: int | None = None) -> Any:
+        return self._remote.tombstone_realm(reason=reason, expected_version=expected_version)
 
-    def recover_realm(self, **kwargs: Any) -> Any:
-        return self._remote.recover_realm(**kwargs)
+    def recover_realm(self, *, expected_realm_id: str, expected_version: int, confirmation: str | None = None, noninteractive: bool = False) -> Any:
+        return self._remote.recover_realm(expected_realm_id=expected_realm_id, expected_version=expected_version, confirmation=confirmation, noninteractive=noninteractive)
 
     def purge_realm(self, confirmation: str) -> Any:
         return self._remote.purge_realm(confirmation)
@@ -165,14 +211,5 @@ class AstridClient:
                 },
             ) from exc
 
-    def read_events(self, *args: Any, **kwargs: Any) -> Any:
-        return self._remote.read_events(*args, **kwargs)
-
-    def subscribe_events(self, *args: Any, **kwargs: Any) -> Any:
-        return self._remote.subscribe_events(*args, **kwargs)
-
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
         return self._remote.invoke(*args, **kwargs)
-
-    def render(self, *args: Any, **kwargs: Any) -> Any:
-        return self._remote.render(*args, **kwargs)

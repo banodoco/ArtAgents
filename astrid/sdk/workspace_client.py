@@ -1,18 +1,21 @@
-"""Discovery and compatibility wrapper around the generated workspace client.
+"""Explicit transport adapter around the generated workspace client.
 
-This module owns only runtime endpoint/credential discovery. HTTP protocol
-encoding, authentication, and response decoding are delegated to the
-generated ``banodoco_workspace_client`` package from the runtime contract.
+HTTP protocol encoding, authentication, and response decoding are delegated
+to the generated ``banodoco_workspace_client`` package from the runtime
+contract. Endpoint and credential values are supplied by the caller.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
+
+try:
+    from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
+except ImportError:  # The SDK remains importable when the runtime package is absent.
+    GeneratedWorkspaceClient = None  # type: ignore[assignment,misc]
 
 
 class WorkspaceClientError(RuntimeError):
@@ -20,10 +23,6 @@ class WorkspaceClientError(RuntimeError):
         super().__init__(message)
         self.status, self.code, self.message = status, code, message
         self.details = dict(details or {})
-
-
-def _support_home() -> Path:
-    return Path(os.environ.get("BANODOCO_LOCAL_HOME") or os.environ.get("HOME", "~")).expanduser()
 
 
 def _read_credential(path: Path) -> str:
@@ -43,92 +42,101 @@ def _read_credential(path: Path) -> str:
     return token
 
 
-def resolve_runtime_connection() -> tuple[str, str]:
-    endpoint = os.environ.get("BANODOCO_RUNTIME_ENDPOINT", "").strip()
-    discovery_path = os.environ.get("BANODOCO_RUNTIME_DISCOVERY", "").strip()
-    if not discovery_path:
-        home = _support_home()
-        discovery_path = str(home / "Library" / "Application Support" / "Banodoco" / "runtime" / "discovery.json")
-    if not endpoint:
-        try:
-            value = json.loads(Path(discovery_path).read_text(encoding="utf-8"))
-            endpoint = str(value.get("endpoint", ""))
-        except (OSError, json.JSONDecodeError):
-            endpoint = ""
-    credential_path = os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "").strip()
-    if not credential_path:
-        home = _support_home()
-        credential_path = str(home / "Library" / "Application Support" / "Banodoco" / "credentials" / "astrid.json")
-    if not endpoint:
-        raise WorkspaceClientError(0, "unavailable", "runtime is unavailable; run `banodoco-local up --profile astrid`")
-    return endpoint.rstrip("/"), _read_credential(Path(credential_path))
-
-
-def _runtime_checkout() -> Path | None:
-    """Resolve the generated-client checkout without importing runtime code."""
-    for name in ("BANODOCO_RUNTIME_CHECKOUT", "BANODOCO_LOCAL_RUNTIME_CHECKOUT"):
-        value = os.environ.get(name, "").strip()
-        if value:
-            return Path(value).expanduser().resolve()
-
-    home = _support_home()
-    catalog_path = home / "Library" / "Application Support" / "Banodoco" / "runtime" / "catalog.json"
-    try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    source = (catalog.get("source_profiles") or {}).get("astrid") if isinstance(catalog, Mapping) else None
-    checkout = source.get("runtime_checkout") if isinstance(source, Mapping) else None
-    return Path(str(checkout)).expanduser().resolve() if checkout else None
-
-
-def _ensure_generated_client_path() -> None:
-    """Make an editable runtime's generated Python client importable."""
-    checkout = _runtime_checkout()
-    if checkout is None:
-        return
-    client_root = checkout / "packages" / "python"
-    if client_root.is_dir():
-        client_root_str = str(client_root)
-        if client_root_str in sys.path:
-            sys.path.remove(client_root_str)
-        sys.path.insert(0, client_root_str)
+def resolve_runtime_connection(endpoint: str, credential: str | Path) -> tuple[str, str]:
+    """Validate an explicitly supplied endpoint and credential."""
+    endpoint = str(endpoint).strip()
+    if not endpoint.startswith(("http://", "https://")) or endpoint.rstrip("/") in {"http:", "https:"}:
+        raise WorkspaceClientError(0, "validation_error", "runtime endpoint must be an explicit http(s) URL")
+    if isinstance(credential, Path):
+        token = _read_credential(Path(credential))
+    else:
+        token = str(credential).removeprefix("Bearer ").strip()
+    if not token:
+        raise WorkspaceClientError(0, "validation_error", "runtime credential must be explicit and non-empty")
+    return endpoint.rstrip("/"), token
 
 
 class WorkspaceClient:
     """Small typed facade over the runtime's generated workspace client.
 
-    This class deliberately contains no HTTP protocol code.  It only discovers
-    the generated package, maps Astrid's compatibility names (``settings``
-    and ``project``) onto the generated operation signatures, and translates
-    generated exceptions into Astrid's stable error type.
+    This class deliberately contains no HTTP protocol code or local discovery.
+    It translates only generated exceptions into Astrid's stable error type.
     """
 
     def __init__(self, endpoint: str, token: str):
-        _ensure_generated_client_path()
-        try:
-            from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
-        except ImportError as exc:
+        if GeneratedWorkspaceClient is None:
             raise WorkspaceClientError(
                 0,
                 "unavailable",
                 "generated workspace client is unavailable; run `banodoco-local up --profile astrid`",
-            ) from exc
-        self.endpoint, self.token = endpoint.rstrip("/"), token
+            )
+        self.endpoint, self.token = resolve_runtime_connection(endpoint, token)
         self._generated = GeneratedWorkspaceClient(self.endpoint, token)
 
     def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""
         try:
-            value = getattr(self._generated, operation)(*args, **kwargs)
+            operations = {
+                "health": self._generated.health, "handshake": self._generated.handshake,
+                "doctor": self._generated.doctor, "create_backup": self._generated.create_backup,
+                "restore_backup": self._generated.restore_backup, "export_realm": self._generated.export_realm,
+                "tombstone_realm": self._generated.tombstone_realm, "recover_realm": self._generated.recover_realm,
+                "purge_realm": self._generated.purge_realm, "create_project": self._generated.create_project,
+                "get_project": self._generated.get_project, "update_project": self._generated.update_project,
+                "list_projects": self._generated.list_projects, "select_project": self._generated.select_project,
+                "current_project": self._generated.current_project, "create_timeline": self._generated.create_timeline,
+                "create_timeline_document": self._generated.create_timeline_document,
+                "update_timeline_document": self._generated.update_timeline_document,
+                "list_timelines": self._generated.list_timelines, "get_timeline": self._generated.get_timeline,
+                "list_timeline_history": self._generated.list_timeline_history, "diff_timeline": self._generated.diff_timeline,
+                "archive_timeline": self._generated.archive_timeline, "recover_timeline": self._generated.recover_timeline,
+                "list_project_shots": self._generated.list_project_shots, "create_project_shot": self._generated.create_project_shot,
+                "get_project_shot": self._generated.get_project_shot, "update_project_shot": self._generated.update_project_shot,
+                "archive_project_shot": self._generated.archive_project_shot, "recover_project_shot": self._generated.recover_project_shot,
+                "add_shot_item": self._generated.add_shot_item, "remove_shot_item": self._generated.remove_shot_item,
+                "reorder_shot_items": self._generated.reorder_shot_items,
+                "list_project_references": self._generated.list_project_references, "create_project_reference": self._generated.create_project_reference,
+                "get_project_reference": self._generated.get_project_reference, "update_project_reference": self._generated.update_project_reference,
+                "archive_project_reference": self._generated.archive_project_reference, "recover_project_reference": self._generated.recover_project_reference,
+                "associate_reference": self._generated.associate_reference, "set_primary_reference": self._generated.set_primary_reference,
+                "link_references": self._generated.link_references, "create_document": self._generated.create_document,
+                "list_documents": self._generated.list_documents, "get_document": self._generated.get_document,
+                "update_document": self._generated.update_document, "ingest_object": self._generated.ingest_object,
+                "ingest_project_object": self._generated.ingest_project_object, "list_project_objects": self._generated.list_project_objects,
+                "create_media_relation": self._generated.create_media_relation, "list_media_relations": self._generated.list_media_relations,
+                "get_object": self._generated.get_object, "head_object": self._generated.head_object,
+                "admit_task": self._generated.admit_task, "get_task": self._generated.get_task,
+                "list_project_tasks": self._generated.list_project_tasks, "cancel_task": self._generated.cancel_task,
+                "retry_task": self._generated.retry_task, "cancel_run": self._generated.cancel_run,
+                "retry_run": self._generated.retry_run, "get_run": self._generated.get_run,
+                "list_project_runs": self._generated.list_project_runs, "list_events": self._generated.list_events,
+                "list_run_events": self._generated.list_run_events, "list_generations": self._generated.list_generations,
+                "get_generation": self._generated.get_generation, "list_variants": self._generated.list_variants,
+                "create_generation": self._generated.create_generation, "create_variant": self._generated.create_variant,
+                "list_capabilities": self._generated.list_capabilities, "register_capability": self._generated.register_capability,
+                "claim_task": self._generated.claim_task, "register_executor": self._generated.register_executor,
+                "settle_attempt": self._generated.settle_attempt,
+            }[operation]
+            value = operations(*args, **kwargs)
         except Exception as exc:  # generated ApiError has stable fields
+            fields = exc.__dict__ if hasattr(exc, "__dict__") else {}
             raise WorkspaceClientError(
-                int(getattr(exc, "status", 0)),
-                str(getattr(exc, "code", "transport_error")),
-                str(getattr(exc, "message", exc)),
-                getattr(exc, "details", {}),
+                int(fields.get("status", 0)),
+                str(fields.get("code", "transport_error")),
+                str(fields.get("message", exc)),
+                fields.get("details", {}),
             ) from exc
-        return asdict(value) if is_dataclass(value) else value
+        def plain(item: Any) -> Any:
+            if is_dataclass(item):
+                return {key: plain(child) for key, child in asdict(item).items()}
+            if isinstance(item, tuple):
+                return tuple(plain(child) for child in item)
+            if isinstance(item, list):
+                return [plain(child) for child in item]
+            if isinstance(item, dict):
+                return {key: plain(child) for key, child in item.items()}
+            return item
+        return plain(value)
 
     # The following methods are intentionally explicit.  They form the
     # product adapter's typed vocabulary and keep generated operation names and
@@ -157,20 +165,11 @@ class WorkspaceClient:
     def recover_realm(
         self,
         *,
-        expected_realm_id: str | None = None,
-        expected_version: int | None = None,
+        expected_realm_id: str,
+        expected_version: int,
         confirmation: str | None = None,
-        noninteractive: bool = True,
+        noninteractive: bool = False,
     ) -> Any:
-        # The runtime recovery contract fences both realm identity and
-        # lifecycle version.  Older Astrid callers supplied only the version;
-        # resolve the identity through the read-only export so those callers
-        # remain safe and compatible with the current generated client.
-        if expected_realm_id is None:
-            exported = self.export_realm()
-            realm = exported.get("realm") if isinstance(exported, Mapping) else None
-            if isinstance(realm, Mapping):
-                expected_realm_id = str(realm.get("id") or realm.get("realm_id") or "") or None
         return self._call_generated(
             "recover_realm",
             expected_realm_id=expected_realm_id,
@@ -188,11 +187,8 @@ class WorkspaceClient:
         *,
         idempotency_key: str,
         slug: str | None = None,
-        settings: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> Any:
-        if metadata is None:
-            metadata = settings
         return self._call_generated(
             "create_project", name, idempotency_key=idempotency_key, slug=slug, metadata=metadata
         )
@@ -204,11 +200,8 @@ class WorkspaceClient:
         idempotency_key: str,
         expected_version: int | None = None,
         name: str | None = None,
-        settings: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> Any:
-        if metadata is None:
-            metadata = settings
         return self._call_generated(
             "update_project",
             project_id,
@@ -219,8 +212,7 @@ class WorkspaceClient:
         )
 
     def list_projects(self) -> Any:
-        items, cursor = self._call_generated("list_projects")
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+        return self._call_generated("list_projects")
 
     def select_project(self, project: str, *, scope: str = "workspace", idempotency_key: str | None = None) -> Any:
         return self._call_generated("select_project", project, scope=scope, idempotency_key=idempotency_key)
@@ -240,18 +232,14 @@ class WorkspaceClient:
     def update_timeline_document(self, project_id: str, timeline_id: str, *, expected_version: int, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str | None = None, name: str | None = None) -> Any:
         return self._call_generated("update_timeline_document", project_id, timeline_id, expected_version=expected_version, config=config, registry=registry, slug=slug, name=name)
 
-    def list_timelines(self, project_id: str) -> Any:
-        items, cursor = self._call_generated("list_timelines", project_id)
-        return {"items": list(items), "next_cursor": cursor}
+    def list_timelines(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_timelines", project_id, cursor=cursor, limit=limit)
 
     def get_timeline(self, timeline_id: str) -> Any:
         return self._call_generated("get_timeline", timeline_id)
 
     def list_timeline_history(self, timeline_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_timeline_history", timeline_id, cursor=cursor, limit=limit
-        )
-        return {"items": list(items), "next_cursor": next_cursor}
+        return self._call_generated("list_timeline_history", timeline_id, cursor=cursor, limit=limit)
 
     def diff_timeline(self, timeline_id: str, *, from_version: int, to_version: int) -> Any:
         return self._call_generated(
@@ -287,14 +275,7 @@ class WorkspaceClient:
         limit: int = 50,
         include_archived: bool = False,
     ) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_project_shots",
-            project_id,
-            cursor=cursor,
-            limit=limit,
-            include_archived=include_archived,
-        )
-        return {"items": list(items), "next_cursor": next_cursor}
+        return self._call_generated("list_project_shots", project_id, cursor=cursor, limit=limit, include_archived=include_archived)
 
     def create_project_shot(self, project_id: str, shot: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("create_project_shot", project_id, shot, idempotency_key=idempotency_key)
@@ -328,14 +309,7 @@ class WorkspaceClient:
         limit: int = 50,
         include_archived: bool = False,
     ) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_project_references",
-            project_id,
-            cursor=cursor,
-            limit=limit,
-            include_archived=include_archived,
-        )
-        return {"items": list(items), "next_cursor": next_cursor}
+        return self._call_generated("list_project_references", project_id, cursor=cursor, limit=limit, include_archived=include_archived)
 
     def create_project_reference(self, project_id: str, reference: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("create_project_reference", project_id, reference, idempotency_key=idempotency_key)
@@ -365,8 +339,7 @@ class WorkspaceClient:
         return self._call_generated("create_document", project_id, document_id, kind, content)
 
     def list_documents(self, project_id: str) -> Any:
-        items, cursor = self._call_generated("list_documents", project_id)
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+        return self._call_generated("list_documents", project_id)
 
     def get_document(self, project_id: str, document_id: str) -> Any:
         return self._call_generated("get_document", project_id, document_id)
@@ -411,10 +384,7 @@ class WorkspaceClient:
         )
 
     def list_project_objects(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_project_objects", project_id, cursor=cursor, limit=limit
-        )
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": next_cursor}
+        return self._call_generated("list_project_objects", project_id, cursor=cursor, limit=limit)
 
     def create_media_relation(
         self,
@@ -437,10 +407,7 @@ class WorkspaceClient:
         )
 
     def list_media_relations(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_media_relations", project_id, cursor=cursor, limit=limit
-        )
-        return {"items": list(items), "next_cursor": next_cursor}
+        return self._call_generated("list_media_relations", project_id, cursor=cursor, limit=limit)
 
     def get_object(self, object_id: str) -> Any:
         return self._call_generated("get_object", object_id)
@@ -476,10 +443,7 @@ class WorkspaceClient:
         return self._call_generated("get_task", task_id)
 
     def list_project_tasks(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_project_tasks", project_id, cursor=cursor, limit=limit
-        )
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": next_cursor}
+        return self._call_generated("list_project_tasks", project_id, cursor=cursor, limit=limit)
 
     def cancel_task(self, task_id: str, *, idempotency_key: str) -> Any:
         return self._call_generated("cancel_task", task_id, idempotency_key=idempotency_key)
@@ -497,40 +461,34 @@ class WorkspaceClient:
         return self._call_generated("get_run", run_id)
 
     def list_project_runs(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
-        items, next_cursor = self._call_generated(
-            "list_project_runs", project_id, cursor=cursor, limit=limit
-        )
-        return {"items": list(items), "next_cursor": next_cursor}
+        return self._call_generated("list_project_runs", project_id, cursor=cursor, limit=limit)
 
     def list_events(self, *, aggregate_id: str | None = None) -> Any:
-        items, cursor = self._call_generated("list_events", aggregate_id=aggregate_id)
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+        return self._call_generated("list_events", aggregate_id=aggregate_id)
 
     def list_run_events(self, run_id: str) -> Any:
-        return [asdict(item) if is_dataclass(item) else item for item in self._call_generated("list_run_events", run_id)]
+        return self._call_generated("list_run_events", run_id)
 
     def list_generations(self, project_id: str) -> Any:
-        items, cursor = self._call_generated("list_generations", project_id)
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+        return self._call_generated("list_generations", project_id)
 
     def get_generation(self, generation_id: str) -> Any:
         return self._call_generated("get_generation", generation_id)
 
     def list_variants(self, generation_id: str) -> Any:
-        items, cursor = self._call_generated("list_variants", generation_id)
-        return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
+        return self._call_generated("list_variants", generation_id)
 
-    def create_generation(self, project_id: str, generation_id: str, **kwargs: Any) -> Any:
-        return self._call_generated("create_generation", project_id, generation_id, **kwargs)
+    def create_generation(self, project_id: str, generation_id: str, *, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None) -> Any:
+        return self._call_generated("create_generation", project_id, generation_id, metadata=metadata, type=type, source_task_id=source_task_id)
 
-    def create_variant(self, generation_id: str, variant_id: str, **kwargs: Any) -> Any:
-        return self._call_generated("create_variant", generation_id, variant_id, **kwargs)
+    def create_variant(self, generation_id: str, variant_id: str, *, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None) -> Any:
+        return self._call_generated("create_variant", generation_id, variant_id, object_id=object_id, variant_type=variant_type, metadata=metadata)
 
     def list_capabilities(self) -> Any:
         return [asdict(item) if is_dataclass(item) else item for item in self._call_generated("list_capabilities")]
 
-    def register_capability(self, *args: Any, **kwargs: Any) -> Any:
-        return self._call_generated("register_capability", *args, **kwargs)
+    def register_capability(self, capability_id: str, definition_digest: str, *, required_resource_keys: list[str] | None = None, status: str = "ready", estimated_scratch_bytes: int = 0, estimated_output_bytes: int = 0, unavailable_reason: str | None = None, idempotency_key: str | None = None) -> Any:
+        return self._call_generated("register_capability", capability_id, definition_digest, required_resource_keys=required_resource_keys, status=status, estimated_scratch_bytes=estimated_scratch_bytes, estimated_output_bytes=estimated_output_bytes, unavailable_reason=unavailable_reason, idempotency_key=idempotency_key)
 
     def claim_task(
         self,

@@ -383,28 +383,4 @@ def run_product_family(
         raise ProductRegistryError(
             f"family {family!r} parser did not configure a handler"
         )
-    # Project-scoped product commands may omit ``--project`` only when the
-    # connected runtime supplies an actor-scoped current project. No local
-    # preference, environment variable, cwd, or sole-project heuristic is
-    # consulted here.
-    if hasattr(parsed, "project") and parsed.project is None:
-        selected_project = getattr(client, "selected_project_ref", None)
-        selected = selected_project() if callable(selected_project) else None
-        if selected is None:
-            # Task identity and event reads are globally unique kernel reads;
-            # their SDK methods deliberately accept an omitted project and
-            # can therefore be used without a workspace selection.  Every
-            # other project-scoped command needs an address before dispatch.
-            # Make that absence a parser/usage error (exit 2), rather than a
-            # domain failure (exit 1), so the CLI contract is consistent with
-            # other missing required arguments.
-            if not (
-                family == "tasks"
-                and getattr(parsed, "command", None) in {"show", "events"}
-            ):
-                parser.error(
-                    "the following arguments are required: --project "
-                    "(or select a current project in the workspace runtime)"
-                )
-        parsed.project = selected
     return int(handler(parsed))

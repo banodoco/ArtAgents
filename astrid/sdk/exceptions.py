@@ -604,7 +604,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
                 "entity": "reference",
                 "reference_id": exc.reference_id,
                 "recovery": (
-                    "run `astrid media references unarchive <ref> --project <project>` "
+                    "run `astrid media references recover <ref> --project <project>` "
                     "then retry the association"
                 ),
             },

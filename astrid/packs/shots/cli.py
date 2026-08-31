@@ -95,9 +95,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=False,
+        required=True,
         default=None,
-        help="Owning project id or slug (defaults to the selected project).",
+        help="Owning project id or immutable slug.",
     )
 
 

@@ -101,9 +101,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=False,
+        required=True,
         default=None,
-        help="Owning project id or slug (defaults to the selected project).",
+        help="Owning project id or immutable slug.",
     )
 
 
@@ -116,10 +116,6 @@ def _cmd_create(parsed: argparse.Namespace) -> int:
         capability=parsed.capability,
         spec=parsed.spec,
         input_manifest=parsed.input_manifest,
-        priority=parsed.priority,
-        available_at=parsed.available_at,
-        max_attempts=parsed.max_attempts,
-        dependencies=parsed.dependencies,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
@@ -131,16 +127,12 @@ def _cmd_list(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_show(parsed: argparse.Namespace) -> int:
-    if parsed.project is None:
-        result = parsed.client.tasks.show(parsed.task_id)
-    else:
-        result = parsed.client.tasks.show(parsed.task_id, parsed.project)
+    result = parsed.client.tasks.show(parsed.task_id)
     return print_result(result, as_json=parsed.json)
 
 
 def _cmd_cancel(parsed: argparse.Namespace) -> int:
     result = parsed.client.tasks.cancel(
-        parsed.project,
         parsed.task_id,
         idempotency_key=parsed.idempotency_key,
     )
@@ -149,7 +141,6 @@ def _cmd_cancel(parsed: argparse.Namespace) -> int:
 
 def _cmd_retry(parsed: argparse.Namespace) -> int:
     result = parsed.client.tasks.retry(
-        parsed.project,
         parsed.task_id,
         idempotency_key=parsed.idempotency_key,
     )
@@ -157,10 +148,7 @@ def _cmd_retry(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_events(parsed: argparse.Namespace) -> int:
-    if parsed.project is None:
-        result = parsed.client.tasks.events(parsed.task_id)
-    else:
-        result = parsed.client.tasks.events(parsed.task_id, parsed.project)
+    result = parsed.client.tasks.events(parsed.task_id)
     return print_result(result, as_json=parsed.json)
 
 

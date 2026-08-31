@@ -45,8 +45,6 @@ _EXPORTS = {
     "get_capability": ("invocation", "get_capability"),
     "invoke": ("invocation", "invoke"),
     "invoke_result": ("invocation", "invoke_result"),
-    "read_events": ("events", "read_events"),
-    "subscribe_events": ("events", "subscribe_events"),
 }
 
 _PRIVATE_EXPORTS = {

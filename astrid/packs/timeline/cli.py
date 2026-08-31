@@ -29,7 +29,7 @@ each):
 - ``save`` — whole-document CAS ``client.timelines.save`` with
   ``--config``/``--registry`` and ``--expected-version``;
 - ``archive`` — reversible event-backed ``client.timelines.archive``;
-- ``unarchive`` — idempotent recovery through ``client.timelines.unarchive``;
+- ``recover`` — idempotent recovery through ``client.timelines.recover``;
 - ``history`` — ordered lifecycle events (read);
 - ``diff`` — deterministic adjacent-version diffs (read).
 - ``visualize`` — synchronous ``client.invoke`` of the public
@@ -95,9 +95,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=False,
+        required=True,
         default=None,
-        help="Owning project id or slug (required unless the workspace runtime selects one).",
+        help="Owning project id or immutable slug.",
     )
 
 
@@ -111,17 +111,13 @@ def _cmd_create(parsed: argparse.Namespace) -> int:
         name=parsed.name,
         config=parsed.config,
         registry=parsed.registry,
-        set_default=parsed.default,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
 
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
-    if parsed.include_archived:
-        result = parsed.client.timelines.list(parsed.project, include_archived=True)
-    else:
-        result = parsed.client.timelines.list(parsed.project)
+    result = parsed.client.timelines.list(parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -151,8 +147,8 @@ def _cmd_archive(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
-def _cmd_unarchive(parsed: argparse.Namespace) -> int:
-    result = parsed.client.timelines.unarchive(
+def _cmd_recover(parsed: argparse.Namespace) -> int:
+    result = parsed.client.timelines.recover(
         parsed.project,
         parsed.ref,
         idempotency_key=parsed.idempotency_key,
@@ -421,7 +417,7 @@ def _configure_archive(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_archive)
 
 
-def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
+def _configure_recover(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     subparser.add_argument(
         "ref",
@@ -429,7 +425,7 @@ def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)
-    subparser.set_defaults(handler=_cmd_unarchive)
+    subparser.set_defaults(handler=_cmd_recover)
 
 
 def _configure_history(subparser: argparse.ArgumentParser) -> None:
@@ -576,13 +572,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "archive",
-        help="Archive a timeline (reversible with unarchive).",
+        help="Archive a timeline (reversible with recover).",
         configure=_configure_archive,
     ),
     CommandSpec(
-        "unarchive",
+        "recover",
         help="Restore archived work; safe to repeat (changed=false when active).",
-        configure=_configure_unarchive,
+        configure=_configure_recover,
     ),
     CommandSpec(
         "history",
@@ -625,7 +621,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astrid timelines",
         description=(
-            "Timeline create/list/show/save/archive/unarchive/history/diff/visualize/render "
+            "Timeline create/list/show/save/archive/recover/history/diff/visualize/render "
             "(product family); nested shots beneath 'timelines shots'."
         ),
     )

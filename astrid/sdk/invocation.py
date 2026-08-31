@@ -1599,18 +1599,8 @@ def _resolve_projects_root(project_root: str | Path | None, project: str | None)
 
 
 def _runtime_selected_project() -> str | None:
-    """Read the actor-scoped project selection from the connected runtime."""
-
-    from astrid.sdk.client import AstridClient
-
-    try:
-        with AstridClient.open() as client:
-            selected = client.selected_project_ref()
-    except AstridSDKError:
-        # Runtime absence is a missing selection, never permission to infer a
-        # project from local state. The caller emits the stable recovery text.
-        return None
-    return selected if isinstance(selected, str) and selected.strip() else None
+    """Project selection is never inferred by the SDK compatibility layer."""
+    return None
 
 
 def _kernel_invoke(

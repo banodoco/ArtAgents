@@ -26,7 +26,7 @@ Verbs (exactly these nine, one SDK call each):
   delta; kind and project stay immutable);
 - ``archive <ref>`` — ``client.references.archive`` (reversible soft archive;
   every byte and association is preserved);
-- ``unarchive <ref>`` — ``client.references.unarchive`` (id or unambiguous
+- ``recover <ref>`` — ``client.references.recover`` (id or unambiguous
   project-local name; safe to repeat);
 - ``associate <ref>`` — ``client.references.associate`` (exact ``--media``
   id, frozen ``--role``, optional ``--context-task``/``--ordinal``/
@@ -116,9 +116,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=False,
+        required=True,
         default=None,
-        help="Owning project id or slug (defaults to the selected project).",
+        help="Owning project id or immutable slug.",
     )
 
 
@@ -159,8 +159,8 @@ def _cmd_archive(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
-def _cmd_unarchive(parsed: argparse.Namespace) -> int:
-    result = parsed.client.references.unarchive(
+def _cmd_recover(parsed: argparse.Namespace) -> int:
+    result = parsed.client.references.recover(
         parsed.project,
         parsed.ref,
         idempotency_key=parsed.idempotency_key,
@@ -174,9 +174,6 @@ def _cmd_associate(parsed: argparse.Namespace) -> int:
         parsed.ref,
         media_id=parsed.media,
         role=parsed.role,
-        context_task_id=parsed.context_task,
-        ordinal=parsed.ordinal,
-        metadata=parsed.metadata,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
@@ -198,14 +195,14 @@ def _cmd_set_primary(parsed: argparse.Namespace) -> int:
     result = parsed.client.references.set_primary(
         parsed.project,
         parsed.ref,
-        media_reference_id=parsed.media_reference,
+        association_id=parsed.media_reference,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
 
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
-    result = parsed.client.references.list(parsed.project, include_archived=parsed.include_archived)
+    result = parsed.client.references.list(parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -275,7 +272,7 @@ def _configure_archive(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_archive)
 
 
-def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
+def _configure_recover(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     subparser.add_argument(
         "ref",
@@ -286,7 +283,7 @@ def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)
-    subparser.set_defaults(handler=_cmd_unarchive)
+    subparser.set_defaults(handler=_cmd_recover)
 
 
 def _configure_associate(subparser: argparse.ArgumentParser) -> None:
@@ -412,9 +409,9 @@ COMMANDS: tuple[CommandSpec, ...] = (
         configure=_configure_archive,
     ),
     CommandSpec(
-        "unarchive",
+        "recover",
         help="Restore by id/name; safe to repeat (changed=false when active).",
-        configure=_configure_unarchive,
+        configure=_configure_recover,
     ),
     CommandSpec(
         "associate",
@@ -455,7 +452,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astrid media references",
         description=(
-            "Reference create/update/archive/unarchive/associate/link/"
+            "Reference create/update/archive/recover/associate/link/"
             "set-primary/list/show "
             "(nested product family)."
         ),

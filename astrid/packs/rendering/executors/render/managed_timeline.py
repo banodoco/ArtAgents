@@ -495,9 +495,10 @@ def resolve_managed_render_snapshot(
             f"stale timeline version: expected {expected_version}, current version is {version}; "
             "show the timeline and retry with the current version"
         )
-    listed = client.timelines.list(project_ref, include_archived=True)
+    listed = client.timelines.list(project_ref)
     if listed.ok:
-        for row in listed.data or []:
+        rows = listed.data[0] if isinstance(listed.data, tuple) else listed.data
+        for row in rows or []:
             if row.get("timeline_id") == timeline_data.get("timeline_id") and row.get("archived_at"):
                 raise ValueError(
                     f"timeline {timeline_ref!r} is archived; unarchive it before rendering"
