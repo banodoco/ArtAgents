@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.foundation.project_paths import project_dir
+from astrid.sdk.workspace_client import page_pair
 
 _LOCAL_VISUALIZE_ATTEMPTS = 0
 
@@ -100,7 +101,10 @@ def _runtime_for(slug: str) -> dict[str, Any]:
     context = _RUNTIME_CONTEXT
     assert context is not None
     if slug not in context["project_ids"]:
-        projects = context["client"].list_projects().get("items", [])
+        project_page = page_pair(context["client"].list_projects())
+        if project_page is None or project_page[1] is not None:
+            raise RuntimeError("runtime project listing returned an invalid page")
+        projects, _project_cursor = project_page
         project = next((row for row in projects if row.get("slug") == slug), None)
         if project is None:
             project = context["client"].create_project(

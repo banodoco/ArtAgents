@@ -26,6 +26,7 @@ from typing import Any, Iterable, Mapping
 from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import StaticChoices
+from astrid.sdk.workspace_client import page_pair
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.core.timeline.resolution import classify_registry
 from astrid.core.timeline.snapshot import TimelineSnapshot, snapshot_from_runtime
@@ -122,27 +123,13 @@ def _runtime_media_row_value(row: Any, *keys: str) -> Any:
 
 
 def _runtime_media_page(result: Any) -> tuple[list[Any], str | None] | None:
-    """Normalize the compatibility wrapper and generated-client page shapes."""
+    """Validate the generated client's canonical JSON page pair."""
 
-    if isinstance(result, Mapping):
-        # The generated workspace contract is an explicit page envelope.  A
-        # mapping that omits ``next_cursor`` is not a terminal page: treating
-        # the omission as ``None`` silently turns a truncated/old adapter into
-        # an apparently complete media snapshot (most dangerously when the
-        # first page happens to be exactly the requested 50 rows).
-        if "next_cursor" not in result:
-            return None
-        items = result.get("items")
-        next_cursor = result.get("next_cursor")
-    elif isinstance(result, tuple) and len(result) == 2:
-        items, next_cursor = result
-    elif isinstance(result, (list, tuple)):
-        # Keep compatibility with older test doubles and local adapters that
-        # predate the cursor-bearing page envelope.
-        items, next_cursor = result, None
-    else:
+    page = page_pair(result)
+    if page is None:
         return None
-    if not isinstance(items, (list, tuple)):
+    items, next_cursor = page
+    if not isinstance(items, list):
         return None
     # The runtime call is explicitly bounded.  A response larger than the
     # requested page is malformed: accepting it would make the snapshot
@@ -253,8 +240,12 @@ def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
 
         endpoint, token = resolve_runtime_connection()
         client = WorkspaceClient(endpoint, token)
-        projects = client.list_projects()
-        rows = projects.get("items", []) if isinstance(projects, Mapping) else projects
+        project_page = page_pair(client.list_projects())
+        if project_page is None:
+            return None
+        rows, project_cursor = project_page
+        if project_cursor is not None:
+            return None
         project = next(
             (
                 row

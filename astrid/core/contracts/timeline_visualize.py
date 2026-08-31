@@ -248,8 +248,14 @@ def _runtime_visualize_run_info(project_slug: str, run_id: str) -> dict[str, Any
         timeline_ids = info.get("timeline_ids")
         if timeline_ids is None and isinstance(metadata, Mapping):
             timeline_ids = metadata.get("timeline_ids")
-        projects = runtime.list_projects()
-        rows = projects.get("items", []) if isinstance(projects, Mapping) else projects
+        from astrid.sdk.workspace_client import page_pair
+
+        project_page = page_pair(runtime.list_projects())
+        if project_page is None:
+            return None
+        rows, project_cursor = project_page
+        if project_cursor is not None:
+            return None
         current = next(
             (
                 row

@@ -16,15 +16,15 @@ class _PagedRuntime:
         self.pages = pages
         self.calls: list[tuple[str, str | None, int]] = []
 
-    def list_projects(self) -> dict[str, list[dict[str, str]]]:
-        return {"items": [{"slug": "demo", "project_id": "project-1"}]}
+    def list_projects(self) -> list[Any]:
+        return [[{"slug": "demo", "project_id": "project-1"}], None]
 
     def list_project_objects(
         self, project_id: str, *, cursor: str | None = None, limit: int = 50
-    ) -> dict[str, Any]:
+    ) -> list[Any]:
         self.calls.append((project_id, cursor, limit))
         items, next_cursor = self.pages[cursor]
-        return {"items": items, "next_cursor": next_cursor}
+        return [items, next_cursor]
 
 
 def _row(number: int) -> dict[str, str]:
@@ -103,6 +103,11 @@ def test_runtime_media_snapshot_rejects_mapping_page_without_explicit_cursor(
     assert runtime.calls == [("project-1", None, 50)]
 
 
+def test_runtime_media_page_rejects_bare_item_lists() -> None:
+    assert run_module._runtime_media_page([_row(1)]) is None
+    assert run_module._runtime_media_page({"items": [_row(1)], "next_cursor": None}) is None
+
+
 def test_runtime_media_snapshot_continues_after_empty_page(monkeypatch) -> None:
     runtime = _PagedRuntime(
         {
@@ -161,11 +166,19 @@ from types import ModuleType
 module = ModuleType("astrid.sdk.workspace_client")
 class Client:
     def __init__(self, *_args): pass
-    def list_projects(self): return {"items": [{"slug": "demo", "project_id": "project-1"}]}
+    def list_projects(self): return [[{"slug": "demo", "project_id": "project-1"}], None]
     def list_project_objects(self, project_id, *, cursor=None, limit=50):
-        return {"items": [], "next_cursor": None}
+        return [[], None]
 module.WorkspaceClient = Client
 module.resolve_runtime_connection = lambda: ("http://runtime", "token")
+module.page_pair = lambda value: (
+    (value[0], value[1])
+    if isinstance(value, list)
+    and len(value) == 2
+    and isinstance(value[0], list)
+    and (value[1] is None or isinstance(value[1], str))
+    else None
+)
 sys.modules[module.__name__] = module
 
 from astrid.packs.rendering.executors.timeline_visualize.run import _runtime_media_snapshot

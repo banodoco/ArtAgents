@@ -21,19 +21,17 @@ class _Runtime:
         self.rows = rows
 
     def list_projects(self):
-        return {
-            "items": [
+        return [[
                 {
                     "project_id": PROJECT_ID,
                     "slug": "demo",
                     "metadata": {"default_timeline_id": UUID_B},
                 }
-            ]
-        }
+            ], None]
 
     def list_timelines(self, project_id: str):
         assert project_id == PROJECT_ID
-        return {"items": self.rows}
+        return [self.rows, None]
 
 
 def _row(timeline_id: str, ulid: str, slug: str, *, state: str | None = None) -> dict:
@@ -84,6 +82,18 @@ def test_runtime_selection_excludes_archived_rows() -> None:
     )
     assert diagnostics == []
     assert [item.timeline_ulid for item in selected] == [ULID_A]
+
+
+def test_runtime_selection_requires_generated_page_pairs() -> None:
+    class BareListRuntime(_Runtime):
+        def list_projects(self):
+            return [{"project_id": PROJECT_ID, "slug": "demo"}]
+
+    selected, diagnostics = select_kernel_timelines(
+        None, project_slug="demo", runtime_client=BareListRuntime([])
+    )
+    assert selected == []
+    assert diagnostics == ["workspace project listing returned an invalid page"]
 
 
 def test_frozen_manifest_selection_is_detached_from_project_tree() -> None:

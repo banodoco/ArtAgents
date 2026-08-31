@@ -13,12 +13,11 @@ from astrid.packs.rendering.executors.timeline_visualize import frozen, select
 
 class _Runtime:
     def list_projects(self):
-        return {"items": [{"project_id": "project-1", "slug": "demo", "metadata": {}}]}
+        return [[{"project_id": "project-1", "slug": "demo", "metadata": {}}], None]
 
     def list_timelines(self, project_id):
         assert project_id == "project-1"
-        return {
-            "items": [
+        return [[
                 {
                     "timeline_id": "timeline-1",
                     "timeline_ulid": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
@@ -31,8 +30,7 @@ class _Runtime:
                     "head_hash": "hash-3",
                     "updated_at": "2026-08-30T00:00:00Z",
                 }
-            ]
-        }
+            ], None]
 
 
 def test_managed_selection_reads_generated_runtime_client():
@@ -57,7 +55,7 @@ def test_managed_visualization_readers_have_no_local_store_authority():
 def test_frozen_run_info_uses_generated_runtime_client(monkeypatch):
     class Runtime:
         def list_projects(self):
-            return {"items": [{"project_id": "project-1", "slug": "demo"}]}
+            return [[{"project_id": "project-1", "slug": "demo"}], None]
 
         def get_run(self, run_id):
             assert run_id == "run-1"
@@ -76,7 +74,7 @@ def test_frozen_run_info_uses_generated_runtime_client(monkeypatch):
 def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
     class Runtime:
         def list_projects(self):
-            return {"items": [{"project_id": "project-current", "slug": "demo"}]}
+            return [[{"project_id": "project-current", "slug": "demo"}], None]
 
         def get_run(self, run_id):
             return {"project_id": "project-other", "status": "completed", "capability": "rendering.timeline_visualize"}
@@ -84,6 +82,22 @@ def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
     monkeypatch.setattr(frozen, "_workspace_runtime_client", lambda: Runtime())
     info = frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused"))
     assert info["project_id"] != info["current_project_id"]
+
+
+def test_frozen_run_info_requires_generated_project_page_pair(monkeypatch):
+    class Runtime:
+        def list_projects(self):
+            return [{"project_id": "project-1", "slug": "demo"}]
+
+        def get_run(self, run_id):
+            return {
+                "project_id": "project-1",
+                "status": "completed",
+                "capability": "rendering.timeline_visualize",
+            }
+
+    monkeypatch.setattr(frozen, "_workspace_runtime_client", lambda: Runtime())
+    assert frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused")) is None
 
 
 def _owned_manifest(tmp_path: Path, run_id: str, payload: bytes) -> tuple[Path, dict]:

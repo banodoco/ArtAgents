@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from astrid.core.receipts.contract import CommandReceipt
 
 from .contracts import DomainResult, ErrorObject
-from .workspace_client import WorkspaceClient, WorkspaceClientError
+from .workspace_client import WorkspaceClient, WorkspaceClientError, page_pair
 
 
 class _RemoteFamily:
@@ -101,12 +101,8 @@ def _page_items(value: Any) -> list[Any] | None:
     The pair is the one remote read shape, including terminal pages; accepting
     a bare item list would hide a contract mismatch and lose pagination state.
     """
-    if not isinstance(value, list) or len(value) != 2:
-        return None
-    items, next_cursor = value
-    if not isinstance(items, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
-        return None
-    return items
+    pair = page_pair(value)
+    return pair[0] if pair is not None else None
 
 
 class RemoteProjects(_RemoteFamily):

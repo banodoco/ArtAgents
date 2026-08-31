@@ -25,6 +25,27 @@ class WorkspaceClientError(RuntimeError):
         self.details = dict(details or {})
 
 
+def page_pair(value: Any) -> tuple[list[Any], str | None] | None:
+    """Decode the generated client's canonical list-page value.
+
+    The generated client returns ``(items, next_cursor)`` and
+    :meth:`WorkspaceClient._call_generated` converts that tuple to the
+    JSON-safe ``[items, next_cursor]`` pair.  A bare list (or a mapping-shaped
+    adapter response) is not a page and must never be treated as a terminal
+    page: doing so loses the pagination boundary and can silently truncate a
+    runtime read.
+    """
+
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    items, next_cursor = value
+    if not isinstance(items, list):
+        return None
+    if next_cursor is not None and not isinstance(next_cursor, str):
+        return None
+    return items, next_cursor
+
+
 def _read_credential(path: Path) -> str:
     try:
         raw = path.read_text(encoding="utf-8").strip()

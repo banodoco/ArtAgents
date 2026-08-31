@@ -28,6 +28,7 @@ from referencing import Registry, Resource
 
 from astrid.core.timeline.resolution import AssetIntegrity
 from astrid.core.timeline.snapshot import TimelineSnapshot
+from astrid.sdk.workspace_client import page_pair
 from astrid.packs.rendering.executors.timeline_visualize.evidence_pack import (
     ACTION_INDEX_NAME,
     ASSET_INDEX_NAME,
@@ -209,14 +210,18 @@ def _rehydrate_managed_pack(
     if runtime_client is None:
         return None
     try:
-        projects = runtime_client.list_projects()
-        project_rows = projects.get("items", []) if isinstance(projects, dict) else projects
+        project_page = page_pair(runtime_client.list_projects())
+        if project_page is None or project_page[1] is not None:
+            return None
+        project_rows, _project_cursor = project_page
         project = next((item for item in project_rows if isinstance(item, Mapping) and item.get("slug") == project_root.name), None)
         project_id = project.get("project_id") if isinstance(project, dict) else None
         if not project_id:
             return None
-        runs = runtime_client.list_project_runs(str(project_id))
-        run_rows = runs.get("items", []) if isinstance(runs, dict) else runs
+        run_page = page_pair(runtime_client.list_project_runs(str(project_id)))
+        if run_page is None or run_page[1] is not None:
+            return None
+        run_rows, _run_cursor = run_page
     except Exception:
         return None
 
@@ -1267,8 +1272,10 @@ def _kernel_frozen_run_info(
         run_project_id = info.get("project_id") or info.get("project")
         projects_reader = getattr(runtime_client, "list_projects", None)
         if callable(projects_reader):
-            projects = projects_reader()
-            rows = projects.get("items", []) if isinstance(projects, dict) else projects
+            projects_page = page_pair(projects_reader())
+            if projects_page is None or projects_page[1] is not None:
+                return None
+            rows, _projects_cursor = projects_page
             current = next((item for item in rows or [] if isinstance(item, Mapping) and item.get("slug") == project_slug), None)
             current_project_id = current.get("project_id") or current.get("id") if isinstance(current, Mapping) else None
             result["project_id"] = run_project_id
