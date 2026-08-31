@@ -395,7 +395,7 @@ def test_dispatch_product_routes_family_and_closes_client(monkeypatch) -> None:
         seen["client"] = client
         return 7
 
-    monkeypatch.setattr(sdk_client.AstridClient, "open", classmethod(_fake_open))
+    monkeypatch.setattr(sdk_client.AstridClient, "open_from_launcher", classmethod(_fake_open))
     monkeypatch.setattr(domain_product, "run_product_family", _fake_run)
 
     from astrid.core.gateway import dispatch
@@ -697,10 +697,7 @@ def test_product_help_documents_json_envelope_convention() -> None:
 def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> None:
     text = _product_help_text()
     assert "projects    [kernel] project create/list/show/update/select/current" in text
-    assert (
-        "timeline create/list/show/save/archive/unarchive/history/diff/visualize/render"
-        in text
-    )
+    assert "[pack: timeline] timelines create/list/show/save/archive/recover/history/diff/visualize/render" in text
 
 
 def test_print_product_help_prints_to_stdout(capsys) -> None:

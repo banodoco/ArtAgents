@@ -88,9 +88,13 @@ def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monke
             assert gateway_main(["projects", "create", "cold", "--name", "Cold", "--idempotency-key", "cold-project", "--json"]) == 0
             created = json.loads(capsys.readouterr().out)
             assert created["ok"] and created["data"]["slug"] == "cold"
+            assert created["receipt"] is not None
+            assert created["receipt"]["command_kind"] == "project.create"
             project_id = created["data"]["project_id"]
             replay = client.projects.create(slug="cold", name="Cold", idempotency_key="cold-project")
-            assert replay.ok
+            assert replay.ok and replay.receipt is not None
+            assert replay.receipt.command_kind == "project.create"
+            assert replay.receipt.as_dict() == created["receipt"]
 
             assert gateway_main(["projects", "select", project_id, "--scope", "workspace", "--json"]) == 0
             selected = json.loads(capsys.readouterr().out)
@@ -101,8 +105,12 @@ def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monke
             assert gateway_main(["tasks", "create", "--project", project_id, "--capability", "render.basic", "--spec", "{}", "--idempotency-key", "cold-task", "--json"]) == 0
             admitted = json.loads(capsys.readouterr().out)
             assert admitted["ok"] and admitted["data"]["capability_id"] == "render.basic"
+            assert admitted["receipt"] is not None
+            assert admitted["receipt"]["command_kind"] == "task.create"
             sdk_task = client.tasks.create(project_id=project_id, capability="render.basic", spec={}, idempotency_key="cold-task")
-            assert sdk_task.ok
+            assert sdk_task.ok and sdk_task.receipt is not None
+            assert sdk_task.receipt.command_kind == "task.create"
+            assert sdk_task.receipt.as_dict() == admitted["receipt"]
 
             before = daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
             daemon.service.register_capability({

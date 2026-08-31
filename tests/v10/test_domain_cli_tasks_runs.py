@@ -149,6 +149,45 @@ def test_tasks_create_forwards_generated_contract(capsys) -> None:
     assert set(envelope) == ENVELOPE_KEYS and envelope["receipt"] is not None
 
 
+def test_tasks_create_does_not_advertise_unsupported_runtime_admission_fields() -> None:
+    from astrid.core.cli.domain_tasks import build_parser
+
+    parser = build_parser(_Client())
+    help_text = parser.format_help()
+    assert all(flag not in help_text for flag in ("--priority", "--available-at", "--max-attempts", "--dependencies"))
+    for flag in ("--priority", "--available-at", "--max-attempts", "--dependencies"):
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(["create", "--project", "P-1", "--capability", "cap.a", "--spec", "{}", flag, "1"])
+        assert exc.value.code == 2
+
+
+def test_runs_show_preserves_runtime_progress_and_optional_evidence(capsys) -> None:
+    client = _Client()
+    client.runs.show = lambda run_id: DomainResult.success({
+        "run_id": run_id,
+        "status": "failed",
+        "progress": {"total_children": 3, "succeeded": 1, "failed": 2, "cancelled": 0},
+        "evidence": [{"evidence_id": "EV-1", "kind": "preview"}],
+    })
+    assert _run("runs", ["show", "--project", "P-1", "R-1", "--evidence", "--json"], client) == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["data"]["progress"]["failed"] == 2
+    assert envelope["data"]["evidence"][0]["evidence_id"] == "EV-1"
+
+
+def test_tasks_and_runs_help_explain_supported_envelope_and_event_scope(capsys) -> None:
+    client = _Client()
+    with pytest.raises(SystemExit) as tasks_help:
+        _run("tasks", ["create", "--help"], client)
+    assert tasks_help.value.code == 0
+    assert "ok/data/error/receipt/idempotency_key" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as runs_help:
+        _run("runs", ["events", "--help"], client)
+    assert runs_help.value.code == 0
+    assert "Child task transitions" in capsys.readouterr().out
+
+
 def test_project_list_is_one_sdk_call(capsys) -> None:
     client = _Client()
     assert _run("tasks", ["list", "--project", "slug", "--json"], client) == 0

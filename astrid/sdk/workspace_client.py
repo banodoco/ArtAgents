@@ -136,6 +136,13 @@ class WorkspaceClient:
             if isinstance(item, dict):
                 return {key: plain(child) for key, child in item.items()}
             return item
+        # The generated client carries committed mutation receipts as an
+        # out-of-band ``MutationResult.receipt`` attribute on its resource
+        # mapping. Preserve that attribute across the plain JSON conversion;
+        # RemoteAstridClient._typed consumes the stable {data, receipt}
+        # envelope and turns it into DomainResult.receipt.
+        if hasattr(value, "receipt") and isinstance(value, dict):
+            return {"data": plain(dict(value)), "receipt": plain(value.receipt)}
         return plain(value)
 
     # The following methods are intentionally explicit.  They form the

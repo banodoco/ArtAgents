@@ -113,7 +113,7 @@ Product families:
   media       [kernel] media import/list/show/verify/relate
   tasks       [kernel] task create/list/show/cancel/retry/events
   runs        [kernel] run list/show/cancel/retry/events
-  timelines   [pack: timeline] timeline create/list/show/save/archive/recover/history/diff/visualize/render
+  timelines   [pack: timeline] timelines create/list/show/save/archive/recover/history/diff/visualize/render
 
 Operational families:
   doctor      [runtime] read-only runtime health diagnostics

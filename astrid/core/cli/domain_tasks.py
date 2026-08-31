@@ -14,10 +14,8 @@ Verbs (exactly these six, one SDK call each):
 - ``create`` — one ``client.tasks.create`` call; accepts ``--project`` (the
   owning project id or immutable slug), ``--capability``, ``--spec`` (a JSON
   object), and the
-  optional admission controls ``--input-manifest`` (JSON array),
-  ``--priority``, ``--available-at``, ``--max-attempts``, and
-  ``--dependencies`` (JSON array), plus ``--idempotency-key`` (a fresh key is
-  generated and returned by the SDK when absent);
+  optional ``--input-manifest`` (JSON array), plus ``--idempotency-key`` (a
+  fresh key is generated and returned by the SDK when absent);
 - ``list`` — one ``client.tasks.list`` call (project-scoped read, no key);
 - ``show <task_id>`` — one ``client.tasks.show`` call (read, no key);
 - ``cancel <task_id>`` — one ``client.tasks.cancel`` call with the same
@@ -172,35 +170,6 @@ def _configure_create(subparser: argparse.ArgumentParser) -> None:
         type=_parse_json_array,
         default=None,
         help="Optional input manifest as a JSON array.",
-    )
-    subparser.add_argument(
-        "--priority",
-        type=int,
-        default=0,
-        help="Admission priority (default: 0).",
-    )
-    subparser.add_argument(
-        "--available-at",
-        dest="available_at",
-        default=None,
-        help="ISO timestamp before which the task must not run (default: now).",
-    )
-    subparser.add_argument(
-        "--max-attempts",
-        dest="max_attempts",
-        type=int,
-        default=1,
-        help="Maximum execution attempts (default: 1).",
-    )
-    subparser.add_argument(
-        "--dependencies",
-        type=_parse_json_array,
-        default=None,
-        help=(
-            "Optional dependency objects as a JSON array; example "
-            "'[{\"task_id\":\"<task-id>\",\"kind\":\"hard\",\"ordinal\":0}]'. "
-            "kind defaults to hard; hard deps block until succeeded, soft deps never block."
-        ),
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)

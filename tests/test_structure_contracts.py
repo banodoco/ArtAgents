@@ -920,8 +920,6 @@ def test_public_import_and_shim_smoke() -> None:
             "discover",
             "invoke",
             "generate",
-            "read_events",
-            "subscribe_events",
             # DTOs / data classes
             "Capability",
             "DiscoveryResult",
