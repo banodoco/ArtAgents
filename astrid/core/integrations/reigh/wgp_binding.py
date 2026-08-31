@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.task_executor.service import (
+from astrid.core.task_handler_registry import (
     TaskExecutorError,
     register_task_handler,
 )

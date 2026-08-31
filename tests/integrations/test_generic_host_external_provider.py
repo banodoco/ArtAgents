@@ -23,7 +23,7 @@ RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace
 if RUNTIME.is_dir():
     sys.path.insert(0, str(RUNTIME / "packages/python"))
     sys.path.insert(0, str(RUNTIME))
-from banodoco_workspace_client import WorkspaceClient
+from banodoco_workspace_client import ApiError, WorkspaceClient
 from runtime_protocol.daemon import RuntimeDaemon
 
 
@@ -184,7 +184,20 @@ def test_hivemind_without_clean_pinned_source_is_optional_unavailable(tmp_path: 
 
 
 def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> None:
-    """Runtime registration and host claim candidates share readiness truth."""
+    """Unavailable capabilities fail before admission and leave no ledger rows."""
+    class ProviderHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler API
+            body = b"provider-ready"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ProviderHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     pack_root = tmp_path / "provider"
     executor_root = pack_root / "executors" / "fetch"
     executor_root.mkdir(parents=True)
@@ -200,7 +213,7 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
         "name": "Provider Fetch",
         "kind": "external",
         "version": "1.0",
-        "command": {"argv": ["{python_exec}", "-c", "pass"]},
+        "command": {"argv": ["{python_exec}", "-c", f"from urllib.request import urlopen; urlopen('http://127.0.0.1:{server.server_port}/ready', timeout=2).read()"]},
         "outputs": [],
         "isolation": {
             "mode": "subprocess",
@@ -211,8 +224,8 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
             "adapter_family": "provider",
             "required_env": ["PROVIDER_KEY"],
             "network_policy": {
-                "allowed_protocols": ["tcp"],
-                "allowed_destinations": ["example.invalid:443"],
+                "allowed_protocols": ["dns", "tcp"],
+                "allowed_destinations": ["127.0.0.1"],
                 "broker": {"host_managed": True},
             },
         },
@@ -233,19 +246,44 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
         registration = host.register()
         assert host.capabilities[record.id].ready is False
         assert registration["capabilities"][0]["ready"] is False
+        project = generated.create_project("Provider fixture", slug="provider-fixture", idempotency_key="provider-project")
+        with pytest.raises(ApiError, match="capability is not ready for admission"):
+            generated.admit_task(
+                capability_id=record.id,
+                capability_digest=record.capability_digest,
+                input_object_ids=[],
+                project_id=project.project_id,
+                idempotency_key="provider-unready-task",
+            )
+
+        # Admission rejection is pre-ledger: no task, run, or execution event
+        # exists for the unavailable capability.
+        assert generated.list_tasks(project.project_id)[0] == []
+        assert generated.list_runs(project.project_id)[0] == []
+        assert generated.list_events()[0] == []
+
+        # Readiness changes only after the host receives the declared
+        # credential; the same host registration then enables settlement.
+        host.credential_source["PROVIDER_KEY"] = "fixture-provider-key"
+        host.preflight()
+        assert host.capabilities[record.id].ready is True
+        host.register(deliberate=True)
+        capability = next(item for item in generated.list_capabilities() if item.capability_id == record.id)
+        assert capability.status == "ready"
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,
             input_object_ids=[],
-            idempotency_key="provider-unready-task",
+            project_id=project.project_id,
+            idempotency_key="provider-ready-task",
         )
-
-        # No lease is acquired: the host has no ready candidate to offer to
-        # the runtime, even though the worker registration remains visible.
-        assert host.run(once=True) == []
-        assert generated.get_task(task.task_id).state == "queued"
+        settled = host.run(once=True)
+        assert len(settled) == 1 and settled[0].state == "succeeded"
+        assert generated.get_task(task.task_id).state == "succeeded"
     finally:
         daemon.stop()
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.parametrize("provider_env", ["FAL_KEY", "GIPHY_API_KEY", "OPENAI_API_KEY"])

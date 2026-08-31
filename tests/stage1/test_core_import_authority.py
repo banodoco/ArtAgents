@@ -109,8 +109,9 @@ def test_reigh_binding_resolution_is_lazy_and_explicit() -> None:
             sys.executable,
             "-c",
             (
-                "import sys; import astrid.core.integrations.reigh; "
+                "import sys; from astrid.core.integrations.reigh import register_bindings; "
                 "from astrid.core.task_executor.service import resolve_task_handler; "
+                "register_bindings('wgp'); "
                 "resolve_task_handler('wgp'); "
                 "print('astrid.core.integrations.reigh.wgp_binding' in sys.modules); "
                 "print('astrid.core.integrations.reigh.vibecomfy_binding' in sys.modules)"

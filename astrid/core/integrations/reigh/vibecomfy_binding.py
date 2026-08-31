@@ -48,7 +48,7 @@ from astrid.core.generation.backends.vibecomfy import (
     _parse_size,
     _resolve_node_target,
 )
-from astrid.core.task_executor.service import (
+from astrid.core.task_handler_registry import (
     TaskExecutorError,
     register_task_handler,
 )

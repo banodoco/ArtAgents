@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -60,7 +59,6 @@ from astrid.core._shared.result_manifest import (
     ValidatedResultManifest,
     validate_result_manifest,
 )
-from astrid.core.contracts.errors import AstridError
 from astrid.core.io.media_import import (
     PreparedMedia,
     prepare_media_file,
@@ -81,6 +79,11 @@ from astrid.core.repositories.tasks import (
     TaskTransitionError,
 )
 from astrid.core.store.uow import UnitOfWork
+from astrid.core.task_handler_registry import (
+    TaskExecutorError,
+    register_task_handler,  # noqa: F401 - compatibility export
+    resolve_registered_task_handler,
+)
 from astrid.core.util.time import utc_now_iso
 
 STAGING_TXN_ID_KEY = "staging_txn_id"
@@ -95,10 +98,6 @@ kernel code never imports packs, so the constant is declared here.
 
 MAX_ERROR_PAYLOAD_CHARS = 4000
 """Upper bound for the failure message recorded on the attempt."""
-
-
-class TaskExecutorError(AstridError):
-    """Base error for the kernel task-executor boundary (m2 plan step 9)."""
 
 
 class HandlerExecutionError(TaskExecutorError):
@@ -128,54 +127,18 @@ class TaskHandler(Protocol):
         """Run the capability and return a universal result manifest."""
         ...
 
-_TASK_HANDLER_FACTORIES: dict[str, Callable[[], TaskHandler]] = {}
-"""Registered TaskHandler factories keyed by binding name.
-
-Bindings are declared constants of the owning integration (e.g. the
-Reigh ``vibecomfy`` binding); registration is an explicit import-time
-act by the integration module — never plugin discovery, never a
-filesystem scan (growth by declaration, doc 27 §3.3).
-"""
-
-
-def register_task_handler(binding: str, factory: Callable[[], TaskHandler]) -> None:
-    """Register one TaskHandler factory under *binding*.
-
-    Re-registering the same binding with a different factory is a
-    programming error and raises :class:`TaskExecutorError` — one
-    authority per binding, no silent overrides.
-    """
-    if not isinstance(binding, str) or not binding:
-        raise TaskExecutorError("binding must be a non-empty string")
-    if not callable(factory):
-        raise TaskExecutorError("factory must be callable")
-    existing = _TASK_HANDLER_FACTORIES.get(binding)
-    if existing is not None and existing is not factory:
-        raise TaskExecutorError(
-            f"binding {binding!r} already has a registered handler factory"
-        )
-    _TASK_HANDLER_FACTORIES[binding] = factory
-
-
 def resolve_task_handler(binding: str) -> TaskHandler:
     """Resolve the one registered handler for *binding*.
 
-    Reigh bindings are runtime-owned and are loaded lazily on demand.  This
-    keeps ``astrid.core.integrations.reigh`` lightweight while allowing the
-    executor/runtime bootstrap to resolve a binding without relying on an
-    unrelated package import having registered it as a side effect.
+    Reigh bindings are runtime-owned and are registered by the explicit
+    integration composition before execution.  The kernel resolver never
+    imports a concrete integration, preserving the one-way kernel/pack
+    dependency and making missing registration fail closed.
     """
-    factory = _TASK_HANDLER_FACTORIES.get(binding)
-    if factory is None and binding in {"wgp", "vibecomfy"}:
-        from astrid.core.integrations.reigh import register_bindings
-
-        register_bindings(binding)
-        factory = _TASK_HANDLER_FACTORIES.get(binding)
-    if factory is None:
-        raise TaskExecutorError(
-            f"no TaskHandler registered for binding {binding!r}"
-        )
-    return factory()
+    handler = resolve_registered_task_handler(binding)
+    if handler is None:
+        raise TaskExecutorError(f"no TaskHandler registered for binding {binding!r}")
+    return handler
 
 
 @dataclass(frozen=True, slots=True)

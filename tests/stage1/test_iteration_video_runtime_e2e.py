@@ -42,7 +42,7 @@ def test_runtime_execution_imports_do_not_reach_retired_project_run() -> None:
     assert result.stdout.splitlines() == ["False", "False"]
 
 
-def test_public_iteration_video_uses_sole_runtime_project_and_run(
+def test_public_iteration_video_uses_explicit_runtime_project_and_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     support = tmp_path / "support"
@@ -87,7 +87,10 @@ def test_public_iteration_video_uses_sole_runtime_project_and_run(
                     out=tmp_path / "out",
                     orchestrator_args=("--repo-root", str(tmp_path)),
                     inputs={"thread": "@active"},
-                    project=None,
+                    # Public iteration-video requires an explicit runtime
+                    # project; it must never infer one from a sole-project
+                    # fallback.
+                    project="demo",
                     run_root=None,
                     dry_run=False,
                 ),

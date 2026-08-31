@@ -114,19 +114,21 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
         assert timeline.ok
         timeline_id = timeline.data["timeline_id"]
         shot = astrid.shots.create(
-            timeline_id=timeline_id,
-            shot={"shot_id": "shot-1", "start_ms": 0, "duration_ms": 1000},
+            project=project_id,
+            shot={"shot_id": "shot-1", "name": "Shot 1"},
             idempotency_key="shot",
         )
         reference = astrid.references.create(
-            timeline_id=timeline_id,
+            project=project_id,
             reference_id="reference-1",
-            object_id=object_id,
-            role="source",
+            kind="object",
+            name="Reference 1",
+            media_id=object_id,
             idempotency_key="reference",
         )
         assert shot.ok and reference.ok
-        assert astrid.timelines.show(project_id, timeline_id).data["references"][0]["reference_id"] == "reference-1"
+        assert astrid.shots.show(project_id, "shot-1").data["shot_id"] == "shot-1"
+        assert astrid.references.show(project_id, "reference-1").data["reference_id"] == "reference-1"
 
         record = GenericPackHost(pack_roots=[pack]).discover()[0]
         host = GenericPackHost(
