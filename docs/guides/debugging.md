@@ -65,10 +65,13 @@ The structured renderer failure kinds are:
 ## 3. SDK-level diagnostics
 
 A backend written against the rendering SDK can use `astrid.support(...)` for
-a request-sensitive support report and `astrid.render(...)` for a local render.
-`RenderContext.run(..., check=False)` returns a bounded subprocess result, and
-`RenderContext.log`/`progress` keeps diagnostics redacted. The full SDK example
-is in [reference/sdk.md](../reference/sdk.md).
+a request-sensitive support report. Product renders must be admitted through
+`astrid.sdk.invoke("rendering.render", kind="executor", project=..., inputs=...)`;
+the workspace runtime's generic host owns execution, materialization, and
+settlement. The retired direct-render symbol is a fail-closed compatibility
+guard and must not be used for rendering. `RenderContext.run(..., check=False)`
+returns a bounded subprocess result, and `RenderContext.log`/`progress` keeps
+diagnostics redacted. The full SDK example is in [reference/sdk.md](../reference/sdk.md).
 
 For any project-facing failure, return to `doctor --json`, inspect the typed
 error envelope (including `internal_error` when an unexpected backend failure

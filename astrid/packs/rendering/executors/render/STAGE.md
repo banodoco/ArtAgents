@@ -18,9 +18,10 @@ coextensive audio clip can be compiled by the FFmpeg renderer to its dedicated
 representation; service selection and request-sensitive support evidence
 choose the implementation.
 
-Normal Astrid usage goes through the SDK (`astrid.sdk.invoke(...)`). The
-direct `run.py` entrypoint is a lower-level debug surface for reproducing
-runner behavior outside the Astrid executor wrapper.
+Normal Astrid usage goes through the admitted SDK capability
+(`astrid.sdk.invoke("rendering.render", kind="executor", project=...)`). The
+runtime generic host owns the pack child process; callers never invoke the
+pack entrypoint or bypass admission.
 
 `rendering.render` has two explicit, mutually exclusive modes. `timeline`
 names an exported or pipeline-produced JSON file owned by the project; values
@@ -209,7 +210,7 @@ discovers and invokes it. To author one, scaffold the canonical four-file pack
 with the internal rendering CLI (`python3 -m astrid.core.rendering.cli create <name> <dest>`), implement
 `render.py`, run the generated `test_renderer.py`, then `validate` →
 trusted `install` via the internal pack CLI (`python3 -m astrid.core.pack.cli`)
-→ `smoke` → `replay <bundle-dir>`
+→ `replay <bundle-dir>`
 for captured failure bundles (the golden
 path in `docs/contracts/render-backend-v1.md`). `render.py` may parse the raw
 v1 file protocol or use the public rendering SDK (`astrid.renderer_main` as
@@ -219,38 +220,13 @@ bundle — resolved request, localized inputs, configuration, redacted logs,
 partial result, and the exact replay command — so backend authors can
 reproduce failures without rerunning the editorial pipeline.
 
-## Lower-level debug commands
+## Runtime boundary
 
-Use direct module execution only when debugging the facade itself. It bypasses
-the normal Astrid executor input mapping, still delegates to `RenderService`,
-and writes to the exact `--out` path. It is not a public entrypoint; the
-canonical guard requires Astrid's internal invocation marker:
-
-```bash
-ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json \
-  --out ./out/hype.mp4
-```
-
-For an asset-free debug render, omit `--assets`; the direct runner creates a
-temporary empty asset registry:
-
-```bash
-ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline ./out/hype.timeline.json \
-  --out ./out/hype.mp4
-```
-
-Free-space guard is also a direct-runner debug flag:
-
-```bash
-ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json \
-  --out ./out/hype.mp4 \
-  --min-free-gb 10
-```
+The pack command is an internal child-process target of the generic host. It
+has no supported direct-debug invocation: all real renders go through the
+admitted SDK capability, which supplies the canonical timeline reference and
+keeps materialization, execution, publication, and settlement in one runtime
+boundary.
 
 ## Pipeline position
 

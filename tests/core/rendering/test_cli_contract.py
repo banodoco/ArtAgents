@@ -2,8 +2,8 @@
 
 Locks the internal renderer-authoring CLI ``--json`` shapes and error behavior:
 
-* every verb (``create``, ``list``, ``inspect``, ``validate``, ``smoke``,
-  plus the ``support`` verb) emits a STABLE, verb-specific JSON object on
+* every remaining authoring verb (``create``, ``list``, ``inspect``,
+  ``validate``, plus the ``support`` verb) emits a STABLE, verb-specific JSON object on
   stdout under ``--json`` — exact keys asserted per verb, NO universal
   envelope (no ``ok``/``status``/``data``/``result`` wrapper);
 * plain mode stays human-readable text;
@@ -31,7 +31,6 @@ from pathlib import Path
 import pytest
 
 from astrid.core.rendering.cli import main as renderers_cli_main
-from astrid.core.rendering.errors import make_renderer_error
 from astrid.core.rendering.scaffold import SCAFFOLD_FILES, create_renderer_scaffold
 from tests.helpers.cli_runner import run_cli
 
@@ -206,32 +205,6 @@ def test_validate_json_shape_on_invalid_pack(tmp_path: Path) -> None:
     assert payload["path"] == str(broken.resolve())
 
 
-def test_smoke_json_shape_is_stable(tmp_path: Path) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    out_path = tmp_path / "out.mp4"
-    result = run_cli(
-        renderers_cli_main,
-        [
-            "smoke",
-            "wave.wave",
-            "--pack-root",
-            str(tmp_path),
-            "--out",
-            str(out_path),
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == 0
-    payload = _load_json(result.stdout)
-    assert set(payload.keys()) == {"renderer_id", "output", "provenance"}
-    _assert_no_envelope(payload)
-    assert payload["renderer_id"] == "wave.wave"
-    assert payload["output"] == str(out_path.resolve())
-    assert payload["provenance"] == str(Path(f"{out_path.resolve()}.provenance.json"))
-    assert result.stderr == ""
-
-
 def test_support_json_shape_is_stable(tmp_path: Path) -> None:
     create_renderer_scaffold("wave", tmp_path / "wave")
     result = run_cli(
@@ -300,20 +273,6 @@ def test_plain_mode_create_is_human_readable_text(tmp_path: Path) -> None:
     assert not result.stdout.lstrip().startswith("{")
     assert "created renderer scaffold at" in result.stdout
     assert "files: pack.yaml renderer.yaml render.py test_renderer.py" in result.stdout
-
-
-def test_plain_mode_smoke_is_human_readable_text(tmp_path: Path) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    result = run_cli(
-        renderers_cli_main,
-        ["smoke", "wave.wave", "--pack-root", str(tmp_path)],
-    )
-
-    assert result.exit_code == 0
-    assert not result.stdout.lstrip().startswith("{")
-    assert "smoke: wave.wave" in result.stdout
-    assert "output: " in result.stdout
-    assert "provenance: " in result.stdout
 
 
 def test_plain_mode_support_is_human_readable_text(tmp_path: Path) -> None:
@@ -445,47 +404,6 @@ def test_untrusted_env_discovered_pack_is_ineligible(
     assert "not executable" in payload["eligibility_reason"]
 
 
-def test_smoke_refuses_untrusted_pack_with_structured_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_renderer_scaffold("wave", tmp_path / "roots" / "wave")
-    monkeypatch.setenv(_ENV_PACKS_PATH, str(tmp_path / "roots"))
-
-    result = run_cli(renderers_cli_main, ["smoke", "wave.wave", "--json"])
-
-    assert result.exit_code != 0
-    assert result.stdout == ""
-    payload = _load_json(result.stderr)
-    assert set(payload.keys()) == {"verb", "error"}
-    assert payload["verb"] == "smoke"
-    error = payload["error"]
-    assert isinstance(error, dict)
-    assert set(error.keys()) == {"kind", "message", "recovery_command"}
-    assert error["kind"] == "ineligible"
-    assert "not execution-eligible" in error["message"]
-    assert "environment-discovered packs are inspectable but not executable" in (
-        error["message"]
-    )
-    assert error["recovery_command"] is not None
-
-
-def test_smoke_refuses_untrusted_pack_in_plain_mode(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_renderer_scaffold("wave", tmp_path / "roots" / "wave")
-    monkeypatch.setenv(_ENV_PACKS_PATH, str(tmp_path / "roots"))
-
-    result = run_cli(renderers_cli_main, ["smoke", "wave.wave"])
-
-    assert result.exit_code != 0
-    assert "not execution-eligible" in result.stderr
-    assert "environment-discovered packs are inspectable but not executable" in (
-        result.stderr
-    )
-
-
 # ---------------------------------------------------------------------------
 # unsupported support: a backend that declines → frozen RendererError shape
 # ---------------------------------------------------------------------------
@@ -611,95 +529,17 @@ def test_support_on_declining_backend_plain_mode_keeps_text(tmp_path: Path) -> N
 
 
 # ---------------------------------------------------------------------------
-# interruption: a cancelled path reports cleanly, never a traceback dump
-# ---------------------------------------------------------------------------
-
-
-def _interrupting_render(self, *args: object, **kwargs: object) -> object:
-    error = make_renderer_error(
-        "interrupted",
-        backend="wave.wave",
-        message="renderer command was interrupted",
-        recovery_command=None,
-        details={},
-    )
-    exc = KeyboardInterrupt()
-    exc.renderer_error = error  # type: ignore[attr-defined]
-    exc.error = error  # type: ignore[attr-defined]
-    raise exc
-
-
-def test_smoke_interrupted_json_emits_frozen_interrupted_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    monkeypatch.setattr(
-        "astrid.core.rendering.service.RenderService.render",
-        _interrupting_render,
-    )
-
-    result = run_cli(
-        renderers_cli_main,
-        ["smoke", "wave.wave", "--pack-root", str(tmp_path), "--json"],
-    )
-
-    assert result.exit_code != 0
-    assert result.stdout == ""
-    assert "Traceback" not in result.stderr
-    payload = _load_json(result.stderr)
-    assert set(payload.keys()) == RENDERER_ERROR_KEYS
-    assert payload["schema_version"] == 1
-    assert payload["kind"] == "interrupted"
-    assert payload["backend"] == "wave.wave"
-
-
-def test_smoke_interrupted_plain_mode_reports_cleanly(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    monkeypatch.setattr(
-        "astrid.core.rendering.service.RenderService.render",
-        _interrupting_render,
-    )
-
-    result = run_cli(
-        renderers_cli_main,
-        ["smoke", "wave.wave", "--pack-root", str(tmp_path)],
-    )
-
-    assert result.exit_code != 0
-    assert "Traceback" not in result.stderr
-    assert "interrupted" in result.stderr
-    assert not result.stderr.lstrip().startswith("{")
-
-
-# ---------------------------------------------------------------------------
 # exit codes: 0 on success, non-zero on failure — no finer taxonomy
 # ---------------------------------------------------------------------------
 
 
 def test_exit_code_contract_is_only_zero_vs_nonzero(tmp_path: Path) -> None:
     create_renderer_scaffold("wave", tmp_path / "wave")
-    out_path = tmp_path / "out.mp4"
 
     successes = [
         run_cli(renderers_cli_main, ["list", "--json"]),
         run_cli(renderers_cli_main, ["inspect", "rendering.ffmpeg", "--json"]),
         run_cli(renderers_cli_main, ["validate", str(tmp_path / "wave"), "--json"]),
-        run_cli(
-            renderers_cli_main,
-            [
-                "smoke",
-                "wave.wave",
-                "--pack-root",
-                str(tmp_path),
-                "--out",
-                str(out_path),
-                "--json",
-            ],
-        ),
         run_cli(
             renderers_cli_main,
             ["support", "wave.wave", "--pack-root", str(tmp_path), "--json"],
@@ -717,22 +557,6 @@ def test_exit_code_contract_is_only_zero_vs_nonzero(tmp_path: Path) -> None:
         assert result.exit_code == 0
     for result in failures:
         assert result.exit_code != 0
-
-
-def test_smoke_interrupted_exits_130(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Interruption exits 130 (SIGINT convention), never 1."""
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    monkeypatch.setattr(
-        "astrid.core.rendering.service.RenderService.render",
-        _interrupting_render,
-    )
-
-    result = run_cli(
-        renderers_cli_main,
-        ["smoke", "wave.wave", "--pack-root", str(tmp_path)],
-    )
-
-    assert result.exit_code == 130
 
 
 def test_replay_json_shape_is_stable(tmp_path: Path) -> None:

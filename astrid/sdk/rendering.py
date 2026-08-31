@@ -13,10 +13,9 @@ with three public entrypoints:
   the command transport (the same public backend machinery the
   :class:`~astrid.core.rendering.service.RenderService` uses), validates the
   result, and writes the frozen result JSON shape to ``--result``.
-* ``render`` — a convenience that builds a :class:`RenderRequest` from
-  friendly arguments and delegates to the shared
-  :class:`~astrid.core.rendering.service.RenderService`, returning the
-  published output path.
+* ``render`` — a retained compatibility guard. Direct product rendering is
+  retired; it always raises and points callers to the admitted
+  ``sdk.invoke("rendering.render", kind="executor", project=...)`` path.
 * ``support`` — a convenience that resolves a qualified backend and returns
   its :class:`SupportReport`.
 * :class:`RenderContext` — the convenience facade a third-party ``render.py``
@@ -47,19 +46,18 @@ Worked example (scaffold → SDK renderer):
        python3 -m astrid.core.rendering.cli create wave acme_wave
        # acme_wave/renderer.yaml: command: [python3, -m, astrid.sdk.rendering]
 
-2. From Python, render through the shared service — the SDK builds a frozen
-   :class:`RenderRequest`, dispatches through :class:`RenderService`, and
-   returns the published output path::
+2. Admit a product render through the workspace runtime. The generic host
+   owns materialization, execution, settlement, and publication::
 
-       import astrid
-       out = astrid.render(
-           "out/hype.timeline.json",
-           assets_registry_path="out/hype.assets.json",
-           backend="acme_wave.wave",
-           backend_config={"acme_wave.wave": {"quality": "preview"}},
-           out_path="out/hype.mp4",
+       import astrid.sdk as sdk
+       result = sdk.invoke(
+           "rendering.render",
+           kind="executor",
+           project="demo",
+           inputs={"timeline_ref": "main"},
        )
-       # out/hype.mp4 + out/hype.mp4.provenance.json
+       # result.run_id identifies the admitted runtime run; inspect its
+       # outputs through the runtime client or `astrid runs show`.
 
 3. Ask a qualified backend whether it supports a specific request::
 
@@ -452,8 +450,8 @@ def support(
     Accepts either a frozen ``request`` (a :class:`RenderRequest` or a v1
     wire mapping) or friendly path/audio/profile arguments.  The backend is
     resolved through the rendering registry and the support verb is dispatched
-    through the shared :class:`RenderService` (injectable via ``service``),
-    so the returned report is exactly what the public backend path produces.
+    to the backend command in a disposable child process. The returned report
+    is exactly what the admitted generic-host backend path produces.
     """
     if request is None:
         if timeline_path is None:

@@ -17,6 +17,20 @@ import astrid.sdk.rendering as sdk_rendering
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _tree_snapshot(root: Path) -> tuple[tuple[str, str, bytes | str], ...]:
+    """Capture fixture-root entries so route side effects are measurable."""
+    records: list[tuple[str, str, bytes | str]] = []
+    for path in sorted(root.rglob("*")):
+        relative = str(path.relative_to(root))
+        if path.is_symlink():
+            records.append(("symlink", relative, str(path.readlink())))
+        elif path.is_dir():
+            records.append(("dir", relative, b""))
+        elif path.is_file():
+            records.append(("file", relative, path.read_bytes()))
+    return tuple(records)
+
+
 def test_live_render_graph_excludes_historical_filesystem_ingest() -> None:
     probe = """
 import sys
@@ -42,12 +56,20 @@ assert 'astrid.core.io.media_import' not in sys.modules
 
 
 def test_public_sdk_render_cannot_bypass_runtime_admission(tmp_path: Path) -> None:
+    before = _tree_snapshot(tmp_path)
     with pytest.raises(UnsupportedCapabilityError, match="sdk.invoke"):
         sdk_rendering.render(
             tmp_path / "timeline.json",
             out_path=tmp_path / "output.mp4",
         )
-    assert not list(tmp_path.iterdir())
+    assert _tree_snapshot(tmp_path) == before
+
+
+def test_renderer_authoring_cli_has_no_unadmitted_smoke_render_route() -> None:
+    source = (ROOT / "astrid/core/rendering/cli.py").read_text()
+    assert "RenderService" not in source
+    assert "_cmd_smoke" not in source
+    assert 'sub.add_parser("smoke"' not in source
 
 
 def test_attached_render_source_has_no_unbound_service_fallback() -> None:

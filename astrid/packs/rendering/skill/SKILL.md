@@ -304,24 +304,10 @@ renderer/planner/finalizer identities, aliases and overrides, manifest and input
 hashes, trust/support evidence, artifact profiles, audio ownership,
 normalization, attachments, and namespaced backend fragments.
 
-Direct facade-module execution is reserved for debugging executor input
-mapping. It still delegates to `RenderService`; it is not a concrete renderer
-entry point:
-
-```bash
-python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json \
-  --out ./out/hype.mp4
-```
-
-Omit `--assets` in direct debug runs only for asset-free timelines.
-
-```bash
-python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline ./out/hype.timeline.json \
-  --out ./out/hype.mp4
-```
+There is no supported direct facade-module render command. Product and
+authoring verification must use the admitted generic-host capability below;
+the host is the only owner of materialization, child-process execution,
+publication, and settlement.
 
 ```python
 # Generate a sprite sheet
@@ -374,7 +360,6 @@ python3 -m pytest -q test_renderer.py     # generated deterministic test
 python3 -m astrid.core.rendering.cli validate .    # static validation
 python3 -m astrid.core.rendering.cli list --pack-root ..  # source checkout discovery
 python3 -m astrid.core.rendering.cli inspect acme_wave.wave --pack-root ..
-python3 -m astrid.core.rendering.cli smoke acme_wave.wave --pack-root .. --out ./out/smoke.mp4  # smoke
 python3 -m astrid.core.rendering.cli replay <bundle-dir>   # replay a captured failure bundle
 ```
 
@@ -382,24 +367,31 @@ V1 is synchronous local execution only; asynchronous job scheduling, remote
 render infrastructure, and layer compositing are explicitly deferred beyond V1
 and are NOT part of the V1 renderer contract.
 
-The smoke verb runs a deterministic direct-service render (fresh temp
-workspace, no ledger/project mutation) and prints the output path plus its
-provenance sidecar path. A real-timeline render goes through the facade:
-`astrid.sdk.invoke("rendering.render", inputs={"timeline": "./out/hype.timeline.json", "backend": "acme_wave.wave"}, out="./out")`, which
-writes `./out/hype.mp4` plus `./out/hype.mp4.provenance.json`; the sidecar
-records resolution/trust/support evidence, artifact hashes and profiles, audio
-ownership, normalization, attachments, and your namespaced
-`backend_fragments`. Failed invocations retain a self-contained replay bundle
-(resolved request, localized inputs, configuration, redacted logs, partial
-result, exact replay command) instead of publishing a sidecar. The full
-walkthrough is the golden-path section of
-`docs/contracts/render-backend-v1.md`.
+To render a real timeline, admit the capability through the workspace runtime;
+the generic host owns materialization, child-process execution, artifact
+publication, and settlement:
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    kind="executor",
+    project="demo",
+    inputs={"timeline_ref": "main", "expected_version": 4},
+)
+```
+
+The resulting run id is the runtime authority for outputs and provenance.
+Failed invocations retain a self-contained replay bundle (resolved request,
+localized inputs, configuration, redacted logs, partial result, exact replay
+command) instead of publishing a sidecar. The full walkthrough is the
+golden-path section of `docs/contracts/render-backend-v1.md`.
 
 ### SDK renderers
 
 A `render.py` may also be written against the public rendering SDK instead of
-parsing the raw file protocol: `astrid.render`/`astrid.support` drive the
-shared `RenderService`, `astrid.renderer_main` is a protocol-v1 command
+parsing the raw file protocol: `astrid.support` probes the backend,
+`astrid.renderer_main` is a protocol-v1 command
 entrypoint that a manifest `command` can point at directly
 (`command: [python3, -m, astrid.sdk.rendering]`), and `astrid.RenderContext`
 provides workspace-validated paths, sanitized subprocesses, redacted logs,

@@ -66,21 +66,25 @@ Normal callers invoke the stable executor capability through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
+    kind="executor",
+    project="demo",
     inputs={
-        "timeline": "./out/hype.timeline.json",
-        "assets_registry": "./out/hype.assets.json",
-        "backend": "video_tool.renderer",
+        "timeline_ref": "main",
+        "expected_version": 4,
     },
-    out="./out",
 )
 ```
 
 The facade is `astrid/packs/rendering/executors/render/run.py`. It validates
 the command surface, converts it into a neutral
 `RenderRequest`, and delegates selection and the entire lifecycle to
-`astrid/core/rendering/service.py::RenderService`. Embedding code may call
-`RenderService` directly. Neither entry point imports a concrete renderer;
-pack commands are discovered from manifests and invoked by the transport.
+`astrid/core/rendering/service.py::RenderService` inside the admitted generic
+host process. Product callers must not call `RenderService`, a pack `run.py`,
+or the retired `astrid.render` convenience directly; the runtime owns
+admission, materialization, execution, settlement, and publication. Neither
+the facade nor the host imports a concrete renderer in the caller process;
+pack commands are discovered from manifests and invoked across the process
+boundary by the transport.
 
 The facade accepts one qualified `selector`; translated aliases and
 conflicting selector/configuration values are rejected. New integrations
@@ -900,10 +904,7 @@ python3 -m astrid.core.rendering.cli validate .
 python3 -m astrid.core.rendering.cli list --pack-root ..
 python3 -m astrid.core.rendering.cli inspect acme_wave.wave --pack-root ..
 
-# 5. Deterministic smoke render through the public service
-python3 -m astrid.core.rendering.cli smoke acme_wave.wave --pack-root .. --out ./out/smoke.mp4
-
-# 6. Debug a captured failure bundle (see "The replay verb" above)
+# 5. Debug a captured failure bundle (see "The replay verb" above)
 python3 -m astrid.core.rendering.cli replay <bundle-dir>
 ```
 
@@ -911,7 +912,7 @@ The destination directory name becomes the pack id (`acme_wave`) and the
 qualified renderer id becomes `<dest>.<name>` (`acme_wave.wave`) unless
 `--id` overrides it; the pack prefix must match the directory name because
 pack manifests require `root.name == pack id`. The renderer-authoring verbs
-(`create`, `list`, `inspect`, `validate`, `smoke`, `replay`) live on the
+(`create`, `list`, `inspect`, `validate`, `replay`) live on the
 internal module CLI `python3 -m astrid.core.rendering.cli` — not on the
 eight-family gateway. `renderers create` refuses to overwrite
 existing files unless `--force` is passed, and refuses
@@ -929,20 +930,15 @@ editable scaffolded pack.
 writes one authoritative JSON result; `test_renderer.py` drives it through a
 real subprocess and checks the artifact hash and result shape.
 
-`renderers smoke <id>` runs a deterministic direct-service render through the
-public rendering service in a fresh temporary workspace (no ledger, no project
-mutation) and prints the output video path plus provenance sidecar path; it
-requires the candidate to be execution-eligible. The scaffold renderer is
-deterministic and ignores timeline content, so the smoke never needs a real
-timeline. To render a real timeline through the stable facade instead (the
-pipeline path), use:
+To render a real timeline through the stable admitted capability path, use:
 
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
-    inputs={"timeline": "./out/hype.timeline.json", "backend": "acme_wave.wave"},
-    out="./out",
+    kind="executor",
+    project="demo",
+    inputs={"timeline_ref": "main"},
 )
 ```
 

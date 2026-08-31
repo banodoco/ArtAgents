@@ -333,41 +333,34 @@ if result.manifest_path:
 
 ## Rendering SDK
 
-The public rendering surface (`astrid.render`, `astrid.support`,
-`astrid.renderer_main`, `astrid.RenderContext`) wraps the frozen
-protocol-v1 rendering boundary described in
+The public rendering tooling (`astrid.support`, `astrid.renderer_main`, and
+`astrid.RenderContext`) wraps the frozen protocol-v1 backend boundary described in
 [render-backend-v1.md](../contracts/render-backend-v1.md). Every JSON payload
 it writes is the `to_dict()` of a frozen core DTO — there are no SDK-only wire
 fields and no semantics drift from the raw command/JSON backend path.
 
-### `render(timeline_path, ...) -> Path`
-
-Builds a `RenderRequest` from friendly arguments and dispatches through the
-shared `RenderService`, returning the published output path (and writing the
-provenance sidecar next to it):
+Product rendering is admitted only through the workspace runtime and its
+generic host. Use the stable capability surface; it resolves the canonical
+timeline, materializes runtime-owned objects into the attempt, executes the
+renderer in a child process, and settles the run:
 
 ```python
-import astrid
+import astrid.sdk as sdk
 
-out = astrid.render(
-    "out/hype.timeline.json",
-    assets_registry_path="out/hype.assets.json",
-    selector="rendering.remotion",       # qualified canonical selector
-    backend_config={"rendering.remotion": {"quality": "preview"}},
-    out_path="out/hype.mp4",
+result = sdk.invoke(
+    "rendering.render",
+    kind="executor",
+    project="demo",
+    inputs={"timeline_ref": "main", "expected_version": 4},
 )
-print(out)          # out/hype.mp4
-# sidecar: out/hype.mp4.provenance.json
+print(result.run_id)
 ```
 
-`selector` is the renderer's qualified canonical ID. Shorthand aliases and
-implicit fallback are rejected. `window` accepts a `FrameWindow` or a wire
-mapping, `audio` accepts `AudioOwnership` or its string value, and
-`profile` accepts a `RenderProfile` or a wire mapping. `out_path` selects the
-published destination; when `output_name` is omitted its basename is used.
-For runtime-managed media, the host supplies the optional attempt-local
-`materialized_root`/`materialized_objects` handoff; live registries remain
-object-id/digest-only and never accept generic file or URL locators.
+`timeline_ref` is a canonical runtime timeline slug, UUID, or ULID. Use
+`expected_version` when the observed stream head must remain unchanged. The
+runtime owns output publication and provenance; callers must not invoke
+the rendering service, a pack `run.py`, or the retired direct-render symbol.
+That retained symbol rejects direct execution with an actionable error.
 
 ### `support(backend, ...) -> SupportReport`
 

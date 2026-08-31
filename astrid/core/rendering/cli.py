@@ -10,9 +10,6 @@ each sub-verb:
 * ``inspect`` — print one candidate's manifest fields plus its discovery and
   trust evidence (source pack, eligibility, trust method);
 * ``validate`` — statically validate a pack root directory;
-* ``smoke`` — render a deterministic minimal timeline through the public
-  :class:`~astrid.core.rendering.service.RenderService` with a smoke-tolerant
-  validator and print the published output plus provenance sidecar;
 * ``support`` — resolve one backend's support report through the public SDK
   (``astrid.sdk.rendering.support``);
 * ``replay`` — re-run a captured failure bundle with pinned
@@ -30,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -44,13 +40,6 @@ from .scaffold import SCAFFOLD_FILES, create_renderer_scaffold
 _EXIT_DOMAIN = 2
 _EXIT_BUG = 1
 _EXIT_INTERRUPT = 130
-
-_SMOKE_BACKEND = "astrid.core"
-_SMOKE_RECOVERY = (
-    "rerun the renderer in a fresh invocation workspace and emit a contained, "
-    "non-empty artifact"
-)
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -174,37 +163,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit one JSON object on stdout instead of plain text.",
     )
     validate_parser.set_defaults(handler=_cmd_validate)
-
-    smoke_parser = sub.add_parser(
-        "smoke",
-        help="Render a deterministic minimal timeline through the public service.",
-    )
-    smoke_parser.add_argument(
-        "renderer_id",
-        metavar="id",
-        help="Qualified renderer id (planner/finalizer ids are refused).",
-    )
-    smoke_parser.add_argument(
-        "--pack-root",
-        dest="pack_root",
-        action="append",
-        default=[],
-        metavar="PATH",
-        help="Extra pack root to discover (repeatable).",
-    )
-    smoke_parser.add_argument(
-        "--out",
-        dest="out",
-        default=None,
-        metavar="PATH",
-        help="Published output path (default: ./smoke-<id>.mp4).",
-    )
-    smoke_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit one JSON object on stdout instead of plain text.",
-    )
-    smoke_parser.set_defaults(handler=_cmd_smoke)
 
     support_parser = sub.add_parser(
         "support",
@@ -633,182 +591,6 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# smoke
-# ---------------------------------------------------------------------------
-
-
-def _smoke_failure(
-    args: argparse.Namespace,
-    message: str,
-    *,
-    hint: str | None = None,
-) -> int:
-    if args.json:
-        _emit_json(
-            {
-                "verb": "smoke",
-                "error": {
-                    "kind": "unknown",
-                    "message": (
-                        message if hint is None else f"{message}; {hint}"
-                    ),
-                    "recovery_command": "python3 -m astrid.core.rendering.cli list",
-                },
-            },
-            stream=sys.stderr,
-        )
-    else:
-        print(message, file=sys.stderr)
-        if hint is not None:
-            print(hint, file=sys.stderr)
-    return _EXIT_DOMAIN
-
-
-def _cmd_smoke(args: argparse.Namespace) -> int:
-    renderers, planners, finalizers = _load_registries(args)
-
-    # smoke resolves ONLY a renderer; a planner/finalizer id is a kind
-    # mismatch and is refused with a hint.
-    renderer_candidates = _registry_candidates(renderers, args.renderer_id)
-    if not renderer_candidates:
-        if _registry_candidates(planners, args.renderer_id):
-            return _smoke_failure(
-                args,
-                f"unknown renderer id '{args.renderer_id}'",
-                hint="is a planner id",
-            )
-        if _registry_candidates(finalizers, args.renderer_id):
-            return _smoke_failure(
-                args,
-                f"unknown renderer id '{args.renderer_id}'",
-                hint="is a finalizer id",
-            )
-        return _smoke_failure(args, f"unknown renderer id '{args.renderer_id}'")
-
-    candidate = renderer_candidates[0]
-    if not candidate.execution_eligible:
-        message = (
-            f"renderer '{args.renderer_id}' is not execution-eligible: "
-            f"{candidate.eligibility.reason}"
-        )
-        if args.json:
-            _emit_json(
-                {
-                    "verb": "smoke",
-                    "error": {
-                        "kind": "ineligible",
-                        "message": message,
-                        "recovery_command": (
-                            "run 'python3 -m astrid.core.rendering.cli inspect "
-                            "<id>' to review why "
-                            "the renderer is not execution-eligible"
-                        ),
-                    },
-                },
-                stream=sys.stderr,
-            )
-        else:
-            print(message, file=sys.stderr)
-        return _EXIT_DOMAIN
-
-    from .service import RenderService
-
-    if args.out is not None:
-        out_path = Path(args.out)
-    else:
-        # Default to a temp workspace so a smoke never pollutes the caller's
-        # cwd/repo root with smoke-*.mp4 artifacts.
-        out_path = Path(
-            tempfile.mkdtemp(prefix="astrid-smoke-")
-        ) / f"smoke-{args.renderer_id}.mp4"
-    service = RenderService(
-        registries=(renderers, planners, finalizers),
-        validator=_smoke_validator,
-    )
-    with tempfile.TemporaryDirectory(prefix="astrid-smoke-") as workspace_text:
-        workspace = Path(workspace_text)
-        timeline = workspace / "timeline.json"
-        timeline.write_text(
-            json.dumps({"tracks": [], "clips": []}),
-            encoding="utf-8",
-        )
-        assets = workspace / "assets.json"
-        assets.write_text(json.dumps({"assets": {}}), encoding="utf-8")
-        published = service.render(
-            timeline,
-            assets_path=assets,
-            out_path=out_path,
-            selector=args.renderer_id,
-        )
-    sidecar = Path(f"{published}.provenance.json")
-    if args.json:
-        _emit_json(
-            {
-                "renderer_id": args.renderer_id,
-                "output": str(published),
-                "provenance": str(sidecar),
-            },
-            stream=sys.stdout,
-        )
-        return 0
-    print(f"smoke: {args.renderer_id}")
-    print(f"output: {published}")
-    print(f"provenance: {sidecar}")
-    return 0
-
-
-def _smoke_validator(
-    result: Any,
-    *,
-    expected_profile: Any,
-    workspace_root: str | Path,
-) -> Any:
-    """Smoke-tolerant artifact validation: containment/size/sha256, no ffprobe.
-
-    The strict validator probes the primary media with ffprobe; smoke runs
-    must not depend on media tooling, so this variant keeps the structural,
-    workspace-containment, non-empty, and digest checks and skips probing.
-    ``expected_profile`` is accepted for signature parity with the strict
-    validator but is not probed.
-    """
-    from .artifacts import (
-        _coerce_result,
-        _contained_regular_file,
-        _validate_result_shape,
-        _verify_hash,
-        _workspace_root,
-    )
-    from .errors import raise_invalid_artifact_error
-
-    render_result = _coerce_result(result)
-    root = _workspace_root(workspace_root)
-    video, _ownership = _validate_result_shape(render_result)
-    video_path = _contained_regular_file(
-        video.path,
-        root=root,
-        label="primary video path",
-    )
-    try:
-        size = video_path.stat().st_size
-    except OSError as exc:
-        raise_invalid_artifact_error(
-            backend=_SMOKE_BACKEND,
-            message="cannot inspect primary video size",
-            recovery_command=_SMOKE_RECOVERY,
-            details={"path": video.path, "error_type": type(exc).__name__},
-        )
-    if size <= 0:
-        raise_invalid_artifact_error(
-            backend=_SMOKE_BACKEND,
-            message="renderer primary video is empty",
-            recovery_command=_SMOKE_RECOVERY,
-            details={"path": video.path, "size": size},
-        )
-    _verify_hash(video_path, video.sha256, label="primary video")
-    return render_result
-
-
-# ---------------------------------------------------------------------------
 # support
 # ---------------------------------------------------------------------------
 
@@ -816,8 +598,9 @@ def _smoke_validator(
 def _cmd_support(args: argparse.Namespace) -> int:
     from astrid.sdk.rendering import support as sdk_support
     from .errors import RendererException
+    from tempfile import TemporaryDirectory
 
-    with tempfile.TemporaryDirectory(prefix="astrid-support-") as workspace_text:
+    with TemporaryDirectory(prefix="astrid-support-") as workspace_text:
         workspace = Path(workspace_text)
         timeline = workspace / "timeline.json"
         timeline.write_text(

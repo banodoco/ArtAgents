@@ -1,15 +1,13 @@
-"""T7.1 — renderer CLI discovery and smoke verbs.
+"""Renderer-authoring CLI discovery and protocol verbs.
 
 Locks the internal renderer-authoring verbs ``list``, ``inspect``, ``validate``,
-and ``smoke`` alongside the existing ``create``:
+alongside the existing ``create``:
 
 * ``list`` prints every discovered renderer/planner/finalizer qualified id
   from the default registries (the four built-ins are always present);
 * ``inspect <id>`` prints the candidate's manifest fields (command,
   operations, required_binaries, capabilities, source pack, eligibility);
 * ``validate <path>`` runs ``validate_pack`` and exits non-zero on errors;
-* ``smoke <id>`` renders a deterministic minimal timeline through the public
-  service and prints the output path plus provenance sidecar path;
 * unknown ids and bad args exit non-zero with a clear message.
 
 All output is stable plain text — no universal JSON envelope (T7.2 owns the
@@ -24,7 +22,6 @@ import pytest
 
 from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 from astrid.core.rendering.cli import main as renderers_cli_main
-from astrid.core.rendering.publication import is_render_result_committed
 from astrid.core.rendering.scaffold import create_renderer_scaffold
 
 BUILTIN_IDS = (
@@ -140,74 +137,6 @@ def test_validate_missing_directory_fails(capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
-# smoke
-# ---------------------------------------------------------------------------
-
-
-def test_smoke_scaffolded_pack_produces_output_and_sidecar(
-    tmp_path: Path,
-    capsys,
-) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    out_path = tmp_path / "out.mp4"
-
-    assert (
-        renderers_cli_main(
-            [
-                "smoke",
-                "wave.wave",
-                "--pack-root",
-                str(tmp_path),
-                "--out",
-                str(out_path),
-            ]
-        )
-        == 0
-    )
-    text = _stdout(capsys)
-    assert "smoke: wave.wave" in text
-    assert f"output: {out_path.resolve()}" in text
-    assert f"provenance: {Path(f'{out_path.resolve()}.provenance.json')}" in text
-
-    assert out_path.is_file()
-    assert out_path.stat().st_size > 0
-    sidecar = Path(f"{out_path}.provenance.json")
-    assert sidecar.is_file()
-    assert is_render_result_committed(out_path, sidecar_path=sidecar)
-
-
-def test_smoke_default_workspace_prints_usable_paths(tmp_path: Path, capsys) -> None:
-    create_renderer_scaffold("wave", tmp_path / "wave")
-
-    assert (
-        renderers_cli_main(["smoke", "wave.wave", "--pack-root", str(tmp_path)])
-        == 0
-    )
-    lines = {
-        line.partition(": ")[0]: line.partition(": ")[2]
-        for line in _stdout(capsys).splitlines()
-        if ": " in line
-    }
-    output = Path(lines["output"])
-    sidecar = Path(lines["provenance"])
-    assert output.is_file()
-    assert output.stat().st_size > 0
-    assert sidecar.is_file()
-    assert is_render_result_committed(output, sidecar_path=sidecar)
-
-
-def test_smoke_unknown_id_fails_with_message(capsys) -> None:
-    assert renderers_cli_main(["smoke", "no.such.renderer"]) == 2
-    assert "unknown renderer id 'no.such.renderer'" in _stderr(capsys)
-
-
-def test_smoke_removed_planner_id_fails_closed(capsys) -> None:
-    assert renderers_cli_main(["smoke", "rendering.legacy_hybrid"]) == 2
-    message = _stderr(capsys)
-    assert "unknown renderer id 'rendering.legacy_hybrid'" in message
-
-
-# ---------------------------------------------------------------------------
 # bad args / gateway routing
 # ---------------------------------------------------------------------------
 
@@ -216,7 +145,6 @@ def test_smoke_removed_planner_id_fails_closed(capsys) -> None:
     "argv",
     [
         ["inspect"],
-        ["smoke"],
         ["bogus-verb"],
     ],
 )
@@ -226,31 +154,10 @@ def test_bad_args_exit_nonzero(argv: list[str]) -> None:
     assert excinfo.value.code == 2
 
 
-def test_internal_renderer_cli_routes_list_and_smoke(
-    tmp_path: Path,
-    capsys,
-) -> None:
+def test_internal_renderer_cli_routes_list(capsys) -> None:
     assert "renderers" not in _TOP_LEVEL_HANDLERS
 
     assert renderers_cli_main(["list"]) == 0
     lines = [line for line in _stdout(capsys).splitlines() if line.strip()]
     for capability_id in BUILTIN_IDS:
         assert capability_id in lines
-
-    create_renderer_scaffold("wave", tmp_path / "wave")
-    out_path = tmp_path / "dispatch-out.mp4"
-    assert (
-        renderers_cli_main(
-            [
-                "smoke",
-                "wave.wave",
-                "--pack-root",
-                str(tmp_path),
-                "--out",
-                str(out_path),
-            ]
-        )
-        == 0
-    )
-    assert out_path.is_file()
-    assert Path(f"{out_path}.provenance.json").is_file()
