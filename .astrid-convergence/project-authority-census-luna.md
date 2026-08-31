@@ -92,9 +92,19 @@ rendering-selector lane and remain untouched.
 - Restored supported-contract cohort: 99 passed, 1 skipped.
 - Focused authority/runtime cohort: 100 passed.
 - Runtime-facing product CLI cohort: 306 passed.
-- Broad run reached 100%; remaining failures are unrelated baseline lanes: CI
-  sandbox subprocess JSON output, frozen timeline hash fixture, generic-provider
-  generated-client fixture methods, and release-identity seed fixtures.
+- Broad run reached 100%: 5,031 passed, 98 skipped, 2 xfailed, 520 subtests;
+  32 failures remain outside this correction. The known lane-owned cluster is
+  CI sandbox JSON output (`tests/concurrency/test_ci_sandbox_isolation.py`),
+  frozen timeline hash, generic-provider generated-client/API drift
+  (`tests/integrations/test_generic_host_external_provider.py`,
+  `test_generic_host_runtime_control2.py`), two foley-map tests, and three
+  rendering-selector tests (managed render and Remotion backend). The stale
+  suite/ops cluster is four changed-selection tests, CI JSON, CI lane manifest,
+  S1 selector, beta capability matrix, four B11 generator tests, env-var
+  conformance, two provider manifest tests, six release-identity/seed tests,
+  and two installed-discovery tests that still reference deleted
+  `astrid.core.pack.store`; these are not evidence of a restored local
+  authority and should be repaired or retired by their owning lanes.
 - Product source scan has no imports of `core.store`, `core.repositories`,
   `core.kernel.read`, `core.io.cas`, local receipt/event services, or the
   removed project CRUD modules.
