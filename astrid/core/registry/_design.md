@@ -56,12 +56,8 @@ base — callers iterate through `register()` on each subclass.
   A uniform base signature would force validation into a hook that doesn't fit
   element's pre-validated pipeline.
 
-- **No public `get()` on the base.**  SD3: Override assembly lives in subclass
-  `get()`.  The base provides a protected `_resolve_override_key()` helper,
-  but each subclass decides how to annotate/return the resolved definition:
-  - Executor/Orchestrator return the override target definition directly.
-  - Element wraps the target with `dataclasses.replace(..., metadata={...,
-    "override_target": target_id})` so callers can trace the remapping.
+- **No public `get()` on the base.** SD3: lookup assembly remains in each
+  subclass because executor/orchestrator/element keys and validation differ.
 
 ## 4. Protected helpers (provided by the base)
 
@@ -70,7 +66,6 @@ base — callers iterate through `register()` on each subclass.
 | `_resolve_entry` | `(entry: list[T] \| T) -> T` | Return the winner.  Handles legacy scalar values (someone assigned directly to `_executors[id] = def`) by returning the scalar as-is. |
 | `_iter_entries` | `(entry: list[T] \| T) -> Iterable[T]` | Yield every definition — winner + shadowed.  Used by `_iter_all()` and validation loops that need to inspect the full set. |
 | `_winner_for` | `(key: K) -> T` | Shorthand for `_resolve_entry(self._entries[key])`.  DRY's up the `entries[key][0]` pattern. |
-| `_resolve_override_key` | `(capability_kind: str, key: K) -> K \| None` | Consults `self.override_store` (if set) and returns the remapped key, or `None` if no override exists.  The returned key may be the same as the input (no-op override).  Used by subclass `get()`. |
 
 ### Helper that stays subclass-only
 
@@ -88,8 +83,7 @@ must not assume alias resolution; subclasses that need it keep their own copy.
 | Input validation (`validate_*_definition`) | Subclass `register()` |
 | Type-specific key shape (`str` vs `tuple[str, str]`) | Subclass `__init__` |
 | Alias resolution (`_resolve_requested_id`) | Executor/Orchestrator (not Element) |
-| Override assembly / metadata annotation | Subclass `get()` |
-| `fork()` | Subclass (deep fork, local pack plumbing) |
+| Capability lookup | Subclass `get()` |
 | `validate_all()` (graph refs, cycles, etc.) | Subclass (executor/orchestrator cross-references) |
 | `to_dict()` / `to_json()` | Subclass (different top-level key names) |
 | `_validate_child_*` / `_strict_child_type_check` | Orchestrator only |
@@ -107,17 +101,13 @@ must not assume alias resolution; subclasses that need it keep their own copy.
   `ElementDefinition`.  A shared `register()` would need a callback hook and
   would still differ in key construction.
 
-- **SD3** (no public `get()` on base): Override resolution is per-subclass.
-  Element annotates the returned definition with `override_target` metadata via
-  `dataclasses.replace`; executor/orchestrator return targets directly.
-  Lifting override assembly into the base would lose element's annotation
-  behaviour.
+- **SD3** (no public `get()` on base): Lookup resolution remains per-subclass
+  because each registry has a different key shape and validation contract.
 
 ## 7. Non-goals
 
-- The base does **not** own `fork()` — it requires executor/orchestrator
-  metadata fields (`content_root`, `executor_root`, `orchestrator_root`)
-  that differ across subclasses.
+- The base does not own pack discovery or source editing; those are ordinary
+  pack authoring operations outside registry lookup.
 - The base does **not** own alias discovery or pack loading —
   `load_default_registry()` is per-subclass module-level code.
 - The base does **not** enforce a particular sort key — subclasses provide

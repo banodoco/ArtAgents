@@ -29,7 +29,6 @@ from astrid.core.pack.alias_resolver import (
 )
 from astrid.core.pack.discovery import DiscoveredPack, discover_pack_metadata
 from astrid.core.pack.manifest import load_manifest_mapping
-from astrid.core.pack.override import OverrideStore
 from astrid.core.registry import CapabilityRegistry, RegistryError
 
 from .contracts import FinalizerManifest, PlannerManifest, RendererManifest
@@ -163,9 +162,8 @@ class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]],
         *,
         alias_resolver: AliasResolver | None = None,
         inspection_alias_resolver: AliasResolver | None = None,
-        override_store: OverrideStore | None = None,
     ) -> None:
-        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
+        super().__init__(alias_resolver=alias_resolver)
         self.inspection_alias_resolver = inspection_alias_resolver or alias_resolver
         self._discovered: dict[str, list[RenderingCandidate[ManifestT]]] = {}
         for candidate in candidates:
@@ -348,23 +346,13 @@ class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]],
                 details={"canonical_id": canonical_id, "alias_chain": list(alias_chain)},
             )
 
-        override_target = self._resolve_override_key(self.capability_kind, canonical_id)
-        target_id = override_target or canonical_id
-        override = (
-            None
-            if override_target is None
-            else {"from": canonical_id, "to": override_target}
-        )
-        if self.rejects_facade and target_id == _FACADE_EXECUTOR_ID:
-            raise self._error(
-                f"override target {_FACADE_EXECUTOR_ID!r} for {self.capability_kind} "
-                f"{canonical_id!r} resolves back to the facade executor",
-                code="facade_recursion",
-                requested_id=requested_id,
-                details={"canonical_id": canonical_id, "override": override},
-            )
+        # Runtime selection is derived only from the canonical discovered
+        # manifest (or a declared alias to that manifest).  There is no
+        # project-local filesystem override store or shadow target.
+        target_id = canonical_id
+        override = None
 
-        winner = self._winner_for(target_id)
+        winner = self._winner_for(canonical_id)
         if winner is None:
             discovered = self._discovered.get(target_id, ())
             details: dict[str, Any] = {
@@ -382,14 +370,6 @@ class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]],
                     f"{self.capability_kind} {target_id!r} is discoverable but not "
                     f"execution-eligible: {reasons}",
                     code="execution_ineligible",
-                    requested_id=requested_id,
-                    details=details,
-                )
-            if override_target is not None:
-                raise self._error(
-                    f"override target {target_id!r} for {self.capability_kind} "
-                    f"{canonical_id!r} not found in executable registry",
-                    code="invalid_override_target",
                     requested_id=requested_id,
                     details=details,
                 )
@@ -495,17 +475,9 @@ def load_default_registries(
         item.priority_index: _derive_pack_trust(item)
         for item in discovered
     }
-    override_store = OverrideStore(root)
-
-    renderers = RendererRegistry(
-        override_store=override_store,
-    )
-    planners = PlannerRegistry(
-        override_store=override_store,
-    )
-    finalizers = FinalizerRegistry(
-        override_store=override_store,
-    )
+    renderers = RendererRegistry()
+    planners = PlannerRegistry()
+    finalizers = FinalizerRegistry()
 
     for item in discovered:
         renderer_paths, planner_paths, finalizer_paths = pack_rendering_manifest_paths(
@@ -781,10 +753,8 @@ def _populate_executable_alias_resolver(
     deepest dangling hop first preserves upstream aliases when an
     intermediate alias has a usable lower-precedence declaration.
 
-    A core compatibility alias may also terminate at a canonical id with an
-    explicit override.  That alias remains only as the routing key needed to
-    apply the override; normal winner selection still enforces eligibility on
-    the override target.
+    Aliases may terminate only at canonical discovered ids.  They never route
+    through a project-local override target.
     """
 
     declarations: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
@@ -819,21 +789,14 @@ def _populate_executable_alias_resolver(
         for alias_name, candidates in declarations.items()
     }
 
-    override_routing_aliases: set[str] = set()
     while True:
         blocked: list[str] = []
-        override_routing_aliases = set()
         for alias_name, (source_pack_id, declaration) in selected.items():
             target = declaration.get("canonical_id")
             if not isinstance(target, str):
                 blocked.append(alias_name)
                 continue
             if target in selected or target in registry._entries:
-                continue
-            if (
-                registry._resolve_override_key(kind, target) is not None
-            ):
-                override_routing_aliases.add(alias_name)
                 continue
             blocked.append(alias_name)
         if not blocked:
@@ -848,15 +811,7 @@ def _populate_executable_alias_resolver(
                 selected[alias_name] = declarations[alias_name][next_index]
 
     for alias_name, (source_pack_id, declaration) in selected.items():
-        if (
-            alias_name not in override_routing_aliases
-            and not _alias_target_can_participate(
-                declaration,
-                registry,
-                aliases=selected,
-                override_routing_aliases=override_routing_aliases,
-            )
-        ):
+        if not _alias_target_can_participate(declaration, registry, aliases=selected):
             continue
         resolver.register_alias(
             alias_name,
@@ -872,9 +827,8 @@ def _alias_target_can_participate(
     registry: _RenderingRegistry[Any],
     *,
     aliases: Mapping[str, tuple[str, Mapping[str, Any]]],
-    override_routing_aliases: set[str] | frozenset[str] = frozenset(),
 ) -> bool:
-    """Return whether a chain reaches an executable or override-routed terminal."""
+    """Return whether an alias chain reaches an executable terminal."""
 
     target = alias.get("canonical_id")
     if not isinstance(target, str):
@@ -882,8 +836,6 @@ def _alias_target_can_participate(
 
     seen: set[str] = set()
     while target in aliases:
-        if target in override_routing_aliases:
-            return True
         if target in seen:
             raise AliasResolutionError(f"alias cycle detected while resolving {target!r}")
         seen.add(target)
@@ -892,10 +844,7 @@ def _alias_target_can_participate(
             return False
     if target in registry._entries:
         return True
-    # A missing canonical terminal is still reachable when an override
-    # routes it to an executable implementation (alias -> canonical ->
-    # override ordering is frozen).
-    return registry._resolve_override_key(registry.capability_kind, target) is not None
+    return False
 
 
 __all__ = [

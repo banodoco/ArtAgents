@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 
 from astrid.core.pack.alias_resolver import AliasResolver
-from astrid.core.pack.override import OverrideStore
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     Attachment,
@@ -691,39 +690,6 @@ def test_unknown_backend_is_structured_and_lists_alternatives(tmp_path: Path) ->
     assert caught.value.error.recovery_command
 
 
-def test_alias_then_override_changes_resolved_winner(tmp_path: Path) -> None:
-    alias = AliasResolver()
-    alias.register_alias("acme.alias", "acme.original")
-    overrides = OverrideStore(tmp_path / "override-project")
-    overrides.set_override("renderer", "acme.original", "acme.winner")
-    renderers = RendererRegistry(
-        [_candidate(tmp_path, "acme.winner", "renderer")],
-        alias_resolver=alias,
-        override_store=overrides,
-    )
-    transport = FakeTransport()
-    service = _service(
-        tmp_path,
-        transport,
-        renderer_ids=(),
-        renderer_registry=renderers,
-    )
-    output = tmp_path / "alias.mp4"
-
-    service.render_request(
-        _request(tmp_path), selector="acme.alias", out_path=output
-    )
-
-    assert ("render", "acme.winner") in transport.calls
-    sidecar = json.loads(Path(f"{output}.provenance.json").read_text(encoding="utf-8"))
-    resolution = sidecar["segments_v2"][0]["renderer"]
-    assert resolution["alias_chain"] == ["acme.alias", "acme.original"]
-    assert resolution["override"] == {
-        "from": "acme.original",
-        "to": "acme.winner",
-    }
-
-
 def test_execution_ineligible_candidate_is_denied(tmp_path: Path) -> None:
     renderers = RendererRegistry(
         [_candidate(tmp_path, "denied.renderer", "renderer", eligible=False)]
@@ -1359,39 +1325,6 @@ def test_trust_denied_higher_priority_candidate_never_wins(
     assert renderer["id"] == "contested.renderer"
     assert renderer["trust_eligibility"]["eligible"] is True
     assert renderer["trust_eligibility"]["reason"] == "fixture trust"
-
-
-def test_alias_and_override_to_trust_denied_only_target_is_structured(
-    tmp_path: Path,
-) -> None:
-    alias = AliasResolver()
-    alias.register_alias("acme.alias", "acme.original")
-    overrides = OverrideStore(tmp_path / "override-project")
-    overrides.set_override("renderer", "acme.original", "acme.denied")
-    renderers = RendererRegistry(
-        [_candidate(tmp_path, "acme.denied", "renderer", eligible=False)],
-        alias_resolver=alias,
-        override_store=overrides,
-    )
-    transport = FakeTransport()
-    service = _service(
-        tmp_path,
-        transport,
-        renderer_ids=(),
-        renderer_registry=renderers,
-    )
-
-    with pytest.raises(RendererUnsupportedError) as caught:
-        service.render_request(
-            _request(tmp_path),
-            selector="acme.alias",
-            out_path=tmp_path / "denied.mp4",
-        )
-
-    registry_error = caught.value.error.details["registry_error"]
-    assert registry_error["code"] == "execution_ineligible"
-    assert transport.calls == []
-    assert not list(tmp_path.glob("*.provenance.json"))
 
 
 @pytest.mark.skip(reason="retired shorthand selector")

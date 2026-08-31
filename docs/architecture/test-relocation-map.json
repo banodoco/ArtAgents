@@ -743,7 +743,7 @@
       "lines": 457,
       "target": "tests/packs/",
       "confidence": "high",
-      "rationale": "Pack local priority."
+      "rationale": "Canonical pack source ordering."
     },
     {
       "file": "test_pack_migration_m4_shells.py",

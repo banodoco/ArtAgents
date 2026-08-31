@@ -300,7 +300,7 @@ automatically route to another backend.
 
 The normal SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`. The sidecar records the resolved plan,
-renderer/planner/finalizer identities, aliases and overrides, manifest and input
+renderer/planner/finalizer identities, aliases, manifest and input
 hashes, trust/support evidence, artifact profiles, audio ownership,
 normalization, attachments, and namespaced backend fragments.
 

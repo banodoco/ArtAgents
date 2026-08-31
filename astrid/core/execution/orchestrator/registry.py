@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable
 
-from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.registry import (
     load_default_registry as load_default_executor_registry,
@@ -19,17 +17,13 @@ from astrid.core.execution.executor.registry import (
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     discover_packs,
-    ensure_local_pack,
     iter_orchestrator_roots,
     validate_content_id_in_pack,
 )
 from astrid.core.pack.discovery import discover_packs_ordered
 from astrid.core.pack.manifest import (
     ManifestParseError,
-    dump_manifest_payload,
-    load_manifest_mapping,
 )
-from astrid.core.pack.override import OverrideStore
 from astrid.core.registry import CapabilityRegistry
 
 from .folder import load_folder_orchestrators
@@ -49,8 +43,9 @@ class OrchestratorRegistryError(OrchestratorValidationError):
 class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
     """Small in-memory registry keyed by orchestrator id.
 
-    Inherits generic storage, conflict detection, and override-key
-    resolution from :class:`CapabilityRegistry`.
+    Inherits generic storage and conflict detection from
+    :class:`CapabilityRegistry`.  Duplicate ids retain canonical discovery
+    order; a project-local source pack cannot shadow an earlier source pack.
     """
 
     def __init__(
@@ -58,28 +53,13 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
         orchestrators: Iterable[OrchestratorDefinition | dict[str, Any]] = (),
         *,
         executor_registry: ExecutorRegistry | None = None,
-        override_store: "OverrideStore | None" = None,
     ) -> None:
-        super().__init__(override_store=override_store)
+        super().__init__()
         self._executor_registry = executor_registry
         #: Nested map: orchestrator_id → child_capability_id → frozenset of output artifact_type values.
         self._child_output_types: dict[str, dict[str, frozenset[str]]] = {}
         for orchestrator in orchestrators:
             self.register(orchestrator)
-
-    # ------------------------------------------------------------------
-    # Backward-compat alias for pre-migration direct ``_orchestrators`` access
-    # (e.g. ``test_orchestrator_runner_errors.py`` bypasses ``register()``).
-    # ------------------------------------------------------------------
-
-    @property
-    def _orchestrators(self) -> dict[str, list[OrchestratorDefinition] | OrchestratorDefinition]:
-        """Legacy alias for ``_entries`` — supports direct scalar writes."""
-        return self._entries
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Public API
@@ -95,20 +75,9 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
         return definition
 
     def get(self, orchestrator_id: str) -> OrchestratorDefinition:
-        canonical_id = orchestrator_id
-        if canonical_id not in self._entries:
+        if orchestrator_id not in self._entries:
             raise KeyError(f"unknown orchestrator id {orchestrator_id!r}")
-        definition = self._resolve_entry(self._entries[canonical_id])
-
-        target_id = self._resolve_override_key("orchestrator", canonical_id)
-        if target_id is not None and target_id != canonical_id:
-            if target_id not in self._entries:
-                raise OrchestratorRegistryError(
-                    f"override target {target_id!r} for orchestrator {canonical_id!r} not found in registry"
-                )
-            return self._resolve_entry(self._entries[target_id])
-
-        return definition
+        return self._resolve_entry(self._entries[orchestrator_id])
 
     def _iter_all(self) -> Iterable[OrchestratorDefinition]:
         """Yield every registered definition (including shadowed)."""
@@ -281,93 +250,6 @@ class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
                         sorted(all_child_output_types),
                     )
 
-    def fork(
-        self,
-        orchestrator_id: str,
-        *,
-        project_root: str | Path,
-        overwrite: bool = False,
-        deep: bool = False,
-    ) -> Path:
-        """Fork *orchestrator_id* into the local scratch pack under *project_root*.
-
-        Returns the absolute path to the forked orchestrator directory.
-
-        When *deep* is ``True``, also recursively forks every child executor
-        (via the attached ``ExecutorRegistry``) and child orchestrator.
-        """
-        definition = self.get(orchestrator_id)
-        local_id = orchestrator_id.split(".", 1)[1] if "." in orchestrator_id else orchestrator_id
-        target = (Path(project_root) / "astrid" / "packs" / "local" / "orchestrators" / local_id).resolve()
-
-        ensure_local_pack(project_root=project_root)
-
-        if target.exists() and not overwrite:
-            raise OrchestratorRegistryError(
-                f"orchestrator fork target already exists: {target}"
-            )
-
-        # Resolve content_root: prefer content_root (set by _attach_pack_metadata),
-        # fall back to orchestrator_root (set by _attach_folder_metadata).
-        content_root_str = definition.metadata.get("content_root") or definition.metadata.get("orchestrator_root")
-        if not content_root_str:
-            raise OrchestratorRegistryError(
-                f"cannot fork orchestrator {orchestrator_id!r}: no content_root or orchestrator_root in metadata"
-            )
-        content_root = Path(content_root_str)
-        if not content_root.is_dir():
-            raise OrchestratorRegistryError(
-                f"cannot fork orchestrator {orchestrator_id!r}: content_root {content_root} is not a directory"
-            )
-
-        # Copy the content root to the target.
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(content_root, target)
-
-        # Rewrite the manifest id and add fork provenance.
-        _rewrite_orchestrator_manifest_fork(
-            target, local_id, forked_from=orchestrator_id, upstream_version=definition.version
-        )
-
-        # Persist fork state for local-edit detection.
-        write_fork_state(target, forked_from=orchestrator_id, upstream_version=definition.version)
-
-        # Deep fork: recursively fork child executors and child orchestrators.
-        if deep:
-            already_forked_orchestrators: set[str] = {orchestrator_id}
-            already_forked_executors: set[str] = set()
-
-            # Fork child executors via the attached ExecutorRegistry.
-            executor_registry = self._executor_registry
-            if executor_registry is not None and definition.child_executors:
-                for child_id in definition.child_executors:
-                    resolved = child_id
-                    if resolved not in already_forked_executors:
-                        already_forked_executors.add(resolved)
-                        try:
-                            executor_registry.fork(
-                                resolved, project_root=project_root, overwrite=overwrite, deep=True,
-                            )
-                        except Exception:
-                            # If a child executor cannot be forked (e.g. it is already
-                            # forked by another path), skip it gracefully.
-                            pass
-
-            # Fork child orchestrators recursively through this registry.
-            if definition.child_orchestrators:
-                for child_id in definition.child_orchestrators:
-                    resolved = child_id
-                    if resolved not in already_forked_orchestrators:
-                        already_forked_orchestrators.add(resolved)
-                        try:
-                            self.fork(resolved, project_root=project_root, overwrite=overwrite, deep=True)
-                        except Exception:
-                            pass
-
-        return target
-
-
 def load_default_registry(
     *,
     executor_registry: ExecutorRegistry | None = None,
@@ -382,7 +264,6 @@ def load_default_registry(
     )
     registry = OrchestratorRegistry(
         executor_registry=active_executor_registry,
-        override_store=OverrideStore(project_root),
     )
     for orchestrator in _load_pack_orchestrators_from_packs(packs):
         registry.register(orchestrator)
@@ -450,58 +331,10 @@ def _attach_pack_metadata(
     metadata = dict(orchestrator.metadata)
     metadata["source"] = "pack"
     metadata["source_pack"] = pack_id
-    metadata["priority"] = 10 if pack_id == "local" else 30
+    metadata["priority"] = 30
     if content_root is not None:
         metadata["content_root"] = str(content_root)
-    # SD5: detect local edits and merge fork state for local pack only
-    if pack_id == "local" and content_root is not None:
-        fork_state = read_fork_state(content_root)
-        if fork_state is not None:
-            for key in ("forked_from", "upstream_version", "compatibility_token"):
-                if key in fork_state:
-                    metadata.setdefault(key, fork_state[key])
-        metadata["local_edit_state"] = detect_local_edits(
-            content_root, forked_from=metadata.get("forked_from", "")
-        )
     return validate_orchestrator_definition(replace(orchestrator, metadata=metadata))
-
-
-def _rewrite_orchestrator_manifest_fork(
-    target: Path,
-    local_id: str,
-    *,
-    forked_from: str,
-    upstream_version: str,
-) -> None:
-    """Rewrite the orchestrator manifest in *target* with the forked identity."""
-    ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
-    manifest_path = None
-    for name in ORCHESTRATOR_MANIFEST_NAMES:
-        candidate = target / name
-        if candidate.is_file():
-            manifest_path = candidate
-            break
-
-    if manifest_path is None:
-        return  # No manifest to rewrite — orchestrator was loaded via orchestrator.py
-
-    try:
-        data = load_manifest_mapping(manifest_path, manifest_kind="orchestrator")
-    except ManifestParseError:
-        return  # Cannot parse, leave as-is
-
-    new_id = f"local.{local_id}"
-    data["id"] = new_id
-
-    # Merge fork provenance into metadata.
-    metadata = data.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
-        data["metadata"] = metadata
-    metadata["forked_from"] = forked_from
-    metadata["upstream_version"] = upstream_version
-
-    dump_manifest_payload(manifest_path, data)
 
 
 __all__ = [

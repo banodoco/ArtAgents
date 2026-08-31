@@ -11,7 +11,6 @@ import pytest
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack.alias_resolver import AliasResolver
-from astrid.core.pack.override import OverrideStore
 from astrid.core.rendering import publication
 from astrid.core.rendering.contracts import RenderPlan
 from astrid.core.rendering.provenance import (
@@ -65,26 +64,17 @@ def _lineage_service(
         resolver.register_alias(requested, canonical)
         aliases[kind] = resolver
 
-    overrides = OverrideStore(tmp_path / "override-project")
-    overrides.set_override("planner", "lineage.planner", "lineage.planner-v2")
-    overrides.set_override("renderer", "lineage.renderer", "lineage.renderer-v2")
-    overrides.set_override(
-        "finalizer", "lineage.finalizer", "lineage.finalizer-v2"
-    )
     renderers = RendererRegistry(
         [_candidate(tmp_path, "lineage.renderer-v2", "renderer")],
         alias_resolver=aliases["renderer"],
-        override_store=overrides,
     )
     planners = PlannerRegistry(
         [_candidate(tmp_path, "lineage.planner-v2", "planner")],
         alias_resolver=aliases["planner"],
-        override_store=overrides,
     )
     finalizers = FinalizerRegistry(
         [_candidate(tmp_path, "lineage.finalizer-v2", "finalizer")],
         alias_resolver=aliases["finalizer"],
-        override_store=overrides,
     )
     return RenderService(
         registries=(renderers, planners, finalizers),

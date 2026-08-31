@@ -1,11 +1,11 @@
-"""Element registry and source precedence."""
+"""Element registry and canonical pack-source discovery."""
 
 import logging
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import Iterable
 
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
@@ -33,10 +33,6 @@ from .schema import (
     load_element_definition,
 )
 
-if TYPE_CHECKING:
-    from astrid.core.pack.override import OverrideStore
-
-
 class ElementRegistryError(ElementValidationError):
     """Raised when element registry state is inconsistent."""
 
@@ -61,8 +57,8 @@ class ElementConflict:
 class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
     """Resolved element registry keyed by kind and element id.
 
-    Inherits generic storage, conflict detection, and override-key
-    resolution from :class:`CapabilityRegistry`.
+    Inherits generic storage and conflict detection from
+    :class:`CapabilityRegistry`.
     """
 
     def __init__(
@@ -70,33 +66,12 @@ class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
         elements: Iterable[ElementDefinition] = (),
         *,
         alias_resolver: AliasResolver | None = None,
-        override_store: "OverrideStore | None" = None,
         element_kind_registry: ElementKindRegistry | None = None,
     ) -> None:
-        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
+        super().__init__(alias_resolver=alias_resolver)
         self.element_kind_registry = element_kind_registry or ELEMENT_KIND_REGISTRY
         for element in elements:
             self.register(element)
-
-    # ------------------------------------------------------------------
-    # Backward-compat alias for pre-migration direct ``_all`` access
-    # ------------------------------------------------------------------
-
-    @property
-    def _all(self) -> dict[tuple[str, str], list[ElementDefinition]]:
-        """Legacy alias for ``_entries`` — supports direct dict writes."""
-        return self._entries
-
-    # ------------------------------------------------------------------
-    # Override resolution helper (tuple-key aware)
-    # ------------------------------------------------------------------
-
-    def _resolve_override_key(self, capability_kind: str, key: tuple[str, str]) -> str | None:
-        """Extract *element_id* from the tuple key before consulting the store."""
-        if self.override_store is None:
-            return None
-        _, element_id = key
-        return self.override_store.resolve(capability_kind, element_id)
 
     # ------------------------------------------------------------------
     # Public API
@@ -107,7 +82,10 @@ class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
         self._register_impl(
             key,
             element,
-            priority_key=lambda item: (item.priority, item.source, str(item.root)),
+            # The first discovered source owns a duplicate id.  A local
+            # Editable packs are ordinary source content, never a special
+            # precedence layer.
+            priority_key=lambda item: item.priority,
         )
         return element
 
@@ -115,36 +93,9 @@ class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
         normalized_kind = self.element_kind_registry.normalize(kind, error_cls=ElementRegistryError)
         key = (normalized_kind, element_id)
         try:
-            definition = self._entries[key][0]
+            definition = self._resolve_entry(self._entries[key])
         except KeyError as exc:
             raise KeyError(f"unknown {normalized_kind} element {element_id!r}") from exc
-
-        # Check override store for a remapped target.
-        target_id = self._resolve_override_key(normalized_kind, key)
-        if target_id is not None:
-            # Validate that the override target exists.
-            target_key = (normalized_kind, target_id)
-            if target_key not in self._entries:
-                raise ElementRegistryError(
-                    f"override target {target_id!r} for {normalized_kind} {element_id!r} not found in registry"
-                )
-            entries = self._entries[target_key]
-            # When a same-ID override points at the rendering-pack canonical
-            # id, prefer the canonical (non-editable) entry over a local
-            # fork that would otherwise win on priority alone.
-            if target_id == element_id and len(entries) > 1:
-                canonical = next((e for e in entries if not e.editable), None)
-                target_def = canonical if canonical is not None else entries[0]
-            else:
-                target_def = entries[0]
-            # Annotate the returned definition with override_target metadata
-            # whenever the override changes the resolved definition.
-            if target_id != element_id or target_def is not definition:
-                target_metadata = dict(target_def.metadata)
-                target_metadata["override_target"] = target_id
-                from dataclasses import replace as _replace
-                return _replace(target_def, metadata=target_metadata)
-
         return definition
 
     def list(self, kind: ElementKind | None = None) -> tuple[ElementDefinition, ...]:
@@ -353,7 +304,9 @@ def _load_pack_elements_from_packs(
 
     elements: list[ElementDefinition] = []
     for pack in packs:
-        priority = 10 if pack.id == "local" else 30
+        # All discovered packs share the same priority.  Discovery order is
+        # canonical; the local editable pack cannot shadow a source pack.
+        priority = 30
         # Per-pack fault tolerance: one broken element manifest (e.g. from an
         # installed external pack) must not abort the whole discovery/invoke.
         # The pack is skipped with a warning; pack-alignment failures

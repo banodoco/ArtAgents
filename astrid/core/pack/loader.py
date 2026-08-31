@@ -39,24 +39,6 @@ def packs_root() -> Path:
 DEFAULT_PACKS_ROOT = packs_root()
 
 
-def ensure_local_pack(*, project_root: str | Path = None) -> Path:
-    """Create or return the ``local`` scratch pack under *project_root*.
-
-    When *project_root* is ``None``, the pack root is derived from
-    ``REPO_ROOT`` so the behaviour matches the old location in
-    ``element/registry.py``.
-    """
-    from astrid.core.foundation.paths import REPO_ROOT
-
-    root = Path(project_root) if project_root is not None else REPO_ROOT
-    pack_root = root / "astrid" / "packs" / "local"
-    pack_root.mkdir(parents=True, exist_ok=True)
-    manifest = pack_root / "pack.yaml"
-    if not manifest.exists():
-        manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
-    return pack_root
-
-
 def discover_packs(
     root: str | Path | None = None,
     *,

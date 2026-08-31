@@ -157,39 +157,6 @@ class CapabilityRegistrySmokeTests(unittest.TestCase):
         self.assertEqual(conflicts[1].key, "b")
 
 
-class CapabilityRegistryOverrideStoreTests(unittest.TestCase):
-    """Tests for _resolve_override_key with and without an OverrideStore."""
-
-    def setUp(self):
-        self.reg: CapabilityRegistry[str, FakeDef] = CapabilityRegistry()
-
-    def test_resolve_override_key_no_store(self):
-        self.assertIsNone(self.reg.override_store)
-        result = self.reg._resolve_override_key("executor", "shots")
-        self.assertIsNone(result)
-
-    def test_resolve_override_key_with_store(self):
-        from astrid.core.pack.override import OverrideStore
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = OverrideStore(project_root=tmpdir)
-            store.set_override("executor", "shots", "local.shots")
-            reg = CapabilityRegistry[str, FakeDef](override_store=store)
-            result = reg._resolve_override_key("executor", "shots")
-            self.assertEqual(result, "local.shots")
-
-    def test_resolve_override_key_no_match(self):
-        from astrid.core.pack.override import OverrideStore
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = OverrideStore(project_root=tmpdir)
-            reg = CapabilityRegistry[str, FakeDef](override_store=store)
-            result = reg._resolve_override_key("executor", "nonexistent")
-            self.assertIsNone(result)
-
-
 class CapabilityRegistryAliasResolverTests(unittest.TestCase):
     """Verify alias_resolver is accepted as a constructor parameter."""
 

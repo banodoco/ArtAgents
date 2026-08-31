@@ -11,10 +11,7 @@ re-baseline the element snapshot, not this one.
 from __future__ import annotations
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
-from textwrap import dedent
 
 from astrid.core.execution.executor.registry import (
     ExecutorRegistry,
@@ -25,7 +22,6 @@ from astrid.core.execution.executor.schema import (
     ExecutorValidationError,
     GraphMetadata,
 )
-from astrid.core.pack.override import OverrideStore
 from astrid.core.contracts.schema import CachePolicy, CommandSpec
 
 
@@ -177,21 +173,6 @@ class ExecutorRegistrySnapshotTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             registry.get("nonexistent.exec")
 
-    def test_get_with_override_store(self):
-        """get() applies override_store redirect."""
-        with tempfile.TemporaryDirectory() as tmp:
-            override_store = OverrideStore(project_root=tmp)
-            override_store.set_override("executor", "editorial.shots", "local.shots")
-            registry = ExecutorRegistry(
-                override_store=override_store,
-            )
-            registry.register(_make_executor("editorial.shots", name="Original Shots", priority=30))
-            registry.register(_make_executor("local.shots", name="Local Shots", priority=10))
-
-            result = registry.get("editorial.shots")
-            self.assertEqual(result.id, "local.shots")
-            self.assertEqual(result.name, "Local Shots")
-
     def test_list_invalid_kind_raises(self):
         """list() raises for invalid kind values."""
         registry = ExecutorRegistry()
@@ -265,17 +246,6 @@ class ExecutorRegistrySnapshotTests(unittest.TestCase):
         data = registry.to_dict(kind="built_in")
         self.assertEqual(len(data["executors"]), 1)
         self.assertEqual(data["executors"][0]["id"], "a.exec")
-
-    def test_backward_compat_executors_property(self):
-        """The _executors property provides backward-compatible access to _entries."""
-        registry = ExecutorRegistry()
-        registry.register(_make_executor("test.exec", priority=30))
-        # Direct dict access (used by test_executor_runner_errors.py)
-        self.assertIn("test.exec", registry._executors)
-        # Writing a scalar directly (bypasses register())
-        registry._executors["test.exec"] = _make_executor("test.exec", priority=5)
-        winner = registry.get("test.exec")
-        self.assertEqual(winner.metadata["priority"], 5)
 
     def test_iter_all_yields_all_including_shadowed(self):
         """_iter_all() yields both winner and shadowed definitions."""

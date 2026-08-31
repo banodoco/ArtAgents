@@ -12,7 +12,6 @@ PortType = Literal[
 OutputMode = Literal["mutate", "create", "create_or_replace"]
 CacheMode = Literal["none", "sentinel", "always_run"]
 IsolationMode = Literal["subprocess"]
-LocalEditState = Literal["clean", "dirty", "conflict"]
 
 # Runtime-validation allowlists, derived from the Literal aliases so the two
 # can never drift out of sync.
@@ -97,9 +96,6 @@ class Provenance:
     manifest_path: str = ""
     content_root: str = ""
     resolved_alias: str | None = None
-    forked_from: str | None = None
-    upstream_version: str | None = None
-    compatibility_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,8 +142,6 @@ class CapabilityHandle:
     category: str = ""
     status: str = "stable"
     visibility: str = "public"
-    local_edit_state: LocalEditState = "clean"
-    override_target: str | None = None
     aliases: tuple[AliasRecord, ...] = ()
     inputs: tuple[Port, ...] = ()
     outputs: tuple[Output, ...] = ()
@@ -231,12 +225,6 @@ def to_capability_handle(
     metadata_source = metadata.get("source")
     provenance_source = str(metadata_source) if metadata_source else "pack"
 
-    forked_from = str(metadata.get("forked_from") or "")
-    upstream_version = str(metadata.get("upstream_version") or "")
-    compatibility_token = str(metadata.get("compatibility_token") or "")
-    local_edit_state = str(metadata.get("local_edit_state") or "clean")
-    override_target = str(metadata.get("override_target") or "")
-
     return CapabilityHandle(
         canonical_id=definition.id,
         local_id=local_id,
@@ -246,9 +234,6 @@ def to_capability_handle(
         version=definition.version,
         provenance=Provenance(
             source=provenance_source,
-            forked_from=forked_from or None,
-            upstream_version=upstream_version or None,
-            compatibility_token=compatibility_token or None,
             resolved_alias=resolved_alias,
         ),
         safety=SafetyDeclaration(
@@ -265,8 +250,6 @@ def to_capability_handle(
         description=definition.description,
         short_description=definition.short_description,
         keywords=definition.keywords,
-        local_edit_state=local_edit_state,
-        override_target=override_target or None,
         aliases=aliases,
         deprecated=deprecated,
         deprecation_message=deprecation_message,
@@ -280,7 +263,6 @@ __all__ = [
     "CacheMode",
     "ISOLATION_MODES",
     "IsolationMode",
-    "LocalEditState",
     "OUTPUT_MODES",
     "OutputMode",
     "PORT_REQUIRED_TYPES",

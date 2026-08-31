@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 
 from astrid.core.element import cli
-from astrid.core.pack.override import OverrideStore
 from tests.helpers.cli_runner import run_cli
 
 
@@ -127,35 +126,6 @@ class ElementsCliTest(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertEqual(stdout, "")
         self.assertIn("element kind must be one of [effects, animations, transitions, widgets]", stderr)
-
-    def test_non_repo_cwd_keeps_mutable_element_state_project_local(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = Path(tmp)
-            previous_cwd = Path.cwd()
-            os.chdir(project)
-            try:
-                result, stdout, stderr = self.capture(["list", "--json", "--kind", "effects"])
-                self.assertEqual(result, 0, stderr)
-                payload = json.loads(stdout)
-                self.assertIn("text-card", {item["id"] for item in payload["elements"]})
-
-                # Set override via OverrideStore API (CLI override subcommand removed in S4).
-                store = OverrideStore(project_root=project)
-                store.set_override("effects", "text-card", "text-card")
-
-                overrides = project / "astrid" / "packs" / "local" / ".overrides.json"
-                self.assertTrue(overrides.is_file())
-                override_payload = json.loads(overrides.read_text(encoding="utf-8"))
-                self.assertEqual(override_payload["effects"]["text-card"], "text-card")
-
-                result, stdout, stderr = self.capture(["list", "--json", "--kind", "effects", "--show-overrides"])
-                self.assertEqual(result, 0, stderr)
-                listed = {item["id"]: item for item in json.loads(stdout)["elements"]}
-                self.assertEqual(listed["text-card"]["_override"], "text-card")
-            finally:
-                os.chdir(previous_cwd)
-
-
 
 if __name__ == "__main__":
     unittest.main()

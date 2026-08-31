@@ -114,12 +114,6 @@ def to_capability_handle(definition: ElementDefinition) -> CapabilityHandle:
 
     canonical_id = f"{definition.kind}/{definition.id}"
 
-    forked_from = str(metadata.get("forked_from") or "")
-    upstream_version = str(metadata.get("upstream_version") or "")
-    compatibility_token = str(metadata.get("compatibility_token") or "")
-    local_edit_state = str(metadata.get("local_edit_state") or "clean")
-    override_target = str(metadata.get("override_target") or "")
-
     return CapabilityHandle(
         canonical_id=canonical_id,
         local_id=definition.id,
@@ -129,16 +123,11 @@ def to_capability_handle(definition: ElementDefinition) -> CapabilityHandle:
         version=version,
         provenance=Provenance(
             source=definition.source,
-            forked_from=forked_from or None,
-            upstream_version=upstream_version or None,
-            compatibility_token=compatibility_token or None,
         ),
         safety=SafetyDeclaration(network=False),
         description=definition.description,
         short_description=definition.short_description,
         keywords=definition.keywords,
-        local_edit_state=local_edit_state,
-        override_target=override_target or None,
         inputs=definition.inputs,
         outputs=definition.outputs,
     )

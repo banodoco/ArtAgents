@@ -106,7 +106,6 @@ Every inspect response includes a `_capability` section with:
 - `aliases` — list of public alias names
 - `deprecated` / `deprecation_message` / `deprecated_alternatives`
 - `provenance` — `source` (pack or active_theme), `version`, `content_root`
-- `local_edit_state` — `"clean"` (no local edits), `"dirty"` (modified), or `"conflict"`
 - `safety` — `network` flag (bool)
 
 ## Picking the Right Capability Kind

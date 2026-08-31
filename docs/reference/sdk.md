@@ -495,14 +495,12 @@ and runner imports happen inside the `discover()`, `get_capability()`, and
 `invoke()` call sites. This keeps the import boundary lightweight and allows
 tooling to inspect the public surface without pulling in execution machinery.
 
-## Theme Overlay Behavior for Elements
+## Element Source Behavior
 
-When `active_theme` is provided to `discover()` or `get_capability()`, the
-element registry includes theme-specific overrides. Elements defined in the
-base registry may be shadowed or extended by theme-aware definitions. The
-theme overlay is resolved at registry load time and reflected in the returned
-`Capability` DTOs — the `schema`, `defaults`, and `definition` mappings carry
-the resolved post-overlay values.
+Element discovery reads canonical pack manifests. A runtime theme is visual
+data and cannot shadow or replace pack element code; edit the owning source
+pack when changing an element. Returned capability DTOs therefore carry the
+manifest-backed identity, source, and digest of the discovered element.
 
 Pass `include_missing_roots=True` to include element roots that are declared
 but not yet present in the checkout. This is useful for pack authoring and

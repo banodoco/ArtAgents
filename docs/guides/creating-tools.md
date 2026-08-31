@@ -100,8 +100,8 @@ dispatcher.
 
 Create an **element** when the missing capability is a reusable render building
 block consumed by timeline JSON. Effects, animations, and transitions are
-elements. If the user needs an editable visual primitive, fork or create an
-element instead of hard-coding behavior in an executor.
+elements. If the user needs an editable visual primitive, create or edit an
+element in its owning source pack instead of hard-coding behavior in an executor.
 
 Create a **shared library** only when the code has no public runtime of its own.
 Hype/editing concepts belong with the owning editorial pack under
@@ -170,8 +170,8 @@ ids stay bare and
 are scoped by `kind` (`effects`, `animations`, `transitions`).
 
 Terminology note: pack placement, capability identity, aliases/deprecation,
-adapter versus default-enabled semantics, and local fork/override terminology
-are defined in `docs/packs/contract.md`. Use that contract for identity
+and adapter versus default-enabled semantics are defined in
+`docs/packs/contract.md`. Use that contract for identity
 questions; this guide only describes the current folder and authoring
 conventions.
 
@@ -211,9 +211,11 @@ astrid/packs/<pack>/elements/<kind>/<id>/
                      # pack_id, metadata, schema, defaults, dependencies
 ```
 
-Element changes are made in a canonical checked-out pack source and reviewed
-through normal Git. Runtime discovery has no local-pack or filesystem-override
-precedence.
+User-authored elements may live in a project-local source pack at
+`astrid/packs/local/elements/<kind>/<id>/`. Declare that pack in `pack.yaml`
+and edit its manifests directly; registry identities and digests come from
+canonical discovered manifests, with no fork, override, or dirty-tracking
+sidecar.
 
 ## Templates
 
@@ -268,5 +270,3 @@ you created instead of guessing from ids alone.
 - **Remote registry** — Publishing and discovering packs from outside the
   repository.
 - **Dependency isolation** — Per-pack isolated dependency resolution.
-- **Semantic merge** — Three-way merge of upstream updates with local
-  forks and overrides.

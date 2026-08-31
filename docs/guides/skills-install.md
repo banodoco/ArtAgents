@@ -130,3 +130,5 @@ If at least one harness is detected on disk and is missing one of the expected p
   contract for discovering capabilities: `skills list`, search, and
   `inspect --json`. Skills install is the delivery mechanism; discovery
   describes what agents do with the installed skills.
+- [creating-packs.md](../packs/creating-packs.md) — Pack authoring and source
+  discovery conventions.

@@ -22,7 +22,6 @@ from unittest import mock
 import pytest
 
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
-from astrid.core.pack.override import OverrideStore
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
     RendererRegistryError,
@@ -400,42 +399,12 @@ def test_env_pack_alias_is_inspectable_but_not_executable(tmp_path: Path) -> Non
     assert evidence_caught.value.code == "unknown_capability"
 
 
-# ---------------------------------------------------------------------------
-# Override matrix
-# ---------------------------------------------------------------------------
-
-
-def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -> None:
-    """Overriding onto a discoverable-but-ineligible target is rejected.
-
-    The override lands on an env-layer renderer that can never be executed;
-    resolution fails with a structured error that records the override that
-    caused the redirect.
-    """
-    store = OverrideStore(tmp_path / "project")
-    store.set_override("renderer", "rendering.remotion", "env_render.renderer")
-
-    renderers, _, _ = _load_env_registries(tmp_path / "project")
-
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("rendering.remotion")
-
-    assert caught.value.code == "execution_ineligible"
-    details = caught.value.to_dict()["details"]
-    assert details["override"] == {
-        "from": "rendering.remotion",
-        "to": "env_render.renderer",
-    }
-    assert details["target_id"] == "env_render.renderer"
-    assert details["canonical_id"] == "rendering.remotion"
-
-
 def _write_alias_to_absent_pack(packs_root: Path) -> Path:
     """A source pack whose renderer alias points at a canonical in ANOTHER
     pack namespace that does not exist in the discovery tree. Cross-pack
     alias targets are not statically checked (validate.py only validates
     same-pack targets), so this pack passes validate_pack while resolution
-    still requires the override to supply the implementation."""
+    still requires a discovered implementation."""
     pack_root = _write_renderer_pack(
         packs_root,
         "alias_missing",

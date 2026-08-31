@@ -16,8 +16,8 @@ by itself.
 - Agents discover capabilities through manifest-backed list/search/inspect
   surfaces, not source-tree guessing.
 - Public id migration requires tested alias infrastructure first.
-- Existing element fork and local-pack behavior is useful precedent for broader
-  fork and override work.
+- Editable local packs are ordinary source roots; registry identity is always
+  derived from the discovered pack manifest.
 
 ## Vocabulary
 
@@ -29,8 +29,8 @@ by itself.
   "built-in."
 - **Optional pack**: a pack that is valid and inspectable but not shown in the
   default agent discovery set until explicitly enabled or requested.
-- **Personal pack**: a user-owned local pack for experiments, private tools, or
-  forks. It must not be silently overwritten by Astrid updates.
+- **Personal pack**: a user-owned local pack for experiments or private tools.
+  It is discovered from its own manifest and is never silently overwritten.
 - **Adapter pack**: a pack that integrates a separately-owned substrate,
   service, CLI, model host, or runtime. Adapter does not imply unsafe; it means
   ownership and support differ from Astrid core.
@@ -41,13 +41,8 @@ by itself.
 - **Alias**: an alternate public id that resolves to a canonical capability id.
   Aliases preserve old ids during moves and must be validated before any public
   id migration.
-- **Fork**: a copied capability or pack that the user owns. A fork keeps
-  provenance back to its source and can diverge.
-- **Override**: a registry preference that chooses one capability instead of
-  another without changing the target's public id.
-- **In-place edit**: a local modification inside an installed or bundled pack.
-  It is a detectable state, not the preferred customization path. Update flows
-  should help promote meaningful in-place edits into forks.
+- **In-place edit**: a direct edit to an ordinary source pack. The changed
+  manifest and its content digest are the complete source of truth.
 
 ## Pack Axes
 
@@ -86,8 +81,7 @@ alias can point at. Its common shape is:
   deprecated, including replacement id, reason, and removal window when known.
 - `status` and `visibility`: stable/experimental/example/hidden/deprecated and
   default-visible or explicit-only.
-- `provenance`: source, manifest path, content root, fork source, and override
-  state when relevant.
+- `provenance`: source, manifest path, and content root when relevant.
 
 `Capability` is the inspectable definition behind a handle. It includes the
 handle fields plus the kind-specific contract already present today:
@@ -99,7 +93,7 @@ handle fields plus the kind-specific contract already present today:
   executors, child orchestrators, and the same safety/cost/secrets/network
   declarations where available.
 - Elements expose element kind (`effects`, `animations`, or `transitions`),
-  source/priority/editability, fork target, dependencies, defaults, schema, and
+  source/priority/editability, dependencies, defaults, schema, and
   safety declarations where relevant.
 
 Canonical inspect output should make identity resolution explicit. Inspecting a
@@ -112,7 +106,7 @@ capability through any current or future surface should show at least:
 - alias/deprecation state;
 - status and visibility;
 - provenance and manifest path;
-- fork or override state, when present;
+- source and manifest digest;
 - inputs, outputs, dependencies, and safety/cost/secrets/network declarations
   that the capability kind can already inspect.
 
@@ -156,7 +150,7 @@ without source reading:
 - What inputs and outputs does it declare?
 - Does it use network, secrets, paid services, external binaries, or unusual
   local file access?
-- Did I resolve an alias, fork, or override?
+- Did I resolve an alias, and which canonical manifest supplied it?
 
 A future unified `capabilities list/search/inspect` surface is required by this
 contract. Its target behavior is:
@@ -258,16 +252,10 @@ The trust/safety axis is expressed through the `permissions` block in
 `pack.yaml` rather than a single taxonomy enum, since safety posture is
 multi-dimensional (network access, secrets, paid APIs, external binaries).
 
-Element precedence remains the current implementation precedent:
-
-1. Active theme elements override other sources when an active theme is set.
-2. Project `local` pack forks override bundled pack elements when a distinct
-   project root is used.
-3. Bundled pack elements provide the fallback managed implementation.
-
-That precedence is documentation of current behavior, not a command to move
-elements during M0. Later fork/override work should reuse this ordering where it
-fits executors, orchestrators, and whole packs.
+Element sources are discovered in canonical pack order. A project-local pack is
+an editable source root, not an override layer; duplicate ids do not acquire
+special filesystem precedence. Live identity and digests come from the
+selected discovered manifest.
 
 ## Deferred Scope
 
@@ -281,8 +269,6 @@ M0 deliberately does not implement:
 - remote or hosted registries;
 - package installation from remote sources;
 - pack directory moves;
-- fork/update commands;
-- fork/update reports;
 - dependency isolation;
 - semantic merge/update intelligence;
 - rich capability graph planning;

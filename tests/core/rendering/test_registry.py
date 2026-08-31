@@ -12,7 +12,6 @@ import pytest
 
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack.discovery import DiscoveredPack
-from astrid.core.pack.override import OverrideStore
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
     FinalizerRegistry,
@@ -435,44 +434,6 @@ def test_dangling_programmatic_alias_falls_through_to_eligible_pack_alias(
         "shared.programmatic",
         "trustedfallback.renderer",
     ]
-
-
-def test_override_is_applied_after_alias_resolution(tmp_path: Path) -> None:
-    store = OverrideStore(tmp_path)
-    store.set_override("renderer", "rendering.remotion", "rendering.ffmpeg")
-
-    with _load_with_source(tmp_path) as (renderers, _, _):
-        selected = renderers.get("rendering.remotion")
-        evidence = renderers.resolve_evidence("rendering.remotion")
-
-    assert selected.id == "rendering.ffmpeg"
-    assert evidence["canonical_id"] == "rendering.remotion"
-    assert evidence["override"] == {
-        "from": "rendering.remotion",
-        "to": "rendering.ffmpeg",
-    }
-
-
-@pytest.mark.parametrize(
-    ("target", "code"),
-    [
-        ("rendering.missing", "invalid_override_target"),
-        ("rendering.render", "facade_recursion"),
-    ],
-)
-def test_invalid_and_facade_override_targets_are_rejected(
-    tmp_path: Path,
-    target: str,
-    code: str,
-) -> None:
-    store = OverrideStore(tmp_path)
-    store.set_override("renderer", "rendering.remotion", target)
-
-    with _load_with_source(tmp_path) as (renderers, _, _):
-        with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("rendering.remotion")
-
-    assert caught.value.code == code
 
 
 def test_source_and_project_local_candidates_are_executable(tmp_path: Path) -> None:

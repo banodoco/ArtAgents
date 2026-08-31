@@ -7,7 +7,7 @@ normative for M5 and should be updated when later milestones reclassify a
 surface.
 
 **M5 key rule**: New internal code belongs under `astrid/core/*`. New pack
-machinery (discovery, resolver, store, manifest, override, alias resolution,
+machinery (discovery, resolver, manifest, alias resolution,
 validation, CLI, installation, entrypoint, agent indexing, gitignore filtering,
 schemas) belongs under `astrid/core/pack/*`. `astrid/packs/` is for pack data
 only — executors, orchestrators, elements, `pack.yaml`, `skill/` — with no
@@ -71,7 +71,7 @@ and their purposes:
 | `core/integrations/` | External-service integrations (RunPod and other approved neutral adapters) |
 | `core/model_catalog/` | Model registry, schema, CLI |
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
-| `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
+| `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, manifest, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
 | `core/runtime/` | In-process runtime invocation and subprocess log capture |
 | `core/task_handler_registry.py` | Task-handler registration boundary for pack-owned adapters |
@@ -101,7 +101,7 @@ These exemptions are recorded in `astrid/core/structure.py` under `_IMPORT_LAYER
 
 When adding new code to the repository, follow these placement rules:
 
-- **New pack machinery**: `astrid/core/pack/*` (discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore)
+- **New pack machinery**: `astrid/core/pack/*` (discovery, resolver, manifest, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore)
 - **New internal framework code**: `astrid/core/<domain>/*`
 - **New pack data** (executors, orchestrators, elements, skills): `astrid/packs/<pack>/`
 - **New public SDK surface**: add to the `astrid/sdk/` package and expose it through the package facade only when it is part of the v1 contract
@@ -189,12 +189,10 @@ The shipped packs are: `rendering`, `understanding`, `generation`, `editorial`,
 `video_editing`, `foley`, `training`, `youtube`, `fal`, `vibecomfy`,
 `runpod`, `moirae`, `iteration`, `media`, `stream_content`, and `comfy_wrap`.
 
-A gitignored `local` pack at `astrid/packs/local/` is created on first use and
-holds user-editable copies: forking a capability copies its manifest,
-entrypoint, and supporting files into the local pack under the `local`
-namespace, overriding redirects a capability id to a fork via
-`astrid/packs/local/.overrides.json`, and dirty detection reports local edits
-to forked copies.
+A project-local `local` pack at `astrid/packs/local/` is an optional ordinary
+source root for user-authored capabilities. Its `pack.yaml` and content
+manifests are discovered like every other source pack; there is no fork state,
+sidecar redirect, or local-priority rule.
 
 The `builtin` pack is hidden and deprecated. It remains only for legacy test
 fixtures and historical pack-level aliases; new capability work should use the

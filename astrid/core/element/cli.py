@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.search import (
     SearchRecord,
     short_description_or_truncated,
@@ -23,26 +21,18 @@ from .registry import ElementRegistryError, load_default_registry
 from .schema import ElementDefinition, ElementValidationError, to_capability_handle
 
 
-# Shared stderr sink for override-management diagnostics.
-def _eprint(*args: object) -> None:
-    print(*args, file=sys.stderr)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        # Create OverrideStore so --show-overrides works.
         project_root = _project_root_from_args(args)
-        override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
             project_root=project_root,
             extra_pack_roots=tuple(args.pack_root),
         )
         _normalize_kind_args(args, registry)
-        registry.override_store = override_store
         return int(args.handler(args, registry))
-    except (KeyError, ElementRegistryError, ElementValidationError, ValueError, OverrideStoreError) as exc:
+    except (KeyError, ElementRegistryError, ElementValidationError, ValueError) as exc:
         raise AstridError(str(exc)) from exc
 
 
@@ -59,7 +49,6 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--kind", help="Filter by element kind.")
     list_parser.add_argument("--pack", help="Filter elements by pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
-    list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
     list_parser.set_defaults(handler=_cmd_list)
 
     search_parser = subparsers.add_parser("search", help="Search elements by id, keywords, and descriptions.")
@@ -74,7 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("element_id")
     inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     inspect_parser.add_argument("--pack", help="Require the resolved element to belong to this pack id.")
-    inspect_parser.add_argument("--show-overrides", action="store_true", help="Show override status for this capability.")
     inspect_parser.set_defaults(handler=_cmd_inspect)
 
     validate_parser = subparsers.add_parser("validate", help="Validate element metadata.")
@@ -103,31 +91,22 @@ def _project_root_from_args(args: argparse.Namespace) -> Path:
 
 def _cmd_list(args: argparse.Namespace, registry: Any) -> int:
     elements = _filter_by_pack(registry.list(kind=args.kind), getattr(args, "pack", None))
-    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
         result = []
         for item in elements:
             handle = to_capability_handle(item)
             entry = {'_capability': handle.to_dict(), 'pack_id': _element_pack_id(item), **item.to_dict()}
-            if show_overrides and registry.override_store is not None:
-                override_target = registry.override_store.resolve(item.kind, item.id)
-                entry['_override'] = override_target
             result.append(entry)
         print(json.dumps({'elements': result}, indent=2, sort_keys=True))
         return 0
     no_describe = bool(getattr(args, "no_describe", False))
     for element in elements:
         editability = "editable" if element.editable else "managed"
-        override_tag = ""
-        if show_overrides and registry.override_store is not None:
-            target = registry.override_store.resolve(element.kind, element.id)
-            if target is not None:
-                override_tag = f"\t→ {target}"
         if no_describe:
-            print(f"{element.kind}\t{element.id}\t{element.source}\t{editability}{override_tag}")
+            print(f"{element.kind}\t{element.id}\t{element.source}\t{editability}")
         else:
             short = short_description_or_truncated(element.short_description, element.description)
-            print(f"{element.kind}\t{element.id}\t{element.source}\t{editability}\t{short}{override_tag}")
+            print(f"{element.kind}\t{element.id}\t{element.source}\t{editability}\t{short}")
     return 0
 
 
@@ -172,15 +151,12 @@ def _cmd_inspect(args: argparse.Namespace, registry: Any) -> int:
     resolved_id = resolver.resolve(args.element_id) if resolver else args.element_id
     element = registry.get(args.kind, resolved_id)
     _require_pack_match(element, getattr(args, "pack", None))
-    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
         handle = to_capability_handle(element)
         if resolver is not None:
             aliases = resolver.get_aliases_for(resolved_id)
             handle = replace(handle, aliases=tuple(aliases))
         result = {"_capability": handle.to_dict(), **element.to_dict()}
-        if show_overrides and registry.override_store is not None:
-            result["_override"] = registry.override_store.resolve(element.kind, element.id)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     print(f"id: {element.id}")
@@ -194,12 +170,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: Any) -> int:
         print(f"description: {element.description}")
     if element.keywords:
         print(f"keywords: {', '.join(element.keywords)}")
-    if show_overrides and registry.override_store is not None:
-        target = registry.override_store.resolve(element.kind, element.id)
-        if target is not None:
-            print(f"override: {element.kind}/{element.id} → {target}")
-        else:
-            print("override: none")
     return 0
 
 

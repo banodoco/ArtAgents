@@ -59,7 +59,7 @@ module-global mutable theme directory plus an environment variable threaded
 into subprocess environments. That local authority is retired; current
 execution receives its runtime-owned scope through the workspace boundary. A
 theme is a bundle of `{visual config + assets + element-overrides}`; the
-override part is just the kernel's `OverrideStore` relabeled.
+the source-selection part is just canonical pack discovery relabeled.
 
 At thousands of packs this generalizes to brand kits, render profiles, locale, safety policy, secrets — all **scoped configuration consumed by many capabilities, none of them a capability themselves**. Threading them as explicit `consumes` ports on every capability *recreates M×N*. So the contract needs exactly **one** more primitive beyond artifacts: **scoped config**, resolved by the kernel per scope (project/user/env) and injected where declared.
 
@@ -74,7 +74,7 @@ Three primitives + a kernel:
 - **Artifact** — a typed value passed between capabilities: `{type, schema}`. Types are pack-extensible and open (unknown → opaque). *This is the waist.*
 - **Capability** — the universal unit: `{id, kind(tag), consumes[typed ports], produces[typed ports], params(json-schema), runtime(adapter+config), metadata}`. Model/element/executor/orchestrator differ only in artifact types + runtime adapter.
 - **Scoped config** — ambient typed configuration resolved by kernel scope; distinct from `params` (per-call) and artifacts (dataflow).
-- **Kernel** — discovers capabilities from packs; indexes by produced/consumed artifact type; resolves by id+alias+override (the existing `CapabilityHandle`/`OverrideStore`); dispatches to the runtime adapter. Knows nothing about video/Remotion/fal.
+- **Kernel** — discovers capabilities from packs; indexes by produced/consumed artifact type; resolves by canonical id plus declared alias; dispatches to the runtime adapter. Knows nothing about video/Remotion/fal.
 
 **Composition rule:** a consumer references a producer by **id**; the kernel **validates** the referenced capability's artifact types are compatible. Imperative orchestration and structured-document artifacts (timelines) both compose by id-reference + kernel type-check — never by name-enumeration.
 
@@ -134,7 +134,7 @@ The validator no longer enumerates every effect. A third-party pack's effect is 
 - **A4** Scoped-config primitive; reimplement themes on it (remove the retired
   module-global theme directory and environment threading); absorb secrets.
 - **A5** Strangler the remaining name-wired seams (orchestrator `child_executors`, model `param_map` → into adapters).
-- **A6** Collapse the registries onto the existing `CapabilityHandle` kernel; `kind` becomes a tag; delete element's per-kind fork/version/override/install (use shared `OverrideStore`).
+- **A6** Collapse the registries onto the existing `CapabilityHandle` kernel; `kind` becomes a tag; keep element source discovery and delete per-kind fork/version/override/install state.
 
 ---
 

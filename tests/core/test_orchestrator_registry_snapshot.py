@@ -11,10 +11,7 @@ re-baseline the element snapshot, not this one.
 from __future__ import annotations
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
-from textwrap import dedent
 
 from astrid.core.execution.orchestrator.registry import (
     OrchestratorRegistry,
@@ -26,7 +23,6 @@ from astrid.core.execution.orchestrator.schema import (
     RuntimeSpec,
 )
 from astrid.core.contracts.schema import CommandSpec, Port
-from astrid.core.pack.override import OverrideStore
 
 
 def _make_orchestrator(
@@ -175,21 +171,6 @@ class OrchestratorRegistrySnapshotTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             registry.get("nonexistent.orch")
 
-    def test_get_with_override_store(self):
-        """get() applies override_store redirect."""
-        with tempfile.TemporaryDirectory() as tmp:
-            override_store = OverrideStore(project_root=tmp)
-            override_store.set_override("orchestrator", "video_editing.hype", "local.hype")
-            registry = OrchestratorRegistry(
-                override_store=override_store,
-            )
-            registry.register(_make_orchestrator("video_editing.hype", name="Original Hype", priority=30))
-            registry.register(_make_orchestrator("local.hype", name="Local Hype", priority=10))
-
-            result = registry.get("video_editing.hype")
-            self.assertEqual(result.id, "local.hype")
-            self.assertEqual(result.name, "Local Hype")
-
     def test_list_invalid_kind_raises(self):
         """list() raises for invalid kind values."""
         registry = OrchestratorRegistry()
@@ -263,17 +244,6 @@ class OrchestratorRegistrySnapshotTests(unittest.TestCase):
         data = registry.to_dict(kind="built_in")
         self.assertEqual(len(data["orchestrators"]), 1)
         self.assertEqual(data["orchestrators"][0]["id"], "a.orch")
-
-    def test_backward_compat_orchestrators_property(self):
-        """The _orchestrators property provides backward-compatible access to _entries."""
-        registry = OrchestratorRegistry()
-        registry.register(_make_orchestrator("test.orch", priority=30))
-        # Direct dict access (used by test_orchestrator_runner_errors.py)
-        self.assertIn("test.orch", registry._orchestrators)
-        # Writing a scalar directly (bypasses register())
-        registry._orchestrators["test.orch"] = _make_orchestrator("test.orch", priority=5)
-        winner = registry.get("test.orch")
-        self.assertEqual(winner.metadata["priority"], 5)
 
     def test_iter_all_yields_all_including_shadowed(self):
         """_iter_all() yields both winner and shadowed definitions."""

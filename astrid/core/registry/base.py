@@ -11,7 +11,6 @@ See ``astrid/core/registry/_design.md`` for the full contract and rationale.
    ├── _resolve_entry(entry) → T          (static)
    ├── _iter_entries(entry) → Iterable[T]  (static)
    ├── _winner_for(key) → T | None
-   ├── _resolve_override_key(capability_kind, key) → str | None
    ├── list() → tuple[T, ...]
    ├── as_mapping() → MappingProxyType[K, T]
    └── conflicts() → tuple[RegistryConflict[K, T], ...]
@@ -19,9 +18,9 @@ See ``astrid/core/registry/_design.md`` for the full contract and rationale.
 Subclasses own:
 
 * ``register()`` — input type differs (SD2)
-* ``get()`` — override assembly differs (SD3)
+* ``get()`` — lookup assembly differs by registry
 * ``_resolve_requested_id()`` — only executor / orchestrator
-* ``validate_all()`` / ``fork()`` — pack-specific plumbing
+* ``validate_all()`` — pack-specific plumbing
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from typing import TYPE_CHECKING, Callable, Generic, Iterable, TypeVar
 
 if TYPE_CHECKING:
     from astrid.core.pack.alias_resolver import AliasResolver
-    from astrid.core.pack.override import OverrideStore
 
 K = TypeVar("K")
 T = TypeVar("T")
@@ -65,21 +63,15 @@ class CapabilityRegistry(Generic[K, T]):
         Optional shared :class:`~astrid.core.pack.alias_resolver.AliasResolver`
         for alias→canonical-id lookups.  Only executor/orchestrator subclasses
         use this; the element registry leaves it as ``None``.
-    override_store:
-        Optional shared :class:`~astrid.core.pack.override.OverrideStore`
-        for user/agent-pinned capability overrides.  Consulted by subclass
-        ``get()`` via ``_resolve_override_key()``.
     """
 
     def __init__(
         self,
         *,
         alias_resolver: "AliasResolver | None" = None,
-        override_store: "OverrideStore | None" = None,
     ) -> None:
         self._entries: dict[K, list[T]] = {}
         self.alias_resolver = alias_resolver
-        self.override_store = override_store
 
     # ------------------------------------------------------------------
     # Protected helpers (called by subclasses)
@@ -130,22 +122,6 @@ class CapabilityRegistry(Generic[K, T]):
         if entry is None:
             return None
         return self._resolve_entry(entry)
-
-    def _resolve_override_key(self, capability_kind: str, key: K) -> str | None:
-        """Consult ``override_store`` and return a remapped target id.
-
-        Returns ``None`` when no override is registered or when
-        ``override_store`` is not configured.
-
-        Subclasses that key on non-string types (e.g. ``tuple[str, str]``
-        for element) extract the string id portion of *key* before
-        calling, or override this method.
-        """
-        if self.override_store is None:
-            return None
-        # Default: key *is* the string id (executor / orchestrator).
-        key_str = key if isinstance(key, str) else str(key)
-        return self.override_store.resolve(capability_kind, key_str)
 
     # ------------------------------------------------------------------
     # Public read surface
