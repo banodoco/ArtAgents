@@ -191,7 +191,6 @@ def test_threejs_manifest_registers_static_raw_command_backend() -> None:
 
 def test_threejs_is_discovered_and_inspected() -> None:
     renderers, _planners, _finalizers = load_default_registries(
-        include_installed=False
     )
     candidates = renderers.candidates(THREEJS_ID)
     assert len(candidates) == 1, [c.to_dict() for c in candidates]

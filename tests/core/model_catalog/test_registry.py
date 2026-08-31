@@ -1161,7 +1161,6 @@ class TestPackDeclaredBackendIds:
         registry = ModelRegistry.load_default(
             project_root=tmp_path,
             extra_pack_roots=(str(extra_root),),
-            include_installed=False,
         )
 
         assert registry.backend_available("ext-model", "t2i", "studio") is True
@@ -1193,7 +1192,6 @@ class TestPackDeclaredBackendIds:
             ModelRegistry.load_default(
                 project_root=tmp_path,
                 extra_pack_roots=(str(extra_root),),
-                include_installed=False,
             )
 
     def test_load_default_rejects_synthetic_backend_when_declaring_pack_not_loaded(
@@ -1233,7 +1231,6 @@ class TestPackDeclaredBackendIds:
         with pytest.raises(ValueError, match="unknown backend key; available backend ids:"):
             ModelRegistry.load_default(
                 project_root=tmp_path,
-                include_installed=False,
             )
 
 

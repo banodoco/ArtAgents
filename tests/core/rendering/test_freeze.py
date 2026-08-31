@@ -385,7 +385,7 @@ def test_freeze_package_data_and_exact_builtin_registry_surface() -> None:
 
     # The default registries expose exactly the frozen built-in surface —
     # no extra built-in renderers/planners/finalizers beyond the epic's set.
-    renderers, planners, finalizers = load_default_registries(include_installed=False)
+    renderers, planners, finalizers = load_default_registries()
     assert {candidate.id for candidate in renderers.list()} == {
         "rendering.remotion",
         "rendering.ffmpeg",

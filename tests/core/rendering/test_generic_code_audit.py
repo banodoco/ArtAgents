@@ -65,8 +65,8 @@ ALLOWED: dict[tuple[str, int], str] = {
     ("astrid/core/rendering/provenance.py", 159): "legacy compatibility shim (auto-route detection)",
     ("astrid/core/rendering/provenance.py", 164): "legacy compatibility shim (auto-route reason)",
     # --- registry: programmatic alias default wiring ---------------------
-    ("astrid/core/rendering/registry.py", 44): "registry/default wiring (remotion alias)",
-    ("astrid/core/rendering/registry.py", 45): "registry/default wiring (ffmpeg alias)",
+    ("astrid/core/rendering/registry.py", 42): "registry/default wiring (remotion alias)",
+    ("astrid/core/rendering/registry.py", 43): "registry/default wiring (ffmpeg alias)",
     # --- profile: legacy canvas-discovery compatibility shim -------------
     ("astrid/core/rendering/profile.py", 113): "legacy compatibility shim (remotion canvas discovery)",
 }

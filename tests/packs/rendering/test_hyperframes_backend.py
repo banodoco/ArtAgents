@@ -121,7 +121,6 @@ def _text_timeline(tmp_path: Path) -> Path:
 def test_hyperframes_pack_is_discovered_and_inspected() -> None:
     renderers, _planners, _finalizers = load_default_registries(
         extra_pack_roots=(str(PACK_ROOT),),
-        include_installed=True,
     )
     candidates = renderers.candidates(HYPERFRAMES_ID)
     assert len(candidates) == 1, [c.to_dict() for c in candidates]

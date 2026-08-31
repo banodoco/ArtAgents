@@ -239,7 +239,7 @@ def test_facade_without_project_fails_before_creating_ledger(
     inputs = _write_project_inputs(projects_root)
     out_arg = None if out is None else tmp_path / "out"
 
-    with pytest.raises(ExecutorRunnerError, match="project required"):
+    with pytest.raises(ExecutorRunnerError, match="project is required"):
         run_executor(
             ExecutorRunRequest(
                 executor_id="rendering.render",

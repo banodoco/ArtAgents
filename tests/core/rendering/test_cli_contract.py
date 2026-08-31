@@ -120,7 +120,6 @@ def test_inspect_json_shape_is_stable() -> None:
         "source_kind",
         "manifest_path",
         "precedence",
-        "active_revision",
         "alias_chain",
         "override",
         "conflicts",
@@ -163,7 +162,6 @@ def test_inspect_json_shape_for_scaffolded_extra_root_pack(tmp_path: Path) -> No
         "source_kind",
         "manifest_path",
         "precedence",
-        "active_revision",
         "alias_chain",
         "override",
         "conflicts",
@@ -742,10 +740,9 @@ def test_replay_json_shape_is_stable(tmp_path: Path) -> None:
     """The replay verb emits one frozen JSON object under --json (no
     universal envelope)."""
     from astrid.core.foundation.hash import sha256_file as _sha256
-    from astrid.core.rendering.replay import ReplayBundle, write_replay_bundle
-    from astrid.core.rendering.registry import load_default_registries
     from astrid.core.rendering.contracts import compute_request_digest as _digest
-    from tests.core.rendering.test_replay import _copy_pack, _candidate
+    from astrid.core.rendering.replay import ReplayBundle, write_replay_bundle
+    from tests.core.rendering.test_replay import _candidate, _copy_pack
 
     extra_root = _copy_pack(tmp_path)
     candidate = _candidate(extra_root)

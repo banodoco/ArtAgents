@@ -10,8 +10,6 @@ propagation, cwd propagation).
 
 from __future__ import annotations
 
-import importlib
-import io
 import sys
 import textwrap
 import types
@@ -29,7 +27,7 @@ from astrid.core.contracts.schema import (
     Port,
 )
 from astrid.core.execution.executor import runner as executor_runner
-from astrid.core.execution.executor.argv import executor_argv, resolve_executor_runtime_module
+from astrid.core.execution.executor.argv import executor_argv
 from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry
 from astrid.core.execution.executor.runner import (
     ExecutorRunnerError,
@@ -44,7 +42,6 @@ from astrid.core.execution.executor.schema import (
     ExecutorValidationError,
 )
 from astrid.core.io.cas import executor_definition_digest
-from astrid.core.pack.resolver import PackResolverError
 
 
 @pytest.fixture(autouse=True)
@@ -466,9 +463,6 @@ def test_executor_argv_resolves_canonical_id_and_bare_pipeline_step() -> None:
         "-m",
         "astrid.packs.rendering.executors.render.run",
     ]
-    assert resolve_executor_runtime_module("upload.youtube") == "astrid.packs.youtube.executors.upload.run"
-
-
 def test_executor_argv_rejects_non_pipeline_bare_name() -> None:
     with pytest.raises(ValueError, match="could not resolve executor step 'upload'"):
         executor_argv("upload", "/opt/python")
@@ -589,73 +583,6 @@ def test_builtin_executor_unknown_pipeline_step(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# youtube.upload built-in — required input
-# ---------------------------------------------------------------------------
-
-
-def test_upload_youtube_requires_video_url(tmp_path: Path) -> None:
-    executor = _executor(
-        executor_id="youtube.upload",
-        argv=None,
-        metadata={
-            "callable_module": "astrid.packs.youtube.executors.upload.src.social_publish",
-            "callable_name": "publish_youtube_video",
-        },
-    )
-    registry = _registry(executor)
-
-    with pytest.raises(ExecutorRunnerError, match="video_url is required"):
-        run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
-
-
-def test_upload_youtube_alias_dispatches_through_canonical_special_case(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from astrid.packs.youtube.executors.upload.src import social_publish
-
-    called: dict[str, Any] = {}
-
-    def _fake_publish(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {"ok": True}
-
-    monkeypatch.setattr(social_publish, "publish_youtube_video", _fake_publish)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id="upload.youtube",
-            out=tmp_path,
-            inputs={
-                "video_url": "https://example.com/video.mp4",
-                "title": "Title",
-                "description": "Desc",
-            },
-        ),
-        load_default_registry(),
-    )
-
-    assert result.executor_id == "youtube.upload"
-    assert result.payload == {"ok": True}
-    assert called == {
-        "video_url": "https://example.com/video.mp4",
-        "title": "Title",
-        "description": "Desc",
-        "tags": None,
-        "privacy_status": "private",
-        "playlist_id": None,
-        "made_for_kids": False,
-    }
-
-
-def test_upload_youtube_reports_missing_callable_metadata(tmp_path: Path) -> None:
-    executor = _executor(executor_id="youtube.upload", argv=None, metadata={})
-    registry = _registry(executor)
-
-    with pytest.raises(PackResolverError, match=r"youtube\.upload manifest is missing metadata\.callable_module"):
-        run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
-
-
 def test_pipeline_module_derived_from_command_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -775,244 +702,6 @@ def test_external_executor_missing_executable_raises_oserror(tmp_path: Path) -> 
     with pytest.raises(FileNotFoundError):
         run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
 
-
-def test_external_executor_in_process_mode_avoids_subprocess_and_returns_executor_result_shape(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executor = _executor(
-        executor_id="test.in_process_help",
-        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-
-    def _fail_subprocess(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("subprocess.run should not be used in in_process mode")
-
-    monkeypatch.setattr(executor_runner.subprocess, "run", _fail_subprocess)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id=executor.id,
-            out=tmp_path,
-            execution_mode="in_process",
-        ),
-        registry,
-    )
-
-    assert result.command == executor.command.argv
-    assert result.cwd is None
-    assert result.env == {}
-    assert result.returncode == 0
-    assert result.ok is True
-    assert result.error is None
-    assert result.payload == {
-        "executor_id": executor.id,
-        "missing_binaries": [],
-        "returncode": 0,
-        "skipped": False,
-        "skipped_reason": "",
-    }
-
-
-def test_external_executor_in_process_mode_shallow_merges_runtime_payload_with_runner_keys_authoritative(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executor = _executor(
-        executor_id="test.in_process_payload_merge",
-        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-
-    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
-        return types.SimpleNamespace(
-            returncode=7,
-            payload={
-                "artifact": str(tmp_path / "artifact.json"),
-                "returncode": 99,
-                "executor_id": "runtime.executor",
-                "missing_binaries": ["runtime-bin"],
-                "skipped": True,
-                "skipped_reason": "runtime value",
-            },
-        )
-
-    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id=executor.id,
-            out=tmp_path,
-            execution_mode="in_process",
-        ),
-        registry,
-    )
-
-    assert result.returncode == 7
-    assert result.payload == {
-        "artifact": str(tmp_path / "artifact.json"),
-        "executor_id": executor.id,
-        "missing_binaries": [],
-        "returncode": 7,
-        "skipped": False,
-        "skipped_reason": "",
-    }
-
-
-def test_external_executor_default_mode_remains_subprocess_first(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executor = _executor(
-        executor_id="test.subprocess_default",
-        argv=(sys.executable, "-c", "pass"),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-    seen: dict[str, Any] = {}
-
-    def _fake_subprocess_run(
-        argv: list[str],
-        *,
-        cwd: str | None,
-        env: Mapping[str, str],
-        check: bool,
-    ) -> types.SimpleNamespace:
-        seen["argv"] = tuple(argv)
-        seen["cwd"] = cwd
-        seen["check"] = check
-        seen["env"] = env
-        return types.SimpleNamespace(returncode=0)
-
-    def _fail_in_process(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("invoke_in_process_command should not be used by default")
-
-    monkeypatch.setattr(executor_runner.subprocess, "run", _fake_subprocess_run)
-    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fail_in_process)
-
-    result = run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
-
-    assert seen["argv"] == executor.command.argv
-    assert seen["cwd"] is None
-    assert seen["check"] is False
-    assert result.returncode == 0
-    assert result.ok is True
-
-
-def test_external_executor_in_process_mode_rejects_different_python_interpreter(
-    tmp_path: Path,
-) -> None:
-    foreign_python = tmp_path / "venv" / "bin" / "python"
-    executor = _executor(
-        executor_id="test.in_process_wrong_python",
-        argv=(
-            str(foreign_python),
-            "-m",
-            "astrid.packs.youtube.executors.upload.run",
-            "--help",
-        ),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id=executor.id,
-            out=tmp_path,
-            execution_mode="in_process",
-        ),
-        registry,
-    )
-
-    assert result.returncode == 1
-    assert result.ok is False
-    assert result.error is not None
-    assert result.error.code == "in_process_precondition"
-    assert result.error.type == "precondition"
-    assert "requires interpreter" in result.error.message
-
-
-def test_external_executor_in_process_mode_captures_logs_and_preserves_terminal_output(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """SC13: the supported path is serialized execution, so stdout/stderr are
-    monkeypatched once at the process level and must still receive live output
-    while run logs are written."""
-
-    pack_root = _extend_packs_path(monkeypatch, tmp_path)
-    module_path = pack_root / "chatty_runtime_test.py"
-    module_path.write_text(
-        "\n".join(
-            [
-                "from __future__ import annotations",
-                "import sys",
-                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
-                "guard_canonical_entrypoint('test.in_process_chatty')",
-                "",
-                "def main(argv=None):",
-                "    print('chatty stdout line')",
-                "    print('chatty stderr line', file=sys.stderr)",
-                "    return {'artifact': 'ok'}",
-            ]
-        ),
-        encoding='utf-8',
-    )
-    importlib.invalidate_caches()
-    sys.modules.pop("astrid.packs.chatty_runtime_test", None)
-
-    executor = _executor(
-        executor_id="test.in_process_chatty",
-        argv=(sys.executable, "-m", "astrid.packs.chatty_runtime_test"),
-        metadata={
-            "runtime_module": "astrid.packs.chatty_runtime_test",
-            "runtime_entrypoint": "main",
-        },
-    )
-    live_stdout = io.StringIO()
-    live_stderr = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", live_stdout)
-    monkeypatch.setattr(sys, "stderr", live_stderr)
-
-    request = ExecutorRunRequest(
-        executor_id=executor.id,
-        out=tmp_path,
-        execution_mode="in_process",
-        run_root=tmp_path / "run",
-    )
-    result = executor_runner._run_in_process_executor_command(
-        executor,
-        request,
-        command=executor.command.argv,
-        cwd=None,
-        env={},
-    )
-
-    assert result.returncode == 0
-    assert result.payload["artifact"] == "ok"
-    assert live_stdout.getvalue().splitlines() == ["chatty stdout line"]
-    assert live_stderr.getvalue().splitlines() == ["chatty stderr line"]
-    assert (tmp_path / "run" / "logs" / "stdout.log").read_text(encoding="utf-8").splitlines() == [
-        "chatty stdout line"
-    ]
-    assert (tmp_path / "run" / "logs" / "stderr.log").read_text(encoding="utf-8").splitlines() == [
-        "chatty stderr line"
-    ]
 
 
 def test_external_executor_env_includes_definition_env(tmp_path: Path) -> None:
@@ -1151,163 +840,7 @@ def test_unknown_executor_id_raises_key_error(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Generation facade contract tests — GENERATION_RESULT_KEY passthrough
-# and runner-authoritative collision precedence
-# ---------------------------------------------------------------------------
 
-
-def test_in_process_generation_result_key_passthrough_preserves_dict(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Runtime payload keys outside the runner-authoritative set are preserved.
-
-    When an in-process executor returns a payload containing
-    ``GENERATION_RESULT_KEY``, the generation result dict must survive the
-    ``_merge_runner_payload`` shallow merge so facade code (T6+) can
-    reconstruct a ``GenerationResult`` later.
-    """
-    from astrid.core.generation import GENERATION_RESULT_KEY
-
-    executor = _executor(
-        executor_id="test.gen_result_passthrough",
-        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-
-    gen_result = {
-        "mode": "t2i",
-        "backend": "local",
-        "model": "z-image",
-        "image_paths": ["/tmp/img_01.png", "/tmp/img_02.png"],
-        "ok": True,
-        "error": None,
-        "manifest": {"prompt": "a red bicycle"},
-        "run_dir": "/tmp/run_abc",
-    }
-
-    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
-        return types.SimpleNamespace(
-            returncode=0,
-            payload={
-                "custom_artifact": str(tmp_path / "out.json"),
-                GENERATION_RESULT_KEY: gen_result,
-            },
-        )
-
-    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id=executor.id,
-            out=tmp_path,
-            execution_mode="in_process",
-        ),
-        registry,
-    )
-
-    # Runner-authoritative keys are set.
-    assert result.payload["executor_id"] == executor.id
-    assert result.payload["returncode"] == 0
-    assert result.payload["missing_binaries"] == []
-    assert result.payload["skipped"] is False
-    assert result.payload["skipped_reason"] == ""
-
-    # Runtime-only key is preserved.
-    assert result.payload["custom_artifact"] == str(tmp_path / "out.json")
-
-    # GENERATION_RESULT_KEY is preserved intact.
-    assert result.payload[GENERATION_RESULT_KEY] == gen_result
-    assert result.payload[GENERATION_RESULT_KEY]["mode"] == "t2i"
-    assert result.payload[GENERATION_RESULT_KEY]["image_paths"] == [
-        "/tmp/img_01.png",
-        "/tmp/img_02.png",
-    ]
-
-
-def test_in_process_returncode_collision_runner_wins_and_generation_result_preserved(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """SC5: runtime ``returncode`` is overwritten by the runner's authoritative value.
-
-    A synthetic in-process executor returning
-    ``{GENERATION_RESULT_KEY: {...}, "returncode": 99}`` must yield:
-    * preserved ``generation_result`` in the payload
-    * runner-level ``returncode`` (7, not 99) in both ``result.returncode``
-      and ``result.payload["returncode"]``
-    """
-    from astrid.core.generation import GENERATION_RESULT_KEY
-
-    executor = _executor(
-        executor_id="test.returncode_collision",
-        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
-        metadata={
-            "runtime_module": "astrid.packs.youtube.executors.upload.run",
-            "runtime_entrypoint": "main",
-        },
-    )
-    registry = _registry(executor)
-
-    gen_result = {
-        "mode": "t2v",
-        "backend": "local",
-        "model": "wan-2.2",
-        "video_paths": ["/tmp/vid_01.mp4"],
-        "ok": True,
-        "error": None,
-        "manifest": {"prompt": "a cat walking"},
-        "run_dir": "/tmp/run_def",
-    }
-
-    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
-        return types.SimpleNamespace(
-            returncode=7,
-            payload={
-                GENERATION_RESULT_KEY: gen_result,
-                "returncode": 99,
-                "executor_id": "runtime.executor",
-                "missing_binaries": ["runtime-bin"],
-                "skipped": True,
-                "skipped_reason": "runtime value",
-            },
-        )
-
-    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id=executor.id,
-            out=tmp_path,
-            execution_mode="in_process",
-        ),
-        registry,
-    )
-
-    # Runner returncode is authoritative on the result struct.
-    assert result.returncode == 7
-
-    # Runner returncode is authoritative in the payload — runtime's 99 is
-    # overwritten during _merge_runner_payload.
-    assert result.payload["returncode"] == 7
-
-    # Other runner-authoritative keys also overwrite runtime values.
-    assert result.payload["executor_id"] == executor.id
-    assert result.payload["missing_binaries"] == []
-    assert result.payload["skipped"] is False
-    assert result.payload["skipped_reason"] == ""
-
-    # GENERATION_RESULT_KEY is preserved intact alongside runner keys.
-    assert result.payload[GENERATION_RESULT_KEY] == gen_result
-    assert result.payload[GENERATION_RESULT_KEY]["mode"] == "t2v"
-    assert result.payload[GENERATION_RESULT_KEY]["video_paths"] == ["/tmp/vid_01.mp4"]
-
-
-# ---------------------------------------------------------------------------
 # SC4: scoped_configs dispatch-time validation (T4)
 # ---------------------------------------------------------------------------
 
@@ -1336,7 +869,6 @@ def test_known_scoped_config_key_style_does_not_raise_at_dispatch(
     tmp_path: Path,
 ) -> None:
     """'style' is a registered key — dispatch must NOT raise."""
-    import astrid.core.theme.scope  # ensure registration
     executor = ExecutorDefinition(
         **{
             **_executor(executor_id="test.style_scope").__dict__,
@@ -1357,7 +889,6 @@ def test_scoped_config_style_emits_hype_active_theme_in_subprocess_env(
 ) -> None:
     """When scoped_configs includes 'style' and a theme is resolved, HYPE_ACTIVE_THEME
     is emitted into the subprocess env (SINGLE source, tagged # scoped-config emit)."""
-    import astrid.core.theme.scope  # ensure registration
     from astrid.core.env_vars import HYPE_ACTIVE_THEME
 
     # Create a fake theme directory so resolve_theme_dir returns a real Path.

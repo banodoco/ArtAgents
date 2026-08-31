@@ -15,7 +15,6 @@ from __future__ import annotations
 import ast
 import json
 import os
-import re
 import subprocess
 import sys
 import textwrap
@@ -277,7 +276,7 @@ def test_editorial_arrange_is_discoverable_via_discover() -> None:
     """``editorial.arrange`` must appear in ``discover()`` results."""
     import astrid as sdk
 
-    discovery = sdk.discover(include_installed=False)
+    discovery = sdk.discover()
     executor_ids = {e.id for e in discovery.executors}
     assert "editorial.arrange" in executor_ids, (
         f"editorial.arrange not found in discovery. "
@@ -294,7 +293,6 @@ def test_editorial_arrange_is_inspectable_via_get_capability() -> None:
     cap = sdk.get_capability(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
     )
 
     assert cap.id == "editorial.arrange"
@@ -319,7 +317,7 @@ def test_editorial_arrange_handle_has_provenance() -> None:
     import astrid as sdk
 
     cap = sdk.get_capability(
-        "editorial.arrange", kind="executor", include_installed=False
+        "editorial.arrange", kind="executor"
     )
     handle = cap.handle
     prov = handle.provenance
@@ -337,7 +335,7 @@ def test_editorial_arrange_handle_has_safety_declaration() -> None:
     import astrid as sdk
 
     cap = sdk.get_capability(
-        "editorial.arrange", kind="executor", include_installed=False
+        "editorial.arrange", kind="executor"
     )
     safety = cap.handle.safety
     assert hasattr(safety, "network"), "SafetyDeclaration missing 'network'"
@@ -374,7 +372,6 @@ def test_get_capability_not_found_raises_capability_not_found_error() -> None:
         sdk.get_capability(
             "missing.capability",
             kind="executor",
-            include_installed=False,
         )
 
 
@@ -389,7 +386,6 @@ def test_get_capability_ambiguous_raises_capability_ambiguous_error() -> None:
         sdk.get_capability(
             "fade",
             kind="element",
-            include_installed=False,
         )
 
 
@@ -426,7 +422,7 @@ def test_capability_schema_is_json_serializable() -> None:
     import astrid as sdk
 
     cap = sdk.get_capability(
-        "editorial.arrange", kind="executor", include_installed=False
+        "editorial.arrange", kind="executor"
     )
 
     schema_dict = cap.schema
@@ -443,7 +439,7 @@ def test_discovery_result_is_iterable() -> None:
     """``DiscoveryResult`` must expose typed groupings as documented."""
     import astrid as sdk
 
-    discovery = sdk.discover(include_installed=False)
+    discovery = sdk.discover()
 
     assert hasattr(discovery, "executors")
     assert hasattr(discovery, "orchestrators")
@@ -540,7 +536,7 @@ def test_provenance_is_populated_on_editorial_arrange() -> None:
     import astrid as sdk
 
     cap = sdk.get_capability(
-        "editorial.arrange", kind="executor", include_installed=False
+        "editorial.arrange", kind="executor"
     )
     prov = cap.handle.provenance
     assert prov.source, "Provenance source is empty"

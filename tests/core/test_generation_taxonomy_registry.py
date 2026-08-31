@@ -91,7 +91,6 @@ extensions:
     registry = load_default_generation_taxonomy_registry(
         project_root=tmp_path,
         extra_pack_roots=(str(extra_root),),
-        include_installed=False,
     )
 
     assert "mask_ref" in registry.feature_ids()

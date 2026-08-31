@@ -1,7 +1,7 @@
 """M2 pack-machinery characterization tests.
 
 Captures the canonical pack import surface, module contracts,
-patch seams (install), and the ``astrid/packs/`` data-tree layout
+and the ``astrid/packs/`` data-tree layout
 so that structural changes can be verified against a known baseline.
 
 These are characterization tests — they test current behavior without
@@ -61,23 +61,9 @@ class PackCoreExportsTest(unittest.TestCase):
         """Key names can be imported via ``from astrid.core.pack import X``."""
         from astrid.core.pack import (
             ELEMENT_KIND_REGISTRY,
-            ElementKindDescriptor,
-            ElementKindRegistry,
             PackDefinition,
             PackValidationError,
             discover_packs,
-            element_kind_registry_for_pack,
-            ensure_local_pack,
-            iter_element_roots,
-            iter_executor_roots,
-            iter_orchestrator_roots,
-            load_pack_manifest,
-            pack_manifest_path,
-            pack_taxonomy_from_manifest,
-            packs_root,
-            qualified_id_pack_id,
-            validate_content_id_in_pack,
-            validate_element_pack_id,
         )
 
         self.assertIsNotNone(PackDefinition)
@@ -87,7 +73,6 @@ class PackCoreExportsTest(unittest.TestCase):
 
     def test_pack_model_types_are_classes(self) -> None:
         from astrid.core.pack import (
-            ElementKindDescriptor,
             ElementKindRegistry,
             PackDefinition,
             PackValidationError,
@@ -221,12 +206,6 @@ class PackSubmoduleImportsTest(unittest.TestCase):
         self.assertTrue(hasattr(gi, "gitignore_filter"))
         self.assertTrue(callable(gi.gitignore_filter))
 
-    def test_install_importable(self) -> None:
-        """astrid.core.pack.install is the canonical install module."""
-        import astrid.core.pack.install as inst
-
-        self.assertIsNotNone(inst)
-
     def test_pack_module_is_a_package(self) -> None:
         """astrid.core.pack is a package namespace."""
         import astrid.core.pack
@@ -238,7 +217,7 @@ class PackSubmoduleImportsTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.core.pack sub-submodules (discovery, resolver, store)
+# astrid.core.pack sub-submodules (discovery, resolver)
 # ---------------------------------------------------------------------------
 
 class PackSubSubmodulesTest(unittest.TestCase):
@@ -279,22 +258,11 @@ class PackSubSubmodulesTest(unittest.TestCase):
         self.assertTrue(issubclass(pr.PackResolverError, RuntimeError))
         self.assertTrue(issubclass(pr.CallableNotFoundError, pr.PackResolverError))
 
-    def test_pack_store_importable(self) -> None:
-        import astrid.core.pack.store as ps
-
-        for name in ("InstallRecord", "InstalledPackStore"):
-            with self.subTest(name=name):
-                self.assertTrue(
-                    hasattr(ps, name),
-                    f"astrid.core.pack.store missing {name}",
-                )
-
     def test_submodules_importable_as_modules(self) -> None:
-        """discovery, resolver, store are importable under astrid.core.pack."""
+        """discovery and resolver are importable under astrid.core.pack."""
         for module_path in (
             "astrid.core.pack.discovery",
             "astrid.core.pack.resolver",
-            "astrid.core.pack.store",
         ):
             with self.subTest(module=module_path):
                 mod = __import__(module_path, fromlist=["__path__"])
@@ -302,72 +270,6 @@ class PackSubSubmodulesTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Patch seams — install (canonical)
-# ---------------------------------------------------------------------------
-
-class PackInstallPatchSeamsTest(unittest.TestCase):
-    """``mock.patch('astrid.core.pack.install.*')`` targets must resolve."""
-
-    def test_patch_install_confirm_trust_resolves(self) -> None:
-        """Patching _confirm_trust through astrid.core.pack.install must work."""
-        import astrid.core.pack.install
-
-        self.assertTrue(
-            hasattr(astrid.core.pack.install, "_confirm_trust"),
-            "_confirm_trust must exist on astrid.core.pack.install",
-        )
-        self.assertTrue(callable(astrid.core.pack.install._confirm_trust))
-
-        with mock.patch(
-            "astrid.core.pack.install._confirm_trust",
-            return_value=True,
-        ) as patched:
-            result = astrid.core.pack.install._confirm_trust("dummy")
-            self.assertTrue(result)
-            patched.assert_called_once_with("dummy")
-
-    def test_patch_install_confirm_resolves(self) -> None:
-        """Patching _confirm through astrid.core.pack.install must work."""
-        import astrid.core.pack.install
-
-        self.assertTrue(
-            hasattr(astrid.core.pack.install, "_confirm"),
-            "_confirm must exist on astrid.core.pack.install",
-        )
-
-        with mock.patch(
-            "astrid.core.pack.install._confirm",
-            return_value=True,
-        ) as patched:
-            result = astrid.core.pack.install._confirm("prompt")
-            self.assertTrue(result)
-            patched.assert_called_once_with("prompt")
-
-    def test_patch_install_pack_resolves(self) -> None:
-        """Patching install_pack through astrid.core.pack.install must work."""
-        import astrid.core.pack.install
-
-        with mock.patch(
-            "astrid.core.pack.install.install_pack",
-            return_value=0,
-        ) as patched:
-            result = astrid.core.pack.install.install_pack(Path("/tmp"))
-            self.assertEqual(result, 0)
-            patched.assert_called_once_with(Path("/tmp"))
-
-    def test_patch_update_pack_resolves(self) -> None:
-        """Patching update_pack through astrid.core.pack.install must work."""
-        import astrid.core.pack.install
-
-        with mock.patch(
-            "astrid.core.pack.install.update_pack",
-            return_value=0,
-        ) as patched:
-            result = astrid.core.pack.install.update_pack("test_pack")
-            self.assertEqual(result, 0)
-            patched.assert_called_once_with("test_pack")
-
-
 # ---------------------------------------------------------------------------
 # astrid.core.pack.entrypoint shim
 # ---------------------------------------------------------------------------

@@ -24,7 +24,6 @@ from pathlib import Path
 import pytest
 
 import astrid
-from astrid.sdk.exceptions import CapabilityValidationError
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     FrozenIntegrityError,
     load_frozen_view,
@@ -53,6 +52,7 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
 from astrid.packs.understanding.executors.visual_understand.run import (
     OrderedImageEvidence,
 )
+from astrid.sdk.exceptions import CapabilityValidationError
 from tests.packs.rendering.test_timeline_visualize_executor import _rewrite_registry_event
 from tests.packs.rendering.test_timeline_visualize_frozen import (
     _append_v160,
@@ -575,7 +575,6 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
         astrid.invoke(
             "rendering.timeline_visualize",
             kind="executor",
-            include_installed=False,
             project=slug,
             inputs={
                 "project_slug": slug,
@@ -584,7 +583,7 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
                 "filmstrip": "off",
                 "timeline_source": str(timeline),
             },
-            execution_mode="subprocess",
+            project_root=tmp_projects_root,
         )
     assert set((project_root / "runs").iterdir()) == run_roots_before
 

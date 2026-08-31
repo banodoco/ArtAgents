@@ -214,12 +214,12 @@ def test_generate_core_returns_enriched_generation_result(
     assert embedded_fields["created"]
 
 
-def test_run_sdk_and_main_preserve_in_process_and_cli_contracts(
+def test_run_sdk_and_main_preserve_contracts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """run_sdk returns payload data while main keeps the legacy manifest print."""
+    """run_sdk returns payload data while the CLI entry point stays usable."""
     from astrid.core.generation import GENERATION_RESULT_KEY
     from astrid.packs.generation.executors.generate_image import run as run_mod
 

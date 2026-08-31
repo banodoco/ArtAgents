@@ -283,7 +283,6 @@ class TestDefaultRegistryOverrideStoreWiring:
             ):
                 registry = executor_registry_module.load_default_registry(
                     project_root=tmp,
-                    include_installed=False,
                 )
 
             assert registry.override_store is not None
@@ -336,7 +335,6 @@ class TestDefaultRegistryOverrideStoreWiring:
                 registry = orchestrator_registry_module.load_default_registry(
                     executor_registry=ExecutorRegistry(),
                     project_root=tmp,
-                    include_installed=False,
                 )
 
             assert registry.override_store is not None

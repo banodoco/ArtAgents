@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 
@@ -316,6 +315,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
             self.calls.append(("list", project))
             return SimpleNamespace(ok=True, data=[{
                 "run_id": TARGET_RUN_ID,
+                "project_id": "demo",
                 "status": "succeeded",
                 "output_artifacts": [{
                     "kind": "image",
@@ -345,19 +345,21 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
     monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
     monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
 
-    result = run_orchestrator(
-        OrchestratorRunRequest(
-            orchestrator_id="video_editing.iteration_video",
+    result = iteration_video.run_orchestrator(
+        SimpleNamespace(
             out=out_dir,
             project="demo",
-            project_was_auto_resolved=True,
             run_root=None,
             inputs={"target_run_id": TARGET_RUN_ID},
-            orchestrator_args=("--repo-root", str(tmp_path), "--renderer", "rendering.fixture"),
-        )
+            orchestrator_args=(
+                "--repo-root", str(tmp_path), "--renderer", "rendering.fixture", "--force"
+            ),
+            dry_run=False,
+        ),
+        SimpleNamespace(id="video_editing.iteration_video", kind="orchestrator"),
     )
 
-    assert result.ok
+    assert result["returncode"] == 0, result
     assert runtime.calls == [("list", "demo")]
     assert runtime.objects == [("demo", "object-image-1")]
     assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"

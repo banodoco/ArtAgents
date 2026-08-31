@@ -29,7 +29,7 @@ BACKEND_MODULE_PREFIXES = (
 
 
 def _registries():
-    return load_default_registries(ROOT, include_installed=False)
+    return load_default_registries(ROOT)
 
 
 def _write_media_timeline(

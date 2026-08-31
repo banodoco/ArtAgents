@@ -141,7 +141,7 @@ def _resolver(
 
 def _plan(tmp_path: Path, timeline: dict, *, config: dict | None = None) -> RenderPlan:
     renderers, _planners, finalizers = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )
     return hybrid.plan(
         _request(tmp_path, timeline, config=config),
@@ -414,7 +414,7 @@ def test_canonical_mp4_time_base(
 
 def test_real_support_evidence_and_identity(tmp_path: Path) -> None:
     renderers, _planners, finalizers = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )
     timeline = _timeline(
         clips=[
@@ -448,7 +448,7 @@ def test_real_support_evidence_and_identity(tmp_path: Path) -> None:
 
 def test_support_resolver_rejection_is_structured(tmp_path: Path) -> None:
     renderers, _planners, finalizers = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )
     request = _request(tmp_path, _timeline(clips=[_text(at=0, hold=1)]))
     with pytest.raises(RendererUnsupportedError) as caught:
@@ -498,7 +498,7 @@ def test_clip_frame_range_rounds_and_keeps_minimum_one_frame() -> None:
 
 def test_registered_protocol_and_registry_identity(tmp_path: Path) -> None:
     renderers, planners, finalizers = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )
     candidate = planners.get(hybrid.BACKEND_ID)
     assert candidate.manifest.operations == ("support", "plan")
@@ -525,7 +525,7 @@ def test_registered_protocol_and_registry_identity(tmp_path: Path) -> None:
 
 def test_registered_protocol_rejects_empty_timeline(tmp_path: Path) -> None:
     _planners_holder = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )[1]
     candidate = _planners_holder.get(hybrid.BACKEND_ID)
     request = _request(tmp_path, _timeline())

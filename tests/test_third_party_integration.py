@@ -41,7 +41,7 @@ def test_env_discovery_populates_sdk_discovery_dto(monkeypatch: pytest.MonkeyPat
     clear_default_registry_cache()
 
     astrid = importlib.import_module("astrid")
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     env_packs = {
         pack["id"]: pack
@@ -82,7 +82,7 @@ def test_env_backend_pack_registers_descriptor_and_dispatches_generate_image(
     create_backend_only_pack(env_root / "third_party_backend")
     monkeypatch.setenv(ASTRID_PACKS_PATH_ENV, str(env_root))
 
-    backend_registry = load_default_generation_backend_registry(include_installed=False)
+    backend_registry = load_default_generation_backend_registry()
     descriptor = backend_registry.get_descriptor(SYNTHETIC_BACKEND_ID)
     assert descriptor.module == SYNTHETIC_BACKEND_MODULE
     assert descriptor.class_name == SYNTHETIC_BACKEND_CLASS
@@ -131,7 +131,7 @@ def test_env_element_pack_validates_loads_lists_and_reaches_sdk(monkeypatch: pyt
     # discovery requires dropping the cached element corpus.
     clear_default_registry_cache()
 
-    registry = load_default_registry(include_installed=False)
+    registry = load_default_registry()
     widget = registry.get("widget", "glow")
     listed = registry.list("widgets")
 
@@ -144,7 +144,6 @@ def test_env_element_pack_validates_loads_lists_and_reaches_sdk(monkeypatch: pyt
         "glow",
         kind="element",
         element_kind="widget",
-        include_installed=False,
     )
     assert capability.id == "widgets/glow"
     assert capability.handle.kind == "widgets"
@@ -157,5 +156,4 @@ def test_env_element_pack_validates_loads_lists_and_reaches_sdk(monkeypatch: pyt
             "glow",
             kind="element",
             element_kind="wigdet",
-            include_installed=False,
         )

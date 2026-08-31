@@ -34,7 +34,6 @@ from typing import Any, Mapping
 import pytest
 from PIL import Image
 
-import astrid
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.timeline.duration import (
@@ -106,6 +105,9 @@ _FROZEN_REL_PATHS = (
 _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "5557754c",
     "astrid/core/timeline/_shared.py": "b768588e",
+    # The bridge deletion removed the migration-only ``timeline.imported``
+    # projection branch from this canonical local projector.
+    "astrid/core/timeline/projection.py": "1b87f869",
     # The schema received several reviewed, additive/narrowing updates during
     # the epic (the explicit schema import path, media identity, and the
     # pinned clip allowlist).  The final convergence checkout also carries
@@ -113,7 +115,7 @@ _FROZEN_LEGITIMATE_UPDATES = {
     # reviewed revision so the pre-update merge blob is treated as history,
     # while every later revision must remain byte-identical to current bytes.
     # ``git log`` is newest-first, so older pre-update history is ignored.
-    "astrid/core/timeline/banodoco_schema.py": "0eb3a146",
+    "astrid/core/timeline/banodoco_schema.py": "e880b5a0",
 }
 
 REPO_ROOT = TESTS_ROOT.parent

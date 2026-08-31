@@ -46,8 +46,3 @@ aliases:
   canonical_id: youtube.youtube_audio
   deprecated: true
   deprecation_message: Moved to youtube.youtube_audio
-- kind: executor
-  alias: upload.youtube
-  canonical_id: youtube.upload
-  deprecated: true
-  deprecation_message: Moved to youtube.upload

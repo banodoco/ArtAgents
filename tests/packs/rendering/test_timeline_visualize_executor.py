@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-import astrid
 from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.foundation.project_paths import project_dir
@@ -55,8 +54,7 @@ def _prepare_project(
     return root, first
 
 
-def _invoke(slug: str, *, execution_mode: str = "in_process", **extra_inputs):
-    del execution_mode
+def _invoke(slug: str, **extra_inputs):
     return invoke_local_visualization(
         slug, run_module=run_module, formats=["png", "svg", "md"], **extra_inputs
     )
@@ -233,7 +231,6 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     result = _invoke(
         slug,
         timeline_source=str(timeline_dir),
-        execution_mode="subprocess",
     )
     captured = capsys.readouterr()
 
@@ -415,7 +412,6 @@ def test_rendered_video_mode_refuses_unverified_output(tmp_projects_root: Path) 
         timeline_source=str(timeline_dir),
         filmstrip="rendered",
         rendered_video=str(unregistered),
-        execution_mode="subprocess",
     )
     assert result.ok is False
     assert "rendered filmstrip refused: hash_unrecorded" in json.dumps(result.error)
@@ -462,8 +458,6 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     assert result.ok is True
     pack_root = Path(result.outputs["pack_root"])
     view_map = json.loads((pack_root / "view-map.json").read_text(encoding="utf-8"))
-    asset_index = json.loads((pack_root / "asset-index.json").read_text(encoding="utf-8"))
-    asset_refs = {asset["qualified_ref"] for asset in asset_index["assets"]}
     filmstrip_dir = pack_root / "filmstrip"
     assert filmstrip_dir.is_dir()
     # Filmstrips are keyed per page (copied stem = "{page_id}_{asset_ref}"),

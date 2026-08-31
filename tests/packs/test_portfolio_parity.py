@@ -8,9 +8,8 @@ For every shipped pack id in ``PORTFOLIO_PACK_IDS`` we prove:
   — same code path user-external packs use.
 * The pack's representative executor dispatches through
   :func:`_run_external_executor` (the same path external packs
-  use), **not** :func:`run_builtin_executor`. We verify this
-  in-process by stubbing both runner entrypoints and asserting only the
-  external one was called.
+  use). We verify the dispatch boundary by stubbing that subprocess
+  entrypoint.
 * Per-component manifests are v1-compliant: ``schema_version: 1`` is
   present on every per-component manifest with a valid ``kind``.
 """
@@ -56,7 +55,7 @@ REPRESENTATIVE_EXECUTORS: dict[str, str] = {
     "rendering": "rendering.render",
     "training": "training.asset_cache",
     "iteration": "iteration.assemble",
-    "youtube": "youtube.upload",
+    "youtube": "youtube.youtube_audio",
     "vibecomfy": "vibecomfy.validate",
     "moirae": "moirae.moirae",
     "runpod": "runpod.session",
@@ -169,7 +168,7 @@ def test_component_manifests_v1_compliant(pack_id: str) -> None:
 
 # ---------------------------------------------------------------------------
 # Dispatch path parity — every pack's representative executor goes through
-# _run_external_executor, not the in-process builtin path.
+# _run_external_executor.
 # ---------------------------------------------------------------------------
 
 
@@ -180,23 +179,17 @@ DISPATCH_PACK_IDS = [pack_id for pack_id in PORTFOLIO_PACK_IDS if pack_id != "re
 def test_representative_executor_dispatches_external(pack_id: str) -> None:
     """The pack's representative executor goes through the external path.
 
-    Same parity proof the seinfeld pack already carries: we patch both
-    ``_run_external_executor`` and the in-process ``run_builtin_executor``,
-    then run the executor. The external stub must fire; the builtin stub
-    must NOT fire.
+    Patch the generic subprocess dispatch entrypoint and prove that the
+    representative command reaches it.
     """
     from astrid.core.execution.executor import runner as runner_mod
     from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunResult
 
     executor_id = REPRESENTATIVE_EXECUTORS[pack_id]
-    registry = load_executor_registry(include_installed=False)
+    registry = load_executor_registry()
     executor = registry.get(executor_id)
 
-    # The in-process path lives in runner_mod._run_builtin_executor;
-    # monkeypatch it directly so the dispatch test is tamper-evident.
-
     external_called: dict[str, bool] = {"hit": False}
-    builtin_called: dict[str, bool] = {"hit": False}
 
     def _fake_external(exe, request, values):
         external_called["hit"] = True
@@ -204,15 +197,6 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
             executor_id=exe.id,
             kind=exe.kind,
             command=("/bin/true",),
-            payload={"executor_id": exe.id, "returncode": 0},
-            returncode=0,
-        )
-
-    def _fake_builtin(exe, request):
-        builtin_called["hit"] = True
-        return ExecutorRunResult(
-            executor_id=exe.id,
-            kind=exe.kind,
             payload={"executor_id": exe.id, "returncode": 0},
             returncode=0,
         )
@@ -225,11 +209,8 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
         if not port.required:
             continue
         inputs[port.name] = inputs.get(port.name, "x")
-    # youtube.upload needs richer inputs to pass its special-cased path.
-    if executor_id == "youtube.upload":
-        inputs.update({"video_url": "https://example.com/v.mp4",
-                       "title": "t", "description": "d"})
-
+    if executor_id == "youtube.youtube_audio":
+        inputs["query"] = "x"
     request = ExecutorRunRequest(
         executor_id=executor_id,
         out=Path(tempfile.mkdtemp()),
@@ -239,33 +220,9 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
         python_exec=sys.executable,
     )
 
-    with mock.patch.object(runner_mod, "_run_external_executor", _fake_external), \
-         mock.patch.object(runner_mod, "_run_builtin_executor", _fake_builtin):
-        if executor_id == "youtube.upload":
-            # youtube.upload has its own dispatch branch that calls the
-            # external uploader directly, not _run_external_executor. The
-            # other four packs cover the external-dispatch parity claim;
-            # for upload, we still assert it never hits the in-process
-            # builtin path.
-            try:
-                runner_mod.run_executor(request, registry)
-            except Exception:
-                # Network/dry-run path may raise; what matters is that the
-                # builtin in-process path is not hit.
-                pass
-        else:
-            runner_mod.run_executor(request, registry)
+    with mock.patch.object(runner_mod, "_run_external_executor", _fake_external):
+        runner_mod.run_executor(request, registry)
 
-    if executor_id == "youtube.upload":
-        assert not builtin_called["hit"], (
-            "youtube.upload unexpectedly dispatched through "
-            "run_builtin_executor (the in-process built-in path)"
-        )
-    else:
-        assert external_called["hit"], (
-            f"{executor_id} did not dispatch through _run_external_executor"
-        )
-        assert not builtin_called["hit"], (
-            f"{executor_id} unexpectedly dispatched through "
-            "run_builtin_executor (the in-process built-in path)"
-        )
+    assert external_called["hit"], (
+        f"{executor_id} did not dispatch through _run_external_executor"
+    )

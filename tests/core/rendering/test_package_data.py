@@ -7,7 +7,6 @@ from importlib import resources
 
 from astrid.core.rendering.registry import load_default_registries
 
-
 SCHEMAS = {
     "request.json",
     "support.json",
@@ -75,7 +74,7 @@ def test_rendering_manifests_are_package_resources_and_discoverable() -> None:
     ]
     assert not missing
 
-    renderers, planners, finalizers = load_default_registries(include_installed=False)
+    renderers, planners, finalizers = load_default_registries()
     assert {candidate.id for candidate in renderers.list()} >= {
         "rendering.remotion",
         "rendering.ffmpeg",

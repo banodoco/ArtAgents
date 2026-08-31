@@ -140,7 +140,7 @@ def _request(
 
 def _registries(*renderer_ids: str):
     renderers, _planners, finalizers = load_default_registries(
-        REPO_ROOT, include_installed=False
+        REPO_ROOT
     )
     if not renderer_ids:
         return renderers, finalizers
@@ -917,7 +917,7 @@ def test_real_stacked_render_constructed_plan_threejs_over_remotion(
     request = _request(tmp_path, timeline, assets=assets, audio="rendered")
     assert injected.profile.has_audio
     renderers, planners, finalizers = load_default_registries(
-        REPO_ROOT, include_installed=False
+        REPO_ROOT
     )
     service = RenderService(
         registries=(renderers, planners, finalizers),

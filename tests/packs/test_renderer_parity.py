@@ -204,7 +204,6 @@ def service(tmp_path: Path) -> RenderService:
     registries = load_default_registries(
         ROOT,
         extra_pack_roots=(str(extra_root),),
-        include_installed=False,
     )
     return RenderService(registries=registries, transport_factory=_transport_factory)
 
@@ -693,7 +692,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_task_env(monkeypatch)
     create_project("demo")
-    timeline_record = create_timeline("demo", "main", is_default=True)
+    create_timeline("demo", "main", is_default=True)
     inputs_root = projects_root / "demo" / "inputs"
     inputs_root.mkdir(parents=True)
     timeline = inputs_root / "hype.timeline.json"

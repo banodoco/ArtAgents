@@ -26,19 +26,19 @@ from typing import Any
 from unittest import mock
 
 from astrid.core.pack import discover_packs as _discover_packs
+from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     AudioOwnership,
     FinalizerManifest,
     PlannerManifest,
+    RendererManifest,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    RendererManifest,
     SupportReport,
     VideoArtifact,
 )
-from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.publication import publish_render_result
 from astrid.core.rendering.registry import (
     ExecutionEligibility,
@@ -49,9 +49,7 @@ from astrid.core.rendering.registry import (
     load_default_registries,
 )
 from astrid.core.rendering.service import RenderService
-
 from astrid.sdk import rendering as sdk_rendering
-
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_PACK = ROOT / "tests" / "fixtures" / "renderer_packs" / "raw_command"
@@ -103,7 +101,6 @@ def _registries(tmp_path: Path):
         return load_default_registries(
             tmp_path / "project",
             extra_pack_roots=(str(extra_root),),
-            include_installed=False,
         )
 
 

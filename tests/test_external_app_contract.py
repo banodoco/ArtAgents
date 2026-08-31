@@ -26,7 +26,7 @@ import sys
 import astrid  # public SDK boundary -- no `from astrid ...` allowed
 
 def _run() -> dict[str, object]:
-    inventory = astrid.discover(include_installed=False)
+    inventory = astrid.discover()
 
     # Prove we got real executors and orchestrators
     executor_ids = [c.id for c in inventory.executors]
@@ -34,11 +34,7 @@ def _run() -> dict[str, object]:
     element_ids = [c.id for c in inventory.elements]
 
     # Resolve a known executor through the public SDK
-    cap = astrid.get_capability("editorial.arrange", kind="executor", include_installed=False)
-    alias_cap = astrid.get_capability(
-        "editorial.inspect_cut", kind="executor", include_installed=False,
-    )
-
+    cap = astrid.get_capability("editorial.arrange", kind="executor")
     return {
         "executor_count": len(executor_ids),
         "orchestrator_count": len(orchestrator_ids),
@@ -46,7 +42,6 @@ def _run() -> dict[str, object]:
         "has_arrange": "editorial.arrange" in executor_ids,
         "arrange_id": cap.id,
         "arrange_capability_type": cap.capability_type,
-        "alias_aliases": [a.alias for a in alias_cap.handle.aliases],
         "packs": [p["id"] for p in inventory.packs if p.get("source_kind") == "source"],
     }
 
@@ -151,7 +146,6 @@ def test_external_app_runs_from_outside_repo() -> None:
         assert result["has_arrange"] is True
         assert result["arrange_id"] == "editorial.arrange"
         assert result["arrange_capability_type"] == "executor"
-        assert "builtin.inspect_cut" in result["alias_aliases"]
 
 
 def test_external_app_script_rejects_from_astrid_imports() -> None:

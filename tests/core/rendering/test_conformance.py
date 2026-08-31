@@ -421,7 +421,6 @@ def test_fixture_pack_static_surface(tmp_path: Path) -> None:
         renderers, _, _ = load_default_registries(
             tmp_path / "project",
             extra_pack_roots=(str(FIXTURE_ROOT.parent),),
-            include_installed=False,
         )
     candidate = renderers.get(BACKEND_ID)
     assert candidate.source_kind == "extra"

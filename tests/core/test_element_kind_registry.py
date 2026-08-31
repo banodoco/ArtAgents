@@ -17,8 +17,8 @@ from unittest import mock
 
 from astrid.core.element.registry import load_pack_elements
 from astrid.core.pack import (
-    ELEMENT_KINDS,
     ELEMENT_KIND_REGISTRY,
+    ELEMENT_KINDS,
     ElementKindDescriptor,
     ElementKindRegistry,
     PackValidationError,
@@ -30,7 +30,6 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # Built-in registration and alias normalization
@@ -760,7 +759,7 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
             packs = discover_packs(packs_root)
 
             with mock.patch("astrid.core.element.registry.discover_packs", return_value=packs):
-                elements = load_pack_elements(include_installed=False)
+                elements = load_pack_elements()
 
             self.assertEqual(
                 [(element.kind, element.id, element.source) for element in elements],

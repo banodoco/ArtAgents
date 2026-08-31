@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import astrid
 import pytest
+
+import astrid
 
 
 def test_networked_understanding_describes_credentials_and_outputs() -> None:
     audio = astrid.get_capability(
         "understanding.audio_understand",
         kind="executor",
-        include_installed=False,
     )
     transcript = astrid.get_capability(
         "editorial.transcribe",
         kind="executor",
-        include_installed=False,
     )
 
     assert audio.handle.safety.network is True
@@ -45,7 +44,6 @@ def test_understand_dry_run_validates_mode_and_selected_modality(tmp_path) -> No
         astrid.invoke(
             "understanding.understand",
             kind="executor",
-            include_installed=False,
             project="demo",
             inputs={"mode": "bogus"},
             dry_run=True,
@@ -55,7 +53,6 @@ def test_understand_dry_run_validates_mode_and_selected_modality(tmp_path) -> No
         astrid.invoke(
             "understanding.understand",
             kind="executor",
-            include_installed=False,
             project="demo",
             inputs={"mode": "audio"},
             dry_run=True,
@@ -66,7 +63,6 @@ def test_understand_dry_run_validates_mode_and_selected_modality(tmp_path) -> No
     result = astrid.invoke(
         "understanding.understand",
         kind="executor",
-        include_installed=False,
         project="demo",
         inputs={"mode": "audio", "audio": str(source)},
         dry_run=True,
@@ -82,7 +78,6 @@ def test_networked_transcribe_sdk_dispatch_does_not_trip_orchestrator_guard(tmp_
     result = astrid.invoke(
         "editorial.transcribe",
         kind="executor",
-        include_installed=False,
         project="demo",
         inputs={"audio": "/tmp/fake.wav"},
         dry_run=True,
@@ -99,7 +94,6 @@ def test_hype_inputs_are_typed_and_preserved_in_command() -> None:
         project="demo",
         inputs={"video": "source.mp4", "brief": "brief.txt"},
         dry_run=True,
-        include_installed=False,
     )
 
     command = result.raw_result["command"]
@@ -113,7 +107,6 @@ def test_hype_inputs_are_typed_and_preserved_in_command() -> None:
             project="demo",
             inputs={"source": "source.mp4"},
             dry_run=True,
-            include_installed=False,
         )
 
 
@@ -122,23 +115,20 @@ def test_lookup_errors_offer_bounded_id_and_kind_recovery() -> None:
         astrid.get_capability(
             "generation.generate_imge",
             kind="executor",
-            include_installed=False,
         )
 
     with pytest.raises(astrid.CapabilityNotFoundError, match="registered as executor; retry with kind='executor'"):
         astrid.get_capability(
             "generation.generate_image",
             kind="orchestrator",
-            include_installed=False,
         )
 
     with pytest.raises(astrid.CapabilityNotFoundError) as far:
         astrid.get_capability(
             "far.unknown.capability.edge.zzzz",
             kind="executor",
-            include_installed=False,
         )
     far_message = str(far.value)
     assert "no close catalog match" in far_message
-    assert "discover(include_installed=False)" in far_message
+    assert "discover()" in far_message
     assert "nearest matches" not in far_message

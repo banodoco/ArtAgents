@@ -23,12 +23,12 @@ from astrid.core.rendering.contracts import (
     LayerRef,
     PlannerManifest,
     PlannerResolution,
+    RendererManifest,
+    RendererResolution,
     RenderPlan,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    RendererManifest,
-    RendererResolution,
     RenderSegment,
     SupportReport,
     VideoArtifact,
@@ -40,7 +40,7 @@ from astrid.core.rendering.errors import (
     RendererUnsupportedError,
     raise_internal_error,
 )
-from astrid.packs.rendering.planners.legacy_hybrid import run as legacy_hybrid
+from astrid.core.rendering.publication import publish_render_result
 from astrid.core.rendering.registry import (
     ExecutionEligibility,
     FinalizerRegistry,
@@ -49,11 +49,11 @@ from astrid.core.rendering.registry import (
     RenderingCandidate,
     load_default_registries,
 )
-from astrid.core.rendering.publication import publish_render_result
 from astrid.core.rendering.service import (
     LegacyRenderRoutingWarning,
     RenderService,
 )
+from astrid.packs.rendering.planners.legacy_hybrid import run as legacy_hybrid
 
 
 def _digest(value: str) -> str:
@@ -1871,7 +1871,7 @@ def _require_ffmpeg() -> None:
 
 def _real_service(tmp_path: Path) -> RenderService:
     renderers, planners, finalizers = load_default_registries(
-        tmp_path, include_installed=False
+        tmp_path
     )
     return RenderService(registries=(renderers, planners, finalizers))
 

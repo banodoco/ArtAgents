@@ -19,6 +19,9 @@ import pytest
 from astrid.core.events.registry import core_only_registry
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
+from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
+from astrid.core.project.project import create_project
+from astrid.core.receipts import ReceiptService
 from astrid.core.rendering import remotion_runtime
 from astrid.core.rendering.remotion_runtime import (
     NODE_EXECUTABLE_ENV,
@@ -27,9 +30,6 @@ from astrid.core.rendering.remotion_runtime import (
     remotion_runtime_status,
     resolve_remotion_runtime_tools,
 )
-from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
-from astrid.core.project.project import create_project
-from astrid.core.receipts import ReceiptService
 from astrid.core.repositories import ProjectRepository
 from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.tasks import TaskRepository
@@ -165,7 +165,6 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
 
         captured["owned_root"] = owned_registry_path.parent
         captured["staged_asset"] = staged_asset
-        captured["execution_mode"] = request.execution_mode
         owned_asset.write_bytes(b"renderer mutated its private input")
         output = Path(request.out) / request.inputs["output_name"]
         output.write_bytes(b"\x00\x00\x00\x18ftyp")
@@ -187,7 +186,6 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
     assert sha256_file_bytes(managed) == digest
     assert sha256_file_bytes(captured["staged_asset"]) == digest
     assert not captured["owned_root"].exists()
-    assert captured["execution_mode"] == "subprocess"
 
 
 def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:

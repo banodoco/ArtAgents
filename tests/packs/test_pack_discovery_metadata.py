@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     PackValidationError,
     discover_packs,
@@ -29,7 +30,6 @@ from astrid.core.pack.discovery import (
     discover_pack_metadata,
     discover_packs_ordered,
 )
-from astrid.core.foundation.paths import REPO_ROOT
 
 
 def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:
@@ -122,7 +122,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                 discovered = discover_pack_metadata(
                     project_root=repo_root,
                     discover_packs_fn=scan,
-                    include_installed=False,
                 )
 
             self.assertFalse((local_pack / "pack.yaml").is_file())
@@ -150,7 +149,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                 discover_pack_metadata(
                     project_root=repo_root,
                     discover_packs_fn=scan,
-                    include_installed=False,
                 )
 
             self.assertEqual(local_manifest.read_text(encoding="utf-8"), "id: not_local\nname: Broken\n")
@@ -165,7 +163,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             def scan(arg=None):
                 return (alpha, local, beta)
 
-            discovered = discover_pack_metadata(discover_packs_fn=scan, include_installed=False)
+            discovered = discover_pack_metadata(discover_packs_fn=scan)
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "beta"])
         self.assertTrue(all(dp.source_kind == "source" for dp in discovered))
@@ -195,7 +193,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             discovered = discover_pack_metadata(
                 project_root=project_root,
                 discover_packs_fn=scan,
-                include_installed=False,
             )
 
         # source first, then only the `local` pack from the project layer.
@@ -224,7 +221,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             discovered = discover_pack_metadata(
                 discover_packs_fn=scan,
                 extra_pack_roots=(str(extra_dir),),
-                include_installed=False,
             )
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
@@ -255,7 +251,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: env_value}, clear=False):
                 discovered = discover_pack_metadata(
                     discover_packs_fn=scan,
-                    include_installed=False,
                 )
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
@@ -283,7 +278,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                 discovered = discover_pack_metadata(
                     discover_packs_fn=scan,
                     extra_pack_roots=(str(external_root / ".." / "external"),),
-                    include_installed=False,
                 )
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
@@ -320,14 +314,13 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs), \
                  mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 exec_ids = [p.id for p in exec_registry._discover_executor_packs(
-                    project_root=REPO_ROOT, extra_pack_roots=(), include_installed=False)]
+                    project_root=REPO_ROOT, extra_pack_roots=())]
                 orch_ids = [p.id for p in orch_registry._discover_orchestrator_packs(
-                    project_root=REPO_ROOT, extra_pack_roots=(), include_installed=False)]
+                    project_root=REPO_ROOT, extra_pack_roots=())]
                 helper_ids = [
                     dp.id
                     for dp in discover_pack_metadata(
                         discover_packs_fn=lambda arg=None: packs,
-                        include_installed=False,
                     )
                 ]
 
@@ -344,7 +337,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             def scan(arg=None):
                 return packs
 
-            ordered = discover_packs_ordered(discover_packs_fn=scan, include_installed=False)
+            ordered = discover_packs_ordered(discover_packs_fn=scan)
 
         self.assertEqual([p.id for p in ordered], ["alpha"])
 
@@ -367,7 +360,6 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             discovered = discover_pack_metadata(
                 project_root=root / "project",
                 extra_pack_roots=(str(extra_root),),
-                include_installed=False,
                 discover_packs_fn=scan,
             )
 

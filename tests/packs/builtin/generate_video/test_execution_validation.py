@@ -13,7 +13,6 @@ from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.generation.backends.base import GenerationResult
 from astrid.core.model_catalog.schema import ModeSpec
 
-
 _EXECUTOR_YAML = (
     Path(__file__).resolve().parents[4]
     / "astrid/packs/generation/executors/generate_video/executor.yaml"
@@ -139,12 +138,12 @@ def test_generate_core_returns_enriched_generation_result(
     assert manifest["outputs"][0]["resolution"] == "1280x720"
 
 
-def test_run_sdk_and_main_preserve_in_process_and_cli_contracts(
+def test_run_sdk_and_main_preserve_contracts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """run_sdk returns payload data while main keeps the legacy manifest print."""
+    """run_sdk returns payload data while the CLI entry point stays usable."""
     from astrid.core.generation import GENERATION_RESULT_KEY
     from astrid.packs.generation.executors.generate_video import run as run_mod
 

@@ -79,7 +79,7 @@ _EXTERNAL_PACK_SCRIPT = (
     "import astrid\n"
     "\n"
     "def _check() -> dict:\n"
-    '    inventory = astrid.discover(include_installed=False)\n'
+    '    inventory = astrid.discover()\n'
     "\n"
     '    env_packs = [p for p in inventory.packs if p.get("source_kind") == "env"]\n'
     '    assert len(env_packs) >= 1, f"Expected >=1 env pack, got {len(env_packs)}"\n'
@@ -92,7 +92,6 @@ _EXTERNAL_PACK_SCRIPT = (
     '        "glow",\n'
     '        kind="element",\n'
     '        element_kind="widget",\n'
-    '        include_installed=False,\n'
     "    )\n"
     '    # Capability.id uses canonical kind/id form (kind is plural canonical)\n'
     '    assert glow.id == "widgets/glow", f"unexpected id: {glow.id}"\n'
@@ -318,12 +317,10 @@ if __name__ == "__main__":
             "os.environ['ASTRID_PROJECTS_ROOT'] = sys.argv[2]\n"
             "os.chdir(sys.argv[1])\n"
             "from astrid.core.project.project import create_project\n"
-            "from astrid.core.timeline.crud import create_timeline\n"
             "create_project('demo')\n"
-            "create_timeline('demo', 'main', is_default=True)\n"
             "from astrid.core.execution.executor.registry import load_default_registry\n"
             "from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor\n"
-            "registry = load_default_registry(include_installed=False)\n"
+            "registry = load_default_registry()\n"
             "staging = Path(sys.argv[2]) / 'demo' / '.astrid' / 'media' / '.staging' / 'external-pack'\n"
             "result = run_executor(\n"
             "    ExecutorRunRequest(\n"

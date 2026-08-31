@@ -51,7 +51,6 @@ def _candidate(extra_root: Path):
     renderers, _, _ = load_default_registries(
         None,
         extra_pack_roots=(str(extra_root),),
-        include_installed=True,
     )
     return renderers.get(BACKEND_ID)
 

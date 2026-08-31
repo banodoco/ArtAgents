@@ -284,7 +284,7 @@ def test_raw_support_adapter_and_registered_protocol(tmp_path: Path) -> None:
     assert isinstance(report, SupportReport)
     assert report.supported is True
     renderers, planners, finalizers = load_default_registries(
-        Path(__file__).resolve().parents[3], include_installed=False
+        Path(__file__).resolve().parents[3]
     )
     assert renderers.get("rendering.ffmpeg").id == "rendering.ffmpeg"
     assert planners.get(legacy_hybrid.BACKEND_ID).manifest.operations == (

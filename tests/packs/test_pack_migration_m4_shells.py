@@ -5,7 +5,6 @@ from pathlib import Path
 
 from astrid.core.pack import load_pack_manifest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
 
@@ -110,7 +109,6 @@ EXPECTED_PACKS = {
         "content": {"executors": "executors"},
         "aliases": {
             "builtin.youtube_audio": "youtube.youtube_audio",
-            "upload.youtube": "youtube.upload",
         },
     },
     "fal": {
