@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 def test_runtime_client_generator_is_byte_stable(tmp_path: Path) -> None:
     root = Path(__file__).parents[1]
-    runtime = root.parent / "banodoco-workspace-runtime-b10-b11-product"
+    configured = os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
+    candidates = ([Path(configured).expanduser()] if configured else []) + sorted(root.parent.glob("*runtime*"))
+    runtime = next((candidate for candidate in candidates if (candidate / "contract" / "openapi" / "workspace-v1.yaml").is_file() and (candidate / "contract" / "manifest.json").is_file()), None)
+    if runtime is None:
+        pytest.fail("set BANODOCO_RUNTIME_CHECKOUT or provide a sibling runtime checkout")
     contract = runtime / "contract" / "openapi" / "workspace-v1.yaml"
     schema = runtime / "contract" / "manifest.json"
     first, second = tmp_path / "first", tmp_path / "second"

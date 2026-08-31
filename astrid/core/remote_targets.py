@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 import subprocess
 from typing import Any, Mapping
@@ -52,17 +53,13 @@ def _local_oid(remote: Path, ref: str) -> str | None:
     return None
 
 
-def _network_oid(url: str, ref: str) -> tuple[str | None, int, str]:
-    result = subprocess.run(["git", "ls-remote", "--refs", url, ref], text=True, capture_output=True, check=False, timeout=30)
-    if result.returncode == 0:
-        line = result.stdout.strip().splitlines()
-        return (line[0].split()[0] if line else None), 200, result.stdout
-    # Git does not expose HTTP status consistently.  Preserve the distinction
-    # between an absent ref and an unreachable/unauthorized repository.
-    return None, 404 if "not found" in result.stderr.lower() else 503, result.stderr
+AuthorizedTransport = Callable[[Mapping[str, Any], str], tuple[str | None, int, str]]
 
 
-def resolve_remote_target(target: Mapping[str, Any], *, local_bare_remote: str | Path | None = None) -> dict[str, Any]:
+def resolve_remote_target(
+    target: Mapping[str, Any], *, local_bare_remote: str | Path | None = None,
+    authorized_transport: AuthorizedTransport | None = None,
+) -> dict[str, Any]:
     """Resolve one immutable locator without writing to a network remote."""
     if set(target) != set(REMOTE_TARGET_FIELDS):
         raise RemoteTargetError("remote target locator fields are not exact")
@@ -85,7 +82,20 @@ def resolve_remote_target(target: Mapping[str, Any], *, local_bare_remote: str |
         status = 200 if actual else 404
         response = actual or "ABSENT"
     else:
-        actual, status, response = _network_oid(str(target["canonical_url"]), ref)
+        if authorized_transport is None:
+            raise RemoteTargetError("network resolution requires an explicitly authorized transport")
+        if not callable(authorized_transport):
+            raise RemoteTargetError("authorized transport must be callable")
+        try:
+            actual, status, response = authorized_transport(dict(target), ref)
+        except RemoteTargetError:
+            raise
+        except Exception as exc:
+            raise RemoteTargetError("authorized remote transport failed") from exc
+        if actual is not None and (not isinstance(actual, str) or len(actual) not in {40, 64} or any(c not in "0123456789abcdef" for c in actual)):
+            raise RemoteTargetError("authorized remote transport returned an invalid object ID")
+        if not isinstance(status, int) or status < 100 or status > 599 or not isinstance(response, str):
+            raise RemoteTargetError("authorized remote transport returned an invalid response")
     # NONE is a create-only discriminator: an existing different ref is a
     # race/conflict, never evidence that the target was absent.
     if actual is not None and actual != expected:
@@ -119,19 +129,30 @@ def provision_local_bare_target(target: Mapping[str, Any], *, local_bare_remote:
         raise RemoteTargetError("local bare remote changed during provisioning")
     key = idempotency_key or f"B11.2:{target['remote_target_id']}:{expected}"
     if actual is None:
-        command = subprocess.run(["git", "--git-dir", str(remote), "update-ref", ref, expected], text=True, capture_output=True, check=False, timeout=30)
+        # The all-zero old value makes creation a compare-and-swap: only a
+        # genuinely absent ref may be created by this request.
+        command = subprocess.run(["git", "--git-dir", str(remote), "update-ref", ref, expected, "0" * len(expected)], text=True, capture_output=True, check=False, timeout=30)
         if command.returncode != 0:
-            raise RemoteTargetError(f"local bare remote provisioning failed: {command.stderr.strip()}")
-        method, status, response = "POST", 201, expected
+            observed = _local_oid(remote, ref)
+            if observed == expected:
+                method, status, response = "POST", 200, "already-present"
+            else:
+                raise RemoteTargetError("local bare remote changed during provisioning")
+        else:
+            method, status, response = "POST", 201, expected
     else:
         method, status, response = "POST", 200, "already-present"
     receipt = dict(resolved["repository_provision_receipt_rows"][0])
-    receipt.update({"method": method, "status": status, "request_sha256": _request_digest(method, target, idempotency_key=key), "response_sha256": _sha(str(response).encode()), "idempotency_key": key, "postflight_status": 200 if _local_oid(remote, ref) == expected else 409, "postflight_response_sha256": _sha(str(_local_oid(remote, ref) or "MISSING").encode())})
+    postflight = _local_oid(remote, ref)
+    receipt.update({"method": method, "status": status, "request_sha256": _request_digest(method, target, idempotency_key=key), "response_sha256": _sha(str(response).encode()), "idempotency_key": key, "postflight_status": 200 if postflight == expected else 409, "postflight_response_sha256": _sha(str(postflight or "MISSING").encode())})
     resolved["repository_provision_receipt_rows"] = [receipt]
     return resolved
 
 
-def resolve_target_set(locators: list[Mapping[str, Any]], *, local_bare_remotes: Mapping[str, str | Path] | None = None, provision: bool = False) -> dict[str, Any]:
+def resolve_target_set(
+    locators: list[Mapping[str, Any]], *, local_bare_remotes: Mapping[str, str | Path] | None = None,
+    authorized_transports: Mapping[str, AuthorizedTransport] | None = None, provision: bool = False,
+) -> dict[str, Any]:
     if not locators:
         raise RemoteTargetError("remote target locator set must be non-empty")
     results = []
@@ -145,7 +166,8 @@ def resolve_target_set(locators: list[Mapping[str, Any]], *, local_bare_remotes:
                 raise RemoteTargetError("network provisioning is disabled; supply an explicit local bare remote")
             results.append(provision_local_bare_target(locator, local_bare_remote=local))
         else:
-            results.append(resolve_remote_target(locator, local_bare_remote=local))
+            transport = (authorized_transports or {}).get(str(locator.get("remote_target_id")))
+            results.append(resolve_remote_target(locator, local_bare_remote=local, authorized_transport=transport))
     return {"schema_version": "remote-target-set-v1", "targets": results}
 
 
