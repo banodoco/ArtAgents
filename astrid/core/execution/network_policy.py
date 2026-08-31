@@ -26,7 +26,6 @@ from urllib.parse import urlsplit
 
 _LOCK = threading.Lock()
 _INSTALLED = False
-_ORIGINALS: dict[tuple[Any, str], Any] = {}
 _DNS_NAMES: dict[str, set[str]] = {}
 _EVENTS: list[dict[str, Any]] = []
 _POLICY: dict[str, Any] = {}
@@ -148,20 +147,17 @@ def _write_evidence() -> None:
             # the broker-only signing secret.  The host re-reads and verifies
             # the broker file independently after the child exits.
             payload["broker_evidence"] = broker_value
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    if not _EVIDENCE_KEY:
-        # A hook without its host-issued key cannot make settlement evidence
-        # trustworthy.  Leave no unsigned artifact for the host to accept.
-        return
-    payload["signature_algorithm"] = "hmac-sha256"
-    payload["signature"] = hmac.new(_EVIDENCE_KEY.encode(), canonical, hashlib.sha256).hexdigest()
+    # Child observations are diagnostic only.  The child must never receive
+    # the signing key for settlement evidence, and an unsigned child file is
+    # never accepted as authority by the host.  Host/broker evidence is
+    # finalized and signed by the parent after the child exits.
     _EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
     _EVIDENCE.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _patch_socket() -> None:
+def _patch_socket(originals: Mapping[tuple[Any, str], Any]) -> None:
     def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any):
-        value = _ORIGINALS[(socket, "getaddrinfo")](host, port, *args, **kwargs)
+        value = originals[(socket, "getaddrinfo")](host, port, *args, **kwargs)
         name = str(host).lower().rstrip(".")
         ips = {str(item[4][0]).lower() for item in value if item and len(item) > 4 and item[4]}
         _DNS_NAMES.setdefault(name, set()).update(ips)
@@ -175,33 +171,33 @@ def _patch_socket() -> None:
 
     def connect(self: socket.socket, address: Any):
         _check("tcp" if self.type & socket.SOCK_STREAM else "udp", address)
-        return _ORIGINALS[(socket.socket, "connect")](self, address)
+        return originals[(socket.socket, "connect")](self, address)
 
     def connect_ex(self: socket.socket, address: Any):
         _check("tcp" if self.type & socket.SOCK_STREAM else "udp", address)
-        return _ORIGINALS[(socket.socket, "connect_ex")](self, address)
+        return originals[(socket.socket, "connect_ex")](self, address)
 
     def sendto(self: socket.socket, data: Any, address: Any, *args: Any):
         _check("udp", address)
-        return _ORIGINALS[(socket.socket, "sendto")](self, data, address, *args)
+        return originals[(socket.socket, "sendto")](self, data, address, *args)
 
-    _ORIGINALS[(socket, "getaddrinfo")] = socket.getaddrinfo
-    _ORIGINALS[(socket.socket, "connect")] = socket.socket.connect
-    _ORIGINALS[(socket.socket, "connect_ex")] = socket.socket.connect_ex
-    _ORIGINALS[(socket.socket, "sendto")] = socket.socket.sendto
+    originals[(socket, "getaddrinfo")] = socket.getaddrinfo
+    originals[(socket.socket, "connect")] = socket.socket.connect
+    originals[(socket.socket, "connect_ex")] = socket.socket.connect_ex
+    originals[(socket.socket, "sendto")] = socket.socket.sendto
     socket.getaddrinfo = getaddrinfo  # type: ignore[assignment]
     socket.socket.connect = connect  # type: ignore[method-assign]
     socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
     socket.socket.sendto = sendto  # type: ignore[method-assign]
 
 
-def _patch_redirects() -> None:
+def _patch_redirects(originals: Mapping[tuple[Any, str], Any]) -> None:
     try:
         from urllib.request import HTTPRedirectHandler
     except ImportError:
         return
     original = HTTPRedirectHandler.redirect_request
-    _ORIGINALS[(HTTPRedirectHandler, "redirect_request")] = original
+    originals[(HTTPRedirectHandler, "redirect_request")] = original
 
     def redirect_request(self: Any, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str, *args: Any, **kwargs: Any):
         host, port = _endpoint_parts(newurl)
@@ -209,7 +205,7 @@ def _patch_redirects() -> None:
         _record("redirect", host=host, port=port, allowed=allowed)
         if not allowed:
             raise NetworkPolicyError(f"network policy denied redirect destination {host}")
-        return original(self, req, fp, code, msg, headers, newurl, *args, **kwargs)
+        return originals[(HTTPRedirectHandler, "redirect_request")](self, req, fp, code, msg, headers, newurl, *args, **kwargs)
 
     HTTPRedirectHandler.redirect_request = redirect_request  # type: ignore[method-assign]
 
@@ -241,7 +237,7 @@ def _command_label(command: Any) -> str:
     return str(command)
 
 
-def _patch_native_descendants() -> None:
+def _patch_native_descendants(originals: Mapping[tuple[Any, str], Any]) -> None:
     """Fail closed when a Python provider tries to escape via a native child."""
     original_popen = subprocess.Popen
 
@@ -255,7 +251,7 @@ def _patch_native_descendants() -> None:
             )
         return original_popen(*args, **kwargs)
 
-    _ORIGINALS[(subprocess, "Popen")] = original_popen
+    originals[(subprocess, "Popen")] = original_popen
     subprocess.Popen = guarded_popen  # type: ignore[assignment]
 
     for name in ("execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp", "execlpe"):
@@ -272,7 +268,7 @@ def _patch_native_descendants() -> None:
                 )
             return _original(*args, **kwargs)
 
-        _ORIGINALS[(os, name)] = original
+        originals[(os, name)] = original
         setattr(os, name, guarded_exec)
 
 
@@ -292,7 +288,7 @@ def _broker_handshake() -> None:
         with socket.create_connection((parsed.hostname, parsed.port), timeout=3) as connection:
             # The digest binds the complete host admission; the nonce makes a
             # replayed handshake from another attempt fail closed.
-            auth_token = os.environ.get("ASTRID_NETWORK_AUTH_TOKEN", "")
+            auth_token = os.environ.get("ASTRID_NETWORK_BROKER_TOKEN", "")
             connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest} {nonce} {auth_token}\n".encode("ascii"))
             response = connection.recv(64).decode("ascii", "replace").strip()
     except OSError as exc:
@@ -311,12 +307,16 @@ def install(policy: Mapping[str, Any], evidence_path: str | Path, *, admission: 
         return
     _POLICY = dict(policy)
     _EVIDENCE = Path(evidence_path)
-    _EVIDENCE_KEY = str(evidence_key)
+    # ``evidence_key`` remains an ignored compatibility parameter for callers
+    # on the old seam.  It is intentionally never retained in a child.
+    del evidence_key
+    _EVIDENCE_KEY = ""
     _ADMISSION = dict(admission or {})
     _INSTALLED = True
-    _patch_socket()
-    _patch_redirects()
-    _patch_native_descendants()
+    originals: dict[tuple[Any, str], Any] = {}
+    _patch_socket(originals)
+    _patch_redirects(originals)
+    _patch_native_descendants(originals)
     _broker_handshake()
     atexit.register(_write_evidence)
 
@@ -337,7 +337,7 @@ def install_from_environment() -> None:
         admission = {}
     # This token authenticates the child to a host-owned broker.  It is not
     # the broker's evidence signing secret.
-    key = os.environ.get("ASTRID_NETWORK_AUTH_TOKEN", "")
+    key = os.environ.get("ASTRID_NETWORK_BROKER_TOKEN", "")
     if isinstance(policy, Mapping) and isinstance(admission, Mapping):
         install(policy, evidence, admission=admission, evidence_key=key)
 

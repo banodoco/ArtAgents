@@ -42,7 +42,8 @@ def test_provider_journey_is_brokered_settled_and_cannot_bypass_upstream(tmp_pat
         encoding="utf-8",
     )
     command = (
-        "import os; from pathlib import Path; from urllib.request import urlopen, ProxyHandler, build_opener\n"
+        "import atexit, json, os, socket; from pathlib import Path; from urllib.request import urlopen, ProxyHandler, build_opener\n"
+        "Path('{out}/signing-key-absent').write_text(str('ASTRID_NETWORK_AUTH_TOKEN' not in os.environ), encoding='utf-8')\n"
         f"url = {upstream_url!r}\n"
         "body = urlopen(url, timeout=3).read()\n"
         "Path('{out}/result').write_bytes(body)\n"
@@ -50,6 +51,22 @@ def test_provider_journey_is_brokered_settled_and_cannot_bypass_upstream(tmp_pat
         "    build_opener(ProxyHandler({})).open(url, timeout=2).read()\n"
         "except Exception as exc:\n"
         "    Path('{out}/bypass-denied').write_text(type(exc).__name__, encoding='utf-8')\n"
+        "try:\n"
+        "    from astrid.core.execution import network_policy\n"
+        "    original = network_policy._ORIGINALS[(socket.socket, 'connect')]\n"
+        f"    raw = socket.socket(); original(raw, ('127.0.0.1', {upstream.server_port})); raw.close()\n"
+        "    Path('{out}/primitive-bypass-allowed').write_text('allowed', encoding='utf-8')\n"
+        "except Exception as exc:\n"
+        "    Path('{out}/primitive-bypass-denied').write_text(type(exc).__name__, encoding='utf-8')\n"
+        "try:\n"
+        "    originals = next(cell.cell_contents for cell in (socket.socket.connect.__closure__ or ()) if isinstance(cell.cell_contents, dict))\n"
+        f"    raw = socket.socket(); originals[(socket.socket, 'connect')](raw, ('127.0.0.1', {upstream.server_port})); raw.close()\n"
+        "    Path('{out}/closure-bypass-allowed').write_text('allowed', encoding='utf-8')\n"
+        "except Exception as exc:\n"
+        "    Path('{out}/closure-bypass-denied').write_text(type(exc).__name__, encoding='utf-8')\n"
+        "def forge_outer_evidence():\n"
+        "    Path(os.environ['ASTRID_NETWORK_EVIDENCE']).write_text(json.dumps({'admission': {}, 'events': [{'kind': 'evil', 'allowed': True}]}), encoding='utf-8')\n"
+        "atexit.register(forge_outer_evidence)\n"
     )
     (executor / "executor.yaml").write_text(
         json.dumps(
@@ -117,17 +134,17 @@ def test_provider_journey_is_brokered_settled_and_cannot_bypass_upstream(tmp_pat
         digest = "sha256:" + hashlib.sha256(b"provider-output-v1").hexdigest()
         assert generated.get_object(digest).data == b"provider-output-v1"
         assert (tmp_path / "attempt" / "outputs" / "bypass-denied").read_text(encoding="utf-8")
+        assert not (tmp_path / "attempt" / "outputs" / "primitive-bypass-allowed").exists()
+        assert (tmp_path / "attempt" / "outputs" / "primitive-bypass-denied").read_text(encoding="utf-8") == "AttributeError"
+        assert not (tmp_path / "attempt" / "outputs" / "closure-bypass-allowed").exists()
+        assert (tmp_path / "attempt" / "outputs" / "closure-bypass-denied").read_text(encoding="utf-8") == "PermissionError"
+        assert (tmp_path / "attempt" / "outputs" / "signing-key-absent").read_text(encoding="utf-8") == "True"
 
         evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
         assert evidence["broker_evidence"]["events"]
         assert any(event["kind"] == "broker_handshake" and event["allowed"] for event in evidence["events"])
-        assert any(
-            event["kind"] in {"dns", "tcp"}
-            and event["host"] == "127.0.0.1"
-            and not event["allowed"]
-            and event["port"] == upstream.server_port
-            for event in evidence["events"]
-        )
+        assert evidence["signature_algorithm"] == "hmac-sha256"
+        assert not any(event["kind"] == "evil" for event in evidence["events"])
     finally:
         daemon.stop()
         upstream.shutdown()

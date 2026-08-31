@@ -265,6 +265,43 @@ def _network_policy(record: "CapabilityRecord") -> dict[str, Any] | None:
     return {str(key): value for key, value in raw.items()}
 
 
+def _host_managed_broker(policy: Mapping[str, Any] | None) -> bool:
+    """Whether a network policy has a broker owned and started by the host."""
+    if not isinstance(policy, Mapping):
+        return False
+    descriptor = policy.get("broker")
+    return isinstance(descriptor, Mapping) and bool(
+        descriptor.get("host_managed", descriptor.get("managed", True))
+    )
+
+
+def _network_sandbox_argv(argv: list[str], attempt: Path, endpoint: str | None) -> list[str]:
+    """Put broker children behind the host's OS network boundary on macOS."""
+    if not endpoint:
+        return argv
+    if sys.platform != "darwin":
+        raise HostError("host-managed provider broker requires an OS network sandbox")
+    sandbox = shutil.which("sandbox-exec")
+    if not sandbox:
+        raise HostError("host-managed provider broker requires macOS sandbox-exec")
+    parsed = urlsplit(endpoint)
+    if parsed.hostname not in {"127.0.0.1", "localhost"} or parsed.port is None:
+        raise HostError("host-managed provider broker endpoint must be loopback")
+    # sandbox-exec receives the profile as an argument; escape only the paths
+    # that are host-selected and never include provider input or credentials.
+    def quote(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    profile = (
+        '(version 1) (deny default) '
+        '(allow process*) (allow file-read*) '
+        f'(allow file-write* (subpath "{quote(str(attempt))}")) '
+        '(allow file-write* (subpath "/tmp")) '
+        f'(allow network-outbound (remote tcp "localhost:{parsed.port}"))'
+    )
+    return [sandbox, "-p", profile, *argv]
+
+
 def _native_network_command(record: "CapabilityRecord") -> bool:
     """Whether a network-required manifest escapes Python hook observability."""
     if record.definition.command is None:
@@ -959,10 +996,22 @@ class GenericPackHost:
                 # policy: without destinations/protocols/redirect handling we
                 # cannot observe or constrain the child honestly.
                 checks["network"] = {"ok": False, "reason": "provider network_policy is missing"}
+            elif record.definition.isolation.network and adapter.family == "provider" and not _host_managed_broker(policy):
+                # A Python hook is diagnostic, not an authority boundary: a
+                # child can recover native socket capabilities. Provider
+                # network work is therefore admissible only through the
+                # host-owned broker.
+                checks["network"] = {"ok": False, "reason": "provider network requires a host-managed broker"}
             elif _native_network_command(record) and record.definition.isolation.network and not _enforceable_network_gateway(policy):
                 checks["network"] = {"ok": False, "reason": "native network requires an enforceable observable proxy or broker"}
             else:
                 checks["network"] = {"ok": True}
+            if record.definition.isolation.network and adapter.family == "provider" and _host_managed_broker(policy):
+                sandbox_available = sys.platform == "darwin" and shutil.which("sandbox-exec") is not None
+                checks["sandbox"] = {
+                    "ok": sandbox_available,
+                    **({} if sandbox_available else {"reason": "host-managed provider broker requires an OS network sandbox"}),
+                }
             pack_source = _hivemind_source_preflight(record)
             if pack_source is not None:
                 checks["pack_source"] = pack_source
@@ -1312,12 +1361,12 @@ class GenericPackHost:
                 encoding="utf-8",
             )
             evidence_path = attempt / "network-evidence.json"
-            # Only the child authentication token crosses the process
-            # boundary.  The broker signing key remains host-owned.
-            evidence_key = network_broker.auth_token if network_broker is not None else secrets_module.token_urlsafe(32)
             env["ASTRID_NETWORK_POLICY"] = json.dumps(policy, sort_keys=True, separators=(",", ":"))
             env["ASTRID_NETWORK_EVIDENCE"] = str(evidence_path)
-            env["ASTRID_NETWORK_AUTH_TOKEN"] = evidence_key
+            # Only the broker authentication token crosses the process
+            # boundary.  The host/broker evidence signing key never does.
+            if network_broker is not None:
+                env["ASTRID_NETWORK_BROKER_TOKEN"] = network_broker.auth_token
             env["ASTRID_NETWORK_ADMISSION"] = json.dumps(dict(admission or {}), sort_keys=True, separators=(",", ":"))
             env["PYTHONPATH"] = str(hook_root) + os.pathsep + env.get("PYTHONPATH", "")
             proxy = policy.get("proxy")
@@ -1350,26 +1399,14 @@ class GenericPackHost:
 
     @staticmethod
     def _network_evidence(attempt: Path, *, evidence_key: str | None = None, admission: Mapping[str, Any] | None = None, required: bool = False, broker_required: bool = False, broker_context: _NetworkBrokerContext | None = None) -> Mapping[str, Any] | None:
-        path = attempt / "network-evidence.json"
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        del evidence_key  # Child evidence keys were retired; only host keys are trusted.
+        if not broker_required:
             if required:
-                raise HostError("network-required task produced no network evidence")
-            return None
-        if not isinstance(value, Mapping):
-            if required:
-                raise HostError("network evidence is not an object")
-            return None
-        unsigned = {key: item for key, item in value.items() if key not in {"signature", "signature_algorithm"}}
-        expected = hmac.new(str(evidence_key or "").encode(), json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(), hashlib.sha256).hexdigest()
-        valid = bool(evidence_key) and value.get("signature_algorithm") == "hmac-sha256" and hmac.compare_digest(str(value.get("signature", "")), expected)
-        bound = isinstance(admission, Mapping) and dict(value.get("admission") or {}) == dict(admission)
-        if required and (not valid or not bound):
-            raise HostError("network evidence signature or admission binding is invalid")
-        if broker_required:
-            if broker_context is None:
                 raise HostError("network-required task has no host broker context")
+            return None
+        if broker_context is None:
+            raise HostError("network-required task has no host broker context")
+        if broker_required:
             # Re-materialize from broker-owned memory after child exit.  This
             # closes the path-overwrite attack: the child knows the path but
             # never knows the signing secret.
@@ -1398,7 +1435,10 @@ class GenericPackHost:
                 for event in broker_events
                 if isinstance(event, Mapping) and str(event.get("detail", "")).endswith("|allowed=true")
             }
-            if not {"handshake", "route"}.issubset(observed):
+            required_events = {"handshake"}
+            if broker_context.broker.allowed_routes:
+                required_events.add("route")
+            if not required_events.issubset(observed):
                 raise HostError("network-required task produced incomplete broker route evidence")
             for event in broker_events:
                 if not isinstance(event, Mapping) or event.get("kind") != "route" or not str(event.get("detail", "")).endswith("|allowed=true"):
@@ -1406,11 +1446,28 @@ class GenericPackHost:
                 target = str(event.get("detail", "")).rsplit("|allowed=", 1)[0]
                 if not any(broker_context.broker._route_allowed(target) for _ in (0,)):
                     raise HostError("network-required task broker evidence contains an unregistered route")
-            # Always expose the verified broker record, never a child-supplied
-            # replacement nested in network-evidence.json.
-            value = dict(value)
-            value["broker_evidence"] = broker
-        return value if valid and bound else (None if not required else value)
+            # Materialize a host-signed envelope from broker-owned events. The
+            # child evidence path is deliberately ignored, so a child cannot
+            # forge either the signature or the observations in settlement.
+            value = {
+                "schema_version": 1,
+                "admission": dict(broker.get("admission") or {}),
+                "events": [
+                    {
+                        "kind": "broker_handshake" if event.get("kind") == "handshake" else "broker_route",
+                        "detail": event.get("detail", ""),
+                        "allowed": str(event.get("detail", "")).endswith("|allowed=true"),
+                    }
+                    for event in broker_events
+                    if isinstance(event, Mapping)
+                ],
+                "broker_evidence": broker,
+            }
+            unsigned = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            value["signature_algorithm"] = "hmac-sha256"
+            value["signature"] = hmac.new(broker_context.evidence_key.encode(), unsigned, hashlib.sha256).hexdigest()
+            (attempt / "network-evidence.json").write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+            return value
 
     def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Publish staged outputs and return settlement-safe object refs."""
@@ -1517,8 +1574,9 @@ class GenericPackHost:
             source_root=record.source_root,
             values=values,
         )
+        broker_endpoint = network_broker.policy.get("proxy") if network_broker is not None else None
         process = popen_owned_group(
-            argv,
+            _network_sandbox_argv(argv, attempt, broker_endpoint),
             cwd=str(cwd),
             env=env,
             stdout=subprocess.PIPE,
@@ -1547,7 +1605,7 @@ class GenericPackHost:
                 candidate = Path(path)
                 if candidate.is_file():
                     outputs[output.name] = str(candidate)
-            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}, "network_evidence_key": env.get("ASTRID_NETWORK_AUTH_TOKEN")})()
+            return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}})()
         finally:
             _release_owned_group(process)
             env.clear()
@@ -1629,8 +1687,9 @@ class GenericPackHost:
             existing = [item for item in env.get("ASTRID_PACKS_PATH", "").split(os.pathsep) if item]
             roots = [str(root) for root in (*self.pack_roots, *map(Path, existing))]
             env["ASTRID_PACKS_PATH"] = os.pathsep.join(dict.fromkeys(roots))
+        broker_endpoint = str((child_env or {}).get("ASTRID_BROKER_PROXY") or "")
         process = popen_owned_group(
-            [sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)],
+            _network_sandbox_argv([sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)], attempt_path, broker_endpoint),
             cwd=str(attempt_path),
             env=env,
             stdout=subprocess.PIPE,
@@ -1714,7 +1773,6 @@ class GenericPackHost:
         root = self.attempt_root or Path(tempfile.mkdtemp(prefix=f"astrid-attempt-{task_id}-")).resolve()
         root.mkdir(parents=True, exist_ok=True)
         settled = False
-        network_evidence_key: str | None = None
         network_broker: _NetworkBrokerContext | None = None
         # Every network attempt gets a fresh host-issued nonce.  It is part of
         # the immutable admission presented to an observable broker, so a
@@ -1786,14 +1844,12 @@ class GenericPackHost:
                         admission=network_admission,
                         network_broker=network_broker,
                     )
-                    network_evidence_key = getattr(result, "network_evidence_key", None)
                 else:
                     # Dispatch through the process boundary.  The immutable
                     # admitted definition is serialized for the child so a
                     # registry reload cannot silently select a different pack.
                     worker_admission = network_admission
                     worker_env, worker_secrets = self._child_environment(record, root, admission=worker_admission, network_broker=network_broker)
-                    network_evidence_key = worker_env.get("ASTRID_NETWORK_AUTH_TOKEN")
                     try:
                         result = self.invoke_capability(
                             capability_kind="executor",
@@ -1832,7 +1888,6 @@ class GenericPackHost:
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
             network_evidence = self._network_evidence(
                 root,
-                evidence_key=network_evidence_key,
                 admission=worker_admission if record.definition.command is None else network_admission,
                 # Every network-required settlement needs signed evidence. A
                 # Python child emits it through the hook; a native child must

@@ -407,6 +407,7 @@ def test_claim_only_admits_capabilities_that_are_currently_ready(tmp_path, monke
                 "network_policy": {
                     "allowed_protocols": ["tcp"],
                     "allowed_destinations": ["example.invalid:443"],
+                    "broker": {"host_managed": True},
                 },
             },
         }),

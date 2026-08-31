@@ -224,11 +224,14 @@ class ObservableNetworkBroker:
             # A declared host:port destination is allowed for any path, but
             # never a different host or port.
             try:
-                declared = urlsplit(candidate if "://" in candidate else f"https://{candidate}")
-                declared_port = declared.port or (443 if declared.scheme == "https" else 80)
+                has_scheme = "://" in candidate
+                declared = urlsplit(candidate if has_scheme else f"https://{candidate}")
+                # A bare host declaration intentionally covers its resolved
+                # HTTP/HTTPS port range; an explicit URL keeps its port fence.
+                declared_port = declared.port if has_scheme or ":" in candidate.rsplit("/", 1)[-1] else None
             except ValueError:
                 continue
-            if declared.hostname and declared.hostname.lower() == parsed.hostname.lower() and declared_port == (parsed.port or (443 if parsed.scheme == "https" else 80)):
+            if declared.hostname and declared.hostname.lower() == parsed.hostname.lower() and (declared_port is None or declared_port == (parsed.port or (443 if parsed.scheme == "https" else 80))):
                 return True
         return False
 

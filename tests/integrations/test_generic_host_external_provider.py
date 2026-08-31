@@ -90,6 +90,7 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
                         "network_policy": {
                             "allowed_protocols": ["dns", "tcp"],
                             "allowed_destinations": ["127.0.0.1"],
+                            "broker": {"host_managed": True},
                         },
                 },
             }
@@ -205,6 +206,7 @@ def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> 
             "network_policy": {
                 "allowed_protocols": ["tcp"],
                 "allowed_destinations": ["example.invalid:443"],
+                "broker": {"host_managed": True},
             },
         },
     }), encoding="utf-8")
@@ -261,6 +263,7 @@ def test_provider_credentials_are_manifest_scoped_and_redacted(tmp_path: Path, p
         "metadata": {"adapter_family": "provider", "network_policy": {
             "allowed_protocols": ["dns", "tcp"], "allowed_destinations": [],
             "allow_redirects": False, "proxy": None,
+            "broker": {"host_managed": True},
         }},
     }), encoding="utf-8")
     credential_source = {"FAL_KEY": "fal-ambient-secret", "GIPHY_API_KEY": "giphy-ambient-secret", "OPENAI_API_KEY": "openai-ambient-secret"}
@@ -319,6 +322,7 @@ def test_provider_network_policy_records_hermetic_dns_tcp_and_denies_redirect(
                 "allowed_protocols": ["dns", "tcp"],
                 "allowed_destinations": ["127.0.0.1:%d" % server.server_port],
                 "allow_redirects": False,
+                "broker": {"host_managed": True},
             }},
         }), encoding="utf-8")
         host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
@@ -335,8 +339,8 @@ def test_provider_network_policy_records_hermetic_dns_tcp_and_denies_redirect(
         server.server_close()
 
 
-def test_provider_network_policy_records_and_allows_quic_over_udp_fixture(tmp_path: Path) -> None:
-    """UDP/QUIC-shaped provider traffic is explicitly admitted and evidenced."""
+def test_provider_network_policy_retires_unbrokered_quic_over_udp_fixture(tmp_path: Path) -> None:
+    """UDP providers are unavailable until the host broker supports datagrams."""
     received: list[bytes] = []
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(("127.0.0.1", 0))
@@ -372,20 +376,14 @@ def test_provider_network_policy_records_and_allows_quic_over_udp_fixture(tmp_pa
         host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
         record = host.discover()[0]
         host.preflight()
-        assert host.capabilities[record.id].ready
-        host.run_task({"task": {"id": "quic-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
-        thread.join(timeout=2)
-        evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
-        assert b"quic-fixture" in received
-        assert any(event["kind"] == "udp" and event["allowed"] for event in evidence["events"])
-        assert evidence["signature_algorithm"] == "hmac-sha256"
-        assert evidence["admission"]["capability_digest"] == record.capability_digest
+        assert host.capabilities[record.id].ready is False
+        assert "host-managed broker" in host.capabilities[record.id].preflight["network"]["reason"]
     finally:
         udp.close()
 
 
-def test_provider_network_policy_proves_real_aioquic_handshake(tmp_path: Path) -> None:
-    """The UDP evidence must come from a real QUIC handshake, not a label."""
+def test_provider_network_policy_retires_unbrokered_aioquic_handshake(tmp_path: Path) -> None:
+    """A QUIC provider is unavailable until a host-owned datagram broker exists."""
     pytest.importorskip("aioquic")
     package_root = tmp_path / "quic_provider"
     package_root.mkdir()
@@ -473,11 +471,8 @@ def test_provider_network_policy_proves_real_aioquic_handshake(tmp_path: Path) -
     host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
     record = host.discover()[0]
     host.preflight()
-    assert host.capabilities[record.id].ready
-    host.run_task({"task": {"id": "quic-real", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
-    assert (tmp_path / "attempt" / "outputs" / "proof.txt").read_text(encoding="utf-8") == "quic handshake complete"
-    evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
-    assert any(event["kind"] == "udp" and event["allowed"] for event in evidence["events"])
+    assert host.capabilities[record.id].ready is False
+    assert "host-managed broker" in host.capabilities[record.id].preflight["network"]["reason"]
 
 
 def test_native_network_command_is_unready_without_enforceable_observable_gateway(tmp_path: Path) -> None:
@@ -500,7 +495,7 @@ def test_native_network_command_is_unready_without_enforceable_observable_gatewa
     record = host.discover()[0]
     host.preflight()
     assert host.capabilities[record.id].ready is False
-    assert "enforceable observable proxy or broker" in host.capabilities[record.id].preflight["network"]["reason"]
+    assert "host-managed broker" in host.capabilities[record.id].preflight["network"]["reason"]
     with pytest.raises(HostError, match="capability .* unavailable"):
         host.run_task({"task": {"id": "native-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
 
@@ -521,7 +516,7 @@ def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Pat
         "command": {"argv": ["{python_exec}", "-c", "import json; from pathlib import Path; Path('{out}/result.json').write_text(json.dumps({'hits': []}), encoding='utf-8')"]},
         "outputs": [{"name": "result", "type": "file", "path_template": "{out}/result.json", "artifact_type": "application/json"}],
         "isolation": {"mode": "subprocess", "network": True, "secrets_required": ["HIVEMIND_ANON_KEY"]},
-        "metadata": {"adapter_family": "provider", "network_policy": {"allowed_protocols": ["dns", "tcp"], "allowed_destinations": []}},
+        "metadata": {"adapter_family": "provider", "network_policy": {"allowed_protocols": ["dns", "tcp"], "allowed_destinations": [], "broker": {"host_managed": True}}},
     }), encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
     subprocess.run(["git", "-C", str(checkout), "config", "user.email", "fixture@example.invalid"], check=True)
@@ -574,11 +569,13 @@ def test_python_provider_cannot_spawn_unobserved_native_network_descendant(tmp_p
         "metadata": {"adapter_family": "provider", "network_policy": {
             "allowed_protocols": ["dns", "tcp"], "allowed_destinations": ["127.0.0.1:9"],
             "allow_redirects": False, "proxy": None,
+            "broker": {"host_managed": True},
         }},
     }), encoding="utf-8")
     host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
     record = host.discover()[0]
     host.preflight()
+    assert host.capabilities[record.id].ready
     with pytest.raises(HostError, match="exited"):
         host.run_task({"task": {"id": "native-escape", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
     evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
@@ -587,9 +584,21 @@ def test_python_provider_cannot_spawn_unobserved_native_network_descendant(tmp_p
 
 def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Path) -> None:
     """A provider must use the live broker and cannot bypass its route."""
-    broker = ObservableNetworkBroker(response_body=b"brokered-response").start()
+    class ProviderHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler API
+            body = b"brokered-response"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), ProviderHandler)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
     try:
-        port = int(broker.endpoint.rsplit(":", 1)[1])
+        port = upstream.server_port
         pack_root = tmp_path / "broker_provider"
         executor_root = pack_root / "executors" / "fetch"
         executor_root.mkdir(parents=True)
@@ -600,7 +609,7 @@ def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Pa
         code = (
             "from pathlib import Path\n"
             "from urllib.request import urlopen, build_opener, ProxyHandler\n"
-            "body = urlopen('http://example.invalid/through-broker', timeout=2).read()\n"
+            f"body = urlopen('http://127.0.0.1:{port}/through-broker', timeout=2).read()\n"
             "Path('{out}/body').write_bytes(body)\n"
             "try:\n"
             "    build_opener(ProxyHandler({{}})).open('http://127.0.0.1:1/bypass', timeout=1)\n"
@@ -616,7 +625,8 @@ def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Pa
             "metadata": {"adapter_family": "provider", "network_policy": {
                 "allowed_protocols": ["dns", "tcp"],
                 "allowed_destinations": [f"127.0.0.1:{port}"],
-                "allow_redirects": False, "proxy": broker.endpoint,
+                "allow_redirects": False,
+                "broker": {"host_managed": True},
             }},
         }), encoding="utf-8")
         host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
@@ -625,12 +635,12 @@ def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Pa
         assert host.capabilities[record.id].ready
         host.run_task({"task": {"id": "broker-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
         assert (tmp_path / "attempt" / "outputs" / "body").read_bytes() == b"brokered-response"
-        assert {event.kind for event in broker.events} >= {"handshake", "route"}
         evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
         assert any(event["kind"] == "broker_handshake" and event["allowed"] for event in evidence["events"])
-        assert any(event["kind"] == "tcp" and not event["allowed"] for event in evidence["events"])
+        assert any(event["kind"] == "broker_route" and event["allowed"] for event in evidence["events"])
     finally:
-        broker.stop()
+        upstream.shutdown()
+        upstream.server_close()
 
 
 def test_host_rejects_child_forged_broker_evidence_without_upstream_route(tmp_path: Path) -> None:
