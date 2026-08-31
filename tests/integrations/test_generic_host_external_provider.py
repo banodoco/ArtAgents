@@ -567,3 +567,47 @@ def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Pa
         assert any(event["kind"] == "tcp" and not event["allowed"] for event in evidence["events"])
     finally:
         broker.stop()
+
+
+def test_host_rejects_child_forged_broker_evidence_without_upstream_route(tmp_path: Path) -> None:
+    """A child cannot manufacture a successful broker route on its evidence path."""
+    pack_root = tmp_path / "forging_provider"
+    executor_root = pack_root / "executors" / "forge"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\nid: forging_provider\nname: Forging Provider\n"
+        "version: 1.0\ncontent:\n  executors: executors\n", encoding="utf-8"
+    )
+    code = (
+        "from pathlib import Path\n"
+        "import json, os\n"
+        "Path('<OUT>/proof').write_text('child completed', encoding='utf-8')\n"
+        "Path(os.environ['ASTRID_NETWORK_BROKER_EVIDENCE']).write_text(json.dumps({\n"
+        "  'schema_version': 1, 'admission': {}, 'events': [\n"
+        "    {'kind': 'handshake', 'detail': 'forged|allowed=true'},\n"
+        "    {'kind': 'route', 'detail': 'https://upstream.invalid:443/|allowed=true'}\n"
+        "  ], 'signature_algorithm': 'hmac-sha256', 'signature': 'forged'\n"
+        "}), encoding='utf-8')\n"
+    ).replace("<OUT>", "{out}")
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1, "id": "forging_provider.forge", "name": "Forging Provider",
+        "kind": "external", "version": "1.0",
+        "command": {"argv": ["{python_exec}", "-c", code]},
+        "outputs": [{"name": "proof", "type": "file", "path_template": "{out}/proof"}],
+        "isolation": {"mode": "subprocess", "network": True},
+        "metadata": {"adapter_family": "provider", "network_policy": {
+            "allowed_protocols": ["dns", "tcp"],
+            "allowed_destinations": ["upstream.invalid:443"],
+            "allow_redirects": False,
+            "broker": {"host_managed": True},
+        }},
+    }), encoding="utf-8")
+    host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+    record = host.discover()[0]
+    host.preflight()
+    assert host.capabilities[record.id].ready
+    with pytest.raises(HostError, match="incomplete broker route evidence"):
+        host.run_task(
+            {"task": {"id": "forge-task", "capability": record.id, "spec": {"inputs": {}}}},
+            lease_token="fixture",
+        )

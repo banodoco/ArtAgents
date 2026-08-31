@@ -143,16 +143,11 @@ def _write_evidence() -> None:
         except (OSError, ValueError):
             broker_value = None
         if isinstance(broker_value, Mapping):
-            broker_unsigned = {key: value for key, value in broker_value.items() if key not in {"signature", "signature_algorithm"}}
-            broker_canonical = json.dumps(broker_unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-            broker_valid = (
-                bool(_EVIDENCE_KEY)
-                and broker_value.get("signature_algorithm") == "hmac-sha256"
-                and hmac.compare_digest(str(broker_value.get("signature", "")), hmac.new(_EVIDENCE_KEY.encode(), broker_canonical, hashlib.sha256).hexdigest())
-                and dict(broker_value.get("admission") or {}) == dict(_ADMISSION)
-            )
-            if broker_valid:
-                payload["broker_evidence"] = broker_value
+            # The child may copy the broker record into its diagnostic
+            # envelope, but must not validate or sign it: only the parent has
+            # the broker-only signing secret.  The host re-reads and verifies
+            # the broker file independently after the child exits.
+            payload["broker_evidence"] = broker_value
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     if not _EVIDENCE_KEY:
         # A hook without its host-issued key cannot make settlement evidence
@@ -297,7 +292,8 @@ def _broker_handshake() -> None:
         with socket.create_connection((parsed.hostname, parsed.port), timeout=3) as connection:
             # The digest binds the complete host admission; the nonce makes a
             # replayed handshake from another attempt fail closed.
-            connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest} {nonce}\n".encode("ascii"))
+            auth_token = os.environ.get("ASTRID_NETWORK_AUTH_TOKEN", "")
+            connection.sendall(f"ASTRID-BROKER/1 HELLO {admission_digest} {nonce} {auth_token}\n".encode("ascii"))
             response = connection.recv(64).decode("ascii", "replace").strip()
     except OSError as exc:
         _record("broker_handshake", host=parsed.hostname, port=parsed.port, allowed=False, detail=str(exc))
@@ -339,7 +335,9 @@ def install_from_environment() -> None:
         admission = json.loads(admission_raw)
     except ValueError:
         admission = {}
-    key = os.environ.get("ASTRID_NETWORK_EVIDENCE_KEY", "")
+    # This token authenticates the child to a host-owned broker.  It is not
+    # the broker's evidence signing secret.
+    key = os.environ.get("ASTRID_NETWORK_AUTH_TOKEN", "")
     if isinstance(policy, Mapping) and isinstance(admission, Mapping):
         install(policy, evidence, admission=admission, evidence_key=key)
 

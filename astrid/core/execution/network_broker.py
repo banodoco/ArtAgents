@@ -37,7 +37,8 @@ class _BrokerHandler(socketserver.StreamRequestHandler):
             parts = first.decode("utf-8", "replace").strip().split()
             digest = parts[2] if len(parts) > 2 else ""
             nonce = parts[3] if len(parts) > 3 else ""
-            allowed = broker._admission_allowed(digest, nonce)
+            auth_token = parts[4] if len(parts) > 4 else ""
+            allowed = broker._admission_allowed(digest, nonce, auth_token)
             broker._record("handshake", f"{digest}:{nonce}", allowed=allowed)
             self.wfile.write(("ASTRID-BROKER/1 OK\n" if allowed else "ASTRID-BROKER/1 REJECT\n").encode("ascii"))
             self.wfile.flush()
@@ -165,6 +166,7 @@ class ObservableNetworkBroker:
     allowed_routes: tuple[str, ...] = ()
     evidence_path: Path | None = None
     evidence_key: str = ""
+    auth_token: str = ""
     _strict: bool = field(default=False, init=False, repr=False)
     _admission: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _server: _BrokerServer | None = field(default=None, init=False, repr=False)
@@ -177,6 +179,7 @@ class ObservableNetworkBroker:
         allowed_routes: list[str] | tuple[str, ...] = (),
         evidence_path: str | Path | None = None,
         evidence_key: str = "",
+        auth_token: str = "",
     ) -> "ObservableNetworkBroker":
         """Pre-register the host's immutable admission and route allowlist."""
         self._admission = dict(admission)
@@ -187,6 +190,7 @@ class ObservableNetworkBroker:
         self.allowed_routes = tuple(str(item) for item in allowed_routes)
         self.evidence_path = Path(evidence_path) if evidence_path is not None else None
         self.evidence_key = str(evidence_key)
+        self.auth_token = str(auth_token)
         self._strict = True
         return self
 
@@ -194,7 +198,7 @@ class ObservableNetworkBroker:
         self.events.append(BrokerEvent(kind, f"{detail}|allowed={str(allowed).lower()}"))
         self._write_evidence()
 
-    def _admission_allowed(self, digest: str, nonce: str) -> bool:
+    def _admission_allowed(self, digest: str, nonce: str, auth_token: str) -> bool:
         if not self._strict:
             return bool(digest)
         return bool(
@@ -202,6 +206,8 @@ class ObservableNetworkBroker:
             and hmac.compare_digest(digest, self.expected_admission_digest)
             and self.expected_nonce
             and hmac.compare_digest(nonce, self.expected_nonce)
+            and self.auth_token
+            and hmac.compare_digest(auth_token, self.auth_token)
         )
 
     def _route_allowed(self, target: str) -> bool:
@@ -267,6 +273,10 @@ class ObservableNetworkBroker:
             self._thread.join(timeout=2)
         self._server = None
         self._thread = None
+
+    def finalize_evidence(self) -> None:
+        """Rewrite signed evidence from broker-owned events after child exit."""
+        self._write_evidence()
 
     def evidence(self) -> list[dict[str, Any]]:
         return [{"kind": event.kind, "detail": event.detail} for event in self.events]
