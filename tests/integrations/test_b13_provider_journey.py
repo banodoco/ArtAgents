@@ -128,6 +128,12 @@ def test_provider_journey_is_brokered_settled_and_cannot_bypass_upstream(tmp_pat
             input_object_ids=[],
             idempotency_key="b13-provider-task",
         )
+        # The scoped actor explicitly requests the short-lived provider route
+        # grant after task admission; the host consumes it once at launch.
+        grant = host.request_provider_route_grant({
+            "task": {"id": task.task_id, "capability": record.id, "spec": {"inputs": {}}}
+        })
+        assert grant.startswith("provider-route-grant-v1.")
         settled = host.run(once=True)
         assert len(settled) == 1 and settled[0].state == "succeeded"
         assert generated.get_task(task.task_id).state == "succeeded"

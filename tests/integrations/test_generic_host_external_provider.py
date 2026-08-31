@@ -27,6 +27,12 @@ from banodoco_workspace_client import WorkspaceClient
 from runtime_protocol.daemon import RuntimeDaemon
 
 
+def _run_provider(host: GenericPackHost, task: dict, *, lease_token: str = "fixture"):
+    """Exercise the explicit provider grant request/consume seam."""
+    grant = host.request_provider_route_grant(task)
+    return host.run_task(task, lease_token=lease_token, provider_route_grant=grant)
+
+
 def test_external_pack_command_imports_from_its_admitted_pack_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -126,7 +132,8 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
         assert record.adapter.family == "provider"
         assert host.capabilities[record.id].ready
 
-        settled = host.run_task(
+        settled = _run_provider(
+            host,
             {"task": {"id": "provider-task", "capability": record.id, "spec": {"inputs": {}}}},
             lease_token="fixture-lease",
         )
@@ -276,7 +283,7 @@ def test_provider_credentials_are_manifest_scoped_and_redacted(tmp_path: Path, p
     host.preflight()
     assert host.capabilities[record.id].ready
     with pytest.raises(HostError) as caught:
-        host.run_task({"task": {"id": "credential-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        _run_provider(host, {"task": {"id": "credential-task", "capability": record.id, "spec": {"inputs": {}}}})
     assert "declared-fixture-secret" not in str(caught.value)
     assert "ambient-secret" not in str(caught.value)
     assert "<redacted>" in str(caught.value)
@@ -329,7 +336,7 @@ def test_provider_network_policy_records_hermetic_dns_tcp_and_denies_redirect(
         record = host.discover()[0]
         host.preflight()
         with pytest.raises(HostError, match="network policy denied redirect"):
-            host.run_task({"task": {"id": "network-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+            _run_provider(host, {"task": {"id": "network-task", "capability": record.id, "spec": {"inputs": {}}}})
         evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
         assert {event["kind"] for event in evidence["events"]} >= {"dns", "tcp", "redirect"}
         assert any(event["kind"] == "redirect" and not event["allowed"] for event in evidence["events"])
@@ -577,7 +584,7 @@ def test_python_provider_cannot_spawn_unobserved_native_network_descendant(tmp_p
     host.preflight()
     assert host.capabilities[record.id].ready
     with pytest.raises(HostError, match="exited"):
-        host.run_task({"task": {"id": "native-escape", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        _run_provider(host, {"task": {"id": "native-escape", "capability": record.id, "spec": {"inputs": {}}}})
     evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
     assert any(event["kind"] == "native_descendant" and not event["allowed"] for event in evidence["events"])
 
@@ -633,7 +640,7 @@ def test_live_observable_proxy_handshake_route_and_bypass_rejection(tmp_path: Pa
         record = host.discover()[0]
         host.preflight()
         assert host.capabilities[record.id].ready
-        host.run_task({"task": {"id": "broker-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        _run_provider(host, {"task": {"id": "broker-task", "capability": record.id, "spec": {"inputs": {}}}})
         assert (tmp_path / "attempt" / "outputs" / "body").read_bytes() == b"brokered-response"
         evidence = json.loads((tmp_path / "attempt" / "network-evidence.json").read_text(encoding="utf-8"))
         assert any(event["kind"] == "broker_handshake" and event["allowed"] for event in evidence["events"])
@@ -681,7 +688,4 @@ def test_host_rejects_child_forged_broker_evidence_without_upstream_route(tmp_pa
     host.preflight()
     assert host.capabilities[record.id].ready
     with pytest.raises(HostError, match="incomplete broker route evidence"):
-        host.run_task(
-            {"task": {"id": "forge-task", "capability": record.id, "spec": {"inputs": {}}}},
-            lease_token="fixture",
-        )
+        _run_provider(host, {"task": {"id": "forge-task", "capability": record.id, "spec": {"inputs": {}}}})

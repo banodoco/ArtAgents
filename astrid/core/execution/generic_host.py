@@ -37,6 +37,10 @@ from astrid.core.execution.process_group import (
     signal_group as _signal_owned_group,
     terminate_group as _terminate_owned_group,
 )
+from astrid.core.execution.provider_route_grant import (
+    ProviderRouteGrantAuthority,
+    ProviderRouteGrantError,
+)
 
 if TYPE_CHECKING:
     from astrid.core.execution.executor.schema import ExecutorDefinition
@@ -265,6 +269,28 @@ def _network_policy(record: "CapabilityRecord") -> dict[str, Any] | None:
     return {str(key): value for key, value in raw.items()}
 
 
+def _provider_routes(record: "CapabilityRecord", inputs: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    """Resolve the exact upstream routes admitted for one provider task."""
+    policy = _network_policy(record) or {}
+    routes = policy.get("allowed_routes", policy.get("allowed_destinations", ()))
+    if isinstance(routes, str):
+        routes = (routes,)
+    dynamic_names = policy.get("dynamic_url_inputs", ())
+    if isinstance(dynamic_names, str):
+        dynamic_names = (dynamic_names,)
+    dynamic_routes: list[str] = []
+    for name in dynamic_names or ():
+        raw = (inputs or {}).get(str(name))
+        if not isinstance(raw, str) or not raw:
+            continue
+        parsed = urlsplit(raw)
+        if parsed.scheme in {"http", "https"} and parsed.hostname:
+            dynamic_routes.append(
+                f"{parsed.scheme}://{parsed.hostname.lower()}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
+            )
+    return tuple(dict.fromkeys([*(str(route) for route in (routes or ())), *dynamic_routes]))
+
+
 def _host_managed_broker(policy: Mapping[str, Any] | None) -> bool:
     """Whether a network policy has a broker owned and started by the host."""
     if not isinstance(policy, Mapping):
@@ -273,6 +299,16 @@ def _host_managed_broker(policy: Mapping[str, Any] | None) -> bool:
     return isinstance(descriptor, Mapping) and bool(
         descriptor.get("host_managed", descriptor.get("managed", True))
     )
+
+
+def _tcp_broker_supports(policy: Mapping[str, Any] | None) -> bool:
+    """The built-in broker is HTTP/TCP only; datagrams are not advertised."""
+    if not isinstance(policy, Mapping):
+        return False
+    protocols = policy.get("allowed_protocols", policy.get("protocols", ()))
+    if isinstance(protocols, str):
+        protocols = (protocols,)
+    return not any(str(protocol).lower() in {"udp", "quic"} for protocol in (protocols or ()))
 
 
 def _network_sandbox_argv(argv: list[str], attempt: Path, endpoint: str | None) -> list[str]:
@@ -819,6 +855,10 @@ class GenericPackHost:
         self.matrix: dict[str, dict[str, Any]] = self._load_matrix(self.capability_matrix_path)
         self.source_epoch = "uninitialized"
         self.runtime_state: dict[str, Any] = {}
+        # Provider route grants are intentionally scoped to this host process;
+        # their signing key never crosses into a child or runtime payload.
+        self._provider_grants = ProviderRouteGrantAuthority()
+        self._pending_provider_grants: dict[str, str] = {}
 
     def _default_matrix_path(self) -> Path | None:
         checkout = Path(__file__).resolve().parents[3]
@@ -1002,6 +1042,8 @@ class GenericPackHost:
                 # network work is therefore admissible only through the
                 # host-owned broker.
                 checks["network"] = {"ok": False, "reason": "provider network requires a host-managed broker"}
+            elif record.definition.isolation.network and adapter.family == "provider" and not _tcp_broker_supports(policy):
+                checks["network"] = {"ok": False, "reason": "host-managed provider broker does not support UDP/QUIC"}
             elif _native_network_command(record) and record.definition.isolation.network and not _enforceable_network_gateway(policy):
                 checks["network"] = {"ok": False, "reason": "native network requires an enforceable observable proxy or broker"}
             else:
@@ -1255,25 +1297,7 @@ class GenericPackHost:
         evidence_key = secrets_module.token_hex(32)
         auth_token = secrets_module.token_urlsafe(32)
         evidence_path = attempt / "broker-evidence.json"
-        routes = policy.get("allowed_routes", policy.get("allowed_destinations", ()))
-        if isinstance(routes, str):
-            routes = (routes,)
-        # URL-bearing provider inputs are admitted dynamically, but only as
-        # concrete parsed destinations for this task.  This keeps article /
-        # workflow URL semantics useful without turning the broker into an
-        # open proxy.
-        dynamic_names = policy.get("dynamic_url_inputs", ())
-        if isinstance(dynamic_names, str):
-            dynamic_names = (dynamic_names,)
-        dynamic_routes = []
-        for name in dynamic_names or ():
-            raw = (inputs or {}).get(str(name))
-            if not isinstance(raw, str) or not raw:
-                continue
-            parsed = urlsplit(raw)
-            if parsed.scheme in {"http", "https"} and parsed.hostname:
-                dynamic_routes.append(f"{parsed.scheme}://{parsed.hostname.lower()}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}")
-        routes = tuple(dict.fromkeys([*(str(route) for route in (routes or ())), *dynamic_routes]))
+        routes = _provider_routes(record, inputs)
         # Bind the concrete dynamic destinations into the signed admission so
         # route evidence cannot be replayed under a different URL input.
         admission["allowed_routes"] = list(routes)
@@ -1298,6 +1322,55 @@ class GenericPackHost:
         effective["allowed_destinations"] = [broker.endpoint]
         effective["broker"] = {**dict(descriptor), "evidence_path": str(evidence_path)}
         return _NetworkBrokerContext(broker=broker, policy=effective, evidence_key=evidence_key, auth_token=auth_token)
+
+    def request_provider_route_grant(
+        self,
+        task: Mapping[str, Any],
+        *,
+        ttl_seconds: int = 60,
+    ) -> str:
+        """Request one short-lived, task-bound provider egress grant.
+
+        This is the explicit actor-facing step.  ``run_task`` consumes the
+        returned opaque handle exactly once immediately before broker launch.
+        """
+        task_data = task.get("task", task)
+        task_id = str(task_data.get("id") or task_data.get("task_id") or "")
+        capability_id = str(task_data.get("capability") or task_data.get("capability_id") or "")
+        if not task_id or not capability_id:
+            raise ProviderRouteGrantError("provider route grant requires task and capability identity")
+        record = self.capabilities.get(capability_id)
+        if record is None:
+            self.discover()
+            record = self.capabilities.get(capability_id)
+        if record is None:
+            raise ProviderRouteGrantError(f"capability not discovered: {capability_id}")
+        self.preflight(capability_id)
+        record = self.capabilities[capability_id]
+        policy = _network_policy(record)
+        if not record.ready or record.adapter.family != "provider" or not record.definition.isolation.network:
+            raise ProviderRouteGrantError("provider route grant requires a ready network provider")
+        if not _host_managed_broker(policy) or not _tcp_broker_supports(policy):
+            raise ProviderRouteGrantError("provider route grant requires a supported host-managed TCP broker")
+        spec = task_data.get("spec") if isinstance(task_data.get("spec"), Mapping) else {}
+        inputs = spec.get("inputs") if isinstance(spec.get("inputs"), Mapping) else {}
+        routes = _provider_routes(record, inputs)
+        descriptor = (policy or {}).get("broker", {})
+        binding = ProviderRouteGrantAuthority.binding(
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            broker=descriptor,
+        )
+        token = self._provider_grants.issue(
+            task_id=task_id,
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            routes=routes,
+            broker_binding=binding,
+            ttl_seconds=ttl_seconds,
+        )
+        self._pending_provider_grants[task_id] = token
+        return token
 
     def _typed_outputs(self, record: CapabilityRecord, result: Any, attempt: Path) -> list[dict[str, Any]]:
         paths = getattr(result, "outputs", {}) or {}
@@ -1752,6 +1825,7 @@ class GenericPackHost:
         attempt_id: str | None = None,
         fence: int | None = None,
         keep_attempt: bool = False,
+        provider_route_grant: str | None = None,
     ) -> Mapping[str, Any]:
         task_data = task.get("task", task)
         task_id = str(task_data["id"])
@@ -1789,6 +1863,29 @@ class GenericPackHost:
         }
         try:
             inputs = self._materialize_inputs(spec, root)
+            if record.adapter.family == "provider" and record.definition.isolation.network:
+                policy = _network_policy(record)
+                descriptor = (policy or {}).get("broker", {})
+                binding = ProviderRouteGrantAuthority.binding(
+                    capability_id=record.id,
+                    capability_digest=record.capability_digest,
+                    broker=descriptor,
+                )
+                token = provider_route_grant or task_data.get("provider_route_grant") or (
+                    spec.get("provider_route_grant") if isinstance(spec, Mapping) else None
+                )
+                try:
+                    self._provider_grants.consume(
+                        token,
+                        task_id=task_id,
+                        capability_id=record.id,
+                        capability_digest=record.capability_digest,
+                        routes=_provider_routes(record, inputs),
+                        broker_binding=binding,
+                    )
+                    self._pending_provider_grants.pop(task_id, None)
+                except ProviderRouteGrantError as exc:
+                    raise HostError(str(exc)) from exc
             network_broker = self._start_network_broker(record, root, network_admission, inputs)
             output_root = root / "outputs"
             output_root.mkdir(parents=True, exist_ok=True)
@@ -2031,6 +2128,20 @@ class GenericPackHost:
             lease_token=str(claim_data.get("lease_id") or ""),
             attempt_id=str(claim_data["attempt_id"]),
             fence=int(claim_data["fence"]),
+            provider_route_grant=(
+                task_data.get("provider_route_grant")
+                or (task_data.get("spec", {}).get("provider_route_grant") if isinstance(task_data.get("spec"), Mapping) else None)
+                or self._pending_provider_grants.pop(task_id, None)
+                or (
+                    self.request_provider_route_grant({"task": task_data})
+                    if (
+                        self.capabilities.get(str(task_data.get("capability"))) is not None
+                        and self.capabilities[str(task_data.get("capability"))].adapter.family == "provider"
+                        and self.capabilities[str(task_data.get("capability"))].definition.isolation.network
+                    )
+                    else None
+                )
+            ),
         )
 
     def run(self, *, once: bool = False, poll_seconds: float = 1.0, max_tasks: int | None = None) -> list[Mapping[str, Any]]:
