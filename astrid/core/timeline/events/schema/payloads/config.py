@@ -74,22 +74,6 @@ class TimelineDeletedPayload:
 
 
 @dataclass(frozen=True)
-class TimelineImportedPayload:
-    snapshot: dict[str, Any]
-    source: TimelineImportSource
-
-    def __post_init__(self) -> None:
-        if self.source not in {"legacy_local", "editor_save", "other"}:
-            raise TimelineEventSchemaError(
-                "payload.source must be legacy_local, editor_save, or other"
-            )
-        _validate_jsonable(self.snapshot, "payload.snapshot")
-
-    def to_json_obj(self) -> dict[str, Any]:
-        return {"snapshot": dict(self.snapshot), "source": self.source}
-
-
-@dataclass(frozen=True)
 class TimelineConfigReplacedPayload:
     config: dict[str, Any]
     source: str | None = None

@@ -133,8 +133,8 @@ def test_installed_scan_catches_combined_adversarial_sources(
 
     _write(
         root,
-        "astrid/core/gateway/evil_supabase.py",
-        "from astrid.core.integrations.reigh.supabase_client import post_json\n",
+        "astrid/core/gateway/evil_remote.py",
+        "from astrid.core.timeline.eventlog.backends.remote_client import post_json\n",
     )
     _write(
         root,
@@ -180,7 +180,7 @@ def test_installed_scan_catches_combined_adversarial_sources(
     report = _scan(root)
     assert not report.ok
     joined = "\n".join(report.errors)
-    assert "Supabase authority" in joined or "supabase" in joined.lower()
+    assert "legacy authority" in joined.lower()
     assert "FSA" in joined or "file-authority" in joined
     assert "semantic JSON/JSONL/FSA writer" in joined
     assert "silent authority fallback" in joined

@@ -2,7 +2,7 @@
 
 Proves that the pre-Phase-3 cut-step rejection of mixed source-video + generative
 pools is gone, and that the Timeline class' runtime clip classification handles
-mixed timelines without persisting a `kind` field (Reigh allowlist is closed).
+mixed timelines without persisting a `kind` field (the runtime allowlist is closed).
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ class MixedModeCutTest(unittest.TestCase):
         )
         self.assertNotIn(ClipClassifiedKind.VIDEO, kinds)
         self.assertNotIn(ClipClassifiedKind.OPAQUE, kinds)
-        # Reigh-compat: no persisted `kind` or `classified_kind` field on any clip.
+        # No persisted `kind` or `classified_kind` field on any clip.
         raw = json.loads(out_path.read_text(encoding="utf-8"))
         for clip in raw.get("clips", []):
             self.assertNotIn("kind", clip)

@@ -3,7 +3,7 @@
 Tests cover:
 - LocalFs materialization and event-log behavior for all 15 secondary events.
 - Assembly-shape edge cases for the secondary materializer domains.
-- Supabase-selected paths that prove the provisional typed Supabase errors fail explicitly.
+- Invalid provider selections fail explicitly at the runtime boundary.
 """
 
 from __future__ import annotations

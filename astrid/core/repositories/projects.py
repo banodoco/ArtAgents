@@ -25,7 +25,7 @@ update path:
   **transaction-free** reads over a separate read-only connection: no writer
   transaction is opened and no row is mutated. ``show`` raises the typed
   :class:`ProjectNotFoundError` for a missing project; ``list`` returns rows
-  sorted by ``slug`` ascending (the frozen bridge ``GET /projects`` shape).
+  sorted by ``slug`` ascending (the frozen runtime ``GET /projects`` shape).
 - :meth:`ProjectRepository.update` eventfully updates ``name``/``settings``
   through the same command path — projection, one hash-chained
   ``core.project.updated`` event, both heads, and one complete receipt in the
@@ -209,7 +209,7 @@ class ProjectReadModel:
         The frozen v10 DDL has no default-timeline column (SD1), so the
         repository persists the default inside ``settings_json`` under
         :data:`DEFAULT_TIMELINE_SETTINGS_KEY`. This property projects it
-        for read consumers (the timeline pack and the bridge); it is
+        for read consumers (the timeline pack and the runtime); it is
         ``None`` until :meth:`ProjectRepository.set_default_timeline`
         has been called.
         """
@@ -220,11 +220,11 @@ class ProjectReadModel:
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectListRow:
-    """One sorted project list row (frozen bridge ``GET /projects`` shape).
+class ProjectSummary:
+    """One sorted project list row (frozen runtime ``GET /projects`` shape).
 
     A lightweight read-only projection of exactly the ``{slug, name}``
-    fields the frozen bridge list contract exposes, ordered by ``slug``
+    fields the frozen runtime list contract exposes, ordered by ``slug``
     ascending. Never mutated; produced only by the transaction-free
     :meth:`ProjectRepository.list` read.
     """
@@ -233,7 +233,7 @@ class ProjectListRow:
     name: str
 
     def to_dict(self) -> dict[str, str]:
-        """Return the JSON-safe dict serialized by the bridge list route."""
+        """Return the JSON-safe dict serialized by the runtime list route."""
         return {"slug": self.slug, "name": self.name}
 
 
@@ -502,12 +502,12 @@ class ProjectRepository:
             raise ProjectNotFoundError(project_id=project_id)
         return self._row_to_read_model(row, project_id)
 
-    def list(self, writer: DatabaseWriter) -> list[ProjectListRow]:
+    def list(self, writer: DatabaseWriter) -> list[ProjectSummary]:
         """Sorted read-only list query: every project, slug ascending.
 
         A transaction-free read on a separate read-only connection (the
-        frozen bridge ``GET /projects`` ordering). Returns one
-        :class:`ProjectListRow` per project; a root with no projects
+        frozen runtime ``GET /projects`` ordering). Returns one
+        :class:`ProjectSummary` per project; a root with no projects
         returns ``[]``. No writer transaction is opened and no row is
         mutated.
         """
@@ -517,7 +517,7 @@ class ProjectRepository:
                 "SELECT slug, name FROM projects ORDER BY slug ASC"
             ).fetchall()
         return [
-            ProjectListRow(slug=str(row["slug"]), name=str(row["name"]))
+            ProjectSummary(slug=str(row["slug"]), name=str(row["name"]))
             for row in rows
         ]
 
@@ -947,7 +947,7 @@ __all__ = [
     "CORE_PROJECT_UPDATED_EVENT_KIND",
     "DEFAULT_TIMELINE_SETTINGS_KEY",
     "ProjectAlreadyExistsError",
-    "ProjectListRow",
+    "ProjectSummary",
     "ProjectNotFoundError",
     "ProjectReadModel",
     "ProjectRepository",

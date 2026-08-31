@@ -6,7 +6,7 @@ The module carries two layers:
   ``Capability*`` subclasses) used by the reduced public SDK's lazy
   discovery/invoke/generate/render/event APIs; and
 - the **frozen m4 service-error taxonomy** (SDK contract
-  ``docs/contracts/astrid-sdk-v10.md`` section 2): :class:`ServiceError`
+  ``docs/contracts/platform-contract.md``): :class:`ServiceError`
   and its nine exact-code subclasses, plus :func:`map_error`, the
   centralized bounded exception mapper that turns any exception — kernel
   repository errors, receipt mismatches, writer unavailability, or

@@ -14,7 +14,6 @@ from scripts.reshape.release_reproducibility import (
     record_required_toolchain,
     validate_dependency_locks,
     validate_hashed_lock,
-    validate_playwright,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,23 +54,11 @@ def test_lock_validation_fails_closed_on_ranges_urls_and_missing_hashes(
             validate_hashed_lock(lock)
 
 
-def test_playwright_package_and_browser_revision_are_lock_aligned() -> None:
-    root = REPO_ROOT / "scripts/reshape/editor_browser_smoke"
-    report = validate_playwright(root)
-    assert report["package_version"] == "1.62.1"
-    assert len(report["package_lock_sha256"]) == 64
-    browsers = root / "node_modules/playwright-core/browsers.json"
-    if browsers.is_file():
-        assert report["chromium"]["revision"]
-        assert report["chromium"]["browserVersion"]
-
-
 def test_required_release_toolchain_is_present_and_version_recorded() -> None:
     expected = ".".join(platform.python_version_tuple()[:2])
     report = record_required_toolchain(
         repo_root=REPO_ROOT,
         expected_python=expected,
-        playwright_root=REPO_ROOT / "scripts/reshape/editor_browser_smoke",
     )
     assert report["python"]["version"] == platform.python_version()
     assert set(report["tools"]) == {"make", "bash", "git", "ffmpeg", "ffprobe"}
@@ -85,14 +72,6 @@ def test_release_ci_enforces_hashed_build_runtime_and_toolchain_evidence() -> No
     assert "python -m build --wheel --no-isolation" in workflow
     assert "scripts.reshape.release_reproducibility" in workflow
     assert '"toolchain": json.loads(' in workflow
-
-
-def test_playwright_lockfile_remains_valid_json() -> None:
-    root = REPO_ROOT / "scripts/reshape/editor_browser_smoke"
-    package = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
-    assert package["devDependencies"]["playwright"] == "1.62.1"
-    assert lock["packages"][""]["devDependencies"]["playwright"] == "1.62.1"
 
 
 def test_runaway_release_migration_inputs_are_tracked_and_byte_pinned() -> None:

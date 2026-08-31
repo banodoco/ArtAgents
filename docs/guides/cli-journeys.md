@@ -7,7 +7,7 @@ command returns an SDK envelope. The Banodoco workspace runtime is the sole
 authority for all durable state; the Astrid checkout has no live project store.
 
 Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6),
-`docs/contracts/astrid-sdk-v10.md` (envelope contract).
+`docs/contracts/platform-contract.md` (envelope contract).
 
 ---
 
@@ -44,7 +44,7 @@ Notes:
 
 - **Neutral runtime handoff for product commands.** Product families below
   cross the generated workspace client, and the configured neutral launcher
-  starts/reconnects it on first use. There is no public `astrid serve` command.
+  starts or reconnects it on first use.
 - **One verb = one SDK call.** Every handler parses arguments, makes exactly
   one SDK service call, and renders the result. There is no SQL or domain
   logic in the CLI layer.

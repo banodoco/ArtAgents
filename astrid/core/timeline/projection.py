@@ -19,17 +19,6 @@ Lifecycle events
 * ``timeline.created``, ``timeline.renamed``, ``timeline.default_set``,
   ``timeline.tombstoned``, ``timeline.deleted`` are **intentional no-ops**
   for the assembly projection.
-* ``timeline.imported`` is migration-only legacy and is rejected by runtime
-  projection.
-
-``timeline.imported`` migration boundary
-----------------------------------------
-
-Historical ``timeline.imported`` payloads and wrapper snapshots are decoded
-only by the Sprint 2 migration scripts. Runtime projection fails closed instead
-of silently converting wrapper, old full-state, or non-container read-model
-shapes.
-
 Dispatch conventions
 --------------------
 
@@ -221,7 +210,6 @@ PROJECTOR_EVENT_CLASSIFICATION: dict[str, ProjectionKindClassification] = {
     "timeline.reverted": "metadata_noop",
     "timeline.branched_from": "metadata_noop",
     "timeline.erased": "metadata_noop",
-    "timeline.imported": "migration_only_legacy",
     "timeline.recovered": "validated_full_config_replacement",
     "clip.added": "timeline_config_mutation",
     "clip.removed": "timeline_config_mutation",
@@ -645,17 +633,6 @@ def apply_event_to_assembly(
             ),
         )
 
-    # timeline.imported — migration-only legacy
-    if event.kind == "timeline.imported":
-        raise ProjectionError(
-            event_id=event.event_id,
-            kind=event.kind,
-            reason=(
-                "timeline.imported is migration-only legacy; run the Sprint 2 "
-                "migration before runtime projection"
-            ),
-        )
-
     classification = classify_projector_event_kind(event.kind)
     if classification in {"metadata_noop", "non_container_read_model"}:
         return state
@@ -688,7 +665,7 @@ def apply_event_to_assembly(
             kind=event.kind,
             reason=(
                 f"{event.kind} is not a TimelineConfig container mutation; "
-                "run the Sprint 2 migration for legacy read-model events"
+                "use a standalone migration tool before importing legacy data"
             ),
         )
 

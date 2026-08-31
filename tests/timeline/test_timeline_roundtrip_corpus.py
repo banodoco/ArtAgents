@@ -1,7 +1,7 @@
 """Corpus round-trip test: glob-discovers all timeline fixtures and asserts
 byte-equivalence after load_timeline -> save_timeline.
 
-This is the regression net for the Reigh corpus baseline gate (S0 de-risk
+This is the regression net for the timeline corpus baseline gate (S0 de-risk
 spike).  Every ``*.timeline*.json`` under ``examples/`` and
 ``tests/fixtures/`` is loaded, re-saved to a temp directory, and compared
 byte-for-byte against the original.  On mismatch a normalised JSON diff

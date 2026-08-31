@@ -101,7 +101,7 @@ class RemoteTimelines(_RemoteFamily):
                 ErrorObject(
                     "unsupported_operation",
                     "timeline save requires project-scoped config and registry",
-                    {"operation": "timelines.save", "legacy_route": "update_timeline"},
+                    {"operation": "timelines.save"},
                 ),
                 idempotency_key=key,
             )

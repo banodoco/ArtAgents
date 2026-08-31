@@ -2,8 +2,8 @@
 
 Schema packs are the database-schema counterpart of capability packs. Their
 ``schema-pack.yaml`` is deliberately *not* a capability ``pack.yaml``: it has
-its own exact 11-field snake_case contract (``docs/astrid-v10-implementation-decisions.md``
-section 4) and never reuses capability-pack semantics such as executor,
+its own exact 11-field snake_case contract and never reuses capability-pack
+semantics such as executor,
 orchestrator, element, model, or component blocks.
 
 Parsing reuses only the shared :func:`load_manifest_mapping` YAML loader; every

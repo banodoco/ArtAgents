@@ -77,7 +77,6 @@ falls back to cloud when those are missing.
 
 ## Related docs
 
-- [Universal result manifest contract](../contracts/output-result-contract.md)
 - [Discovery for agents](../guides/discovery-for-agents.md)
 - [Astrid CLI contract](../contracts/cli-contract.md)
 - [Packs: contract](../packs/contract.md)

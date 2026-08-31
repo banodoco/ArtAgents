@@ -662,13 +662,6 @@
       "rationale": "No duplicate HTTP utility test."
     },
     {
-      "file": "test_open_in_reigh.py",
-      "lines": 38,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Open in Reigh for reigh pack."
-    },
-    {
       "file": "test_orchestrate_dsl.py",
       "lines": 221,
       "target": "tests/orchestrate/",
@@ -914,20 +907,6 @@
       "rationale": "Registry lookup semantics."
     },
     {
-      "file": "test_reigh_data.py",
-      "lines": 726,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Reigh data tests for reigh pack."
-    },
-    {
-      "file": "test_reigh_integration.py",
-      "lines": 498,
-      "target": "tests/packs/",
-      "confidence": "high",
-      "rationale": "Reigh integration tests."
-    },
-    {
       "file": "test_remotion_element_generation.py",
       "lines": 123,
       "target": "tests/packs/",
@@ -1003,13 +982,6 @@
       "target": "tests/core/",
       "confidence": "high",
       "rationale": "Subprocess env policy for core."
-    },
-    {
-      "file": "test_supabase_data_provider.py",
-      "lines": 245,
-      "target": "tests/core/",
-      "confidence": "medium",
-      "rationale": "Supabase data provider; could be core/ or packs/reigh."
     },
     {
       "file": "test_sweeper_async.py",

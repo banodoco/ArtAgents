@@ -68,7 +68,7 @@ Current shipped domains:
 | `media` | `rendering`, `understanding`, `video_editing`, `foley`, `stream_content` — media creation and editing |
 | `editorial` | `editorial` — transcript-to-cut editorial pipeline |
 | `generation` | `generation`, `comfy_wrap` — image/video generation |
-| `integration` | `reigh`, `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
+| `integration` | `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
 | `development` | `iteration`, `training` — author-test-iterate tooling and model training |
 | `infrastructure` | `runpod` — GPU provisioning and execution |
 | `system` | `builtin` (compatibility shell, hidden) — legacy namespace shell that preserves backward-compatible pack-level aliases; `_core` is a skill-only shell (no `pack.yaml`, no capabilities) classified under §Shells and Hidden Packs |
@@ -260,7 +260,7 @@ Not every pack directory in the repository is a runtime-discovered pack:
 
 - **`astrid/packs/`** — Runtime packs. Discovered by `python3 -m astrid.core.pack.cli list`,
   `status`, and capability searches. Currently: `rendering`, `understanding`, `generation`,
-  `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`,
+  `editorial`, `video_editing`, `foley`, `training`, `youtube`, `fal`,
   `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `comfy_wrap`,
   `stream_content`, plus the dynamically-created `local` scratch
   pack. The legacy `builtin` pack is a hidden compatibility shell that preserves the
@@ -327,8 +327,8 @@ in M2:
    `pack.yaml` files under their `aliases:` blocks — not in
    `builtin/pack.yaml`. The canonical packs that carry these aliases include
    `editorial`, `foley`, `generation`, `fal`, `youtube`, `rendering`,
-   `training`, `understanding`, `video_editing`, `vibecomfy`, `runpod`,
-   `moirae`, and `reigh`.
+   `training`, `understanding`, `video_editing`, `vibecomfy`, `runpod`, and
+   `moirae`.
 
 2. **Agent probe** — `orchestrators/agent_probe/` is a legacy DSL
    orchestrator shim (`@orchestrator("builtin.agent_probe")`) used by

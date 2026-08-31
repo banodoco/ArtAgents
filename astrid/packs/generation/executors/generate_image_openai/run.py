@@ -47,7 +47,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "prompt": (
             "An illuminated medieval manuscript page depicting Saint Peter of Banodoco, "
             "patron of file-based pipelines, haloed in glowing unix prompts, quill in "
-            "hand inscribing ffmpeg incantations. Tiny familiar spirits labelled REIGH, "
+            "hand inscribing ffmpeg incantations. Tiny familiar spirits label every step, "
             "LOTA, and MOIRAE peer over his shoulders. Gold leaf, vellum, Celtic "
             "knotwork border."
         ),

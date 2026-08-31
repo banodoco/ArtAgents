@@ -602,13 +602,13 @@ def test_legacy_authority_in_supported_entry_path_fails(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     _write(
         tmp_path,
-        "astrid/packs/timeline/bridge.py",
+        "astrid/packs/__init__.py",
         "from astrid.core.timeline.eventlog import LocalFsBackend\n"
         "backend = LocalFsBackend(timeline_id='x', timeline_home=Path('.'))\n",
     )
     errors = lint_legacy_authorities(tmp_path)
     assert any(
-        "astrid/packs/timeline/bridge.py: legacy authority marker "
+        "astrid/packs/__init__.py: legacy authority marker "
         "'LocalFsBackend' in a supported v10 entry path" in error
         for error in errors
     ), errors
@@ -622,7 +622,7 @@ def test_legacy_files_outside_supported_paths_are_allowed(tmp_path: Path) -> Non
         tmp_path,
         "astrid/core/timeline/legacy_thing.py",
         "from astrid.core.timeline.eventlog import LocalFsBackend\n"
-        "from astrid.core.timeline.eventlog.backends.supabase import client\n",
+        "from astrid.core.timeline.eventlog.backends.remote_client import client\n",
     )
     errors = lint_legacy_authorities(tmp_path)
     assert errors == [], errors
@@ -954,7 +954,7 @@ def test_mutation_fixture_fails_the_whole_authority_lint(
     )
     _write(
         tmp_path,
-        "astrid/packs/timeline/bridge.py",
+        "astrid/packs/__init__.py",
         "from astrid.core.timeline.eventlog import LocalFsBackend\n",
     )
     _write(

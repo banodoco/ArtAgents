@@ -26,12 +26,16 @@ def test_kernel_binding_requires_explicit_writer_and_repository() -> None:
     assert kernel_binding.gateway_kernel_kwargs(binding)["writer"] is binding.writer
 
 
+def test_deleted_worker_bridge_is_not_a_timeline_caller() -> None:
+    """The retired worker bridge is gone, rather than hidden behind an alias."""
+    assert not (ROOT / "astrid/core/integrations/worker/banodoco_worker.py").exists()
+
+
 def test_normal_timeline_pack_callers_do_not_discover_kernel() -> None:
     paths = (
         ROOT / "astrid/packs/iteration/executors/assemble/run.py",
         ROOT / "astrid/packs/video_editing/executors/cut/timeline_build.py",
         ROOT / "astrid/packs/editorial/executors/refine/run.py",
-        ROOT / "astrid/core/integrations/worker/banodoco_worker.py",
     )
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -43,4 +47,3 @@ def test_normal_timeline_pack_callers_do_not_discover_kernel() -> None:
         assert not any(
             "astrid.application" in ast.unparse(node) for node in imported
         ), path
-

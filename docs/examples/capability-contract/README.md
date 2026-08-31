@@ -104,8 +104,8 @@ canonical ids seeded in the registry.
 
 Unknown artifact types never fail validation — the registry's `resolve()`
 returns `None` for unknowns, and callers treat that as "opaque, pass through."
-This is the Reigh-boundary leniency rule (see
-[contract guide §4](../../contracts/capability-artifact-contract.md#4-open-string-fallback-reigh-boundary-leniency)).
+This is the external-boundary leniency rule (see
+[contract guide §4](../../contracts/capability-artifact-contract.md#4-open-string-fallback-external-boundary-leniency)).
 The example manifests deliberately use only canonical ids to demonstrate
 the type-checked path, but the system never rejects unrecognized types.
 

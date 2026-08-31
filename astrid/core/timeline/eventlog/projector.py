@@ -21,12 +21,7 @@ def project_display(
     deleted = False
 
     for event in events:
-        if event.kind == "timeline.imported":
-            raise ValueError(
-                "timeline.imported is migration-only legacy; display projection "
-                "does not unwrap runtime snapshots"
-            )
-        elif event.kind == "timeline.created":
+        if event.kind == "timeline.created":
             display = Display(
                 schema_version=TIMELINE_SCHEMA_VERSION,
                 slug=event.payload.slug,

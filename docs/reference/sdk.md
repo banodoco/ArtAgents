@@ -343,9 +343,8 @@ The discovery follows a two-step fallback:
 
 When neither source yields a `manifest.json` file, `manifest_path` is `None`.
 
-Refer to the [output/result contract](../contracts/output-result-contract.md) for the
-universal manifest schema, the kind vocabulary, file and directory hashing
-semantics, partial-output optionality, and domain-manifest coexistence rules.
+The invocation result exposes the normalized manifest fields documented in the
+executor and run-ledger contracts.
 
 ```python
 import astrid

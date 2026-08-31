@@ -256,7 +256,6 @@ _SECRET_PREFIXES = (
     "OPENAI_",
     "REIGH_",
     "RUNPOD_",
-    "SUPABASE_",
 )
 _REMOVED_ENV_NAMES = {
     "ASTRID_ACTOR",

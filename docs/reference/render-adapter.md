@@ -176,7 +176,6 @@ provenance authoring path.
 
 ## Related Documents
 
-- [adapter-packs.md](../packs/adapter-packs.md) — General adapter pack conventions
 - [STAGE.md](../../astrid/packs/rendering/executors/render/STAGE.md) — Render executor stage documentation
 - [render-backend-v1.md](../contracts/render-backend-v1.md) — Public pluggable renderer contract
 - [sdk.md](sdk.md#rendering-sdk) — Public rendering SDK (`render`, `support`, `renderer_main`, `RenderContext`)

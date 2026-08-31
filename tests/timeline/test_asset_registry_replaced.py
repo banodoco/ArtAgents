@@ -192,7 +192,7 @@ class AssetRegistryReplacedPayloadConstructionTest(unittest.TestCase):
         self.assertIsNone(payload.source)
 
     def test_payload_with_source(self) -> None:
-        for source in ("legacy_local", "supabase_config", "editor_save", "other"):
+        for source in ("legacy_local", "editor_save", "other"):
             payload = AssetRegistryReplacedPayload(
                 registry=_minimal_registry(), source=source,
             )

@@ -114,7 +114,7 @@ drawn from evidence.
 
 ### Universal result manifests
 
-`docs/contracts/output-result-contract.md` defines the cross-executor
+The run-ledger contract defines the cross-executor
 `manifest.json` contract:
 
 - `schema_version`

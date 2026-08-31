@@ -94,8 +94,6 @@ ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ('astrid/packs/editorial/executors/quote_scout/run.py', 90): 'wrapped by quote_scout.main() via run_pack_main before agent-facing output',
     ('astrid/packs/editorial/executors/quote_scout/run.py', 114): 'wrapped by quote_scout.main() via run_pack_main before agent-facing output',
     ('astrid/packs/editorial/executors/quote_scout/run.py', 116): 'wrapped by quote_scout.main() via run_pack_main before agent-facing output',
-    ('astrid/packs/reigh/executors/reigh_data/run.py', 67): 'wrapped by reigh_data.main() into AstridError before agent-facing output',
-    ('astrid/packs/reigh/executors/reigh_data/run.py', 69): 'wrapped by reigh_data.main() into AstridError before agent-facing output',
     ('astrid/packs/training/executors/pool_build/run.py', 41): 'wrapped by pool_build.main() via run_pack_main before agent-facing output',
     ('astrid/packs/training/executors/pool_build/run.py', 55): 'wrapped by pool_build.main() via run_pack_main before agent-facing output',
     ('astrid/packs/training/executors/pool_build/run.py', 78): 'wrapped by pool_build.main() via run_pack_main before agent-facing output',

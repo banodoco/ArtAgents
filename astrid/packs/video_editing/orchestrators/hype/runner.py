@@ -556,9 +556,8 @@ def _apply_trim_deltas_to_arrangement(
     # positions the run-local ``arrangement.json`` as a derived compatibility
     # output.
     #
-    # The gateway handles bootstrap only for true-legacy timelines (no
-    # identity sidecar); created timelines with provenance ``"created"``
-    # accept bare first domain events.  After appending, the gateway
+    # Created timelines with provenance ``"created"`` accept bare first
+    # domain events.  After appending, the gateway
     # regenerates ``assembly.json`` from the canonical event stream.
     # Actor attribution uses a system actor with optional ``actor.via``
     # chaining for upstream provenance.

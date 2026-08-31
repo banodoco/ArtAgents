@@ -39,7 +39,7 @@ Deliberately excluded suites (asserted separately, see below):
   the three conformance files import the domain packs at module level.
 - ``test_contention.py`` / ``test_crash_atomicity.py`` import the timeline
   repository at module level.
-- ``test_media_pipeline.py`` exercises the standard bridge composition
+- ``test_media_pipeline.py`` exercises the standard host composition
   (``compose_standard_bridge`` / startup staging GC) which legitimately
   requires the timeline pack.
 
@@ -222,7 +222,7 @@ _TIMELINE_IMPORT_LINES = (
     "from astrid.packs.timeline.repository import TimelineRepository\n",
 )
 """Module-level timeline imports in ``astrid/packs/__init__.py`` that the
-standard bridge composition needs; they are removed only in the temporary
+standard host composition needs; they are removed only in the temporary
 copy when the timeline pack is the one under removal."""
 
 # Paths the lane needs besides ``astrid/``, ``tests/v10`` and ``pyproject.toml``.
@@ -479,7 +479,6 @@ def _artifact_environment(*roots: Path) -> dict[str, str]:
         "ASTRID_PACKS_PATH",
         "ASTRID_THEMES_ROOT",
         "OPENAI_API_KEY",
-        "SUPABASE_URL",
     ):
         environment.pop(name, None)
     return environment

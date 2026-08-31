@@ -381,26 +381,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
-      - name: Install current stable Chromium (editor lane)
-        # Executes the frozen "current stable Chromium" browser target
-        # (docs/contracts/supported-platforms.md): Playwright installs its
-        # current stable Chromium build plus the OS libraries it needs
-        # (--with-deps) under the pinned Node 20.19 floor.
-        working-directory: scripts/reshape/editor_browser_smoke
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-
-      - name: Run browser-backed editor selector (current stable Chromium)
-        # A real browser-backed selector: Playwright launches the installed
-        # current stable Chromium headless and asserts the frozen bridge
-        # timeline read model through DOM locators (real JS + real network
-        # + real DOM). This step is NOT continue-on-error: the documented
-        # target must actually execute, so a browser failure is visible
-        # editor-lane evidence, not a silent gap.
-        working-directory: scripts/reshape/editor_browser_smoke
-        run: npm run smoke
-
   pack-recoverability-exhaustive:
     name: Pack recoverability exhaustive (opt-in)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pack_recoverability_exhaustive }}
@@ -513,13 +493,6 @@ jobs:
             requirements/build.lock
             requirements/runtime.lock
 
-      - name: Set up Node for the browser lane
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.0"
-          cache: npm
-          cache-dependency-path: scripts/reshape/editor_browser_smoke/package-lock.json
-
       - name: Download the one canonical release wheel
         uses: actions/download-artifact@v4
         with:
@@ -589,22 +562,11 @@ jobs:
           printf '%s\n' "$rc" > "$RUNNER_TEMP/m8-exact-wheel-status"
           exit "$rc"
 
-      - name: Install current stable Chromium
-        working-directory: scripts/reshape/editor_browser_smoke
-        run: |
-          npm ci
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            npx playwright install --with-deps chromium
-          else
-            npx playwright install chromium
-          fi
-
       - name: Validate locks and record the exact release toolchain
         shell: bash
         run: |
           python -m scripts.reshape.release_reproducibility \
             --expected-python "${{ matrix.python-version }}" \
-            --playwright-root scripts/reshape/editor_browser_smoke \
             --output "$RUNNER_TEMP/m8-evidence/toolchain.json" \
             > "$RUNNER_TEMP/m8-logs/toolchain.log"
 
@@ -635,17 +597,6 @@ jobs:
           printf '%s\n' "$status" > "$RUNNER_TEMP/m8-status"
           exit "$status"
 
-      - name: Run current stable Chromium editor-contract lane
-        if: always()
-        working-directory: scripts/reshape/editor_browser_smoke
-        shell: bash
-        run: |
-          set +e
-          timeout 120 npm run smoke 2>&1 | tee "$RUNNER_TEMP/m8-logs/browser.log"
-          rc=${PIPESTATUS[0]}
-          if [[ "$rc" -ne 0 ]]; then printf '1\n' > "$RUNNER_TEMP/m8-browser-status"; else printf '0\n' > "$RUNNER_TEMP/m8-browser-status"; fi
-          exit "$rc"
-
       - name: Write digest-bound m8 evidence
         if: always()
         env:
@@ -665,11 +616,6 @@ jobs:
           wheel = json.loads((root / "m8-wheel.json").read_text(encoding="utf-8"))
           digest = wheel["sha256"]
           status = "pass" if (root / "m8-status").read_text().strip() == "0" else "failed"
-          browser_status = "pass"
-          browser_file = root / "m8-browser-status"
-          if browser_file.is_file() and browser_file.read_text().strip() != "0":
-              status = "failed"
-              browser_status = "failed"
           now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
           cell = f"{os.environ['M8_OS']}-py{os.environ['M8_PYTHON']}"
           log_root = str(root / "m8-logs")
@@ -712,7 +658,6 @@ jobs:
               ],
               "conformance": [
                   record(selector="tests/v10/test_m8_installed_journey.py"),
-                  record(selector="browser:current-stable-chromium", record_status=browser_status),
               ],
               "crash_contention": [record(selector="installed-journey:crash-contention")],
               "backup_restore": [record(selector="installed-journey:backup-restore")],
@@ -741,7 +686,7 @@ jobs:
                       device="physical-macos-chromium",
                   )
               ],
-              "lanes": [record(selector="installed-wheel-cell"), record(selector="browser", record_status=browser_status)],
+              "lanes": [record(selector="installed-wheel-cell")],
           }
           out = root / "m8-evidence" / f"{cell}.json"
           out.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")

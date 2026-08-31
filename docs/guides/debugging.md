@@ -18,9 +18,8 @@ After initialization, `state: "ready"` means healthy and `state:
 "unhealthy"` or a failed check means investigate. Treat `schema_versions: fail`
 as a migration or schema incompatibility. If a
 product CLI command returns `error.code=unavailable` with
-`error.details.reason=store_owned`, `astrid serve` owns the store: use `GET
-/routes` and its HTTP routes while it runs, or wait for a clean shutdown.
-Reads may retry after release. For writes, keep the exact payload and
+`error.details.reason=store_owned`, wait for the active local owner to release
+the store. Reads may retry after release. For writes, keep the exact payload and
 idempotency key, retry only after release, and verify state. Keep the original
 project unchanged while selecting a compatible checkout or retrying after the
 owner exits. A stale timeline save is expected to return
@@ -32,7 +31,7 @@ For media integrity failures, `media verify` is a read-only check. Missing or
 mutated bytes are rejected consistently and surface as the typed
 `integrity_error` code in the public envelope; restore or re-import the exact bytes
 instead of editing the digest path. For an interrupted restore, repeat the
-restore command or restart the bridge. The durable restore journal is read
+restore command or restart the local runtime. The durable restore journal is read
 before writer construction, so recovery publishes only a complete old or new
 state.
 
@@ -40,7 +39,6 @@ state.
 python3 -m astrid media verify M_01ABC --project demo \
   --realm managed_local --json
 python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
-python3 -m astrid serve --projects-root ./projects --no-open-editor
 ```
 
 ## 2. Local renderer debugging

@@ -19,30 +19,6 @@ class EventLogError(_EventLogErrorBase):
     """Raised when a timeline eventlog operation fails."""
 
 
-class EventLogNotConfiguredError(EventLogError):
-    """Raised when a backend can be constructed but is not configured for use."""
-
-
-class EventLogNotImplementedError(EventLogError):
-    """Raised when a backend shape exists but the implementation is deferred."""
-
-
-class EventLogMissingConfigError(EventLogNotConfiguredError, EventLogNotImplementedError):
-    """Raised when a backend operation needs config that was not supplied."""
-
-
-class EventLogUnsupportedRpcError(EventLogNotImplementedError):
-    """Raised when the target backend lacks the requested RPC capability."""
-
-
-class EventLogAuthRequiredError(EventLogError):
-    """Raised when a write requires a verified auth subject that was not proven."""
-
-
-class EventLogTransportError(EventLogError):
-    """Raised when a backend transport returns malformed or unusable data."""
-
-
 @dataclass(frozen=True)
 class TimelineVersionConflict:
     """Structured optimistic-concurrency mismatch details."""
@@ -105,17 +81,6 @@ class TimelineStreamRef:
     source: str = "timeline_home"
 
 
-class EventLogIdempotentError(EventLogError):
-    """Raised when an idempotent import succeeds (event already exists)."""
-
-    def __init__(self, existing_event_id: str) -> None:
-        self.existing_event_id = existing_event_id
-        super().__init__(
-            f"import already exists (destination event {existing_event_id}); "
-            f"this is a success, not a failure — callers should unwrap and return the existing event"
-        )
-
-
 @dataclass(frozen=True)
 class AppendEventRequest:
     kind: str
@@ -123,15 +88,6 @@ class AppendEventRequest:
     actor: TimelineActor
     expected_version: int | None = None
     txn_id: str | None = None
-
-
-@dataclass(frozen=True)
-class ImportEventRequest:
-    """Request to import a source event into a destination backend."""
-
-    source_event: "TimelineEvent"  # forward-ref; resolved at runtime
-    idempotency_key: str
-    actor: "TimelineActor"
 
 
 # ============================================================================

@@ -9,9 +9,9 @@ Every public mutation function in the edit modules uses:
 * ``_resolve_or_bootstrap_backend`` — locate the timeline, then resolve the
   event-log backend.  Handles two cases:
   1. Identity exists with provenance ``"created"`` → resolve backend normally,
-     first domain event is bare (no ``timeline.imported``).
-  2. Identity missing → fail closed. Legacy conversion is handled only by the
-     Sprint 2 migration scripts.
+     first domain event is bare.
+  2. Identity missing → fail closed. Callers must create a runtime timeline
+     before editing.
 * ``_materialize`` — post-append projection regenerator that calls
   ``regenerate_projection()`` to rewrite ``assembly.json`` from the
   canonical event stream.
@@ -130,8 +130,8 @@ def _resolve_or_bootstrap_backend(
     -----------
     1. **Identity exists with provenance ``"created"``** —
        resolve the backend normally.  The first domain event is bare
-       (no ``timeline.imported``).
-    2. **Identity missing** — fail closed with a clear migration error.
+       (no compatibility bootstrap event).
+    2. **Identity missing** — fail closed with a clear creation error.
 
     Returns ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
 
@@ -175,8 +175,7 @@ def _resolve_or_bootstrap_backend(
         else f"timeline '{slug}' has no identity sidecar"
     )
     raise TimelineEditError(
-        f"{detail}. Runtime legacy bootstrap is disabled; run the Sprint 2 "
-        "migration before editing this timeline."
+        f"{detail}. Create this timeline through the runtime before editing."
     )
 
 
@@ -410,8 +409,8 @@ def pack_write_gateway(
             via=existing_via + [actor_via],
         )
 
-    # 2. Resolve an identity-backed backend. Legacy timelines without an
-    #    identity sidecar are rejected until migrated.
+    # 2. Resolve an identity-backed backend. Timelines without an identity
+    #    sidecar are rejected until created through the runtime.
     resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
         _resolve_or_bootstrap_backend(
             project_slug,

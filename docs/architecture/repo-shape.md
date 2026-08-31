@@ -157,7 +157,7 @@ The repository enforces a strict import layering convention:
 
 - **CLI modules** live as `<subsystem>/cli.py` for each subsystem (skills, core/threads, core/orchestrate, core/timeline, core/pack). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
 - **Pack-owned domain libraries** such as `astrid/packs/editorial/hype/` may import from core shared libraries but must not import CLI modules.
-- **Core kernel** (`astrid/core/`) must not import concrete pack implementation modules except through named runtime bridge exemptions.
+- **Core kernel** (`astrid/core/`) must not import concrete pack implementation modules except through the generic pack host.
 - **Pack data** (`astrid/packs/<pack>/`) must not import from `astrid/core/` except through sanctioned entrypoints.
 
 These rules are enforced by `validate_import_layering()` in `astrid/core/structure.py`.
@@ -258,14 +258,12 @@ contract documents:
 | `docs/architecture/repo-shape.md` | **This document** — M5 canonical repo-shape contract |
 | `docs/architecture/top-level-inventory.json` | Machine-readable top-level entry inventory (M5) |
 | `docs/architecture/pack-layout-variants.json` | Machine-readable pack variant catalog |
-| `docs/architecture/test-relocation-map.json` | Test relocation target map (consumed by M3) |
 | `docs/architecture/giant-file-split-candidates.json` | Giant-file split candidates with line counts (consumed by M4, now completed) |
 | `docs/architecture/shim-legacy-audit.md` | (removed — audit absorbed into §3 above) |
 | `docs/contracts/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
 | `docs/contracts/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
 | `docs/reference/sdk.md` | User-facing SDK walkthrough |
 | `docs/contracts/integration_contracts.md` | Integration contracts |
-| `docs/contracts/output-result-contract.md` | Output result contract |
 
 ## 9. Soft Boundary Conventions (Not Hard-Gated)
 
@@ -305,12 +303,6 @@ All exemptions are colocated in `astrid/core/structure.py`:
 
 `astrid/core/doctor.py` consumes `validate_repo_structure()` and fails when
 canonical repository structure drifts.
-
-## 11. M3, M4, and M5 Inventory Consumption
-
-- **M3** consumes `docs/architecture/test-relocation-map.json` to guide
-  root-level test file relocation into domain-specific test directories.
-  Ambiguous cases are flagged for owner review.
 
 - **M4** consumed `docs/architecture/giant-file-split-candidates.json` to
   split `gateway.py` and `sdk.py`. Later cleanup folded both split surfaces into

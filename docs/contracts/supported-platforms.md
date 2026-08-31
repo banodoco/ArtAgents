@@ -3,7 +3,7 @@
 **Artifact status:** the m8 release matrix is frozen for the packaged GA gate;
 the m4 development matrix is retained below as historical evidence.
 
-**Normative sources:** `docs/astrid-v10-implementation-decisions.md` §19
+**Normative source:** this platform matrix.
 (m8 packaged GA release contract), the m8 plan (Step 1, decision artifact),
 and `docs/contracts/platform-contract.md` (the v1 public SDK boundary, which
 this document does not change).
@@ -68,19 +68,14 @@ described as notarized does not satisfy this contract.
 | CI OS | **Linux** | Linux is the only m4 CI OS. macOS and Windows are **not** m4 targets. |
 | Python (CPython) | **3.11 and 3.12** | CI must actually execute both Python targets (install + test), not merely assert them. |
 | Development install | **editable installation** | The development gate installs the package editable (`pip install -e '.[dev]'`); wheel/standalone packaging is an m6 concern. |
-| Node.js | **20.19** (floor) | Pinned floor for the external editor lane tooling; the observed dev environment runs Node v20.20.2, which satisfies the floor. |
-| Browser (external editor lane) | **current stable Chromium** | Used only by the external Reigh editor evidence lane (disposition reporting; never an m4 admission input). |
-| Release Owner | **the Astrid Release Owner role** | Named role per `docs/astrid-v10-implementation-decisions.md` §9; assigning an individual is an organizational follow-up. |
+| Node.js | **20.19** (floor) | Pinned floor for optional pack tooling; the observed dev environment runs Node v20.20.2, which satisfies the floor. |
+| Release Owner | **the Astrid Release Owner role** | Organizational owner for release verification. |
 | Deadline | **end of Sprint 5** (before Sprint 6 Phase 2 work begins) | The frozen deadline for the matrix owner to deliver the release packaging/platform decision. |
 
 ## 3. What m4 CI actually executed
 
 - The m4 gate CI must run the retained evidence lanes on **both** CPython 3.11
   and CPython 3.12 (Linux), with the package installed **editable**.
-- The external editor lane (pinned Reigh selectors + latency check) must run as
-  an always-run **disposition-reporting** lane on Linux with the pinned Node
-  floor and current stable Chromium. It is retained evidence and is **never** an
-  input to m4 admission success.
 
 ## 4. Explicitly out of scope for m4
 

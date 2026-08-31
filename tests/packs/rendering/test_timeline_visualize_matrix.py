@@ -84,8 +84,8 @@ _ORACLE = runpy.run_path(str(PARITY_ROOT / "oracle.py"))
 # Ground-truth checkout (read-only) for the immutability fence.
 GROUND_TRUTH_ROOT = Path("/Users/peteromalley/Documents/reigh-workspace/Astrid")
 
-# Frozen read-only files owned by other initiatives (dirty_ownership_map.json
-# ``frozen_read_only``).  The matrix must leave every one byte-identical.
+# Frozen read-only files owned by other initiatives. The matrix must leave
+# every one byte-identical.
 _FROZEN_REL_PATHS = (
     "astrid/packs/rendering/executors/timeline_storyboard/",
     "tests/packs/rendering/test_timeline_storyboard.py",

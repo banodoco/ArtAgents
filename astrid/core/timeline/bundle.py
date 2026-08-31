@@ -1,7 +1,7 @@
-"""Fail-closed validation for the Astrid TimelineBundle wire envelope.
+"""Fail-closed validation for the Astrid TimelineBundle runtime envelope.
 
 The editor owns the canonical TypeScript schema.  Astrid mirrors its small,
-stable v1 vocabulary here so the bridge can reject malformed or future data
+stable v1 vocabulary here so the runtime can reject malformed or future data
 before a CAS transaction starts, while retaining opaque authored payloads and
 unknown envelope-level fields byte-for-byte.
 """

@@ -1121,7 +1121,7 @@ def test_validate_authority_boundaries_flags_every_rule_family(
     )
     _write(
         tmp_path,
-        "astrid/packs/timeline/bridge.py",
+        "astrid/packs/__init__.py",
         "from astrid.core.timeline.eventlog import LocalFsBackend\n",
     )
     _write(
@@ -1139,7 +1139,7 @@ def test_validate_authority_boundaries_flags_every_rule_family(
     joined = "\n".join(errors)
     assert "astrid/core/evil.py: kernel-to-pack import" in joined
     assert "astrid/core/evil_writer.py: SQLite writer construction outside" in joined
-    assert "astrid/packs/timeline/bridge.py: legacy authority marker" in joined
+    assert "astrid/packs/__init__.py: legacy authority marker" in joined
     assert "kernel FK from events to pack table 'timelines'" in joined
     assert "forbidden table 'sessions'" in joined
 

@@ -455,22 +455,6 @@ def test_auto_forward_respects_executor_metadata_opt_out(tmp_path: Path) -> None
     assert "--assets" not in command
 
 
-def test_reigh_open_in_reigh_does_not_forward_unsupported_assets_flag(
-    tmp_path: Path,
-) -> None:
-    """`reigh.open_in_reigh` opts out: its run.py argparse has no `--assets`."""
-    command = build_executor_command(
-        ExecutorRunRequest(
-            executor_id="reigh.open_in_reigh",
-            out=tmp_path,
-            inputs={"timeline": "/tmp/t.json", "assets": "/tmp/a.json"},
-            python_exec="/opt/python",
-        ),
-        load_default_registry(),
-    )
-    assert "--assets" not in command
-
-
 def test_executor_argv_resolves_canonical_id_and_bare_pipeline_step() -> None:
     assert executor_argv("rendering.render", "/opt/python") == [
         "/opt/python",

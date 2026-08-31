@@ -17,6 +17,11 @@ def test_retired_authority_packages_and_routes_are_not_present() -> None:
         "astrid/packs/reigh",
         "astrid/core/timeline/eventlog/supabase.py",
         "astrid/core/contracts/remote_timeline.py",
+        "astrid/core/timeline/eventlog/reigh_events.py",
+        "scripts/migrations/sprint-2/migrate_timelines.py",
+        "scripts/migrations/sprint-2",
+        "scripts/migrations/v10",
+        "scripts/reshape/editor_browser_smoke",
     ):
         assert not (root / rel).exists(), rel
 
@@ -39,3 +44,32 @@ def test_normal_capability_sources_have_no_reigh_ids_or_credentials() -> None:
     assert all(not key.startswith("reigh.") for key in exemptions["exemptions"])
     assert importlib.util.find_spec("astrid.core.integrations.reigh") is None
     assert importlib.util.find_spec("astrid.core.integrations.worker") is None
+
+
+def test_canonical_runtime_lanes_have_no_bridge_or_provider_residue() -> None:
+    root = Path(__file__).resolve().parents[2]
+    for rel in (
+        "astrid/packs/timeline/repository.py",
+        "astrid/packs/shots/repository.py",
+        "astrid/packs/references/repository.py",
+        "astrid/core/rendering/remotion_runtime.py",
+        "astrid/core/timeline/bundle.py",
+        "astrid/core/migrations/runner.py",
+    ):
+        assert (root / rel).is_file(), rel
+
+    forbidden = (
+        "append_imported_event",
+        "_BRIDGE_CANONICAL_TOP_KEYS",
+        "TimelineReadModel",
+        "TimelineListRow",
+        "ProjectListRow",
+        "legacy_route",
+        "reigh_events",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+    )
+    for rel in ("astrid", "scripts"):
+        for path in (root / rel).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            assert not any(marker in text for marker in forbidden), path

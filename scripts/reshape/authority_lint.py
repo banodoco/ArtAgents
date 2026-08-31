@@ -12,8 +12,8 @@ Rules:
     - kernel-to-pack: nothing under ``astrid/core/`` may import
       ``astrid.packs`` except the single documented application-composition
       exemption (``astrid/core/gateway/dispatch.py``, the generic pack host).
-    - pack-to-pack: no pack may import another pack's modules. The timeline
-      pack's own ``bridge.py`` and repository compose only kernel services.
+    - pack-to-pack: no pack may import another pack's modules. Pack
+      repositories compose only kernel services.
 
 ``writer_authority``
     SQLite construction (``sqlite3.connect``, ``sqlite3.Connection``,
@@ -80,7 +80,6 @@ COMPOSITION_EXEMPTION = "astrid/core/gateway/dispatch.py"
 """The one documented kernel-to-pack composition exemption (generic host)."""
 
 SUPPORTED_ENTRY_PATHS = (
-    "astrid/packs/timeline/bridge.py",
     "astrid/packs/__init__.py",
     COMPOSITION_EXEMPTION,
     # Product dispatch paths must never import a legacy/removed authority.
@@ -129,8 +128,8 @@ lint error.
 """
 
 # Product paths scanned by ``lint_removed_authorities``: the eight-family
-# dispatch routes, the SDK, the application composition, the bridge
-# composition, and the pack modules — not the entire ``astrid/`` tree. The
+# dispatch routes, the SDK, the application composition, and the pack
+# modules — not the entire ``astrid/`` tree. The
 # pack product paths are the standard schema packs only (those shipping a
 # ``schema-pack.yaml``): the m1-m6 legacy capability packs stay in-tree as
 # non-product dead code and keep their own import graph.
@@ -479,10 +478,9 @@ def lint_removed_authorities(root: Path) -> list[str]:
     The cutover removes the legacy file/JSONL/FSA and remote authorities and
     the legacy timeline/project/session CLI modules from the product surface.
     Any product path (dispatch route, SDK module, application composition,
-    bridge composition, or pack module) that imports one of the removed
-    authority modules is a second authority and a lint error. The legacy
-    modules stay in-tree as dead code for non-product consumers; only their
-    import from a product path is forbidden.
+    host composition, or pack module) that imports one of the removed
+    authority modules is a second authority and a lint error. Retired modules
+    are deleted from the product tree; only neutral runtime authorities remain.
     """
     errors: list[str] = []
     for path in _iter_python(root / "astrid"):

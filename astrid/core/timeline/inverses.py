@@ -95,7 +95,6 @@ class InverseRequest:
 # undone by a single domain event.
 _NON_REVERSIBLE_KINDS: frozenset[str] = frozenset({
     "timeline.created",
-    "timeline.imported",
     "timeline.deleted",
     "timeline.tombstoned",
     "timeline.erased",
@@ -677,7 +676,7 @@ def plan_inverse(
     transitions, theme values, annotations, pool metadata, scores), returns
     a mechanical inverse event request.
 
-    For non-reversible kinds (timeline.created, timeline.imported,
+    For non-reversible kinds (timeline.created,
     timeline.deleted, timeline.tombstoned, timeline.erased, timeline.recovered,
     timeline.branched_from, timeline.reverted), returns a ``timeline.reverted``
     request with the before/after projections for auditability.

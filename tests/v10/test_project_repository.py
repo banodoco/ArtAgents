@@ -73,7 +73,7 @@ from astrid.core.repositories import (
     ProjectSlugConflictError,
     ProjectValidationError,
 )
-from astrid.core.repositories.projects import ProjectListRow
+from astrid.core.repositories.projects import ProjectSummary
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter, WriterSession
 
@@ -671,7 +671,7 @@ def test_list_returns_sorted_read_only_rows(
         "Mid 2",
         "Zulu",
     ]
-    # The frozen bridge GET /projects row shape: exactly {slug, name}.
+    # The frozen runtime GET /projects row shape: exactly {slug, name}.
     assert [row.to_dict() for row in rows] == [
         {"slug": "alpha", "name": "Alpha"},
         {"slug": "alpha-1", "name": "Alpha 1"},
@@ -700,7 +700,7 @@ def test_show_returns_typed_read_model_and_raises_not_found(
     # A missing project never becomes an empty authority-dependent view:
     # the list still shows exactly the one real project.
     assert repo.list(writer) == [
-        ProjectListRow(slug=created.slug, name=created.name)
+        ProjectSummary(slug=created.slug, name=created.name)
     ]
 
     with pytest.raises(ProjectValidationError, match="project_id"):
@@ -1031,7 +1031,7 @@ def test_restart_durability_with_transaction_free_reads(
         }
         assert shown.default_timeline_id == "tl-default"
         assert shown.event_head_seq == 3
-        assert rows == [ProjectListRow(slug="pilot", name="Durable Name")]
+        assert rows == [ProjectSummary(slug="pilot", name="Durable Name")]
         assert reopened.submit(lambda session: session.in_transaction) is False
 
         # The full event chain survives the restart.

@@ -106,7 +106,7 @@ cap = kernel.resolve(clip_type, scope=active_theme)   # id-reference
 if cap is not None:                                    # known capability
     kernel.check_consumes(cap, artifact_type="clip/visual")  # type-match
     _validate_effect_params(...)
-# else: unknown clipType stays opaque — Reigh compatibility preserved
+# else: unknown clipType stays opaque — forward compatibility preserved
 ```
 
 ---
@@ -165,15 +165,15 @@ runtime:
 
 ---
 
-## 4. Open-string fallback (Reigh-boundary leniency)
+## 4. Open-string fallback (external-boundary leniency)
 
-The timeline format is shared with Reigh via the external `banodoco_timeline_schema` package. Astrid's artifact types are an **internal** opinion; at the Reigh boundary, unknown/foreign types pass through opaque.
+The timeline format is shared with the external schema via the external `banodoco_timeline_schema` package. Astrid's artifact types are an **internal** opinion; at the external schema boundary, unknown/foreign types pass through opaque.
 
 **Rules:**
 
 1. **Artifact types are open and extensible.** Packs declare their own types. The registry seeds from built-ins + pack extensions. Unknown types are never rejected — `ArtifactTypeRegistry.resolve(name)` returns `None` for unknowns, and callers treat `None` as "opaque, pass through."
-2. **Lenient at the external boundary.** Astrid never tightens a format it doesn't solely own. Reigh-authored timelines with `clipType` values Astrid doesn't recognize remain valid and loadable.
-3. **`artifact_type` is never required for load.** Existing on-disk timelines/manifests (and Reigh-authored ones) keep loading unchanged. The field is used-if-present.
+2. **Lenient at the external boundary.** Astrid never tightens a format it doesn't solely own. external-authored timelines with `clipType` values Astrid doesn't recognize remain valid and loadable.
+3. **`artifact_type` is never required for load.** Existing on-disk timelines/manifests (and external-authored ones) keep loading unchanged. The field is used-if-present.
 
 This is the "open `clipType`" philosophy generalized — it's what lets 100 packs evolve independent vocabularies without a central enum becoming a chokepoint, and without Astrid breaking a format shared with an external system.
 

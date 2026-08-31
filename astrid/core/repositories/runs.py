@@ -73,7 +73,7 @@ Contracts kept here (v10 section 5.2; m2 plan steps 12 and 13):
   validates the frozen continuation-envelope fields and ordinal/maximum
   rules **without any transaction, run-head CAS allocation, or terminal
   extension logic** — m2 validates but never executes continuation chunks
-  (plan step 12 item 4; the m3 bridge).
+  (plan step 12 item 4; the continuation boundary).
 
 The repository is stateless apart from the event append and receipt
 services; every command must run inside the caller's
@@ -215,7 +215,7 @@ FROZEN_CONTINUATION_ENVELOPE_FIELDS: tuple[str, ...] = (
 
 m2 validates these fields and their ordinal/maximum rules; it never
 executes the envelope (no continuation transaction, run-head CAS
-allocation, or terminal extension logic — that is the m3 bridge).
+allocation, or terminal extension logic — that is a future continuation phase).
 """
 
 

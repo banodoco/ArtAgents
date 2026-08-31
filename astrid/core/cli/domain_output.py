@@ -4,7 +4,7 @@ One exact JSON envelope renderer for the stable SDK envelope plus concise
 human output, stable exit codes, and no domain semantics. Every product
 family handler (plan steps 25-29) renders through this module so JSON
 output, human output, and process exit codes stay aligned with the frozen
-SDK envelope (``docs/contracts/astrid-sdk-v10.md``) and the explicit
+SDK envelope (``docs/contracts/platform-contract.md``) and the explicit
 product registry (``astrid/core/cli/domain_product.py``).
 
 Stable exit codes (documented in product help, :func:`print_result`):

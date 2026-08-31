@@ -885,17 +885,3 @@ def test_multi_task_journey_continuation_replay_and_mismatch(journey_env) -> Non
 
 
 # ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Batch B2 (DC-1): the generic VibeComfy binding journey — R1 admission of a
-# declared custom workflow, fenced claim, REAL subprocess execution through
-# the one generic TaskHandler, atomic multipart completion, and the
-# generation row + media materialized in one transaction.
-#
-# Self-contained on purpose: the pack-factoring kernel lane copies this tree
-# without tests/integrations, so no cross-package test imports.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skip(reason="retired: local bridge journey is outside Stage1 runtime")

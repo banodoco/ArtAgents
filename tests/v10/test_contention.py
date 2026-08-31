@@ -814,7 +814,7 @@ def test_heartbeat_and_media_import_contention_keeps_editor_serviceable(
     assert sum(1 for kind, name, _ in results if name == "MediaReadModel") == 4
     # Editor work remains serviceable: exactly one save wins and the loser
     # gets the typed version conflict; the editor timeline advanced.
-    assert sum(1 for kind, name, _ in results if name == "TimelineReadModel") == 1
+    assert sum(1 for kind, name, _ in results if name == "TimelineRecord") == 1
     conflict_errors = [
         kind for kind, _, _ in errors if kind == "TimelineVersionConflictError"
     ]

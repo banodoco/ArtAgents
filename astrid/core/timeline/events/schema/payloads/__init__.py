@@ -39,7 +39,6 @@ from .config import (
     TimelineCreatedPayload,
     TimelineDefaultSetPayload,
     TimelineDeletedPayload,
-    TimelineImportedPayload,
     TimelineRenamedPayload,
     TimelineTombstonedPayload,
 )
@@ -90,7 +89,6 @@ __all__ = [
     "TimelineCreatedPayload",
     "TimelineDefaultSetPayload",
     "TimelineDeletedPayload",
-    "TimelineImportedPayload",
     "TimelineRenamedPayload",
     "TimelineTombstonedPayload",
     "EffectAddedPayload",

@@ -114,7 +114,7 @@ _theme_slug_for_render_default = _shared._theme_slug_for_render_default
 BACKEND_ID = "rendering.remotion"
 BACKEND_VERSION = "1.0.0"
 
-# The timeline schema keeps ``clipType`` open for Reigh compatibility.  These
+# The timeline schema keeps ``clipType`` open for forward-compatible values. These
 # built-in spellings all mean an ordinary asset-backed media clip; Remotion's
 # VisualClip/AudioTrack dispatch already handles them identically.  Keep them
 # out of effect resolution so intuitive image/video/audio annotations do not

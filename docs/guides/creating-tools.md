@@ -87,7 +87,7 @@ discoverable, reusable, and individually testable.
 
 Create an **executor** when the missing capability performs one concrete unit of
 work. It should be independently runnable, inspectable, and testable. Examples:
-fetch Reigh data, render a timeline, upload a video, inspect audio, build a
+fetch source data, render a timeline, upload a video, inspect audio, build a
 sprite sheet, generate a brief from a topic, or transform one artifact into
 another.
 
@@ -268,8 +268,6 @@ you created instead of guessing from ids alone.
 - [fork-and-update.md](../packs/fork-and-update.md) — Scaffolding personal packs
   for local experimentation, detecting and managing local edits with dirty
   check and fork.
-- [adapter-packs.md](../packs/adapter-packs.md) — Adapter pack conventions and
-  trust/ownership distinctions.
 
 ## Future Work
 

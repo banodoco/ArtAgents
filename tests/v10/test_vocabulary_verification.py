@@ -18,7 +18,7 @@ DDL sources (parsed from the shipped migration SQL, never hardcoded):
 - ``evidence_items.kind`` — declared ``TEXT NOT NULL`` with **no** CHECK
   (the closed five-kind vocabulary is enforced by
   :class:`astrid.core.repositories.evidence.EvidenceRepository` before any
-  write; see docs/astrid-v10-implementation-decisions.md section 8).
+  write; see the repository event vocabulary declarations).
 """
 
 from __future__ import annotations

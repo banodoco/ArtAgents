@@ -2,7 +2,7 @@
 
 Proves:
 (a) apply_event_to_assembly and project_to_assembly for every event kind.
-(b) timeline.imported is migration-only legacy and rejected by runtime replay.
+(b) unknown migration-only event kinds are rejected by runtime replay.
 (c) Lifecycle no-ops (created, renamed, default_set, tombstoned, deleted).
 (d) Deterministic output — same input always produces same output.
 (e) Input immutability — projector never mutates input events.
@@ -56,12 +56,6 @@ RUNTIME_GOLDEN_FIXTURES = (
     "fixture_pool.json",
     "fixture_bootstrap_created.json",
 )
-LEGACY_REJECTION_GOLDEN_FIXTURES = (
-    "fixture_arrangement.json",
-    "fixture_bootstrap_legacy.json",
-)
-
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -469,49 +463,6 @@ class TestLifecycleNoOps:
         assert result is state
 
 
-# ── timeline.imported ────────────────────────────────────────────────────────
-
-
-class TestTimelineImported:
-    def test_rejects_full_wrapper_shape(self):
-        """Runtime replay fails closed on legacy wrapper snapshots."""
-        payload = {
-            "snapshot": {
-                "assembly.json": {
-                    "schema_version": 1,
-                    "assembly": {
-                        "clips": [{"id": "legacy-1", "kind": "visual", "track_id": "visual", "asset_id": "old.mp4",
-                                   "start": 1.0, "duration": 5.0, "text": "hi", "note": "old"}],
-                        "theme": "legacy-theme",
-                    },
-                },
-            },
-            "source": "legacy_local",
-        }
-        event = _make_event("timeline.imported", payload)
-        with pytest.raises(ProjectionError, match="migration-only legacy"):
-            apply_event_to_assembly({}, event)
-
-    def test_rejects_bare_snapshot_without_wrapper(self):
-        """Shape-valid legacy imported snapshots are still migration-only."""
-        payload = {
-            "snapshot": {
-                "assembly.json": {"clips": [], "tracks": []},
-            },
-            "source": "legacy_local",
-        }
-        event = _make_event("timeline.imported", payload)
-        with pytest.raises(ProjectionError, match="migration-only legacy"):
-            apply_event_to_assembly({}, event)
-
-    def test_empty_snapshot_rejected(self):
-        """Even an empty imported payload cannot silently no-op at runtime."""
-        payload = {"snapshot": {}, "source": "legacy_local"}
-        event = _make_event("timeline.imported", payload)
-        with pytest.raises(ProjectionError, match="migration-only legacy"):
-            apply_event_to_assembly({"clips": []}, event)
-
-
 # ── project_to_assembly (full replay) ─────────────────────────────────────────
 
 
@@ -862,7 +813,7 @@ class TestGoldenFixtures:
 
     def test_every_golden_fixture_is_accounted_for_by_boundary(self):
         fixture_names = {path.name for path in GOLDEN_DIR.glob("fixture_*.json")}
-        accounted_for = set(RUNTIME_GOLDEN_FIXTURES) | set(LEGACY_REJECTION_GOLDEN_FIXTURES)
+        accounted_for = set(RUNTIME_GOLDEN_FIXTURES)
         assert fixture_names == accounted_for
 
     @pytest.mark.parametrize("fixture_name", RUNTIME_GOLDEN_FIXTURES)
@@ -871,7 +822,6 @@ class TestGoldenFixtures:
     ):
         source = (GOLDEN_DIR / fixture_name).read_text(encoding="utf-8")
         forbidden = (
-            '"kind": "timeline.imported"',
             '"kind": "timeline.recovered"',
             '"kind": "arrangement.replaced"',
             '"label": null',
@@ -895,13 +845,6 @@ class TestGoldenFixtures:
             assert "canonical_empty_timeline()" in source
             for marker in forbidden_inline_seeds:
                 assert marker not in source, f"{path} hand-writes a runtime empty container"
-
-    @pytest.mark.parametrize("fixture_name", LEGACY_REJECTION_GOLDEN_FIXTURES)
-    def test_legacy_read_model_fixtures_reject_runtime_projection(self, fixture_name: str):
-        data = _load_golden_fixture(fixture_name)
-        events = [TimelineEvent.from_dict(e) for e in data["events"]]
-        with pytest.raises(ProjectionError, match="migration-only legacy|not a TimelineConfig"):
-            project_to_assembly(events)
 
     def test_pool_fixture_is_non_container_noop(self):
         data = _load_golden_fixture("fixture_pool.json")
@@ -1215,6 +1158,23 @@ class TestColdBootstrap:
             version += 1
         backend.append_prebuilt_events(timeline_id, batch)
 
+    @staticmethod
+    def _config_reset_event(
+        backend: LocalFsBackend, timeline_id: str, config: dict[str, Any]
+    ) -> TimelineEvent:
+        """Build the canonical runtime reset event used by cold-start tests."""
+        head = backend.head()
+        event = TimelineEvent.new(
+            timeline_id=timeline_id,
+            ts="2026-08-12T00:00:00Z",
+            actor=_actor("save"),
+            kind="timeline.config_replaced",
+            payload={"config": config, "source": "editor_save"},
+            prev_hash=head.last_hash,
+            expected_version=head.version + 1,
+        )
+        return with_event_hash(event, prev_hash=head.last_hash)
+
     def test_cold_bootstrap_skips_full_replay_for_config_tail(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1223,22 +1183,14 @@ class TestColdBootstrap:
         timeline_id = identity["timeline_id"]
         self._seed_renamed(backend, timeline_id, 2000)
 
-        from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
-
         head = backend.head()
         config = {
             "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
             "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
         }
-        batch = construct_reigh_timeline_events(
-            timeline_id=timeline_id,
-            tail_hash=head.last_hash,
-            next_event_version=head.version + 1,
-            actor=_actor("save"),
-            source="editor_save",
-            config=config,
+        backend.append_prebuilt_events(
+            timeline_id, [self._config_reset_event(backend, timeline_id, config)]
         )
-        backend.append_prebuilt_events(timeline_id, [e.event for e in batch.events])
 
         assert not (tdir / "assembly.checkpoint.json").exists()
 
@@ -1299,26 +1251,17 @@ class TestColdBootstrap:
         timeline_id = identity["timeline_id"]
         self._seed_renamed(backend, timeline_id, 2000)
 
-        from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
-
         head = backend.head()
         config = {
             "clips": [{"id": "c9", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
             "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
         }
-        batch = construct_reigh_timeline_events(
-            timeline_id=timeline_id,
-            tail_hash=head.last_hash,
-            next_event_version=head.version + 1,
-            actor=_actor("save"),
-            source="editor_save",
-            config=config,
-        )
-        backend.append_prebuilt_events(timeline_id, [e.event for e in batch.events])
+        reset_event = self._config_reset_event(backend, timeline_id, config)
+        backend.append_prebuilt_events(timeline_id, [reset_event])
 
         # A few granular events AFTER the last config (still within the window).
-        prev = batch.tail_hash
-        version = batch.next_event_version
+        prev = reset_event.hash
+        version = head.version + 2
         for index in range(10):
             event = TimelineEvent.new(
                 timeline_id=timeline_id,
@@ -1355,15 +1298,14 @@ class TestColdBootstrap:
         assert len(regen["clips"]) == 11  # 10 granular + 1 from config
 
 
-# ── bootstrap behavior (created vs legacy) ────────────────────────────────────
+# ── bootstrap behavior for created timelines ─────────────────────────────────
 
 
 class TestBootstrapBehavior:
-    """Prove bootstrap seam: created timelines get no timeline.imported;
-    true-legacy timelines fail closed until migrated."""
+    """Prove that created timelines start directly with domain events."""
 
     def test_created_timeline_no_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """A fresh created timeline does NOT emit timeline.imported on first write."""
+        """A fresh created timeline does not emit a compatibility bootstrap."""
         from astrid.core.timeline._edit_helpers import pack_write_gateway
         from astrid.core.timeline.events.schema import TimelineActor
 
@@ -1387,61 +1329,9 @@ class TestBootstrapBehavior:
         )
 
         assert result.bootstrap_emitted is False, \
-            "Created timelines must NOT emit timeline.imported"
+            "Created timelines must not emit a compatibility bootstrap"
         assert result.attempts == 1, \
             f"Expected 1 domain event, got {result.attempts}"
-
-    def test_legacy_timeline_rejects_runtime_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """A true-legacy timeline (no identity, has compatibility files)
-        fails closed instead of emitting timeline.imported."""
-        import json
-
-        from astrid.core.timeline._edit_helpers import pack_write_gateway
-        from astrid.core.timeline.events.schema import TimelineActor
-
-        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
-        create_project("legacy-proj")
-
-        # Create a fake legacy timeline without identity sidecar.
-        from astrid.core.ids import generate_ulid
-        ulid = generate_ulid()
-        tdir = tmp_path / "legacy-proj" / "timelines" / ulid
-        tdir.mkdir(parents=True)
-
-        # Write compatibility files.
-        display = {
-            "schema_version": 1,
-            "slug": "legacy-tl",
-            "name": "Legacy Timeline",
-        }
-        (tdir / "display.json").write_text(json.dumps(display), encoding="utf-8")
-        (tdir / "manifest.json").write_text(
-            json.dumps({"contributing_runs": [], "final_outputs": []}),
-            encoding="utf-8",
-        )
-        (tdir / "assembly.json").write_text(
-            json.dumps({"clips": [], "tracks": []}),
-            encoding="utf-8",
-        )
-
-        with pytest.raises(Exception, match="Runtime legacy bootstrap is disabled"):
-            pack_write_gateway(
-                project_slug="legacy-proj",
-                timeline_slug="legacy-tl",
-                timeline_ulid="",
-                timeline_event_stream_id="",
-                events=[{
-                    # Declared kind so the vocabulary gate passes and the
-                    # legacy-identity check below is what fails closed.
-                    "kind": "timeline.config_replaced",
-                    "payload": {"config": {"clips": [], "tracks": []}},
-                }],
-                actor=TimelineActor(type="system", id="test:legacy", display="Test"),
-            )
-
-        assert not (tdir / "assembly.identity.json").exists()
-        assert not (tdir / "assembly.jsonl").exists()
-
 
 # ── repair tests ──────────────────────────────────────────────────────────────
 

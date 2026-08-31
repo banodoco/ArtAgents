@@ -291,7 +291,6 @@ def test_reversible_event_kind(
     "kind, payload",
     [
         ("timeline.created", {"timeline_id": "00000000-0000-0000-0000-000000000001", "slug": "test", "name": "Test"}),
-        ("timeline.imported", {"snapshot": {}, "source": "legacy_local"}),
         ("timeline.deleted", {}),
         ("timeline.tombstoned", {"reason": "test"}),
         ("timeline.erased", {"selector_summary": {}, "reason": "test", "affected_count": 1}),

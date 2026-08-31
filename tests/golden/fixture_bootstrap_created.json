@@ -1,5 +1,5 @@
 {
-  "description": "Golden fixture: fresh created timeline \u2014 bare first domain event on empty assembly (no timeline.imported). Lifecycle events are no-ops.",
+  "description": "Golden fixture: fresh created timeline \u2014 bare first domain event on empty assembly. Lifecycle events are no-ops.",
   "events": [
     {
       "event_id": "01KS4ZQKZ23VKZE6GZZ665PVN8",

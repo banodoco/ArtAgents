@@ -313,7 +313,6 @@ user-facing workflows.
 - Read [SDK Reference](../reference/sdk.md) for the full DTO and exception catalog.
 - Explore [Creating Packs](../packs/creating-packs.md) to build your own
   executors and orchestrators.
-- See [Adapter Packs](../packs/adapter-packs.md) for local, remote, and manual
   execution backends.
 - Browse [Discovery for Agents](discovery-for-agents.md) to understand
   how AI agents consume the capability registry.

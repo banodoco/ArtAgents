@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a clean catalog from raw 2RP Supabase fetch."""
+"""Build a clean catalog from raw 2RP source data."""
 import json
 from pathlib import Path
 from collections import defaultdict

@@ -31,15 +31,8 @@ regenerating the complete transitive lock.
 
 The m8 installed matrix also writes `astrid.release_toolchain.v1` evidence.
 It records the exact CPython patch and executable, GNU Make, Bash, Git, FFmpeg,
-FFprobe, dependency-lock digests, Playwright package-lock digest, and the
-installed Playwright Chromium revision/browser version. A missing tool, a
-Python-series mismatch, a range/unhashed dependency, or Playwright drift fails
-before the installed/browser lanes can be accepted.
-
-`scripts/reshape/editor_browser_smoke/package.json` pins Playwright exactly;
-`npm ci` verifies its integrity-bearing lock. The browser revision is read from
-the installed `playwright-core/browsers.json`, not inferred from a moving
-"current stable" label.
+FFprobe, and dependency-lock digests. A missing tool, Python-series mismatch,
+or range/unhashed dependency fails before the installed lanes can be accepted.
 
 ## Remotion adapter provisioning
 

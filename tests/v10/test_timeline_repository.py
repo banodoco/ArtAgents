@@ -22,9 +22,9 @@ projection contract end to end:
 - initial head semantics: after create, the timeline stream head is 1,
   ``config_version`` equals that head, and the project event head advanced
   by exactly one;
-- sorted lists: ``list`` returns exactly the frozen bridge rows
+- sorted lists: ``list`` returns exactly the frozen runtime rows
   ``{timeline_id, timeline_ulid, slug, name, is_default}`` ordered by slug;
-- exact bridge-shaped rows: ``show`` returns the §5.2 load shape with loose
+- exact runtime rows: ``show`` returns the §5.2 load shape with loose
   ``config``, ``registry.assets``, and ``config_version``;
 - missing cases: every read raises typed errors and never an empty
   authority-dependent view;

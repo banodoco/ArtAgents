@@ -183,7 +183,7 @@ def test_synthetic_b_registered_invalid_params() -> None:
 
 def test_synthetic_c_opaque_unregistered_cliptype() -> None:
     """Both paths pass via opaque fallthrough for unknown clipType."""
-    payload = _tl([_clip("c1", "reigh-custom-thing")])
+    payload = _tl([_clip("c1", "custom-third-party-thing")])
 
     for mode in ("legacy", "new"):
         passed, _, _ = _validate_timeline_payload(payload, mode)
@@ -277,13 +277,13 @@ def test_synthetic_g_audio_producing_element_as_cliptype() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Open-string fallback regression test (Reigh-style)
+# Open-string fallback regression test
 # ---------------------------------------------------------------------------
 
 
-def test_reigh_open_string_fallback_regression() -> None:
+def test_open_string_fallback_regression() -> None:
     """A timeline with an open-string clipType not registered anywhere
-    must validate successfully under both paths (Reigh opaque-fallback
+    must validate successfully under both paths (opaque fallback
     contract).
 
     This is the explicit open-string-fallback regression test required
@@ -292,7 +292,7 @@ def test_reigh_open_string_fallback_regression() -> None:
     """
     open_string_cliptypes = [
         "custom-third-party-effect",
-        "reigh-experimental-v2",
+        "external-experimental-v2",
         "studio-alpha-overlay",
         "banana-slammer-9000",
     ]
@@ -303,5 +303,5 @@ def test_reigh_open_string_fallback_regression() -> None:
             passed, exc_type, msg = _validate_timeline_payload(payload, mode)
             assert passed, (
                 f"({mode}) open-string clipType {clip_type!r} must pass "
-                f"(Reigh contract): {exc_type}: {msg}"
+                f"(runtime contract): {exc_type}: {msg}"
             )

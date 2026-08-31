@@ -119,7 +119,7 @@ def _seed_succeeded_task(env, *, project_id: str, task_id: str | None = None):
         lambda u: env.task_repo.create(
             u,
             project_id=project_id,
-            capability="reigh.wan_2_2_t2i",
+            capability="generation.generate_video",
             spec=dict(SPEC),
             input_manifest=[],
             idempotency_key=f"admit-{task_id}",
@@ -326,7 +326,7 @@ def test_record_completion_rejections_change_zero_rows(env) -> None:
         lambda u: env.task_repo.create(
             u,
             project_id=project.id,
-            capability="reigh.wan_2_2_t2i",
+            capability="generation.generate_video",
             spec=dict(SPEC),
             input_manifest=[],
             idempotency_key=f"admit-{queued_task_id}",

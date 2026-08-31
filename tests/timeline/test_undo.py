@@ -559,8 +559,8 @@ class TestMassUndoPreviewOnly:
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append lifecycle event (timeline.created happens automatically via bootstrap)
-        # The bootstrap is timeline.imported, which is in _NON_REVERSIBLE_KINDS
-        # Ok, let's just append clip events and check
+        # Created timelines have no synthetic bootstrap event; append clip
+        # events and check the non-reversible lifecycle set.
         backend.append_event(
             timeline_id, "clip.added",
             {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
@@ -570,8 +570,7 @@ class TestMassUndoPreviewOnly:
         selector = MassUndoSelector(actor_id="undo-test")
         preview = plan_mass_undo(backend, selector)
 
-        # The bootstrap timeline.imported should be skipped
-        # Only the clip.added should appear
+        # Only the clip.added should appear.
         for cand in preview.candidates:
             assert cand["kind"] not in _NON_REVERSIBLE_KINDS
 

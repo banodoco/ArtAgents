@@ -40,7 +40,6 @@ from .payloads import (
     TimelineDefaultSetPayload,
     TimelineDeletedPayload,
     TimelineErasedPayload,
-    TimelineImportedPayload,
     TimelineRecoveredPayload,
     TimelineRenamedPayload,
     TimelineRevertedPayload,
@@ -77,7 +76,6 @@ TimelineEventKind = Literal[
     "timeline.default_set",
     "timeline.tombstoned",
     "timeline.deleted",
-    "timeline.imported",
     "timeline.config_replaced",
     "timeline.asset_registry_replaced",
     "timeline.recovered",
@@ -165,7 +163,6 @@ PayloadModel = (
     | TimelineDefaultSetPayload
     | TimelineTombstonedPayload
     | TimelineDeletedPayload
-    | TimelineImportedPayload
     | TimelineConfigReplacedPayload
     | TimelineAssetRegistryReplacedPayload
     | TimelineRecoveredPayload
@@ -207,7 +204,6 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "timeline.default_set": TimelineDefaultSetPayload,
     "timeline.tombstoned": TimelineTombstonedPayload,
     "timeline.deleted": TimelineDeletedPayload,
-    "timeline.imported": TimelineImportedPayload,
     "timeline.config_replaced": TimelineConfigReplacedPayload,
     "timeline.asset_registry_replaced": TimelineAssetRegistryReplacedPayload,
     "timeline.recovered": TimelineRecoveredPayload,

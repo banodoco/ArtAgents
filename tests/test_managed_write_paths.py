@@ -1,15 +1,13 @@
 """End-to-end tests for managed write paths — m4 T9 update.
 
 Proves:
-1. Managed flows emit correct event kinds and order
-   (timeline.config_replaced; timeline.imported only for true-legacy timelines).
+1. Managed flows emit correct event kinds and order.
 2. Compatibility outputs remain byte-equivalent after managed writes.
 3. verify_chain() passes for pack-produced timeline fixtures.
 4. Actor attribution including actor.via chaining.
 5. Unmanaged artifact mode still works without breaking.
 
-These tests exercise the managed LocalFs event path while Astrid's Reigh-side
-blob writes remain a legacy compatibility bridge.
+These tests exercise the managed local event path and runtime materialization.
 """
 
 from __future__ import annotations
@@ -114,7 +112,7 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
 
     def test_first_managed_write_no_bootstrap_for_created_timeline(self):
         """First managed write on a created timeline emits timeline.config_replaced
-        directly — NO timeline.imported bootstrap."""
+        directly — no compatibility bootstrap."""
         ulid, tdir = self._find_timeline_ulid_and_dir()
 
         result = pack_write_gateway(
@@ -743,7 +741,6 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
             ROOT / "astrid/packs/video_editing/orchestrators/hype/run.py",
             ROOT / "astrid/packs/editorial/executors/refine/run.py",
             ROOT / "astrid/packs/iteration/executors/assemble/run.py",
-            ROOT / "astrid/core/integrations/worker/banodoco_worker.py",
         ]
         for path in managed_sources:
             source = path.read_text(encoding="utf-8")

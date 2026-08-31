@@ -239,6 +239,7 @@ def test_discovery_does_not_load_executor_catalog_runner_or_project_runtime() ->
             (
                 "import sys; import astrid; astrid.discover(); "
                 "legacy = ('astrid.core.execution.executor.catalog_source', "
+                "'astrid.core.execution.executor.install', "
                 "'astrid.core.execution.executor.runner', "
                 "'astrid.core.execution.orchestrator.runner', "
                 "'astrid.core.execution.executor.banodoco_catalog', "

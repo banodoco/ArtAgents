@@ -1,7 +1,7 @@
 """Checkout pack registry and manifest composition.
 
 Pack discovery is intentionally a pure checkout concern. Runtime projects,
-writers, SDK services, and bridge composition live behind the generated
+writers, SDK services, and host composition live behind the generated
 workspace client or the runtime daemon; importing this package never opens a
 database or constructs a local application.
 """

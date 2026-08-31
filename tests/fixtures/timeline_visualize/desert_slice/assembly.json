@@ -3,7 +3,7 @@
     "com.example.writer2": {
       "note": "concurrent write"
     },
-    "com.reigh.scene-phase-markers": {
+    "com.example.scene-phase-markers": {
       "sceneMarkers": []
     }
   },

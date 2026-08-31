@@ -571,7 +571,7 @@
       "kind": "direct_stderr",
       "line": 2802,
       "path": "astrid/core/timeline/cli.py",
-      "source": "print(f\"timelines undo: warning \u2014 projection regeneration failed: {exc}\", file=sys.stderr)",
+      "source": "print(f\"timelines undo: warning — projection regeneration failed: {exc}\", file=sys.stderr)",
       "stderr_kind": "print"
     },
     {
@@ -1446,7 +1446,7 @@
       "kind": "direct_stderr",
       "line": 278,
       "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
-      "source": "print(f\"[foley_map] step 3/5: fal_foley \u00d7 {len(manifest['tiles'])}\", file=sys.stderr)",
+      "source": "print(f\"[foley_map] step 3/5: fal_foley × {len(manifest['tiles'])}\", file=sys.stderr)",
       "stderr_kind": "print"
     },
     {
@@ -1686,41 +1686,6 @@
       "path": "astrid/packs/media/executors/clip_extract/run.py",
       "source": "sys.stderr.write(result.stderr)",
       "stderr_kind": "write"
-    },
-    {
-      "kind": "direct_stderr",
-      "line": 75,
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "source": "print(f\"open_in_reigh.py: missing required output file(s): {', '.join(missing)}\", file=sys.stderr)",
-      "stderr_kind": "print"
-    },
-    {
-      "kind": "direct_stderr",
-      "line": 164,
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "source": "print(\n            \"open_in_reigh: --project-id is required for bridge metadata. \"\n            \"Use --print-sql, --copy-to, or --copy-files to skip the network.\",\n            file=sys.stderr,\n        )",
-      "stderr_kind": "print"
-    },
-    {
-      "kind": "direct_stderr",
-      "line": 173,
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "source": "print(\"open_in_reigh: timeline JSON must be a JSON object\", file=sys.stderr)",
-      "stderr_kind": "print"
-    },
-    {
-      "kind": "direct_stderr",
-      "line": 176,
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "source": "print(\n            \"open_in_reigh: refusing to bridge placement-style timeline.json to reigh-app. \"\n            \"The DataProvider expects the canonical clip-shaped TimelineConfig \"\n            \"(per @banodoco/timeline-schema). Re-export with the collapsed schema first.\",\n            file=sys.stderr,\n        )",
-      "stderr_kind": "print"
-    },
-    {
-      "kind": "direct_stderr",
-      "line": 495,
-      "path": "astrid/packs/reigh/executors/publish/run.py",
-      "source": "print(f\"publish: {exc}\", file=sys.stderr)",
-      "stderr_kind": "print"
     },
     {
       "exception": "ValueError",
@@ -2374,7 +2339,7 @@
       "source": "raise ValueError(\"specify a pack id or pass --all\")"
     }
   ],
-  "expected_parser_surface_count": 72,
+  "expected_parser_surface_count": 67,
   "expected_parser_surfaces": [
     {
       "module": "astrid.core.backup.cli",
@@ -2567,26 +2532,6 @@
       "path": "astrid/packs/moirae/executors/moirae/run.py"
     },
     {
-      "module": "astrid.packs.reigh.executors.open_in_reigh.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py"
-    },
-    {
-      "module": "astrid.packs.reigh.executors.publish.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/publish/run.py"
-    },
-    {
-      "module": "astrid.packs.reigh.executors.reigh_data.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/reigh_data/run.py"
-    },
-    {
-      "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py"
-    },
-    {
       "module": "astrid.packs.rendering.executors.html_canvas_effect.run",
       "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py"
@@ -2735,7 +2680,7 @@
   "kind_arg_findings": [],
   "mode": "zero",
   "non_kind_enum_findings": [],
-  "scanned_parser_surface_count": 72,
+  "scanned_parser_surface_count": 67,
   "scanned_parser_surfaces": [
     {
       "module": "astrid.core.backup.cli",
@@ -3000,34 +2945,6 @@
       "module": "astrid.packs.moirae.executors.moirae.run",
       "builder": "build_parser",
       "path": "astrid/packs/moirae/executors/moirae/run.py",
-      "prog": "-c",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.packs.reigh.executors.open_in_reigh.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "prog": "-c",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.packs.reigh.executors.publish.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/publish/run.py",
-      "prog": "tools/publish.py",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.packs.reigh.executors.reigh_data.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/reigh_data/run.py",
-      "prog": "-c",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
-      "builder": "build_parser",
-      "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py",
       "prog": "-c",
       "enum_arg_count": 0
     },

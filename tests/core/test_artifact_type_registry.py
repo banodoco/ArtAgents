@@ -77,7 +77,7 @@ class BuiltinRegistrationTest(unittest.TestCase):
     def test_resolve_unknown_returns_none(self) -> None:
         """Unknown names return None (opaque fallthrough contract)."""
         self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("nonexistent"))
-        self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("reigh-custom-thing"))
+        self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("external-custom-thing"))
         self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve(""))
 
     def test_is_known(self) -> None:
@@ -440,18 +440,18 @@ class PackDeclaredArtifactTypeLoadingTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Opaque fallthrough (Reigh contract)
+# Opaque fallthrough (runtime contract)
 # ---------------------------------------------------------------------------
 
 
 class OpaqueFallthroughTest(unittest.TestCase):
     def test_unknown_value_resolve_returns_none(self) -> None:
         """Unknown runtime values return None — caller decides (opaque fallthrough)."""
-        self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("reigh-custom-type"))
+        self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("external-custom-type"))
         self.assertIsNone(ARTIFACT_TYPE_REGISTRY.resolve("open-string-anything"))
 
     def test_unknown_value_is_known_returns_false(self) -> None:
-        self.assertFalse(ARTIFACT_TYPE_REGISTRY.is_known("reigh-custom-type"))
+        self.assertFalse(ARTIFACT_TYPE_REGISTRY.is_known("external-custom-type"))
 
     def test_normalize_on_unknown_raises(self) -> None:
         """normalize() should raise for unknown (used in strict validation paths),

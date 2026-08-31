@@ -29,7 +29,7 @@ _ASTRID_TOP_LEVEL_OVERLAY = frozenset({"app"})
 def _load_shared_schema() -> tuple[dict, str] | None:
     """Load the schema from the same public package used by Astrid runtime.
 
-    The release verifier places the pinned Reigh schema package on the Python
+    The release verifier places the pinned timeline schema package on the Python
     path. Resolving sibling workspaces or npm copies here would make this test
     pass against an unrelated schema revision.
     """

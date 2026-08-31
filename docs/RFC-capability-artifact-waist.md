@@ -44,7 +44,7 @@ The six DeepSeek agents converged at "HIGH confidence" and each wanted to bolt o
 
 > **Composition = type-match (for validation) + id-reference (for selection). The id-reference is irreducible.** You cannot replace "apply `cross-fade`" with pure type-matching — the user is choosing *which* of N `clip→clip` transitions. Type-matching validates; the id selects. This holds for timelines and orchestrators alike.
 
-**One real constraint the audits missed:** `clipType` is *deliberately an open string* "for Reigh compatibility… unknown clip types stay valid and classify as opaque at runtime" (timeline.py:194, 251-252). **The migration must preserve open-string fallback** — artifact types validate what we know and leave unknowns opaque. No closed enum.
+**One real constraint the audits missed:** `clipType` is *deliberately an open string* "for forward compatibility… unknown clip types stay valid and classify as opaque at runtime" (timeline.py:194, 251-252). **The migration must preserve open-string fallback** — artifact types validate what we know and leave unknowns opaque. No closed enum.
 
 ---
 
@@ -107,7 +107,7 @@ Optional → every existing manifest keeps working. Composition is type-checked 
 | `asset_registry` | `validate_registry` (assets `{file,url}`) |
 | `lora` | fal LoRA resolution (registry id + scale + base-model match) |
 
-Unknown types stay opaque (Reigh open-string rule, §2).
+Unknown types stay opaque under the open-string rule (§2).
 
 ### A3. Prove M+N on ONE seam — the timeline validator
 Replace the enumerate-and-membership-test (timeline.py:247-257) with id-resolution + type-check:
@@ -117,7 +117,7 @@ cap = kernel.resolve(clip_type, scope=active_theme)   # id-reference (irreducibl
 if cap is not None:                                    # known capability
     kernel.check_consumes(cap, artifact_type="video/clip")  # type-match (validation)
     _validate_effect_params(clip_type, clip.get("params"), ..., theme=active_theme)
-# else: unknown clipType stays opaque — Reigh compatibility preserved
+# else: unknown clipType stays opaque — forward compatibility preserved
 ```
 The validator no longer enumerates every effect. A third-party pack's effect is resolved + type-checked through the kernel, not discovered by re-listing. **This is the M×N→M+N proof in one file.** Highest-traffic name-wiring site; immediate, visible payoff; fully reversible.
 

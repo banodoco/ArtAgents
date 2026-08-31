@@ -1135,10 +1135,10 @@ evidence for the landed gates and subsequent kernel-authority integration.
 ## Explicit non-goals for the first release
 
 - any human-facing dashboard or interactive editor;
-- replacing Reigh's interactive editor;
+- replacing an interactive editor;
 - mutating timeline events or final-output records;
 - rendering the final composited video automatically;
-- remote/Supabase visualization without a locally readable projection;
+- remote visualization without a locally readable projection;
 - a persistent watch server;
 - an `--audience` mode switch;
 - a generic asset browser or media-management surface;

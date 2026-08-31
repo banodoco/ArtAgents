@@ -26,8 +26,8 @@ single ``BEGIN IMMEDIATE`` unit of work:
 Reads (:meth:`resolve`, :meth:`list`, :meth:`show`) are transaction-free
 queries on a separate read-only connection (the established T14/T15 path).
 ``resolve`` resolves a canonical UUID, lowercase 26-character Crockford ULID,
-or immutable project-scoped slug **within one project** (bridge §8 order:
-UUID, then ULID, then slug). ``list`` returns frozen bridge-shaped rows
+or immutable project-scoped slug **within one project** (runtime §8 order:
+UUID, then ULID, then slug). ``list`` returns frozen runtime-shaped rows
 ``{timeline_id, timeline_ulid, slug, name, is_default}`` sorted by slug, and
 ``show`` returns the frozen load shape with loose ``config``,
 ``registry.assets``, and ``config_version`` equal to the numeric timeline
@@ -35,7 +35,7 @@ stream head. Default-timeline state is projected from
 ``projects.settings_json`` only — never a second authority.
 
 :meth:`TimelineRepository.save` (plan step 14) is the whole-document CAS
-command: it canonicalizes only the frozen bridge top keys, derives the
+command: it canonicalizes only the frozen runtime top keys, derives the
 internal idempotency key from project/timeline identity, the integer
 expected head, and the canonical payload, CAS-checks the expected head
 *before* any mutation (a stale save raises
@@ -116,7 +116,7 @@ TIMELINE_REPLACE_CONFIG_COMMAND_KIND = "timeline.replace_config"
 Declared by the timeline pack manifest; implemented by
 :meth:`TimelineRepository.replace_config`. Receipt keys follow the save
 convention — ``timeline.replace_config:{timeline_id}:{expected_version}``
-when the caller supplies the key, or the derived bridge key
+when the caller supplies the key, or the derived runtime key
 ``{command_kind}:{project_id}:{timeline_id}:{expected_version}:{digest}``
 when it does not.
 """
@@ -163,19 +163,6 @@ order (created first, then saves, archive/recovery). Archive never changes
 document/registry, so the version content used by ``diff`` is carried by
 ``timeline.created`` and ``timeline.saved`` only."""
 
-_BRIDGE_CANONICAL_TOP_KEYS: tuple[str, ...] = (
-    "config",
-    "registry",
-    "expected_version",
-)
-"""The frozen bridge save-request top keys (contract §6.1).
-
-Whole-document saves canonicalize exactly these three keys — the bridge body
-has no other fields. ``config`` and ``registry`` are loose editor objects;
-``expected_version`` is the integer CAS version. Timeline/project identity
-enters the derived idempotency key separately, never the canonical payload.
-"""
-
 DEFAULT_TIMELINE_KEY_SUFFIX = ":set-default"
 """Suffix deriving the nested default-update idempotency key from the create key.
 
@@ -196,7 +183,7 @@ _UPPERCASE_ULID_RE = re.compile(r"^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$")
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
-"""Canonical lowercase UUID grammar (8-4-4-4-12 hex groups, bridge §8)."""
+"""Canonical lowercase UUID grammar (8-4-4-4-12 hex groups, runtime §8)."""
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +205,7 @@ class TimelineValidationError(TimelineRepositoryError):
 
     Covers invalid slugs, non-object config/registry, invalid addresses
     (a ``:ref`` that is not a UUID, ULID, or slug), and invalid command
-    arguments — the bridge ``400 invalid_timeline`` surface.
+    arguments — the runtime ``400 invalid_timeline`` surface.
     """
 
     def __init__(
@@ -234,7 +221,7 @@ class TimelineValidationError(TimelineRepositoryError):
 class TimelineAmbiguousError(TimelineRepositoryError):
     """Raised when a display-name lookup matches multiple timelines.
 
-    The canonical bridge addresses are still UUID, ULID, and slug.  This
+    The canonical runtime addresses are still UUID, ULID, and slug.  This
     error is kept in the repository taxonomy because SDK error mapping must be
     able to import and classify the name-resolution failure without coupling
     itself to a different pack revision.
@@ -295,7 +282,7 @@ class TimelineVersionConflictError(TimelineRepositoryError):
     The CAS check runs before any sequence allocation or projection change,
     so a stale save leaves document, registry, events, both heads, and
     receipts unchanged. Carries the current head as ``current_version`` —
-    the bridge ``409 timeline_version_conflict`` body adds exactly this as
+    the runtime ``409 timeline_version_conflict`` body adds exactly this as
     ``config_version`` (contract §6.2).
     """
 
@@ -360,8 +347,8 @@ class TimelineArchivedError(TimelineRepositoryError):
 
 
 @dataclass(frozen=True, slots=True)
-class TimelineReadModel:
-    """Immutable timeline read model (frozen bridge load shape, §5.2).
+class TimelineRecord:
+    """Immutable timeline read model (frozen runtime load shape, §5.2).
 
     ``config`` is the loose editor document, ``registry`` is the full
     ``{"assets": {...}}`` wire shape, and ``config_version`` is the numeric
@@ -396,7 +383,7 @@ class TimelineReadModel:
         return result
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> TimelineReadModel:
+    def from_mapping(cls, value: Mapping[str, Any]) -> TimelineRecord:
         """Rebuild the frozen read model from a stored result mapping."""
         return cls(
             timeline_id=str(value["timeline_id"]),
@@ -412,8 +399,8 @@ class TimelineReadModel:
 
 
 @dataclass(frozen=True, slots=True)
-class TimelineListRow:
-    """One sorted timeline list row (frozen bridge ``GET /timelines`` shape).
+class TimelineSummary:
+    """One sorted timeline list row (frozen runtime ``GET /timelines`` shape).
 
     Exactly the five fields the frozen list contract exposes
     (``timeline_id``, ``timeline_ulid``, ``slug``, ``name``, ``is_default``),
@@ -428,7 +415,7 @@ class TimelineListRow:
     is_default: bool
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the JSON-safe dict serialized by the bridge list route."""
+        """Return the JSON-safe dict serialized by the runtime list route."""
         return {
             "timeline_id": self.timeline_id,
             "timeline_ulid": self.timeline_ulid,
@@ -701,7 +688,7 @@ class TimelineRepository:
         set_default: bool = False,
         command_kind: str = TIMELINE_CREATE_COMMAND_KIND,
         created_at: str | None = None,
-    ) -> TimelineReadModel:
+    ) -> TimelineRecord:
         """Create a timeline atomically and idempotently.
 
         Inside the caller's active unit of work this persists, in one
@@ -722,7 +709,7 @@ class TimelineRepository:
         mutation.
 
         ``config`` is the loose editor document object. ``registry`` is the
-        full bridge registry object (``{"assets": {...}}``); only its
+        full runtime registry object (``{"assets": {...}}``); only its
         ``assets`` object is persisted in ``asset_registry_json``. When
         ``set_default`` is true the created timeline becomes the project's
         repository-owned default (``settings_json``).
@@ -801,7 +788,7 @@ class TimelineRepository:
             command_kind=command_kind,
         )
         if replayed is not None:
-            return TimelineReadModel.from_mapping(replayed)
+            return TimelineRecord.from_mapping(replayed)
 
         # Typed not-found before any mutation.
         project = uow.query_one(
@@ -919,7 +906,7 @@ class TimelineRepository:
             )
         # 5. The complete receipt: transaction id, stream association, exact
         #    project sequence, ordered event ids, and result.
-        read_model = TimelineReadModel(
+        read_model = TimelineRecord(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             slug=slug,
@@ -962,22 +949,22 @@ class TimelineRepository:
         command_kind: str = TIMELINE_SAVE_COMMAND_KIND,
         idempotency_key: str | None = None,
         created_at: str | None = None,
-    ) -> TimelineReadModel:
+    ) -> TimelineRecord:
         """Whole-document CAS save: one atomic, idempotent commit (§6).
 
         Inside the caller's single ``BEGIN IMMEDIATE`` unit of work this
         resolves *ref* (UUID, ULID, or slug) within *project_id*, validates
         the loose ``config``/``registry`` object shapes and the integer
         ``expected_version`` (booleans are rejected — a boolean is not a
-        version, bridge §6.1), canonicalizes **only** the frozen bridge top
-        keys (:data:`_BRIDGE_CANONICAL_TOP_KEYS`), and resolves the effective
+        version, runtime §6.1), canonicalizes **only** the frozen runtime top
+        request keys, and resolves the effective
         idempotency key:
 
         - when *idempotency_key* is supplied, it is the caller's key, used
           verbatim (a non-empty string, validated before any mutation);
-        - when absent, the repository derives the frozen bridge key from
+        - when absent, the repository derives the frozen runtime key from
           project/timeline identity, the integer expected head, and the
-          canonical payload — the bridge route has no ``idempotency_key``
+          canonical payload — the runtime route has no ``idempotency_key``
           field, so the repository derives one (receipt secrecy, §7).
 
         Both paths then share the exact same atomic command: the receipt
@@ -1028,7 +1015,7 @@ class TimelineRepository:
         if not isinstance(assets, Mapping):
             raise TimelineValidationError("registry.assets must be a JSON object")
         registry_shape = {"assets": dict(assets)}
-        # Canonicalize only the frozen bridge top keys; timeline/project
+        # Canonicalize only the frozen runtime top keys; timeline/project
         # identity stays out of the payload and enters the derived key.
         try:
             config_json = canonical_json(dict(config))
@@ -1044,7 +1031,7 @@ class TimelineRepository:
             "bundle": "__omitted__" if bundle is _BUNDLE_MISSING else bundle,
         }
         try:
-            bridge_request_digest = request_hash(command_kind, payload)
+            runtime_request_digest = request_hash(command_kind, payload)
         except CanonicalizationError as exc:
             raise TimelineValidationError(
                 f"cannot hash timeline save request: {exc}"
@@ -1055,20 +1042,20 @@ class TimelineRepository:
         timeline_id = self._resolve_id(uow, project_id, ref)
 
         # Effective idempotency key: the caller's key when supplied,
-        # otherwise the frozen bridge-derived key from project/timeline
-        # identity + integer expected head + canonical payload (bridge §6.1
+        # otherwise the frozen runtime-derived key from project/timeline
+        # identity + integer expected head + canonical payload (runtime §6.1
         # derivation rule). Both paths share the receipt gate below.
         derived_key = (
             f"{command_kind}:{project_id}:{timeline_id}:"
-            f"{expected_version}:{bridge_request_digest}"
+            f"{expected_version}:{runtime_request_digest}"
         )
         if idempotency_key is None:
-            # Preserve the frozen bridge-derived key and its persisted
-            # request hash exactly: bridge identity already lives in the
+            # Preserve the frozen runtime-derived key and its persisted
+            # request hash exactly: runtime identity already lives in the
             # derived key, while its canonical payload remains the receipt
-            # hash used by earlier bridge saves.
+            # hash used by earlier runtime saves.
             effective_key = derived_key
-            request_digest = bridge_request_digest
+            request_digest = runtime_request_digest
         else:
             # A caller key is scoped only by project in command_receipts, so
             # the resolved timeline target must participate in semantic
@@ -1096,7 +1083,7 @@ class TimelineRepository:
             command_kind=command_kind,
         )
         if replayed is not None:
-            return TimelineReadModel.from_mapping(replayed)
+            return TimelineRecord.from_mapping(replayed)
 
         row = uow.query_one(
             "SELECT t.id, t.project_id, t.event_stream_id, t.name, "
@@ -1218,7 +1205,7 @@ class TimelineRepository:
         )
 
         # 4. The complete receipt and the committed frozen load shape.
-        read_model = TimelineReadModel(
+        read_model = TimelineRecord(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             slug=slug,
@@ -1377,7 +1364,7 @@ class TimelineRepository:
         command_kind: str = TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
         idempotency_key: str | None = None,
         created_at: str | None = None,
-    ) -> TimelineReadModel:
+    ) -> TimelineRecord:
         """Whole-config CAS replacement: one atomic, idempotent commit.
 
         The runtime full-replacement surface behind the declared
@@ -1393,9 +1380,9 @@ class TimelineRepository:
         and break that path.
 
         - *config*/*registry* are loose JSON objects and *expected_version*
-          the integer CAS head (booleans rejected, bridge §6.1), with only
-          the frozen bridge top keys
-          (:data:`_BRIDGE_CANONICAL_TOP_KEYS`) canonicalized;
+          the integer CAS head (booleans rejected, runtime §6.1), with only
+          the frozen runtime top keys
+          canonicalized;
         - the expected head is CAS-checked **before** any allocation (a
           stale write raises :class:`TimelineVersionConflictError` and
           changes zero rows);
@@ -1406,7 +1393,7 @@ class TimelineRepository:
         - the effective idempotency key mirrors :meth:`save`: the caller's
           key verbatim when supplied (canonical form
           ``timeline.replace_config:{timeline_id}:{expected_version}``),
-          otherwise the derived bridge key from project/timeline identity +
+          otherwise the derived runtime key from project/timeline identity +
           integer expected head + canonical payload.
 
         Returns the frozen load shape (§5.2) with the new ``config_version``
@@ -1449,7 +1436,7 @@ class TimelineRepository:
         if not isinstance(assets, Mapping):
             raise TimelineValidationError("registry.assets must be a JSON object")
         registry_shape = {"assets": dict(assets)}
-        # Canonicalize only the frozen bridge top keys; timeline/project
+        # Canonicalize only the frozen runtime top keys; timeline/project
         # identity stays out of the payload and enters the derived key.
         try:
             config_json = canonical_json(dict(config))
@@ -1465,7 +1452,7 @@ class TimelineRepository:
             "bundle": "__omitted__" if bundle is _BUNDLE_MISSING else bundle,
         }
         try:
-            bridge_request_digest = request_hash(command_kind, payload)
+            runtime_request_digest = request_hash(command_kind, payload)
         except CanonicalizationError as exc:
             raise TimelineValidationError(
                 f"cannot hash timeline replace_config request: {exc}"
@@ -1476,14 +1463,14 @@ class TimelineRepository:
         timeline_id = self._resolve_id(uow, project_id, ref)
 
         # Effective idempotency key: the caller's key when supplied,
-        # otherwise the derived bridge key — mirroring save's derivation.
+        # otherwise the derived runtime key — mirroring save's derivation.
         derived_key = (
             f"{command_kind}:{project_id}:{timeline_id}:"
-            f"{expected_version}:{bridge_request_digest}"
+            f"{expected_version}:{runtime_request_digest}"
         )
         if idempotency_key is None:
             effective_key = derived_key
-            request_digest = bridge_request_digest
+            request_digest = runtime_request_digest
         else:
             caller_request = {
                 "project_id": project_id,
@@ -1507,7 +1494,7 @@ class TimelineRepository:
             command_kind=command_kind,
         )
         if replayed is not None:
-            return TimelineReadModel.from_mapping(replayed)
+            return TimelineRecord.from_mapping(replayed)
 
         row = uow.query_one(
             "SELECT t.id, t.project_id, t.event_stream_id, t.name, "
@@ -1629,7 +1616,7 @@ class TimelineRepository:
         )
 
         # 4. The complete receipt and the committed frozen load shape.
-        read_model = TimelineReadModel(
+        read_model = TimelineRecord(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             slug=slug,
@@ -1957,12 +1944,12 @@ class TimelineRepository:
         """Resolve a UUID, ULID, or slug to a timeline id.
 
         A transaction-free read on a separate read-only connection. Resolution
-        is project-scoped (bridge §8 order: canonical UUID, then 26-character
+        is project-scoped (runtime §8 order: canonical UUID, then 26-character
         Crockford ULID, then immutable slug). Lowercase ULIDs are canonical;
         uppercase ULIDs are accepted only as an exact compatibility lookup for
         identities already exposed by ``list``. No case normalization occurs.
         An address matching none of the forms raises
-        :class:`TimelineValidationError` (the bridge ``400 invalid_timeline``),
+        :class:`TimelineValidationError` (the runtime ``400 invalid_timeline``),
         a missing project raises :class:`ProjectNotFoundError`, and a missing
         timeline raises :class:`TimelineNotFoundError`.
         """
@@ -2077,11 +2064,11 @@ class TimelineRepository:
         project_id: str,
         *,
         include_archived: bool = False,
-    ) -> list[TimelineListRow | TimelineInclusiveListRow]:
+    ) -> list[TimelineSummary | TimelineInclusiveListRow]:
         """Sorted read-only list query for one project.
 
         A transaction-free read on a separate read-only connection (the
-        frozen bridge ``GET /timelines`` shape, §5.1). Rows carry exactly
+        frozen runtime ``GET /timelines`` shape, §5.1). Rows carry exactly
         ``{timeline_id, timeline_ulid, slug, name, is_default}``, ordered by
         ``slug`` ascending (deterministic; ``timeline_id`` breaks ties).
         Archived timelines are hidden by default (SD1/m4 plan step 7). When
@@ -2135,7 +2122,7 @@ class TimelineRepository:
                 TIMELINE_UNARCHIVED_EVENT_KIND,
             )
             rows = conn.execute(query, params).fetchall()
-        rows_out: list[TimelineListRow | TimelineInclusiveListRow] = []
+        rows_out: list[TimelineSummary | TimelineInclusiveListRow] = []
         for row in rows:
             timeline_ulid = row["timeline_ulid"]
             slug = row["slug"]
@@ -2159,7 +2146,7 @@ class TimelineRepository:
                     else None
                 )
             rows_out.append(
-                (TimelineInclusiveListRow if include_archived else TimelineListRow)(
+                (TimelineInclusiveListRow if include_archived else TimelineSummary)(
                     **row_kwargs
                 )
             )
@@ -2167,12 +2154,12 @@ class TimelineRepository:
 
     def show(
         self, writer: DatabaseWriter, project_id: str, ref: str
-    ) -> TimelineReadModel:
+    ) -> TimelineRecord:
         """Typed show query: one timeline's frozen load shape (§5.2).
 
         A transaction-free read on a separate read-only connection: resolves
         *ref* (UUID, ULID, or slug) within *project_id*, then returns the
-        immutable :class:`TimelineReadModel` with loose ``config``,
+        immutable :class:`TimelineRecord` with loose ``config``,
         ``registry.assets``, and ``config_version`` equal to the numeric
         timeline stream head. A missing project raises
         :class:`ProjectNotFoundError`, a missing timeline raises
@@ -2231,7 +2218,7 @@ class TimelineRepository:
         bundle = self._parse_project_data(
             str(row["project_data_json"]), timeline_id
         )
-        return TimelineReadModel(
+        return TimelineRecord(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             slug=slug,
@@ -2453,7 +2440,7 @@ class TimelineRepository:
     def _parse_project_data(
         self, project_data_json: str, timeline_id: str
     ) -> dict[str, Any] | None:
-        """Parse the bridge-owned project-data lane, failing closed."""
+        """Parse the runtime-owned project-data lane, failing closed."""
         try:
             parsed = parse_json(project_data_json)
         except CanonicalizationError as exc:
@@ -2466,7 +2453,7 @@ class TimelineRepository:
             raise TimelineRepositoryError(
                 f"timeline {timeline_id!r} project data is not an object"
             )
-        # The bridge validates the opaque bundle at its HTTP boundary so a
+        # The runtime validates the opaque bundle at its HTTP boundary so a
         # malformed or future persisted value becomes the typed 422
         # ``schema_incompatible`` response.  The repository keeps the value
         # lossless for SDK/read-model consumers and does not reinterpret an
@@ -2495,9 +2482,9 @@ __all__ = [
     "TimelineDiffEntry",
     "TimelineHistoryEntry",
     "TimelineInclusiveListRow",
-    "TimelineListRow",
+    "TimelineSummary",
     "TimelineNotFoundError",
-    "TimelineReadModel",
+    "TimelineRecord",
     "TimelineRepository",
     "TimelineRepositoryError",
     "TimelineSlugConflictError",

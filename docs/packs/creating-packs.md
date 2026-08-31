@@ -507,8 +507,6 @@ these for the topics they cover:
   Decision table and CLI examples for the three customization mechanisms.
 - [fork-and-update.md](fork-and-update.md) — Scaffolding and managing
   personal packs with forks, overrides, dirty detection, and update workflows.
-- [adapter-packs.md](adapter-packs.md) — What makes a pack an adapter,
-  trust/ownership distinctions, and the `kind: external` convention.
 
 ## Future Work
 

@@ -16,7 +16,7 @@ platform contract is the final authority.
 - **[capability-artifact-contract.md](capability-artifact-contract.md)** —
   The capability/artifact/scoped-config contract: the three primitives,
   composition rule (id-reference + type-match), conceptual↔canonical
-  mapping, open-string fallback (Reigh-boundary leniency), and pack
+  mapping, open-string fallback, and pack
   extension via `extensions.artifact_types.types`.  The definitive guide
   for third-party pack authors shipping typed capabilities.
 
@@ -37,18 +37,16 @@ platform contract is the final authority.
   2=recoverable failure), the `AstridError` envelope contract, rendering
   rules, recovery-command expectations, and authoring rules.
 
-- **[output-result-contract.md](output-result-contract.md)** — Universal
-  result manifest (`manifest.json`) contract for M1 executors: required
-  fields, kind vocabulary, output entry hashing, directory tree hashing,
-  optional partial outputs, and domain-manifest coexistence.
-
+- **[run-ledger-contract.md](run-ledger-contract.md)** — Ledger
+  invariant that every in-band execution produces exactly one truthful
+  `run.json` entry: three-record taxonomy, exemption catalog, cost
+  source precedence, log capture rules, cleanup verbs, and external
+  `out=` semantics.
 
 ## Timeline & Event Contracts
 
 Timeline and event-sourcing schemas live under
-[docs/architecture/timeline-event-sourcing/](../architecture/timeline-event-sourcing/):
-M1 schema, M2 clip primitives, M3 secondary primitives, M5 concurrency,
-and M6 sync contracts.
+[docs/architecture/timeline-event-sourcing/](../architecture/timeline-event-sourcing/).
 
 ## Pack Contract
 

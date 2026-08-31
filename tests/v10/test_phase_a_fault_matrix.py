@@ -683,7 +683,7 @@ def _seed_task(template_ctx_writer, registry) -> None:
         lambda u: tasks.create(
             u,
             project_id=_PROJECT_ID,
-            capability="reigh.image_upscale",
+            capability="generation.generate_image",
             spec={"schema_version": 1, "family": "image_upscale"},
             input_manifest=[],
             idempotency_key="fault-seed-task",

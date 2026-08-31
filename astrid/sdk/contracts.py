@@ -1,7 +1,7 @@
 """Immutable domain result envelopes, error objects, and identity helpers.
 
 (m4 plan step 3, task T3.) This module implements the frozen SDK contract
-``docs/contracts/astrid-sdk-v10.md`` as executable types:
+the platform contract as executable types:
 
 - :class:`DomainResult` — the immutable generic domain result envelope with
   exactly the five keys ``ok``/``data``/``error``/``receipt``/

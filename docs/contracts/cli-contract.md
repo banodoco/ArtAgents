@@ -154,4 +154,3 @@ Key points for agents:
 - [Error Model](error-model.md) — canonical exit-code taxonomy, error envelope contract, recovery-command expectations.
 - [Platform Contract](platform-contract.md) — cross-backend primitives and gateway-level guarantees.
 - [Discovery for Agents](../guides/discovery-for-agents.md) — how agents discover available capabilities through the SDK.
-- [Output Result Contract](output-result-contract.md) — how executor outputs are surfaced.

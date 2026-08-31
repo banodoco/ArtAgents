@@ -1,7 +1,7 @@
 # Runaway typed-timeline release runbook
 
 This runbook is the operator gate for the Runaway timing-v1 pack, the
-typed-timeline mapper/renderer, and the local Reigh bridge. The canonical
+typed-timeline mapper/renderer. The canonical
 store is `${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`; the original
 `deliverables/` and `timeline/` files remain immutable migration inputs.
 Exact-commit release automation uses the byte-pinned tracked copies under
@@ -11,8 +11,8 @@ an ignored local project tree from silently changing release evidence.
 ## Preconditions
 
 1. Freeze the application wheel and record its SHA-256.
-2. Stop all Astrid writers for the projects root. The bridge and migration
-   must never run concurrently against the same owner lock.
+2. Stop all Astrid writers for the projects root. Migration must never run
+   concurrently against the same owner lock.
 3. Run `python3 -m astrid doctor --json --projects-root "$ROOT"` and require
    every check to be green.
 4. Create and retain a validated backup:
@@ -59,30 +59,6 @@ payload is deliberately limited to the fixed migration, mode, outcome, and
 error-kind enums; it never includes a project, path, prompt, or exception
 message, and a telemetry-sink failure cannot change the migration result.
 
-## Editor bridge verification
-
-Start only on loopback. Set a random bearer token when the caller supports
-it; never expose this HTTP service on a LAN or public interface.
-
-```sh
-export ASTRID_BRIDGE_TOKEN="<random-secret>"
-python3 -m astrid serve \
-  --projects-root "$ROOT" \
-  --host 127.0.0.1 \
-  --port 9101 \
-  --release-mode \
-  --no-open-editor
-```
-
-Verify `/v1/health`, then traverse
-`/v1/projects/runaway-piano-colour-demo/runaway-transitions?limit=256` until
-`page.next_cursor` is null. Require `api_version=v1`, a stable `snapshot`,
-566 unique ordered transitions, and the same `total_count` on every page.
-The response must include `X-Astrid-Bridge-Version: v1`. Check that malformed,
-cross-project, and modified cursors fail with `400 invalid_cursor`; missing or
-bad bearer credentials fail with `401`; disallowed `Host`/`Origin` fail with
-`403`; oversized request targets/bodies fail closed.
-
 ## Render acceptance
 
 Map the admitted 566-row JSON artifact twice with both `runaway_colour` and
@@ -104,13 +80,13 @@ python3 -m astrid backup restore "$BACKUP" --projects-root "$RESTORE_ROOT"
 python3 -m astrid doctor --json --projects-root "$RESTORE_ROOT"
 ```
 
-Swap the restored root into service only after doctor, source-hash, and bridge
-health checks pass. Keep the failed database and the immutable source files;
+Swap the restored root into service only after doctor and source-hash checks
+pass. Keep the failed database and the immutable source files;
 never hand-edit receipts, events, evidence, or `runaway_transitions`.
 
 ## Release record
 
 Attach the wheel hash, source hashes, backup location, dry-run/apply outputs,
-idempotent replay counts, bridge pagination/security results, mapper goldens,
+idempotent replay counts, mapper goldens,
 FFmpeg/ffprobe evidence, full pytest summary, operator, and UTC timestamps to
 the release ticket. A missing item blocks promotion.

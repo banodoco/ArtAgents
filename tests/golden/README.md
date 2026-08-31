@@ -4,15 +4,13 @@ This directory contains backend-neutral fixture files for the
 `project_to_assembly()` projector. Runtime fixtures must project to raw
 `TimelineConfig` only: top-level `clips` and `tracks`, with no
 `{schema_version, assembly}` wrapper and no `pool` or `arrangement` read-model
-keys. Legacy wrapper/no-label/arrangement cases are kept only as explicit
-runtime-rejection fixtures or in migration tests.
+keys. These fixtures are runtime-only and never serve as a migration corpus.
 
 Each fixture is a single JSON file with:
 
 - **`events`** — an ordered list of `TimelineEvent` dicts.
 - **`expected_assembly`** — the expected raw `TimelineConfig` dict for runtime
-  fixtures. Rejection fixtures may carry historical read-model shapes only to
-  prove runtime projection rejects them.
+  fixtures.
 
 ## Coverage
 
@@ -25,21 +23,13 @@ Each fixture is a single JSON file with:
 | `fixture_track.json` | `track.added`, `track.removed` |
 | `fixture_audio.json` | `audio.bound`, `audio.unbound` |
 | `fixture_pool.json` | `pool.asset_added`, `pool.asset_removed`, `pool.asset_scored` |
-| `fixture_arrangement.json` | `arrangement.replaced` |
 | `fixture_bootstrap_created.json` | Fresh created timeline — bare first domain event, lifecycle no-ops |
-| `fixture_bootstrap_legacy.json` | Historical legacy timeline — rejected by runtime projection |
 
 ## Bootstrap variants
 
 1. **Created** (`fixture_bootstrap_created.json`): A fresh `timeline.created`
    followed by a bare `clip.added`. The projector treats lifecycle events as
-   no-ops. No `timeline.imported` is present.
-
-2. **Legacy** (`fixture_bootstrap_legacy.json`): A historical
-   `timeline.imported` event with a snapshot containing the full
-   `assembly.json` wrapper shape (`{schema_version: 1, assembly: {...}}`).
-   Runtime projection rejects this fixture; Sprint 2 migration code owns
-   loose decoding and conversion.
+   no-ops and starts from the first runtime domain event.
 
 ## Usage in tests
 
@@ -50,9 +40,7 @@ Consumers should:
    `TimelineEvent.from_dict()`.
 3. For runtime fixtures, call `project_to_assembly(events)`, assert the result
    equals `expected_assembly`, and validate it as raw `TimelineConfig`.
-4. For explicit rejection fixtures, assert `project_to_assembly(events)` raises
-   rather than converting legacy read-model shapes.
-5. Assert that `project_to_assembly(events[:k])` for any runtime prefix `k`
+4. Assert that `project_to_assembly(events[:k])` for any runtime prefix `k`
    produces intermediate state consistent with stepwise replay.
 
 Cross-backend parity tests (m6, m8) consume these same fixtures unchanged.

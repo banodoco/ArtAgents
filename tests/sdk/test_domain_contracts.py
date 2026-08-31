@@ -1,6 +1,6 @@
 """Executable m4 domain-contract tests (plan Step 3 / task T3).
 
-Proves the frozen SDK contract ``docs/contracts/astrid-sdk-v10.md`` is
+Proves the frozen SDK platform contract is
 implemented exactly by ``astrid.sdk.contracts``, ``astrid.sdk.exceptions``,
 and ``astrid.core.receipts.service``:
 

@@ -90,7 +90,7 @@ def test_lane_can_run_outside_checkout_with_scrubbed_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-enter-child")
-    monkeypatch.setenv("SUPABASE_URL", "https://example.invalid")
+    monkeypatch.setenv("DEMO_PROVIDER_URL", "https://example.invalid")
     monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
     script = (
         "import json, os, pathlib, sys; "
@@ -139,7 +139,7 @@ def test_scrubber_removes_account_cloud_provider_and_python_path_inputs(
         "HOME": "/real/home",
         "OPENAI_API_KEY": "secret",
         "AWS_ACCESS_KEY_ID": "secret",
-        "SUPABASE_URL": "https://example.invalid",
+        "DEMO_PROVIDER_URL": "https://example.invalid",
         "ASTRID_SESSION_ID": "session",
         "PYTHONPATH": str(REPO_ROOT),
         "PIP_INDEX_URL": "https://user:pass@example.invalid/simple",
@@ -151,10 +151,10 @@ def test_scrubber_removes_account_cloud_provider_and_python_path_inputs(
     assert "ASTRID_SESSION_ID" not in env
     assert "OPENAI_API_KEY" not in env
     assert "AWS_ACCESS_KEY_ID" not in env
-    assert "SUPABASE_URL" not in env
+    assert "DEMO_PROVIDER_URL" not in env
     assert "PIP_INDEX_URL" not in env
     assert is_secret_env_name("OPENAI_API_KEY")
-    assert is_secret_env_name("SUPABASE_URL")
+    assert is_secret_env_name("DEMO_SERVICE_KEY")
     assert not is_secret_env_name("LANG")
 
 

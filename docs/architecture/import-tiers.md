@@ -32,7 +32,7 @@ many call sites for negligible architectural gain. The cycle checker's baseline 
 | Cycle | Why it's genuine (not a hack) |
 |---|---|
 | `adapter ↔ task` | Plugin/strategy pattern: adapters depend on `task.Step`/`CostEntry`; `task.gate_dispatch` instantiates adapters by name. |
-| `session ↔ task` | The shared event-write path: `session.WriterContext` ↔ `task.append_event`. (Has a known cold-import-order sensitivity — real entry points load `task` first; a future shallow-bridge cut of `EVENTS_FILENAME`/`LEASE_FILENAME` + CAS exceptions → `contracts` would reduce it.) |
+| `session ↔ task` | The shared event-write path: `session.WriterContext` ↔ `task.append_event`. (Has a known cold-import-order sensitivity — real entry points load `task` first.) |
 | `project ↔ task` | A project run may be *hosted by* a task step (`project.run` uses `task.env`/`step_dir_for`); a task step *produces* project runs (task consumes project's `current_run`/`schema`/`run`). |
 | `project ↔ timeline` | A run and its timeline co-own the contributing-run binding: `project.run` resolves/creates/records into its timeline; `timeline.defaults`/`crud` load/validate the parent project. |
 | `orchestrator ↔ task` | `task` resolves orchestrator ids and loads orchestrator-defined plan builders; `orchestrator` consumes task run-state. The id-listing helper's consumers span both `session` and `task`, and `orchestrator` already imports `session.config` — relocating it would create a worse `session↔orchestrator` cycle. |

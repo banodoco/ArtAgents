@@ -3,7 +3,7 @@
 The pre-T10 file also covered build_placement / source_ref / run_ref /
 validate_project_timeline / add_placement / remove_placement. Those symbols
 are gone with the parallel placement schema; T13 tests the canonical timeline
-contract end-to-end through SupabaseDataProvider.save_timeline.
+contract end-to-end through the runtime repository.
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ def test_register_source_file_promotes_bare_file_to_registered_source(
 
 
 def test_create_project_does_not_write_timeline_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """T10 invariant: project creation stays local-only; Reigh blob writes remain a legacy compatibility bridge."""
+    """T10 invariant: project creation stays local-only."""
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
