@@ -15,8 +15,8 @@ from astrid.core.timeline.kinds import normalize_track_kind
 
 # Registry lookups are late-imported through banodoco_schema so that
 # mock.patch.object(banodoco_schema, ...) still affects internal callers.
-# DO NOT import _animation_ids/_animation_meta/_effect_ids/_transition_ids
-# directly from validators.registry here.
+# DO NOT import _animation_ids/_animation_meta/_transition_ids directly from
+# validators.registry here.
 
 
 def _validate_animation_reference(ref: Any, phase: str, path: str, known_ids: set[str]) -> None:
@@ -276,14 +276,12 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
                 raise ValueError(
                     f"clips[{index}].text.content must be a string for clipType 'text'"
                 )
-        # Active theme slug from the timeline lets effect-id scans pick up
+        # Active theme slug from the timeline lets canonical element resolution pick up
         # theme-scoped clipTypes (e.g. 2rp's section-hook). Open-string
-        # clipTypes that are not registered effects remain opaque.
+        # clipTypes that are not registered elements remain opaque.
         active_theme = theme if isinstance(theme, str) else None
-        # New artifact-type resolution is canonical; legacy _effect_ids path
-        # retained via _parity shim for env-flagged oracle (S4: remove shim).
-        from astrid.core.timeline.validators._parity import is_effect_clip
-        if is_effect_clip(clip_type, active_theme):
+        from astrid.core.timeline.validators._type_resolve import is_visual_clip_element
+        if is_visual_clip_element(clip_type, active_theme):
             _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params", theme=active_theme)
         if "pool_id" in clip and not isinstance(clip["pool_id"], str):
             raise ValueError(f"clips[{index}].pool_id must be a string")

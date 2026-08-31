@@ -114,7 +114,7 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | `astrid/core/contracts/*` | Shared library | Common schema dataclasses for ports, outputs, cache, commands, and isolation. |
 | `astrid/packs/editorial/hype/*` | Pack-owned domain library | Hype-cut/editing concepts such as arrangement rules, enriched arrangements, and text matching. |
 | `astrid/core/util/llm_clients.py` | Utility library | Generic LLM client construction and environment handling. |
-| `astrid/core/audit/*` | Shared library | Run-local provenance ledger, graph, and HTML report. |
+| `astrid/core/audit/*` | Ephemeral pack helper | In-process provenance descriptions only; durable events, receipts, and evidence belong to the workspace runtime. |
 | `astrid/core/theme/` | Shared library | Theme resolution, CLI, and schema validation helpers. |
 | `astrid/core/paths.py` | Shared library | Repository and workspace path resolution. |
 | `astrid/packs/editorial/executors/refine/src/reviewers/*` | Executor-owned library | Focused review heuristics used only by `editorial.refine`. |

@@ -107,10 +107,8 @@ def _classify_clip(
         return _asset_kind_from_entry(_asset_entry_for_clip(clip, registry)) or ClipClassifiedKind.VIDEO
     if clip_type == "effect-layer":
         return ClipClassifiedKind.EFFECT
-    # New artifact-type resolution is canonical; legacy _effect_ids path
-    # retained via _parity shim for env-flagged oracle (S4: remove shim).
-    from astrid.core.timeline.validators._parity import is_effect_clip
-    if isinstance(clip_type, str) and is_effect_clip(clip_type, theme):
+    from astrid.core.timeline.validators._type_resolve import is_visual_clip_element
+    if isinstance(clip_type, str) and is_visual_clip_element(clip_type, theme):
         return ClipClassifiedKind.EFFECT
     return ClipClassifiedKind.OPAQUE
 

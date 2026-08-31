@@ -7,11 +7,6 @@ from astrid.core.timeline.banodoco_schema import _ASSET_ENTRY_ALLOWED, _raise_un
 from astrid.core.timeline.validators.metadata import _validate_generated_at
 
 
-def _effect_ids(theme: str | None = None) -> set[str]:
-    from astrid.core.element import catalog as effects_catalog
-    return set(effects_catalog.list_effect_ids(theme=theme))
-
-
 def _animation_ids() -> set[str]:
     from astrid.core.element import catalog as effects_catalog
     return set(effects_catalog.list_animation_ids())

@@ -39,7 +39,7 @@ def resolve_clip_to_artifact_type(
     for kind in _ELEMENT_KIND_SCAN_ORDER:
         try:
             ids = _catalog.list_element_ids(kind, theme=theme)
-        except Exception:
+        except Exception:  # noqa: BLE001 - an optional pack must not break opaque fallthrough
             continue
         if clip_type not in ids:
             continue
@@ -62,10 +62,23 @@ def resolve_clip_to_artifact_type(
 def is_visual_clip_element(
     clip_type: str,
     theme: str | None,
-    element_registry: "ElementRegistry",
-    artifact_type_registry: "ArtifactTypeRegistry",
+    element_registry: "ElementRegistry | None" = None,
+    artifact_type_registry: "ArtifactTypeRegistry | None" = None,
 ) -> bool:
-    """Return True iff *clip_type* resolves to the canonical ``clip/visual`` artifact type."""
+    """Return True iff *clip_type* resolves to ``clip/visual``.
+
+    Product validation uses the canonical default registries when callers do
+    not provide explicit registries; this keeps registry setup in the one
+    type-resolution implementation rather than a compatibility shim.
+    """
+    if element_registry is None:
+        from astrid.core.element.registry import load_default_registry
+
+        element_registry = load_default_registry()
+    if artifact_type_registry is None:
+        from astrid.core.contracts.artifact_types import ARTIFACT_TYPE_REGISTRY
+
+        artifact_type_registry = ARTIFACT_TYPE_REGISTRY
     return (
         resolve_clip_to_artifact_type(
             clip_type, theme, element_registry, artifact_type_registry

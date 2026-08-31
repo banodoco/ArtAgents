@@ -96,7 +96,7 @@ Concrete example — the timeline validator (the canonical M×N → M+N proof si
 ```python
 # BEFORE (name-wired, enumerates every effect):
 clip_type = clip.get("clipType", "media")
-effect_ids = _effect_ids(active_theme)          # pull the ENTIRE set
+effect_ids = set(element_catalog.list_effect_ids(theme=active_theme))  # historical catalog scan
 if clip_type in effect_ids:                      # membership-test
     _validate_effect_params(...)
 

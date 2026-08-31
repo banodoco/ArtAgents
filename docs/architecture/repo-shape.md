@@ -35,7 +35,7 @@ The 28 names in `astrid.__all__` are:
 | Surface | File | Classification |
 | --- | --- | --- |
 | `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.core.gateway.main()`. |
-| `astrid.core.gateway` | `astrid/core/gateway/` | **Subcommand router package** — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
+| `astrid.core.gateway` | `astrid/core/gateway/` | **Subcommand router package** — runtime project resolution and command dispatch. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
 | `astrid.core.orchestrate.cli` | `astrid/core/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
 | `astrid doctor` | `astrid/core/gateway/dispatch.py` | **Runtime health diagnostic** — delegates to the generated workspace client. |
 | `astrid.skills.cli` | `astrid/skills/cli.py` | **Skills CLI** — skill discovery and harness management. |
@@ -73,9 +73,8 @@ and their purposes:
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
 | `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
-| `core/runtime/` | In-process runtime invoker, log capture |
-| `core/session/` | Session identity, binding, lease, lifecycle, discovery, writer |
-| `core/task/` | Task kernel: event stream, run store, run audit, gate, lifecycle, CAS, inbox, claim, plan verbs, managed binding |
+| `core/runtime/` | In-process runtime invocation and subprocess log capture |
+| `core/task_handler_registry.py` | Task-handler registration boundary for pack-owned adapters |
 | `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, track, transition), erasure, integrity, migration, projection, undo, observability, local event log, banodoco schema |
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 
@@ -141,7 +140,7 @@ Canonical homes:
 | `astrid/core/contracts/` | **Shared library** | Common schema dataclasses (ports, outputs, cache, commands, isolation, errors, run status). |
 | `astrid/packs/editorial/hype/` | **Pack-owned domain library** | Hype/editing logic such as arrangement rules, enriched arrangements, and text matching. |
 | `astrid/core/util/` | **Utility library** | Generic helpers (LLM client construction, environment handling). |
-| `astrid/core/audit/` | **Shared library** | Run-local provenance ledger, graph, transport, and HTML report. |
+| `astrid/core/audit/` | **Ephemeral pack helper** | In-process provenance descriptions; durable events, receipts, and evidence are owned by the workspace runtime. It never creates or reads an audit ledger. |
 | `astrid/core/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.core.threads.__all__`. |
 | `astrid/core/verify/` | **Verification helpers** | Soft boundary — currently a convention, not a hard gate. |
 | `astrid/core/modalities/` | **Modality helpers** | Modality-specific support code. |
@@ -259,7 +258,7 @@ contract documents:
 | `docs/architecture/top-level-inventory.json` | Machine-readable top-level entry inventory (M5) |
 | `docs/architecture/pack-layout-variants.json` | Machine-readable pack variant catalog |
 | `docs/architecture/giant-file-split-candidates.json` | Giant-file split candidates with line counts (consumed by M4, now completed) |
-| `docs/architecture/shim-legacy-audit.md` | (removed — audit absorbed into §3 above) |
+| `docs/architecture/shim-legacy-audit.md` | (removed — audit is an ephemeral runtime hand-off described in §4 above) |
 | `docs/contracts/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
 | `docs/contracts/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
 | `docs/reference/sdk.md` | User-facing SDK walkthrough |

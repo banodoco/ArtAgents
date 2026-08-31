@@ -18,17 +18,20 @@ PortType = Literal["string","path","file","directory","json","boolean","number",
 ```
 These are **transport** types (how bytes arrive at a CLI boundary), not **artifact** types (what the bytes *mean*). `Port.type` and `Output.type` both default to `"path"` (schema.py:28,38). So a `video/clip`, an `image`, and an `audio` are all just `file`.
 
-**Consequence — composition is name-wired everywhere (the M×N problem).** The canonical site, `timeline/validators/timeline.py:247-257`:
+**Historical consequence — composition was name-wired (the M×N problem).**
+Before the canonical artifact-type resolver was adopted, the timeline
+validator used a catalog-wide effect membership scan:
 ```python
 clip_type = clip.get("clipType", "media")
 ...
 active_theme = theme if isinstance(theme, str) else None
-from astrid.core.timeline.banodoco_schema import _effect_ids
-effect_ids = _effect_ids(active_theme)          # pull the ENTIRE set of effect ids
+effect_ids = set(element_catalog.list_effect_ids(theme=active_theme))
 if clip_type in effect_ids:                      # ...to membership-test one clipType
     _validate_effect_params(clip_type, clip.get("params"), ..., theme=active_theme)
 ```
-`_effect_ids` (`validators/registry.py:10-12`) calls `effects_catalog.list_effect_ids()`. The timeline must enumerate *every* effect to know which `clipType` strings are effects. Add a pack with a new effect and every consumer must re-enumerate. That is M×N, and it is the *only* thing possible while everything is typed `file`.
+The timeline had to enumerate *every* effect to classify one `clipType`.
+The canonical resolver now resolves one element id directly and checks its
+artifact type, so adding a pack does not require another consumer-wide scan.
 
 **The substrate is further along than the audits claimed.** `core/contracts/schema.py:119-149` already defines `CapabilityHandle` — a shared identity carried by *every* executor, orchestrator, and element, complete with `inputs: tuple[Port,...]`, `outputs: tuple[Output,...]`, and a `Provenance` block. `to_capability_handle` (schema.py:193) adapts the native definitions into it. The comment at line 80 even reads "M1 Capability Identity." So the **identity** layer is unified; only the **type** on its ports is missing. We are adding the waist to a structure built to receive it — not green-fielding a kernel.
 

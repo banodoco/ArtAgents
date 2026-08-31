@@ -95,9 +95,7 @@ python -c "import banodoco_timeline_schema; print('timeline schema available')"
 
 The Astrid checkout does not contain `packages/timeline-schema/python`; replace
 the placeholder with the path to the external workspace. If the package is not
-installed, the timeline parity module remains collectible and skips only its
-parameterized canonical-schema checks; its independent compositor checks still
-run.
+installed, timeline validation fails closed with the installation message above.
 
 ### First visible timeline render
 

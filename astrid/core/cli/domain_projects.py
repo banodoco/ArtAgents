@@ -170,27 +170,11 @@ def _configure_select(subparser: argparse.ArgumentParser) -> None:
         default="workspace",
         help="Preference scope to persist (default: workspace).",
     )
-    subparser.add_argument(
-        "--cwd",
-        default=None,
-        help=(
-            "Workspace directory for the preference file (default: "
-            "ASTRID_PROJECTS_ROOT when set, otherwise cwd)."
-        ),
-    )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_select)
 
 
 def _configure_current(subparser: argparse.ArgumentParser) -> None:
-    subparser.add_argument(
-        "--cwd",
-        default=None,
-        help=(
-            "Workspace directory whose selection should be inspected (default: "
-            "ASTRID_PROJECTS_ROOT when set, otherwise cwd)."
-        ),
-    )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_current)
 

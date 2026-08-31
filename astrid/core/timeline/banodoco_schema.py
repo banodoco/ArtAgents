@@ -6,7 +6,7 @@ Theme are re-exported from `banodoco_timeline_schema` (the Python package in
 the external Banodoco workspace's `packages/timeline-schema/python/` tree); the
 JSON-Schema validator there is the canonical shape check. Everything else in
 this file (pool/arrangement/metadata/registry types, transition validation,
-effect-id registry checks) is Banodoco-only.
+element registry checks) is Banodoco-only.
 """
 
 # Validator exports intentionally remain below the optional schema import.
@@ -610,7 +610,6 @@ from astrid.core.timeline.validators.pool import (
 from astrid.core.timeline.validators.registry import (
     _animation_ids as _animation_ids,
     _animation_meta as _animation_meta,
-    _effect_ids as _effect_ids,
     _transition_ids as _transition_ids,
     validate_registry as validate_registry,
 )
@@ -628,7 +627,6 @@ from astrid.core.timeline.validators.timeline import (
 
 for _exported_name in (
     "ArrangementDurationError",
-    "_effect_ids",
     "validate_timeline",
 ):
     globals()[_exported_name].__module__ = __name__

@@ -105,7 +105,6 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             "_TRACK_ALLOWED",
             "_animation_ids",
             "_animation_meta",
-            "_effect_ids",
             "_normalize_clip_for_validation",
             "_transition_ids",
             "canonical_empty_timeline",
