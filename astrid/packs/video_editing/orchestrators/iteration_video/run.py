@@ -330,9 +330,15 @@ def _runtime_run_list(client: Any, project: str) -> list[Any]:
         if not callable(method):
             raise IterationVideoError("runtime client does not expose project run listing")
         value = _unwrap_runtime_result(method(project))
-    # Generated list operations return ``(items, next_cursor)``.  Keep the
-    # runtime boundary typed while presenting the pack with its item list.
-    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
+    # Generated list operations return ``(items, next_cursor)``.  The typed
+    # SDK preserves that pair as a JSON-shaped list, so unwrap either Python
+    # sequence without mistaking a two-item page for two resources.
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and value[1] is None
+        and isinstance(value[0], (list, tuple))
+    ):
         value = value[0]
     if isinstance(value, Mapping):
         if "items" not in value:
@@ -352,12 +358,13 @@ def _runtime_run_show(
 ) -> dict[str, Any] | None:
     runs = getattr(client, "runs", None)
     method = getattr(runs, "show", None)
-    # A project-scoped run read is required. A generic workspace lookup would
-    # allow a foreign project record into the lineage graph.
+    # The generated runtime client addresses runs by opaque id. Project scope
+    # is still enforced below from the returned resource; never accept a
+    # resource whose explicit owner does not match the selected project.
     if not callable(method):
         return None
     try:
-        value = _unwrap_runtime_result(method(project, run_id))
+        value = _unwrap_runtime_result(method(run_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
     record = _normalize_runtime_record(value, client=client, project=project)
@@ -484,7 +491,12 @@ def _runtime_task_records(
         if "items" not in value:
             return {}, False
         value = value["items"]
-    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and value[1] is None
+        and isinstance(value[0], (list, tuple))
+    ):
         value = value[0]
     if not isinstance(value, (list, tuple)):
         return {}, False
@@ -644,7 +656,7 @@ def _runtime_run_events(
     if not callable(method):
         return [], False
     try:
-        value = _unwrap_runtime_result(method(project, run_id)) if runs is not None and hasattr(runs, "events") else _unwrap_runtime_result(method(run_id))
+        value = _unwrap_runtime_result(method(run_id)) if runs is not None and hasattr(runs, "events") else _unwrap_runtime_result(method(run_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return [], False
     return _scoped_events(value, aggregate_id=run_id)
@@ -660,7 +672,7 @@ def _runtime_task_events(
     if not callable(method):
         return [], False
     try:
-        value = _unwrap_runtime_result(method(task_id, project)) if tasks is not None and hasattr(tasks, "events") else _unwrap_runtime_result(method(aggregate_id=task_id))
+        value = _unwrap_runtime_result(method(task_id)) if tasks is not None and hasattr(tasks, "events") else _unwrap_runtime_result(method(aggregate_id=task_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return [], False
     return _scoped_events(value, aggregate_id=task_id)

@@ -72,7 +72,7 @@ def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> N
             assert project == "selected"
             return []
 
-        def show(self, project, run_id):
+        def show(self, run_id):
             return {
                 "run_id": run_id,
                 "project_id": "other-project",
@@ -91,8 +91,7 @@ def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> N
 
 def test_iteration_rejects_run_without_project_ownership() -> None:
     class Runs:
-        def show(self, project, run_id):
-            assert project == "selected"
+        def show(self, run_id):
             return {"run_id": run_id, "output_artifacts": [{"kind": "secret"}]}
 
     class Runtime:
@@ -104,7 +103,7 @@ def test_iteration_rejects_run_without_project_ownership() -> None:
 
 def test_iteration_rejects_conflicting_run_project_owners() -> None:
     class Runs:
-        def show(self, project, run_id):
+        def show(self, run_id):
             return {
                 "run_id": run_id,
                 "project_id": "selected",
@@ -156,14 +155,14 @@ def test_iteration_relation_media_objects_are_not_promoted_to_run_lineage() -> N
 
 def test_iteration_events_drop_mismatched_aggregate_ids() -> None:
     class Runs:
-        def events(self, project, run_id):
+        def events(self, run_id):
             return [
                 {"event_id": "exact", "aggregate_id": run_id},
                 {"event_id": "other", "aggregate_id": ROOT_RUN_ID},
             ]
 
     class Tasks:
-        def events(self, task_id, project=None):
+        def events(self, task_id):
             return [
                 {"event_id": "exact", "aggregate_id": task_id},
                 {"event_id": "other", "aggregate_id": "task-other"},
@@ -180,7 +179,7 @@ def test_iteration_events_drop_mismatched_aggregate_ids() -> None:
 
 def test_iteration_malformed_event_response_is_unavailable() -> None:
     class Runs:
-        def events(self, project, run_id):
+        def events(self, run_id):
             return {"unexpected": "shape"}
 
     runtime = type("Runtime", (), {"runs": Runs()})()
@@ -407,20 +406,21 @@ def _runtime_client(*, include_root: bool = False):
     class Runs:
         def list(self, project):
             calls.append(("list", project))
-            return type("Result", (), {"ok": True, "data": records})()
+            # Match the generated runtime client's paginated read shape.
+            return type("Result", (), {"ok": True, "data": [records, None]})()
 
-        def events(self, project, run_id):
+        def events(self, run_id):
             return [{"event_id": f"event-{run_id}", "aggregate_id": run_id, "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}]
 
     class Tasks:
         def list(self, project):
-            return type("Result", (), {"ok": True, "data": [{
+            return type("Result", (), {"ok": True, "data": [[{
                 "task_id": f"task-{TARGET_RUN_ID}", "run_id": TARGET_RUN_ID,
                 "project_id": project,
                 "output_artifacts": [_artifact("image", "d" * 64)],
-            }]})()
+            }], None]})()
 
-        def events(self, task_id, project=None):
+        def events(self, task_id):
             return [{"event_id": f"event-{task_id}", "aggregate_id": task_id, "event_type": "task.completed", "payload": {}}]
 
     class Media:

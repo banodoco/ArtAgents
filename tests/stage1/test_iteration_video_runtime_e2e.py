@@ -106,11 +106,6 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
             monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble)
             monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
             monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda _client=None: nullcontext(client))
-            # The generated contract's ``get_run`` takes only the opaque run
-            # id; the iteration route still supplies its selected project for
-            # ownership validation.  Adapt that fixture seam explicitly.
-            generated_show = client.runs.show
-            monkeypatch.setattr(client.runs, "show", lambda _project, run_id: generated_show(run_id))
             result = iteration_video.run_orchestrator(
                 SimpleNamespace(
                     out=tmp_path / "out",
