@@ -18,7 +18,7 @@ import os
 import shutil
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
@@ -30,11 +30,12 @@ from astrid.core.execution.executor.runner import ExecutorRunRequest, run_execut
 
 PACK_ID = "rendering.render"
 FAMILY = "render_export"
-# The paired/local worker uses the server-owned Remotion policy.  The
-# canonical service may support-route ordinary timelines to FFmpeg, while
-# Remotion-only caption/text timelines remain on the real Remotion backend.
-# This is fixed policy, never a browser parameter.
-DEFAULT_ENGINE = "remotion"
+# The paired/local worker owns backend selection.  Ordinary media timelines
+# use the canonical FFmpeg renderer; timelines containing non-media elements
+# require the server-owned Remotion runtime.  This is fixed policy, never a
+# task/browser parameter.
+FFMPEG_SELECTOR = "rendering.ffmpeg"
+REMOTION_SELECTOR = "rendering.remotion"
 DEFAULT_OUTPUT_NAME = "render.mp4"
 _MAX_DEADLINE_SECONDS = 60 * 60
 _FORBIDDEN_CALLER_PARAMS = frozenset({"engine", "backend", "backend_config", "project_dir"})
@@ -285,8 +286,13 @@ class RenderExportTaskAdapter:
             timeline_requires_remotion,
         )
 
-        remotion_status = remotion_runtime_status(require_explicit_project=True)
-        if timeline_requires_remotion(config) and not remotion_status.available:
+        requires_remotion = timeline_requires_remotion(config)
+        remotion_status = (
+            remotion_runtime_status(require_explicit_project=True)
+            if requires_remotion
+            else None
+        )
+        if requires_remotion and not remotion_status.available:
             raise RenderExportRefused(
                 "server-owned Remotion runtime unavailable: "
                 + (remotion_status.reason or "unknown reason")
@@ -337,8 +343,9 @@ class RenderExportTaskAdapter:
             _write_json(owned_assets_path, owned_registry)
 
             # The server owns renderer selection; a caller cannot downgrade or
-            # inject backend configuration.
-            engine = DEFAULT_ENGINE
+            # inject backend configuration.  FFmpeg receives no Remotion
+            # namespace or environment, so an unset Remotion project can never
+            # become the accidental default for an ordinary media timeline.
             if "output_name" in params:
                 raise RenderExportRefused("render_export uses output_filename")
             output_name = params.get("output_filename", DEFAULT_OUTPUT_NAME)
@@ -351,6 +358,27 @@ class RenderExportTaskAdapter:
                     "render_export output_filename must be a plain .mp4 filename"
                 )
             output_path = staging_dir / output_name
+            selector = REMOTION_SELECTOR if requires_remotion else FFMPEG_SELECTOR
+            renderer_inputs: dict[str, Any] = {
+                "timeline": str(owned_timeline_path),
+                "assets_registry": str(owned_assets_path),
+                "output_name": output_name,
+                "selector": selector,
+                "keep_previous_renders": True,
+            }
+            render_env = nullcontext()
+            if requires_remotion:
+                assert remotion_status is not None and remotion_status.project_dir is not None
+                renderer_inputs["backend_config"] = {
+                    REMOTION_SELECTOR: {
+                        # This is deployment configuration, never a task field.
+                        "project_dir": str(remotion_status.project_dir),
+                    }
+                }
+                render_env = _scoped_env(
+                    ASTRID_REMOTION_PROJECT_DIR,
+                    str(remotion_status.project_dir),
+                )
 
             # Route through the canonical executor registry so this pack adapter
             # never imports the facade runtime directly. The executor manifest is
@@ -360,30 +388,14 @@ class RenderExportTaskAdapter:
             with (
                 _project_env(project_root),
                 _scoped_env("ASTRID_RENDER_INHERIT_PROCESS_GROUP", "1"),
-                _scoped_env(
-                    ASTRID_REMOTION_PROJECT_DIR,
-                    str(remotion_status.project_dir),
-                ),
+                render_env,
             ):
                 result = run_executor(
                     ExecutorRunRequest(
                         executor_id=PACK_ID,
                         out=staging_dir,
                         project=project_slug,
-                        inputs={
-                            "timeline": str(owned_timeline_path),
-                            "assets_registry": str(owned_assets_path),
-                            "output_name": output_name,
-                            "engine": engine,
-                            "backend_config": {
-                                "rendering.remotion": {
-                                    # This is deployment configuration, never
-                                    # a task field.
-                                    "project_dir": str(remotion_status.project_dir),
-                                }
-                            },
-                            "keep_previous_renders": True,
-                        },
+                        inputs=renderer_inputs,
                         project_was_auto_resolved=True,
                         projects_root=self._projects_root,
                         invocation="render-export-task",
@@ -425,7 +437,7 @@ class RenderExportTaskAdapter:
                 "timeline_ref": params.get("timeline_ref"),
                 "expected_version": params.get("expected_version"),
                 "semantic_role": "render",
-                "engine": engine,
+                "selector": selector,
             },
             "outputs": [
                 {

@@ -712,7 +712,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     inputs = {
         "timeline": str(timeline),
         "assets_registry": str(assets),
-        "engine": "ffmpeg",
+        "selector": "rendering.ffmpeg",
         "output_name": output_name,
     }
     _fake_render_process(monkeypatch)

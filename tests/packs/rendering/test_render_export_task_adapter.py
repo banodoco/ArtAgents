@@ -133,6 +133,54 @@ def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -
     assert raw[4:8] == b"ftyp"
     assert manifest["outputs"][0]["role"] == "result"
     assert manifest["outputs"][0]["content_hash"] == f"sha256:{hashlib.sha256(raw).hexdigest()}"
+    assert manifest["inputs"]["selector"] == "rendering.ffmpeg"
+
+
+def test_media_timeline_selects_ffmpeg_without_remotion_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ordinary media timeline must never synthesize a Remotion project."""
+
+    create_project("render-project", name="Render Project", root=tmp_path)
+    task = _task(root=tmp_path)
+    captured: dict[str, Any] = {}
+
+    def fail_remotion_probe(**_kwargs: Any) -> None:
+        raise AssertionError("FFmpeg-only timeline probed the Remotion runtime")
+
+    def fake_run_executor(request: Any, _registry: Any) -> Any:
+        captured.update(request.inputs)
+        assert "ASTRID_REMOTION_PROJECT_DIR" not in os.environ
+        output = Path(request.out) / request.inputs["output_name"]
+        output.write_bytes(b"\x00\x00\x00\x18ftyp")
+        return SimpleNamespace(
+            ok=True,
+            error=None,
+            payload={},
+            outputs={"video": output},
+        )
+
+    monkeypatch.delenv("ASTRID_REMOTION_PROJECT_DIR", raising=False)
+    monkeypatch.setattr(remotion_runtime, "remotion_runtime_status", fail_remotion_probe)
+    monkeypatch.setattr(task_adapter_module, "run_executor", fake_run_executor)
+    monkeypatch.setattr(task_adapter_module, "load_default_registry", lambda: object())
+
+    manifest = execute_render_export_task(
+        task=task,
+        staging_dir=tmp_path / "staging",
+        projects_root=tmp_path,
+    )
+
+    assert captured["selector"] == "rendering.ffmpeg"
+    assert "backend_config" not in captured
+    assert manifest["inputs"] == {
+        "family": "render_export",
+        "project_slug": "render-project",
+        "timeline_ref": "timeline-1",
+        "expected_version": 1,
+        "semantic_role": "render",
+        "selector": "rendering.ffmpeg",
+    }
 
 
 def test_renderer_inputs_are_inode_isolated_and_cleaned(
@@ -367,7 +415,7 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
     )
     output = tmp_path / "staging" / manifest["outputs"][0]["path"]
     assert output.read_bytes()[4:8] == b"ftyp"
-    assert manifest["inputs"]["engine"] == "remotion"
+    assert manifest["inputs"]["selector"] == "rendering.remotion"
     assert not (tmp_path / "npx-used").exists()
 
 
