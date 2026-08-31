@@ -182,7 +182,6 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             "banodoco_schema",
             "crud",
             "defaults",
-            "eventlog",
             "events",
             "integrity",
             "kinds",

@@ -25,6 +25,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import Any
 
 MANIFEST_SCHEMA = "astrid.distribution_manifest.v1"
@@ -38,6 +39,29 @@ _TIERS = ("cpu", "gpu")
 
 class ManifestError(RuntimeError):
     """Typed failure: missing, malformed, or untrusted manifest."""
+
+
+def validate_artifact_id(artifact_id: object) -> str:
+    """Validate one host artifact id as a single safe filename component.
+
+    Artifact ids are signed input, but a valid signature cannot make a path
+    safe.  Keep this check next to manifest validation so the executor host
+    does not depend on the retired workspace setup journal for path safety.
+    """
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or artifact_id in {".", ".."}
+        or "/" in artifact_id
+        or "\\" in artifact_id
+        or Path(artifact_id).is_absolute()
+        or PureWindowsPath(artifact_id).is_absolute()
+        or PureWindowsPath(artifact_id).drive
+    ):
+        raise ManifestError(
+            f"unsafe setup artifact id {artifact_id!r}; expected one filename"
+        )
+    return artifact_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +144,7 @@ def make_manifest(
     min_ram_bytes: int = 0,
 ) -> DistributionManifest:
     """Build a signed manifest over exact content + license bytes."""
-    _validate_manifest_artifact_id(artifact_id)
+    validate_artifact_id(artifact_id)
     manifest = DistributionManifest(
         artifact_id=artifact_id,
         version=version,
@@ -169,23 +193,13 @@ def parse_manifest(raw: dict[str, Any]) -> DistributionManifest:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ManifestError(f"malformed manifest: {exc}") from None
-    _validate_manifest_artifact_id(manifest.artifact_id)
+    validate_artifact_id(manifest.artifact_id)
     if not verify_signature(manifest):
         raise ManifestError(
             f"manifest signature mismatch for {manifest.artifact_id}; "
             "refusing to trust it"
         )
     return manifest
-
-
-def _validate_manifest_artifact_id(artifact_id: str) -> None:
-    """Keep signed artifact ids confined to one setup filename component."""
-    from astrid.core.model_setup.journal import SetupJournalError, _validate_artifact_id
-
-    try:
-        _validate_artifact_id(artifact_id)
-    except SetupJournalError as exc:
-        raise ManifestError(str(exc)) from None
 
 
 def load_manifest(path: str | Path) -> DistributionManifest:

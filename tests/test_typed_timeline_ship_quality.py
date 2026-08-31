@@ -18,7 +18,7 @@ from astrid.packs.rendering.backends.ffmpeg.audio_reactive_colour import (
 )
 from astrid.packs.typed_timeline.common import load_admitted_rows
 from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
-from astrid.packs.runaway.prompts import prompts_for_manifest
+from astrid.packs.typed_timeline.prompts import prompts_for_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"

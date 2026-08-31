@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import platform
 from pathlib import Path
@@ -17,12 +16,6 @@ from scripts.reshape.release_reproducibility import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-RUNAWAY_RELEASE_FIXTURE_HASHES = {
-    "audio-reactive-v1.json": "e53d67df26c96d03967f7e2e620bd897ab004bfe45e8451e7ce67c6fc0cb5b8e",
-    "timing-manifest.json": "eba9e6a521200bb57458111315ecb0314a31739980da72b44dac4d66d0fcacf6",
-}
-
 
 def test_repository_dependency_locks_are_hashed_exact_and_cover_metadata() -> None:
     report = validate_dependency_locks(REPO_ROOT)
@@ -73,12 +66,4 @@ def test_release_ci_enforces_hashed_build_runtime_and_toolchain_evidence() -> No
     assert "scripts.reshape.release_reproducibility" in workflow
     assert '"toolchain": json.loads(' in workflow
 
-
-def test_runaway_release_migration_inputs_are_tracked_and_byte_pinned() -> None:
-    fixture_root = REPO_ROOT / "tests/fixtures/runaway_release"
-    assert {
-        path.name for path in fixture_root.glob("*.json")
-    } == set(RUNAWAY_RELEASE_FIXTURE_HASHES)
-    for name, expected_hash in RUNAWAY_RELEASE_FIXTURE_HASHES.items():
-        fixture = fixture_root / name
-        assert hashlib.sha256(fixture.read_bytes()).hexdigest() == expected_hash
+# End of release reproducibility contract.

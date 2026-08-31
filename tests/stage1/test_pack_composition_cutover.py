@@ -18,7 +18,6 @@ def test_packs_registry_keeps_only_checkout_composition() -> None:
         "timeline",
         "shots",
         "references",
-        "runaway",
     )
     registry = astrid.packs.build_standard_registry()
     assert set(registry.packs) >= {"core", *astrid.packs.STANDARD_SCHEMA_PACKS}

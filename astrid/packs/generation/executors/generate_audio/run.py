@@ -310,7 +310,7 @@ def generate_core(
     except KeyError as exc:
         raise AstridError(
             f"model {args.model!r} mode {mode_name!r} not found: {exc}",
-            recovery_command="check available models with 'astrid models list' and retry with a valid model:mode pair",
+            recovery_command="inspect the generation capability manifest and retry with a valid model:mode pair",
         ) from exc
 
     # --- check backend availability for --execution --------------------------

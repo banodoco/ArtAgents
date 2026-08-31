@@ -41,7 +41,6 @@ _FIRST_PARTY_PACK_IDS = (
 _FIRST_PARTY_INTERNAL_DIRS = {
     "_core",
     "references",
-    "runaway",
     "shots",
     "timeline",
     # Typed-timeline is an internal capability implementation package. Its

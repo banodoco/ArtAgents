@@ -2339,22 +2339,12 @@
       "source": "raise ValueError(\"specify a pack id or pass --all\")"
     }
   ],
-  "expected_parser_surface_count": 67,
+  "expected_parser_surface_count": 65,
   "expected_parser_surfaces": [
-    {
-      "module": "astrid.core.backup.cli",
-      "builder": "build_parser",
-      "path": "astrid/core/backup/cli.py"
-    },
     {
       "module": "astrid.core.element.cli",
       "builder": "build_parser",
       "path": "astrid/core/element/cli.py"
-    },
-    {
-      "module": "astrid.core.model_catalog.cli",
-      "builder": "_build_parser",
-      "path": "astrid/core/model_catalog/cli.py"
     },
     {
       "module": "astrid.core.rendering.cli",
@@ -2680,27 +2670,13 @@
   "kind_arg_findings": [],
   "mode": "zero",
   "non_kind_enum_findings": [],
-  "scanned_parser_surface_count": 67,
+  "scanned_parser_surface_count": 65,
   "scanned_parser_surfaces": [
-    {
-      "module": "astrid.core.backup.cli",
-      "builder": "build_parser",
-      "path": "astrid/core/backup/cli.py",
-      "prog": "astrid backup",
-      "enum_arg_count": 0
-    },
     {
       "module": "astrid.core.element.cli",
       "builder": "build_parser",
       "path": "astrid/core/element/cli.py",
       "prog": "python3 -m astrid elements",
-      "enum_arg_count": 0
-    },
-    {
-      "module": "astrid.core.model_catalog.cli",
-      "builder": "_build_parser",
-      "path": "astrid/core/model_catalog/cli.py",
-      "prog": "astrid models",
       "enum_arg_count": 0
     },
     {
@@ -2722,7 +2698,7 @@
       "builder": "build_parser",
       "path": "astrid/packs/blender/executors/render/run.py",
       "prog": "-c",
-      "enum_arg_count": 1
+      "enum_arg_count": 0
     },
     {
       "module": "astrid.packs.comfy_wrap.executors.run.run",
@@ -3114,7 +3090,7 @@
       "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/hype/parser.py",
       "prog": "-c",
-      "enum_arg_count": 1
+      "enum_arg_count": 0
     },
     {
       "module": "astrid.packs.video_editing.orchestrators.logo_ideas.run",

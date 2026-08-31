@@ -17,8 +17,8 @@ from astrid.core.schema_packs.registry import (
     SchemaPackRegistry,
 )
 
-STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
-"""Exactly the in-tree schema packs shipped with Astrid."""
+STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+"""The in-tree schema packs shipped with Astrid."""
 
 _PACKS_ROOT = Path(__file__).parent
 

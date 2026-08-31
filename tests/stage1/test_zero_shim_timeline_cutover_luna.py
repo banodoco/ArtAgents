@@ -9,6 +9,7 @@ attempt outputs.
 from __future__ import annotations
 
 import os
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.rendering.service import RenderService
+import astrid.packs
 from astrid.core.timeline.snapshot import snapshot_from_runtime
 from astrid.packs.rendering.executors.timeline_visualize import select
 from astrid.packs.rendering.executors.timeline_visualize.run import (
@@ -38,8 +40,6 @@ for name in (
     'astrid.core.timeline.crud',
     'astrid.core.timeline.paths',
     'astrid.core.timeline.repair',
-    'astrid.core.timeline.eventlog.local_fs',
-    'astrid.core.timeline.eventlog.selector',
     'astrid.core.timeline._edit_helpers',
     'astrid.core.timeline.branch',
     'astrid.core.timeline.erasure',
@@ -56,10 +56,6 @@ for name in (
         "astrid/core/timeline/crud.py",
         "astrid/core/timeline/paths.py",
         "astrid/core/timeline/repair.py",
-        "astrid/core/timeline/eventlog/local_fs.py",
-        "astrid/core/timeline/eventlog/selector.py",
-        "astrid/core/timeline/eventlog/protocol.py",
-        "astrid/core/timeline/eventlog/types.py",
         "astrid/core/timeline/_edit_helpers.py",
         "astrid/core/timeline/audio_edits.py",
         "astrid/core/timeline/branch.py",
@@ -246,17 +242,26 @@ def test_supported_visualization_accepts_only_frozen_runtime_identity() -> None:
     ) is None
 
 
-def test_legacy_eventlog_exports_are_not_product_api() -> None:
-    import astrid.core.timeline.eventlog as eventlog
+def test_deleted_timeline_eventlog_package_is_not_importable() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("astrid.core.timeline.eventlog")
 
-    for name in (
-        "EventLogBackend",
-        "LocalFsBackend",
-        "select_timeline_backend",
-        "select_timeline_stream",
-    ):
-        with pytest.raises(AttributeError):
-            getattr(eventlog, name)
+
+def test_deleted_model_setup_journal_has_no_workspace_authority() -> None:
+    assert not (ROOT / "astrid/core/model_setup/journal.py").exists()
+    source = (ROOT / "astrid/core/model_setup/acquire.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from .journal" not in source
+    assert "projects_root" not in source
+
+
+def test_runaway_schema_host_and_migration_are_absent() -> None:
+    runaway = ROOT / "astrid/packs/runaway"
+    assert not (runaway / "schema-pack.yaml").exists()
+    assert not (runaway / "migrations").exists()
+    assert not (runaway / "__init__.py").exists()
+    assert "runaway" not in astrid.packs.STANDARD_SCHEMA_PACKS
 
 
 def test_pack_workers_are_result_only_and_have_no_timeline_write_binding() -> None:

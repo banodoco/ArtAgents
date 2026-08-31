@@ -138,8 +138,8 @@ class ModelEntry:
     modes: dict[str, ModeSpec] = field(default_factory=dict)
 
     #: When ``True``, this is a closed-weight model (e.g. Recraft,
-    #: Ideogram).  Default ``astrid models list`` hides closed entries;
-    #: they are only shown with ``--include-closed`` (SD-008).
+    #: Ideogram).  Closed entries are retained in the registry for backend
+    #: selection and policy checks (SD-008).
     #: ``None`` is treated as falsy / open-weight.
     closed: bool | None = None
 

@@ -115,8 +115,8 @@ astrid = [
     "core/rendering/schemas/v1/*.json",
 
     # The frozen schema-pack composition: core plus timeline, shots,
-    # references, and runaway.  The manifests and their migrations are required for
-    # a first installed run and for too-new-schema refusal.
+    # references. The manifests and their migrations are required for a first
+    # installed run and for too-new-schema refusal.
     "core/migrations/sql/core/*.sql",
     "packs/timeline/schema-pack.yaml",
     "packs/timeline/migrations/*.sql",
@@ -124,8 +124,6 @@ astrid = [
     "packs/shots/migrations/*.sql",
     "packs/references/schema-pack.yaml",
     "packs/references/migrations/*.sql",
-    "packs/runaway/schema-pack.yaml",
-    "packs/runaway/migrations/*.sql",
 
     # Capability manifests and their runtime data.  STAGE.md, skill files,
     # requirements files, golden logs, and other authoring-only material are

@@ -1,7 +1,6 @@
 """Deterministic packaged and temporary-copy factoring checks.
 
-Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``,
-``runaway``)
+Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``)
 can be removed **only inside a temporary source copy** -- both the pack
 directory and the explicit standard registration tuple
 (``astrid.packs.STANDARD_SCHEMA_PACKS``, which drives
@@ -19,7 +18,7 @@ Lane completeness
 -----------------
 The enumerated :data:`KERNEL_LANE` is the fixed, complete set of kernel test
 files under ``tests/v10`` that import no domain schema pack at module level
-and whose assertions hold under *any* subset of the four packs:
+and whose assertions hold under *any* subset of the three packs:
 
 - runtime-boundary and authority checks: import laziness, explicit launcher/
   SDK context, generated runtime event reads, and deterministic authority lint
@@ -28,7 +27,7 @@ and whose assertions hold under *any* subset of the four packs:
 Deliberately excluded suites (asserted separately, see below):
 
 - ``test_registry.py`` / ``test_catalog_migrations.py`` assert the exact
-  *standard* 4-pack composition, so they cannot
+  *standard* 3-pack composition, so they cannot
   run under a reduced composition; the check's own catalog verification step
   re-derives the remaining manifest-derived catalog from the modified
   registration instead.
@@ -84,7 +83,7 @@ from astrid.core.schema_packs.catalog import CORE_MIGRATIONS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 """The repository root the check copies from (read-only)."""
 
-DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
+DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 """Exactly the in-tree schema packs the standard composition registers."""
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
@@ -96,7 +95,6 @@ PACK_TABLES: dict[str, tuple[str, ...]] = {
         "generation_variants",
     ),
     "references": ("project_references", "media_references", "reference_links"),
-    "runaway": ("runaway_transitions",),
 }
 """Tables each domain pack declares through its manifest migrations (frozen
 m1/m3 catalog; never inferred from a live database)."""
@@ -151,14 +149,6 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "repositories": ("ReferenceRepository",),
         "cli_mounts": ("references",),
         "bridge_mounts": (),
-    },
-    "runaway": {
-        "stream_types": ("runaway.transition_set",),
-        "event_kinds": ("runaway.created",),
-        "command_kinds": ("runaway.create",),
-        "repositories": ("RunawayRepository",),
-        "cli_mounts": (),
-        "bridge_mounts": ("runaway_transitions",),
     },
 }
 """The complete vocabulary owned by each fixed schema pack.
@@ -280,6 +270,14 @@ def build_temp_source_copy(
             ignore=_COPY_IGNORE,
             symlinks=False,
         )
+        # The factoring lane includes the stage-one authority proofs as well
+        # as the v10 checks. Keep this explicit so a reduced source copy
+        # cannot accidentally pass while omitting a negative proof.
+        for rel in KERNEL_LANE:
+            source = REPO_ROOT / rel
+            target = work / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
         for rel in _LANE_FIXTURES:
             source = REPO_ROOT / rel
             if source.exists():
@@ -488,7 +486,7 @@ artifact_root = Path(sys.argv[3]).resolve()
 assert Path(astrid.__file__).resolve().is_relative_to(artifact_root), astrid.__file__
 
 # The typed-timeline consumer is independently installable and must survive
-# removal of every schema pack, especially Runaway.  Its admitted-artifact
+# removal of every schema pack. Its admitted-artifact
 # source seam must not import a domain repository or sqlite directly.
 from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
 from astrid.packs.typed_timeline.sources import load_json_rows

@@ -16,8 +16,7 @@ runtime semantics:
   media→references) recorded as documented composition exemptions — any
   other error fails closed;
 - **forbidden drift rejection**: schema/catalog composition drift (the frozen
-  23-table catalog: kernel 14 + timeline 1 + shots 4 + references 3 +
-  Runaway 1),
+  22-table catalog: kernel 14 + timeline 1 + shots 4 + references 3),
   product surface drift (exactly five top-level families, two
   manifest-declared nested mounts, no ``timelines copy`` route), SDK surface
   drift (no public raw runner promises), and sentinel-secret persistence in
@@ -87,8 +86,8 @@ BASELINE_SCHEMA = "astrid.m4_baseline.v1"
 # retained m4 evidence artifact for it.
 SENTINEL = "astrid-sentinel-secret-7f3c9d"
 
-# Frozen composition: kernel 14 + timeline 1 + shots 4 + references 3 + runaway 1.
-FROZEN_TABLE_COUNT = 23
+# Frozen composition: kernel 14 + timeline 1 + shots 4 + references 3.
+FROZEN_TABLE_COUNT = 22
 """The frozen standard composition total (core + declared pack tables)."""
 FROZEN_CORE_TABLE_COUNT = 14
 FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
@@ -99,9 +98,8 @@ FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
     "references": frozenset(
         {"project_references", "media_references", "reference_links"}
     ),
-    "runaway": frozenset({"runaway_transitions"}),
 }
-FROZEN_STANDARD_PACKS = ("timeline", "shots", "references", "runaway")
+FROZEN_STANDARD_PACKS = ("timeline", "shots", "references")
 
 # Frozen product surface (m4 plan step 24 / sense check SC25).
 FROZEN_PRODUCT_FAMILIES = ("projects", "media", "tasks", "runs", "timelines")
@@ -541,7 +539,7 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
 
 
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
-    """Reject schema/catalog drift from the frozen 23-table composition."""
+    """Reject schema/catalog drift from the frozen 22-table composition."""
     violations: list[str] = []
     from astrid.core.schema_packs.catalog import CORE_TABLES, FORBIDDEN_TABLES
     from astrid.core.schema_packs.manifest import load_schema_pack_manifest

@@ -1,60 +1,54 @@
-"""Crash-resumable artifact acquisition (Batch B8, doc 27 §6.1).
+"""Executor-host artifact acquisition.
 
-The ONLY sanctioned outbound networking in the product lives here:
-explicit setup mode. Task execution never imports this module.
+This module is deliberately independent of Astrid's workspace and runtime
+database. A generic executor host may use it for a supported machine profile
+by supplying an executor-owned root outside the realm. The host owns only
+materialized bytes and their manifest digest; model availability is never
+advertised through a workspace journal, sidecar, or model-management command.
 
-Pipeline per artifact, journaled at every transition:
-
-    absent -> downloading(offset) -> verifying -> staged -> installed(verified)
-
-- Download: HTTP ``Range: bytes=<offset>-`` resume into
-  ``<setup>/tmp/<id>.part`` from the boot-replayed offset; the offset is
-  fsync-journaled after every chunk so a kill mid-download resumes from
-  recorded progress.
-- Verifying: stream SHA-256 over the complete ``.part`` against the
-  signed manifest hash. Mismatch → ``corrupt(hash_mismatch)``, typed
-  refusal — never a silent retry loop.
-- Staging: same-filesystem rename to ``<id>.staged``.
-- Installing: atomic rename to ``artifacts/<id>`` + directory fsync +
-  ``installed(sha256,size)`` stamp.
-
-Kill-mid-download / kill-mid-verify / kill-mid-rename are observable at
-the named :data:`journal.KILL_BOUNDARIES` via
-``ASTRID_SETUP_KILL_BOUNDARY``; :func:`journal.resolve_boot_state`
-replays and completes or resumes each one.
+Acquisition resumes from an existing ``.part`` file, verifies the signed
+manifest's SHA-256 and size, and publishes the verified bytes with an atomic
+same-filesystem rename. A partial file is operational scratch, not durable
+product state.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from astrid.core.model_setup import journal as jrn
-from astrid.core.model_setup.manifest import DistributionManifest
+from astrid.core.model_setup.manifest import (
+    DistributionManifest,
+    ManifestError,
+    validate_artifact_id,
+    verify_signature,
+)
 from astrid.core.model_setup.preflight import require_disk
 
 CHUNK_SIZE = 1 << 20
-"""Download chunk size; each chunk boundary journals the new offset."""
+ARTIFACTS_DIR_NAME = "artifacts"
+TMP_DIR_NAME = "tmp"
+PART_SUFFIX = ".part"
+STAGED_SUFFIX = ".staged"
 
 
 class AcquisitionError(RuntimeError):
-    """Typed failure for setup acquisition (hash mismatch, network)."""
+    """Typed failure for host acquisition or manifest verification."""
 
 
 class _HashMismatch(AcquisitionError):
-    """Internal marker carrying the found digest for corrupt journaling."""
-
     def __init__(self, found: str) -> None:
         super().__init__(f"hash mismatch: found {found}")
         self.found = found
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AcquisitionResult:
-    """Outcome of one completed acquisition."""
+    """Outcome of one verified host artifact acquisition."""
 
     artifact_id: str
     path: Path
@@ -62,104 +56,127 @@ class AcquisitionResult:
     size: int
 
 
+def artifacts_dir(executor_root: str | Path) -> Path:
+    """Return the host-owned final artifact directory."""
+    return Path(executor_root) / ARTIFACTS_DIR_NAME
+
+
+def tmp_dir(executor_root: str | Path) -> Path:
+    """Return the host-owned temporary acquisition directory."""
+    return Path(executor_root) / TMP_DIR_NAME
+
+
+def artifact_path(executor_root: str | Path, artifact_id: object) -> Path:
+    """Return a safe final path for one manifest artifact."""
+    return artifacts_dir(executor_root) / validate_artifact_id(artifact_id)
+
+
+def part_path(executor_root: str | Path, artifact_id: object) -> Path:
+    """Return a safe partial-download path for one manifest artifact."""
+    return tmp_dir(executor_root) / f"{validate_artifact_id(artifact_id)}{PART_SUFFIX}"
+
+
+def staged_path(executor_root: str | Path, artifact_id: object) -> Path:
+    """Return a safe staging path for one manifest artifact."""
+    return tmp_dir(executor_root) / f"{validate_artifact_id(artifact_id)}{STAGED_SUFFIX}"
+
+
+def _assert_host_tree_is_owned(root: Path) -> None:
+    """Reject links at host storage boundaries before creating or writing."""
+    if root.is_symlink():
+        raise AcquisitionError(f"executor artifact root must not be a symlink: {root}")
+    for label, path in (
+        ("artifact directory", root / ARTIFACTS_DIR_NAME),
+        ("temporary directory", root / TMP_DIR_NAME),
+    ):
+        if path.is_symlink():
+            raise AcquisitionError(f"executor {label} must not be a symlink: {path}")
+
+
+def _fsync_directory(path: Path) -> None:
+    """Durably record a directory entry where the platform supports it."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def acquire_artifact(
     manifest: DistributionManifest,
-    projects_root: str | Path,
+    executor_root: str | Path,
     url: str,
     *,
     urlopen: Callable[..., object] | None = None,
 ) -> AcquisitionResult:
-    """Acquire one manifest-described artifact, crash-resumably.
+    """Acquire one signed artifact into an executor-host-owned root.
 
-    ``urlopen`` is injectable so fixtures serve deterministic bytes
-    without real networking; production uses
-    :func:`urllib.request.urlopen`. The manifest's signature must already
-    be verified by the caller (:func:`manifest.load_manifest` refuses
-    untrusted manifests).
+    The root is intentionally not a projects root. It may be shared by the
+    host's supported adapters, but it is never opened by Astrid's workspace
+    client and carries no journal or availability projection.
     """
-    root = Path(projects_root)
-    artifact_id = manifest.artifact_id
-    final = jrn.artifact_path(root, artifact_id)
-
-    # Disk preflight BEFORE any byte moves (download + working + output).
-    require_disk(jrn.setup_dir(root), manifest.size)
-
-    state = jrn.resolve_boot_state(root).states.get(
-        artifact_id, jrn.ArtifactState(artifact=artifact_id)
-    )
-    journal = jrn.SetupJournal(root)
-
-    if state.phase == "installed":
-        return AcquisitionResult(
-            artifact_id=artifact_id,
-            path=final,
-            sha256=state.sha256 or "",
-            size=state.size or 0,
+    if not verify_signature(manifest):
+        raise ManifestError(
+            f"manifest signature mismatch for {manifest.artifact_id}; refusing to trust it"
         )
+    root = Path(executor_root).expanduser()
+    _assert_host_tree_is_owned(root)
+    artifact_id = validate_artifact_id(manifest.artifact_id)
+    final = artifact_path(root, artifact_id)
+    require_disk(root, manifest.size)
 
-    part = jrn.part_path(root, artifact_id)
-    if part.is_symlink():
-        # Never append through a setup-root symlink into an unrelated file.
+    root.mkdir(parents=True, exist_ok=True)
+    tmp_dir(root).mkdir(parents=True, exist_ok=True)
+    artifacts_dir(root).mkdir(parents=True, exist_ok=True)
+    _assert_host_tree_is_owned(root)
+
+    if final.is_symlink():
+        raise AcquisitionError(f"executor artifact path must not be a symlink: {final}")
+    if final.is_file():
+        try:
+            digest, size = _verify(final, manifest)
+        except _HashMismatch:
+            final.unlink()
+        else:
+            return AcquisitionResult(artifact_id, final, digest, size)
+
+    part = part_path(root, artifact_id)
+    staged = staged_path(root, artifact_id)
+    for label, path in (("partial", part), ("staged", staged)):
+        if path.is_symlink():
+            raise AcquisitionError(f"executor {label} path must not be a symlink: {path}")
+
+    # A stale staged file is scratch from a previous failed host attempt.
+    if staged.exists():
+        staged.unlink()
+    offset = part.stat().st_size if part.is_file() else 0
+    if offset > manifest.size:
         part.unlink()
-    offset = _resume_offset(state, part)
-    if state.phase == "corrupt" and state.reason == "hash_mismatch":
-        # Targeted repair starts over: the partial bytes failed verify.
         offset = 0
-        journal.append(artifact_id, "repairing")
-        if part.exists():
-            part.unlink()
-    elif state.phase == "corrupt" or state.phase == "repairing":
-        journal.append(artifact_id, "repairing")
-        offset = 0
-        if part.exists():
-            part.unlink()
-    journal.append(artifact_id, "downloading", offset=offset)
+    _download(manifest, url, part, offset, urlopen=urlopen)
 
-    offset = _download(manifest, url, part, offset, journal, urlopen=urlopen)
-
-    journal.append(artifact_id, "verifying")
-    jrn.kill_boundary("after_verify_entry")
     try:
         digest, size = _verify(part, manifest)
     except _HashMismatch as exc:
-        journal.append(artifact_id, "corrupt", reason="hash_mismatch")
         raise AcquisitionError(
-            f"{artifact_id}: downloaded bytes fail the signed manifest "
-            f"hash (found {exc.found}, expected {manifest.sha256})"
+            f"{artifact_id}: downloaded bytes fail the signed manifest hash "
+            f"(found {exc.found}, expected {manifest.sha256})"
         ) from None
     if size != manifest.size:
-        journal.append(artifact_id, "corrupt", reason="size_mismatch")
         raise AcquisitionError(
-            f"{artifact_id}: downloaded size {size} does not match "
-            f"manifest size {manifest.size}"
+            f"{artifact_id}: downloaded size {size} does not match manifest size {manifest.size}"
         )
 
-    staged = jrn.staged_path(root, artifact_id)
-    journal.append(artifact_id, "staged", sha256=digest, size=size)
     os.replace(part, staged)
-    jrn._fsync_directory(staged.parent)
-    jrn.kill_boundary("after_stage")
-
-    final.parent.mkdir(parents=True, exist_ok=True)
+    _fsync_directory(staged.parent)
     os.replace(staged, final)
-    jrn._fsync_directory(final.parent)
-    journal.append(artifact_id, "installed", sha256=digest, size=size)
-    jrn.kill_boundary("after_install_rename")
-
-    return AcquisitionResult(
-        artifact_id=artifact_id, path=final, sha256=digest, size=size
-    )
-
-
-def _resume_offset(state: jrn.ArtifactState, part: Path) -> int:
-    """Filesystem wins over the journal: resume from real bytes on disk."""
-    if part.is_symlink():
-        return 0
-    if state.phase == "downloading" and state.offset:
-        return state.offset
-    if part.is_file():
-        return part.stat().st_size
-    return 0
+    _fsync_directory(final.parent)
+    return AcquisitionResult(artifact_id, final, digest, size)
 
 
 def _download(
@@ -167,11 +184,10 @@ def _download(
     url: str,
     part: Path,
     offset: int,
-    journal: jrn.SetupJournal,
     *,
     urlopen: Callable[..., object] | None,
 ) -> int:
-    """Range-resume the download, journaling the offset after each chunk."""
+    """Resume a host scratch file with HTTP Range when possible."""
     opener = urlopen or urllib.request.urlopen
     part.parent.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(url)
@@ -180,7 +196,6 @@ def _download(
     with opener(request) as response:  # type: ignore[operator]
         status = getattr(response, "status", 200)
         if offset and status == 200:
-            # Server ignored Range: restart cleanly rather than append.
             offset = 0
             part.write_bytes(b"")
         elif offset and status != 206:
@@ -196,14 +211,33 @@ def _download(
                 handle.write(block)
                 handle.flush()
                 offset += len(block)
-                journal.append(manifest.artifact_id, "downloading", offset=offset)
-                jrn.kill_boundary("after_download_append")
     return offset
 
 
-def _verify(part: Path, manifest: DistributionManifest) -> tuple[str, int]:
-    """Deep-hash the downloaded bytes against the signed manifest."""
-    digest, size = jrn._hash_file(part)
-    if digest != manifest.sha256:
-        raise _HashMismatch(digest)
-    return digest, size
+def _verify(path: Path, manifest: DistributionManifest) -> tuple[str, int]:
+    """Stream the exact SHA-256 and size required by the signed manifest."""
+    digest = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as handle:
+        while True:
+            block = handle.read(CHUNK_SIZE)
+            if not block:
+                break
+            digest.update(block)
+            size += len(block)
+    found = digest.hexdigest()
+    if found != manifest.sha256:
+        raise _HashMismatch(found)
+    return found, size
+
+
+__all__ = [
+    "AcquisitionError",
+    "AcquisitionResult",
+    "acquire_artifact",
+    "artifact_path",
+    "artifacts_dir",
+    "part_path",
+    "staged_path",
+    "tmp_dir",
+]

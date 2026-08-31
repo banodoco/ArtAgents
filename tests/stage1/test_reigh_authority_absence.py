@@ -15,9 +15,7 @@ def test_retired_authority_packages_and_routes_are_not_present() -> None:
         "astrid/core/integrations/reigh",
         "astrid/core/integrations/worker",
         "astrid/packs/reigh",
-        "astrid/core/timeline/eventlog/supabase.py",
         "astrid/core/contracts/remote_timeline.py",
-        "astrid/core/timeline/eventlog/reigh_events.py",
         "scripts/reshape/editor_browser_smoke",
     ):
         assert not (root / rel).exists(), rel
