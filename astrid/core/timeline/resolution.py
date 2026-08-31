@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from astrid.core.io.media_import import validate_digest
-from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 
 _HASH_KEYS = ("digest", "content_sha256", "sha256", "hash")
 _ROLE_KEYS = ("role", "kind")
@@ -69,15 +69,9 @@ def _runtime_rows(runtime_client: Any | None, project_ref: str, media_snapshot: 
         if runtime_client is None:
             return []
         try:
-            result = runtime_client.media.list(project_ref)
-            if not result.ok:
+            rows = paged_rows(runtime_client.media.list, project_ref)
+            if rows is None:
                 return []
-            page = page_pair(result.data)
-            # ``RemoteMedia.list`` has no cursor argument. A continuation is
-            # therefore an incomplete authority read, never a terminal page.
-            if page is None or page[1] is not None:
-                return []
-            rows = page[0]
         except Exception:  # noqa: BLE001 - a runtime read failure is fail-closed
             return []
     if not isinstance(rows, list):

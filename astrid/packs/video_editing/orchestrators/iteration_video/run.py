@@ -20,7 +20,7 @@ from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
-from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
 
@@ -337,29 +337,13 @@ def _runtime_paged_read(
     rows whenever a continuation cursor is present.
     """
 
-    rows: list[Any] = []
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    for _ in range(_RUNTIME_MAX_PAGES):
-        try:
-            kwargs = dict(initial_kwargs or {})
-            if cursor is not None:
-                kwargs.update(cursor=cursor, limit=_RUNTIME_PAGE_LIMIT)
-            value = method(*args, **kwargs)
-            pair = page_pair(_unwrap_runtime_result(value))
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-            return None
-        if pair is None:
-            return None
-        page_rows, next_cursor = pair
-        rows.extend(page_rows)
-        if next_cursor is None:
-            return rows
-        if next_cursor in seen_cursors or next_cursor == cursor:
-            return None
-        seen_cursors.add(next_cursor)
-        cursor = next_cursor
-    return None
+    return paged_rows(
+        method,
+        *args,
+        limit=_RUNTIME_PAGE_LIMIT,
+        max_pages=_RUNTIME_MAX_PAGES,
+        **dict(initial_kwargs or {}),
+    )
 
 
 def _runtime_run_list(client: Any, project: str) -> list[Any]:

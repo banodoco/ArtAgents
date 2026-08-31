@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from astrid.core import timeline
 from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.io.media_import import validate_digest
-from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 
 
 class ManagedRenderValidationError(ValueError):
@@ -154,17 +154,11 @@ def _runtime_media_admissions(client: Any, project_ref: str) -> dict[str, str]:
     """
 
     try:
-        result = client.media.list(project_ref)
+        rows = paged_rows(client.media.list, project_ref)
     except Exception:  # noqa: BLE001 - an unavailable authority fails closed
         return {}
-    if not result.ok:
+    if rows is None:
         return {}
-    page = page_pair(result.data)
-    # ``RemoteMedia.list`` has no cursor argument. Do not authorize a
-    # partial media admission when the runtime says more pages exist.
-    if page is None or page[1] is not None:
-        return {}
-    rows = page[0]
     admitted: dict[str, str] = {}
     for row in rows:
         if not isinstance(row, Mapping):
@@ -454,12 +448,10 @@ def resolve_managed_render_snapshot(
             f"stale timeline version: expected {expected_version}, current version is {version}; "
             "show the timeline and retry with the current version"
         )
-    listed = client.timelines.list(project_ref)
-    if listed.ok:
-        page = listed.data
-        rows = page[0] if isinstance(page, list) and len(page) == 2 else []
-        for row in rows or []:
-            if row.get("timeline_id") == timeline_data.get("timeline_id") and row.get("archived_at"):
+    rows = paged_rows(client.timelines.list, project_ref)
+    if rows is not None:
+        for row in rows:
+            if isinstance(row, Mapping) and row.get("timeline_id") == timeline_data.get("timeline_id") and row.get("archived_at"):
                 raise ValueError(
                     f"timeline {timeline_ref!r} is archived; unarchive it before rendering"
                 )

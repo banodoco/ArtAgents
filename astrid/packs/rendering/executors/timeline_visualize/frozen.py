@@ -28,7 +28,7 @@ from referencing import Registry, Resource
 
 from astrid.core.timeline.resolution import AssetIntegrity
 from astrid.core.timeline.snapshot import TimelineSnapshot
-from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 from astrid.packs.rendering.executors.timeline_visualize.evidence_pack import (
     ACTION_INDEX_NAME,
     ASSET_INDEX_NAME,
@@ -96,48 +96,15 @@ _RUNTIME_PAGE_LIMIT = 50
 _RUNTIME_MAX_PAGES = 10_000
 
 
-def _terminal_page(value: Any) -> list[Any] | None:
-    """Return one complete canonical page, rejecting truncated reads.
-
-    Run-event reads currently have no cursor-bearing client method, so a
-    continuation cannot be followed safely here.  The page pair is still
-    required: accepting a bare list or mapping would silently erase the
-    authority's pagination boundary.
-    """
-
-    page = page_pair(value)
-    if page is None or page[1] is not None:
-        return None
-    return page[0]
-
-
 def _paged_rows(reader: Any, *args: Any) -> list[Any] | None:
     """Read all canonical pages from a cursor-bearing generated method."""
 
-    rows: list[Any] = []
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    for _ in range(_RUNTIME_MAX_PAGES):
-        try:
-            value = (
-                reader(*args)
-                if cursor is None
-                else reader(*args, cursor=cursor, limit=_RUNTIME_PAGE_LIMIT)
-            )
-        except Exception:
-            return None
-        page = page_pair(value)
-        if page is None:
-            return None
-        page_rows, next_cursor = page
-        rows.extend(page_rows)
-        if next_cursor is None:
-            return rows
-        if next_cursor in seen_cursors or next_cursor == cursor:
-            return None
-        seen_cursors.add(next_cursor)
-        cursor = next_cursor
-    return None
+    return paged_rows(
+        reader,
+        *args,
+        limit=_RUNTIME_PAGE_LIMIT,
+        max_pages=_RUNTIME_MAX_PAGES,
+    )
 
 
 def _register_rehydrated_pack(root: Path) -> None:
@@ -283,7 +250,7 @@ def _rehydrate_managed_pack(
         if str(raw_run.get("status", raw_run.get("state", ""))) not in {"completed", "succeeded"}:
             continue
         try:
-            run_events = _terminal_page(runtime_client.list_run_events(run_id))
+            run_events = _paged_rows(runtime_client.list_run_events, run_id)
         except Exception:
             continue
         if run_events is None:
@@ -1148,7 +1115,7 @@ def _runtime_settled_outputs(runtime_client: Any, run_id: str, run_info: Mapping
     if not callable(reader):
         return None
     try:
-        events = _terminal_page(reader(run_id))
+        events = _paged_rows(reader, run_id)
     except Exception:
         return None
     if events is None:

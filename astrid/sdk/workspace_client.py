@@ -53,6 +53,75 @@ def page_pair(value: Any) -> tuple[list[Any], str | None] | None:
     return items, next_cursor
 
 
+def paged_rows(
+    reader: Any,
+    *args: Any,
+    cursor: str | None = None,
+    limit: int = 50,
+    max_pages: int = 10_000,
+    **kwargs: Any,
+) -> list[Any] | None:
+    """Read every page from a canonical cursor-bearing runtime operation.
+
+    This is the one pagination boundary shared by product adapters and
+    runtime-backed packs.  A page is *only* the JSON-safe ``[items,
+    next_cursor]`` pair; bare lists, mappings, malformed cursors, failures,
+    and cursor cycles fail closed as ``None``.  ``max_pages`` is an explicit
+    safety bound so an unhealthy runtime cannot turn a read into an unbounded
+    loop.
+
+    ``reader`` is called with the canonical ``cursor`` and ``limit`` keyword
+    arguments on every request, including the first page.  The runtime
+    sibling's generated signatures are required to accept these arguments.
+    DomainResult-like values are unwrapped only through their explicit
+    ``ok``/``data`` contract; no alternate page shape is accepted.
+    """
+
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        return None
+    if not isinstance(max_pages, int) or isinstance(max_pages, bool) or max_pages <= 0:
+        return None
+    rows: list[Any] = []
+    seen_cursors: set[str] = set()
+    current = cursor
+    for _ in range(max_pages):
+        call_kwargs = dict(kwargs)
+        call_kwargs.update(cursor=current, limit=limit)
+        try:
+            value = reader(*args, **call_kwargs)
+        except TypeError:
+            # Keep narrow test doubles and older generated clients usable for
+            # a terminal first page. A continuation still necessarily uses
+            # the canonical cursor-bearing call and therefore fails closed if
+            # the reader cannot accept it.
+            if current is not None or kwargs:
+                return None
+            try:
+                value = reader(*args)
+            except Exception:
+                return None
+        except Exception:
+            return None
+        if hasattr(value, "ok") and hasattr(value, "data"):
+            if not bool(value.ok):
+                return None
+            value = value.data
+        page = page_pair(value)
+        if page is None:
+            return None
+        page_rows, next_cursor = page
+        if len(page_rows) > limit:
+            return None
+        rows.extend(page_rows)
+        if next_cursor is None:
+            return rows
+        if next_cursor == current or next_cursor in seen_cursors:
+            return None
+        seen_cursors.add(next_cursor)
+        current = next_cursor
+    return None
+
+
 def _read_credential(path: Path) -> str:
     try:
         raw = path.read_text(encoding="utf-8").strip()
@@ -368,8 +437,8 @@ class WorkspaceClient:
     def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> Any:
         return self._call_generated("create_document", project_id, document_id, kind, content)
 
-    def list_documents(self, project_id: str) -> Any:
-        return self._call_generated("list_documents", project_id)
+    def list_documents(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_documents", project_id, cursor=cursor, limit=limit)
 
     def get_document(self, project_id: str, document_id: str) -> Any:
         return self._call_generated("get_document", project_id, document_id)
@@ -504,17 +573,17 @@ class WorkspaceClient:
             "list_events", cursor=cursor, limit=limit, aggregate_id=aggregate_id
         )
 
-    def list_run_events(self, run_id: str) -> Any:
-        return self._call_generated("list_run_events", run_id)
+    def list_run_events(self, run_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_run_events", run_id, cursor=cursor, limit=limit)
 
-    def list_generations(self, project_id: str) -> Any:
-        return self._call_generated("list_generations", project_id)
+    def list_generations(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_generations", project_id, cursor=cursor, limit=limit)
 
     def get_generation(self, generation_id: str) -> Any:
         return self._call_generated("get_generation", generation_id)
 
-    def list_variants(self, generation_id: str) -> Any:
-        return self._call_generated("list_variants", generation_id)
+    def list_variants(self, generation_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_variants", generation_id, cursor=cursor, limit=limit)
 
     def create_generation(self, project_id: str, generation_id: str, *, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None) -> Any:
         return self._call_generated("create_generation", project_id, generation_id, metadata=metadata, type=type, source_task_id=source_task_id)

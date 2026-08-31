@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 
 from astrid.packs.rendering.executors.timeline_visualize.ids import (
     parse_qualified_ref,
@@ -196,12 +196,9 @@ def select_kernel_timelines(
         except Exception as exc:
             return [], [f"workspace runtime is unavailable: {exc}"]
     try:
-        projects = page_pair(runtime_client.list_projects())
-        if projects is None:
+        project_rows = paged_rows(runtime_client.list_projects)
+        if project_rows is None:
             return [], ["workspace project listing returned an invalid page"]
-        project_rows, project_cursor = projects
-        if project_cursor is not None:
-            return [], ["workspace project listing returned an unsupported continuation page"]
         project = next(
             (row for row in project_rows if isinstance(row, Mapping) and row.get("slug") == project_slug),
             None,
@@ -211,12 +208,9 @@ def select_kernel_timelines(
         project_id = project.get("project_id") or project.get("id")
         if not project_id:
             return [], [f"project {project_slug!r} has no runtime identity"]
-        timeline_page = page_pair(runtime_client.list_timelines(str(project_id)))
-        if timeline_page is None:
+        rows = paged_rows(runtime_client.list_timelines, str(project_id))
+        if rows is None:
             return [], ["workspace timeline listing returned an invalid page"]
-        rows, timeline_cursor = timeline_page
-        if timeline_cursor is not None:
-            return [], ["workspace timeline listing returned an unsupported continuation page"]
     except Exception as exc:
         return [], [f"workspace timeline read failed: {exc}"]
 

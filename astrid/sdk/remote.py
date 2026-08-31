@@ -11,6 +11,7 @@ from astrid.core.receipts.contract import CommandReceipt
 
 from .contracts import DomainResult, ErrorObject
 from .workspace_client import WorkspaceClient, WorkspaceClientError, page_pair
+from .pagination import paged_rows
 
 
 class _RemoteFamily:
@@ -109,7 +110,8 @@ class RemoteProjects(_RemoteFamily):
     def create(self, *, slug: str, name: str, metadata: Mapping[str, Any] | None = None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("create_project", name, key=key, idempotency_key=key, slug=slug, metadata=metadata)
-    def list(self): return self._typed("list_projects")
+    def list(self, *, cursor=None, limit=50):
+        return self._typed("list_projects", cursor=cursor, limit=limit)
     def show(self, ref): return self._typed("get_project", ref)
     def update(self, ref, *, name=None, metadata=None, expected_version=None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
@@ -133,10 +135,7 @@ class RemoteTimelines(_RemoteFamily):
         # canonical id before issuing the resource read. This keeps slug
         # resolution inside the remote client and never creates a filesystem
         # timeline authority.
-        listed = self.list(project)
-        if not listed.ok:
-            return listed
-        rows = _page_items(listed.data)
+        rows = paged_rows(self._client.list_timelines, str(project), limit=50)
         if rows is None:
             return DomainResult.failure(ErrorObject("not_found", "timeline not found", {"project": str(project), "ref": str(ref)}))
         match = next(
@@ -209,13 +208,13 @@ class RemoteMedia(_RemoteFamily):
             if not result.ok: return result
             items.append(result.data)
         return DomainResult.success(items, idempotency_key=idempotency_key or "")
-    def list(self, project):
-        return self._typed("list_project_objects", project)
+    def list(self, project, *, cursor=None, limit=50):
+        return self._typed("list_project_objects", project, cursor=cursor, limit=limit)
     def show(self, project, ref):
-        listed = self.list(project)
-        if not listed.ok: return listed
-        rows = _page_items(listed.data) or []
-        if not any(isinstance(item, dict) and str(ref) in {str(item.get("digest")), str(item.get("object_id"))} for item in (rows or [])):
+        rows = paged_rows(self._client.list_project_objects, str(project), limit=50)
+        if rows is None:
+            return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
+        if not any(isinstance(item, dict) and str(ref) in {str(item.get("digest")), str(item.get("object_id"))} for item in rows):
             return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
         return self._typed("get_object", ref)
     def verify(self, project, ref, *, realm="managed_local", idempotency_key=None):
@@ -424,9 +423,11 @@ class RemoteShots(_RemoteFamily):
 class RemoteGenerations(_RemoteFamily):
     def create(self, *, project: str, generation_id: str, metadata=None, type="image", source_task_id=None, idempotency_key=None):
         return self._typed("create_generation", project, generation_id, key=idempotency_key, metadata=metadata or {}, type=type, source_task_id=source_task_id)
-    def list(self, project): return self._typed("list_generations", project)
+    def list(self, project, *, cursor=None, limit=50):
+        return self._typed("list_generations", project, cursor=cursor, limit=limit)
     def show(self, project, generation_id): return self._typed("get_generation", generation_id)
-    def variants(self, project, generation_id): return self._typed("list_variants", generation_id)
+    def variants(self, project, generation_id, *, cursor=None, limit=50):
+        return self._typed("list_variants", generation_id, cursor=cursor, limit=limit)
     def create_variant(self, generation_id: str, *, variant_id: str, object_id: str | None = None, variant_type="original", metadata=None, idempotency_key=None):
         return self._typed("create_variant", generation_id, variant_id, key=idempotency_key, object_id=object_id, variant_type=variant_type, metadata=metadata or {})
 

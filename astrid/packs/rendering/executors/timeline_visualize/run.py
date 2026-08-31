@@ -27,6 +27,7 @@ from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import StaticChoices
 from astrid.sdk.workspace_client import page_pair
+from astrid.sdk.pagination import paged_rows
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.core.timeline.resolution import classify_registry
 from astrid.core.timeline.snapshot import TimelineSnapshot, snapshot_from_runtime
@@ -240,11 +241,8 @@ def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
 
         endpoint, token = resolve_runtime_connection()
         client = WorkspaceClient(endpoint, token)
-        project_page = page_pair(client.list_projects())
-        if project_page is None:
-            return None
-        rows, project_cursor = project_page
-        if project_cursor is not None:
+        rows = paged_rows(client.list_projects)
+        if rows is None:
             return None
         project = next(
             (
@@ -259,30 +257,17 @@ def _runtime_media_snapshot(project_slug: str) -> list[Any] | None:
         project_id = project.get("project_id") or project.get("id")
         if not isinstance(project_id, str) or not project_id:
             return None
-        rows: list[Any] = []
-        cursor: str | None = None
-        seen_cursors: set[str] = set()
-        for _ in range(_RUNTIME_MEDIA_MAX_PAGES):
-            result = client.list_project_objects(
-                project_id, cursor=cursor, limit=_RUNTIME_MEDIA_PAGE_LIMIT
-            )
-            page = _runtime_media_page(result)
-            if page is None:
-                return None
-            page_rows, next_cursor = page
-            rows.extend(page_rows)
-            if next_cursor is None:
-                return _runtime_media_snapshot_rows(
-                    rows, project_id=project_id, project_slug=project_slug
-                )
-            if next_cursor in seen_cursors or next_cursor == cursor:
-                return None
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-        # A runtime that emits an unbounded stream of unique cursors is just as
-        # unsafe as one that repeats a cursor; never hand an incomplete snapshot
-        # to the managed-media resolver.
-        return None
+        rows = paged_rows(
+            client.list_project_objects,
+            project_id,
+            limit=_RUNTIME_MEDIA_PAGE_LIMIT,
+            max_pages=_RUNTIME_MEDIA_MAX_PAGES,
+        )
+        if rows is None:
+            return None
+        return _runtime_media_snapshot_rows(
+            rows, project_id=project_id, project_slug=project_slug
+        )
     except Exception:  # noqa: BLE001 - managed media reads fail closed
         return None
 
