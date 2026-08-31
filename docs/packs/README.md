@@ -17,7 +17,3 @@ All pack authoring and reference docs live in this directory:
   populate, and validate packs.
 - **[pack-taxonomy.md](pack-taxonomy.md)** — Machine-readable pack
   classification fields (maturity, domain, origin, stability).
-- **[fork-and-update.md](fork-and-update.md)** — Scaffolding and managing
-  personal packs with forks, overrides, dirty detection, and update workflows.
-- **[aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md)** —
-  Three mechanisms for redirecting or customizing capability resolution.

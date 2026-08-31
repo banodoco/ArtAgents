@@ -20,7 +20,6 @@ LIVE_DOCS = (
 AUTHORITATIVE_PACK_DOCS = (
     ROOT / "astrid" / "packs" / "rendering" / "skill" / "SKILL.md",
     ROOT / "docs" / "packs" / "creating-packs.md",
-    ROOT / "docs" / "packs" / "aliases-vs-forks-vs-overrides.md",
     ROOT / "docs" / "contracts" / "render-backend-v1.md",
 )
 

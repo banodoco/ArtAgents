@@ -130,8 +130,3 @@ If at least one harness is detected on disk and is missing one of the expected p
   contract for discovering capabilities: `skills list`, search, and
   `inspect --json`. Skills install is the delivery mechanism; discovery
   describes what agents do with the installed skills.
-- [aliases-vs-forks-vs-overrides.md](../packs/aliases-vs-forks-vs-overrides.md) —
-  How aliases, forks, and overrides interact with installed skills.
-  Installed skills always reflect the current resolution order; if an
-  override or fork changes which capability a name resolves to, the
-  installed SKILL.md content updates accordingly on next `sync`.

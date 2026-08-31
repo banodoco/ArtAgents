@@ -13,9 +13,6 @@ with three public entrypoints:
   the command transport (the same public backend machinery the
   :class:`~astrid.core.rendering.service.RenderService` uses), validates the
   result, and writes the frozen result JSON shape to ``--result``.
-* ``render`` — a retained compatibility guard. Direct product rendering is
-  retired; it always raises and points callers to the admitted
-  ``sdk.invoke("rendering.render", kind="executor", project=...)`` path.
 * ``support`` — a convenience that resolves a qualified backend and returns
   its :class:`SupportReport`.
 * :class:`RenderContext` — the convenience facade a third-party ``render.py``
@@ -72,7 +69,7 @@ Worked example (scaffold → SDK renderer):
        from astrid import RenderContext
        from astrid.core.rendering.contracts import RenderRequest, RenderResult
 
-       def render(workspace, request: RenderRequest) -> RenderResult:
+       def render_backend(workspace, request: RenderRequest) -> RenderResult:
            with RenderContext(workspace, backend="acme_wave.wave") as ctx:
                out = ctx.output_path(request.output_name)
                ctx.run(["vendor-tool", "--out", out])
@@ -112,7 +109,7 @@ from astrid.core.rendering.contracts import (
 
 from .results import _json_safe
 
-__all__ = ["RenderContext", "render", "renderer_main", "support"]
+__all__ = ["RenderContext", "renderer_main", "support"]
 
 _CORE_BACKEND_ID = "astrid.core"
 _TRANSPORT_BACKEND_ENV = "ASTRID_RENDER_BACKEND"
@@ -354,69 +351,6 @@ def _backend_render(
         if len(authored) != len(validated.logs):
             validated = replace(validated, logs=authored)
     return validated
-
-
-# ---------------------------------------------------------------------------
-# render — public convenience
-# ---------------------------------------------------------------------------
-
-
-def render(
-    timeline_path: str | Path,
-    *,
-    output_name: str | None = None,
-    assets_registry_path: str | Path | None = None,
-    out_path: str | Path | None = None,
-    selector: str | None = None,
-    window: FrameWindow | Mapping[str, Any] | None = None,
-    audio: AudioOwnership | str | None = None,
-    profile: RenderProfile | Mapping[str, Any] | None = None,
-    backend_config: Mapping[str, Mapping[str, Any]] | None = None,
-    metadata: Mapping[str, str] | None = None,
-    sidecar_path: str | Path | None = None,
-    project_root: str | Path | None = None,
-    extra_pack_roots: tuple[str, ...] = (),
-    transport: Any = None,
-    transport_factory: Any = None,
-    validator: Any = None,
-    materialized_root: str | Path | None = None,
-    materialized_objects: Mapping[str, str] | None = None,
-) -> Path:
-    """Reject the retired direct render convenience path.
-
-    Rendering is a product operation, so admission, materialization, leases,
-    and settlement must come from ``sdk.invoke`` and the neutral generic host.
-    The protocol-only ``renderer_main`` entrypoint below remains available to
-    a host-launched renderer backend; it is not a second product execution
-    route.
-    """
-
-    del (
-        timeline_path,
-        output_name,
-        assets_registry_path,
-        out_path,
-        selector,
-        window,
-        audio,
-        profile,
-        backend_config,
-        metadata,
-        sidecar_path,
-        project_root,
-        extra_pack_roots,
-        transport,
-        transport_factory,
-        validator,
-        materialized_root,
-        materialized_objects,
-    )
-    from astrid.sdk.exceptions import UnsupportedCapabilityError
-
-    raise UnsupportedCapabilityError(
-        "direct SDK rendering is retired; admit rendering.render through "
-        "sdk.invoke(..., kind='executor', project=...)"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1338,4 +1272,4 @@ class RenderContext:
             self.cleanup()
 
 
-__all__ = ["RenderContext", "render", "renderer_main", "support"]
+__all__ = ["RenderContext", "renderer_main", "support"]

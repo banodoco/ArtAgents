@@ -31,8 +31,8 @@ ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.html_ca
 
 Output:
 
-- `astrid/packs/local/elements/effects/<effect-id>/component.tsx`
-- `astrid/packs/local/elements/effects/<effect-id>/element.yaml`
+- `<editable-pack-root>/elements/effects/<effect-id>/component.tsx`
+- `<editable-pack-root>/elements/effects/<effect-id>/element.yaml`
 - report JSON at `--out`
 - preview `timeline.json` and `assets.json` next to the report
 

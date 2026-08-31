@@ -87,7 +87,7 @@ theme.
 | `rendering.render` | Stable facade that renders a hype timeline through a qualified renderer or planner and writes an MP4 plus provenance. Pipeline step 12 — the terminal step before optional YouTube upload. |
 | `rendering.timeline_visualize` | Read managed timeline event logs without mutation and emit a deterministic, run-owned agent evidence pack with JSON, Markdown, PNG, SVG, and navigation actions. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
-| `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
+| `rendering.html_canvas_effect` | Scaffold an explicitly supplied editable Remotion HTML-in-canvas effect source with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. It does not install a runtime override. |
 
 ## Escape hatch: element system
 
@@ -96,7 +96,7 @@ the rendering pack provides two escape hatches into the element system:
 
 ### `rendering.html_canvas_effect`
 
-Scaffolds a custom local effect element that renders DOM content inside
+Scaffolds a custom effect source that renders DOM content inside
 a Remotion `<HtmlInCanvas>` component. Useful for:
 
 - Custom WebGL/shaders overlaid on video
@@ -104,7 +104,7 @@ a Remotion `<HtmlInCanvas>` component. Useful for:
 - Any effect that benefits from DOM content rendered into a canvas for
   post-processing
 
-The scaffolded element lives under `astrid/packs/local/elements/effects/`
+The scaffolded element is written to the caller-supplied editable pack source
 and can be freely edited. Once created, it integrates into the standard
 Remotion render flow — you reference it by id in the timeline and render
 via `rendering.render`.

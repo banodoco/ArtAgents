@@ -120,7 +120,6 @@ def main(argv: list[str] | None = None) -> int:
             raise
         if project_context is not None:
             args.project = project_context.project_slug
-            args.render_parent_run_id = project_context.run_id
         try:
             returncode = pool_main(args)
         except SystemExit as exc:

@@ -16,7 +16,6 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('video_editing.cut')
 import argparse
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -25,9 +24,6 @@ from urllib.parse import urlparse
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.rendering.attached import invoke_attached_render
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.theme import load_theme
 from astrid.core.timeline import (
     canonical_timeline_config,
@@ -143,7 +139,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="rendering.remotion",
         help="Qualified rendering backend id.",
     )
-    parser.add_argument("--render", action="store_true", help="Render clips and concat them into hype.mp4.")
     return parser
 
 
@@ -369,34 +364,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_timeline(timeline, timeline_path)
     save_registry(registry, assets_path)
     save_metadata(meta, metadata_path)
-    rendered_path = None
-    if args.render:
-        render_kwargs: dict[str, Any] = {}
-        if os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV):
-            render_kwargs["step_id"] = "cut-render"
-        hype_path = invoke_attached_render(
-            timeline_path,
-            assets_path,
-            out_dir / "hype.mp4",
-            selector=args.renderer,
-            backend_config={
-                "rendering.remotion": {"project_dir": str(REPO_ROOT / "remotion")}
-            },
-            project_root=REPO_ROOT,
-            **render_kwargs,
-        )
-        rendered_path = hype_path
-        print(
-            f"wrote_edl={edl_path} timeline={timeline_path} assets={assets_path} metadata={metadata_path} "
-            f"hype={hype_path}"
-        )
-    else:
-        print(f"wrote_edl={edl_path} timeline={timeline_path} assets={assets_path} metadata={metadata_path}")
+    print(f"wrote_edl={edl_path} timeline={timeline_path} assets={assets_path} metadata={metadata_path}")
     _register_cut_outputs(
         out_dir=out_dir,
         stage="cut",
-        metadata={"clips": len(timeline.get("clips", [])), "render": bool(args.render), "renderer": args.renderer},
-        rendered_path=rendered_path,
+        metadata={"clips": len(timeline.get("clips", [])), "renderer": args.renderer},
+        rendered_path=None,
     )
     # --- universal result manifest (output-contract M2) -------------------
     manifest_outputs = [
@@ -405,11 +378,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         {"path": "hype.assets.json", "type": "file"},
         {"path": "hype.metadata.json", "type": "file"},
     ]
-    if rendered_path is not None:
-        manifest_outputs.append({"path": rendered_path.name, "type": "file"})
-        manifest_outputs.append(
-            {"path": f"{rendered_path.name}.provenance.json", "type": "file"}
-        )
     manifest_inputs: dict[str, Any] = {
         "arrangement": str(arrangement_path),
         "pool": str(pool_path),

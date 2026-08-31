@@ -2,8 +2,8 @@
 
 Importing ``astrid.sdk`` is intentionally transport-only. Product clients
 must not pull local repositories, SQLite, CAS, or the retired thread store
-into the normal import graph. Capability and rendering APIs remain available
-through lazy attribute resolution for pack authors and existing callers.
+into the normal import graph. Capability APIs and the protocol-only rendering
+entrypoint remain available through lazy attribute resolution.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ _EXPORTS = {
     "CapabilityValidationError": ("exceptions", "CapabilityValidationError"),
     "UnsupportedCapabilityError": ("exceptions", "UnsupportedCapabilityError"),
     "RenderContext": ("rendering", "RenderContext"),
-    "render": ("rendering", "render"),
     "renderer_main": ("rendering", "renderer_main"),
     "support": ("rendering", "support"),
     "GenerationFacade": ("generation", "GenerationFacade"),

@@ -7,10 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from astrid.core.execution.generic_host import GenericPackHost
-from astrid.sdk.exceptions import UnsupportedCapabilityError
 import astrid.sdk.rendering as sdk_rendering
 
 
@@ -55,14 +52,11 @@ assert 'astrid.core.io.media_import' not in sys.modules
         assert "astrid.core.io.media_import" not in (ROOT / relative).read_text()
 
 
-def test_public_sdk_render_cannot_bypass_runtime_admission(tmp_path: Path) -> None:
-    before = _tree_snapshot(tmp_path)
-    with pytest.raises(UnsupportedCapabilityError, match="sdk.invoke"):
-        sdk_rendering.render(
-            tmp_path / "timeline.json",
-            out_path=tmp_path / "output.mp4",
-        )
-    assert _tree_snapshot(tmp_path) == before
+def test_public_sdk_has_no_direct_render_compatibility_surface() -> None:
+    source = (ROOT / "astrid/sdk/rendering.py").read_text()
+    assert not hasattr(sdk_rendering, "render")
+    assert "def render(\n    timeline_path" not in source
+    assert "sdk.invoke(" in source and "rendering.render" in source
 
 
 def test_renderer_authoring_cli_has_no_unadmitted_smoke_render_route() -> None:
@@ -72,11 +66,18 @@ def test_renderer_authoring_cli_has_no_unadmitted_smoke_render_route() -> None:
     assert 'sub.add_parser("smoke"' not in source
 
 
-def test_attached_render_source_has_no_unbound_service_fallback() -> None:
-    source = (ROOT / "astrid/core/rendering/attached.py").read_text()
-    assert "RenderService(" not in source
-    assert "service:" not in source
-    assert "runtime parent" in source
+def test_attached_render_module_and_nested_runner_are_deleted() -> None:
+    assert not (ROOT / "astrid/core/rendering/attached.py").exists()
+    for path in (
+        ROOT / "astrid/packs/editorial/executors/human_notes/run.py",
+        ROOT / "astrid/packs/video_editing/executors/cut/run.py",
+        ROOT / "astrid/packs/video_editing/executors/cut/resume.py",
+        ROOT / "astrid/packs/video_editing/orchestrators/hype/steps.py",
+        ROOT / "astrid/packs/video_editing/orchestrators/iteration_video/run.py",
+    ):
+        source = path.read_text()
+        assert "invoke_attached_render" not in source
+        assert "run_executor" not in source
 
 
 def test_stale_timeline_visualize_task_adapter_is_deleted() -> None:

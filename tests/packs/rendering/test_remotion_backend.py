@@ -31,7 +31,7 @@ from astrid.core.rendering.contracts import (
 from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.backends.remotion import run as remotion
 from astrid.packs.rendering.executors.render import run as facade
-from astrid.sdk.rendering import render
+from astrid.packs.rendering.executors.render.run import render
 from tests.packs.rendering._helpers import _execution_env, _probe
 
 ROOT = Path(__file__).resolve().parents[3]

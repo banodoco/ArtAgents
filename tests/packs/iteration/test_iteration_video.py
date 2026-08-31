@@ -17,11 +17,7 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
     repo = tmp_path
     runtime = _runtime_client(include_root=True)
 
-    def fail_render(*args, **kwargs):  # pragma: no cover - should never be called
-        raise AssertionError("inspect must not render")
-
     monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
-    monkeypatch.setattr(iteration_video, "run_builtin_render", fail_render)
 
     report = iteration_video.inspect_iteration_run(repo_root=repo, target_run_id=TARGET_RUN_ID, project_slug="demo", runtime_client=runtime)
     text = iteration_video.format_inspection(report, no_content=True)
@@ -403,17 +399,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
     runtime = Runtime()
     out_dir = tmp_path / "iteration-video"
 
-    def fake_render(timeline: Path, assets: Path, output: Path, **_kwargs) -> Path:
-        assert json.loads(timeline.read_text(encoding="utf-8"))["clips"][0]["clipType"] == "media"
-        asset = next(iter(json.loads(assets.read_text(encoding="utf-8"))["assets"].values()))
-        assert Path(asset["file"]).read_bytes() == payload
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"rendered-mp4")
-        Path(f"{output}.provenance.json").write_text("{}\n", encoding="utf-8")
-        return output
-
     monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
-    monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
 
     result = iteration_video.run_orchestrator(
         SimpleNamespace(
@@ -432,7 +418,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
     assert result["returncode"] == 0, result
     assert runtime.calls == [("list", "demo")]
     assert runtime.objects == [("demo", "object-image-1")]
-    assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
+    assert not (out_dir / "iteration.mp4").exists()
     assert _read_json(out_dir / "iteration.quality.json")["data_quality"] < 1.0
     assert not (out_dir / "run.json").exists()
 

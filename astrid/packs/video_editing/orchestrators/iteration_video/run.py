@@ -18,8 +18,6 @@ from typing import Any, Mapping
 
 from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.rendering.attached import invoke_attached_render
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.sdk.pagination import paged_rows
 SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
@@ -69,8 +67,6 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
         # the selected workspace runtime here and pass its client explicitly to
         # the route so all run selection and provenance reads are API-backed.
         with _runtime_client_context() as runtime_client:
-            render_binding = _attached_render_binding(request)
-            render_binding.pop("project_slug", None)
             result = run_iteration_video(
                 repo_root=repo_root,
                 out_path=out_path,
@@ -86,7 +82,6 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
                 no_content=args.no_content,
                 project_slug=getattr(request, "project", None),
                 runtime_client=runtime_client,
-                **render_binding,
             )
     except (IterationVideoError, assemble.AssembleError, OSError, RuntimeError) as exc:
         return {
@@ -122,8 +117,6 @@ def run_iteration_video(
     no_content: bool = False,
     project_slug: str | None = None,
     runtime_client: Any | None = None,
-    parent_run_id: str | None = None,
-    render_step_id: str | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.expanduser().resolve()
     out_path = out_path.expanduser().resolve()
@@ -159,17 +152,6 @@ def run_iteration_video(
         clip_mode=clip_mode,
         no_content=no_content,
     )
-    iteration_mp4 = run_builtin_render(
-        out_path,
-        repo_root=repo_root,
-        renderer=renderer,
-        # Render must use the same selected runtime project that supplied the
-        # input runs.  This matters for direct SDK callers that omit the
-        # optional project argument and rely on runtime selection.
-        project_slug=target["project_slug"],
-        parent_run_id=parent_run_id,
-        step_id=render_step_id,
-    )
     return {
         "target_run_id": target["target_run_id"],
         "assemble": assemble_result,
@@ -179,60 +161,6 @@ def run_iteration_video(
             ("iteration.assemble", str(out_path)),
             ("rendering.render", str(out_path / "hype.timeline.json"), str(out_path / "hype.assets.json")),
         ),
-    }
-
-
-def run_builtin_render(
-    brief_out: Path,
-    *,
-    repo_root: Path,
-    renderer: str,
-    project_slug: str | None = None,
-    parent_run_id: str | None = None,
-    step_id: str | None = None,
-) -> Path:
-    return invoke_attached_render(
-        brief_out / "hype.timeline.json",
-        brief_out / "hype.assets.json",
-        brief_out / "iteration.mp4",
-        project_slug=project_slug,
-        parent_run_id=parent_run_id,
-        step_id=step_id,
-        selector=renderer,
-        project_root=repo_root,
-    )
-
-
-def _attached_render_binding(request: Any) -> dict[str, str | None]:
-    """Return the existing parent ledger binding without creating another run."""
-
-    env_project = os.environ.get(TASK_PROJECT_ENV)
-    env_run = os.environ.get(TASK_RUN_ID_ENV)
-    if env_project is not None or env_run is not None:
-        return {
-            "project_slug": None,
-            "parent_run_id": None,
-            "render_step_id": "iteration-render",
-        }
-    project_slug = getattr(request, "project", None)
-    run_root = getattr(request, "run_root", None)
-    # Rendering must remain attached to the admitted parent run. A project
-    # without that parent is intentionally left unbound so the render helper
-    # rejects the route instead of inventing a local service authority.
-    if run_root and not project_slug:
-        raise IterationVideoError(
-            "iteration render received a run context without a parent project"
-        )
-    if project_slug and run_root:
-        return {
-            "project_slug": str(project_slug),
-            "parent_run_id": Path(run_root).name,
-            "render_step_id": "iteration-render",
-        }
-    return {
-        "project_slug": None,
-        "parent_run_id": None,
-        "render_step_id": None,
     }
 
 

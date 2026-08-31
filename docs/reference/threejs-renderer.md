@@ -75,17 +75,17 @@ binaries before any render is attempted.
 ## Direct use
 
 ```python
-from astrid.sdk.rendering import render
+import astrid.sdk as sdk
 
-published = render(
-    timeline_path="timeline.json",
-    assets_registry_path=None,
-    out_path="out.mp4",
-    selector="rendering.threejs",
+result = sdk.invoke(
+    "rendering.render",
+    kind="executor",
+    project="demo",
+    inputs={"timeline_ref": "main", "selector": "rendering.threejs"},
 )
 ```
 
-`render(..., selector="rendering.threejs")` accepts complete timelines only
+`sdk.invoke(..., selector="rendering.threejs")` accepts complete timelines only
 (no native frame windows) and takes **no backend_config in v1** — any
 non-empty `rendering.threejs` own-namespace config is rejected.
 

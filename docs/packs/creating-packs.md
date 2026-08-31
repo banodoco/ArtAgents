@@ -144,10 +144,8 @@ The pack manifest declares:
 - **Agent instructions**: `purpose`, `normal_entrypoints`,
   `do_not_use_for`, `required_context`.
 - **Documentation references**: paths to `README.md`, `skill/SKILL.md`, etc.
-- **Aliases**: alternate public ids that route to executor or orchestrator
-  capabilities or rendering implementations in this pack. See
-  [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
-  the full alias vocabulary and schema.
+- **Aliases**: alternate public ids explicitly declared by this pack. They do
+  not redirect to filesystem forks or overrides.
 - **Extensions**: optional pack-owned registries, including timeline renderers,
   planners, and finalizers under `extensions.rendering`.
 
@@ -505,10 +503,6 @@ these for the topics they cover:
 - [discovery-for-agents.md](../guides/discovery-for-agents.md) — How a cold agent
   discovers capabilities (e.g., via `astrid.sdk.discover()` and
   `astrid.sdk.get_capability()`).
-- [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
-  Decision table and CLI examples for the three customization mechanisms.
-- [fork-and-update.md](fork-and-update.md) — Scaffolding and managing
-  personal packs with forks, overrides, dirty detection, and update workflows.
 
 ## Future Work
 

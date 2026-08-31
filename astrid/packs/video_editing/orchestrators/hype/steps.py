@@ -7,15 +7,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from astrid.core.execution.executor.argv import executor_argv
-from astrid.core.rendering.attached import invoke_attached_render
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 
 from .config import STEP_ORDER
 
@@ -132,40 +128,6 @@ def build_hype_render_cmd(args: argparse.Namespace) -> list[str]:
     ]
     return add_extra_args(args, "render", cmd)
 
-
-def invoke_hype_render(args: argparse.Namespace) -> Path:
-    """Render Hype through the runtime-admitted attached facade."""
-
-    project_slug = getattr(args, "project", None)
-    parent_run_id = getattr(args, "render_parent_run_id", None)
-    theme = getattr(args, "theme", None)
-    explicit_binding = bool(project_slug and parent_run_id)
-    env_binding = bool(
-        os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV)
-    )
-    attached_kwargs: dict[str, Any] = {}
-    if explicit_binding:
-        attached_kwargs.update(
-            project_slug=str(project_slug),
-            parent_run_id=str(parent_run_id),
-        )
-    if explicit_binding or env_binding:
-        attached_kwargs["step_id"] = (
-            f"hype-render-{int(getattr(args, 'editor_iteration', 1))}-"
-            f"{uuid.uuid4().hex[:8]}"
-        )
-    if theme is not None:
-        attached_kwargs["backend_config"] = {
-            "rendering.remotion": {"theme_path": str(theme)},
-        }
-
-    return invoke_attached_render(
-        args.brief_out / "hype.timeline.json",
-        args.brief_out / "hype.assets.json",
-        args.brief_out / "hype.mp4",
-        theme_path=theme,
-        **attached_kwargs,
-    )
 
 def _verdict_build_cmd(args: argparse.Namespace) -> list[str]:
     raise NotImplementedError(
@@ -388,7 +350,6 @@ def build_pool_steps() -> list[Step]:
             ("hype.mp4", "hype.mp4.provenance.json"),
             build_hype_render_cmd,
             per_brief=True,
-            invoke=invoke_hype_render,
         ),
         Step(
             "editor_review",

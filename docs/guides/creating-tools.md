@@ -211,11 +211,9 @@ astrid/packs/<pack>/elements/<kind>/<id>/
                      # pack_id, metadata, schema, defaults, dependencies
 ```
 
-User-editable forks land in the gitignored `local` pack at
-`astrid/packs/local/elements/<kind>/<id>/`. The first fork auto-creates
-`astrid/packs/local/pack.yaml` and rewrites the copied element's `pack_id`
-to `local` (fork/override/dirty tracking is a Python-layer mechanism — there
-is no `elements` CLI verb for it).
+Element changes are made in a canonical checked-out pack source and reviewed
+through normal Git. Runtime discovery has no local-pack or filesystem-override
+precedence.
 
 ## Templates
 
@@ -264,11 +262,6 @@ you created instead of guessing from ids alone.
   capabilities via the SDK.
 - [debugging.md](debugging.md) — Debugging renderers: static validation, smoke
   tests, the failure replay bundle, and SDK-level moves.
-- [aliases-vs-forks-vs-overrides.md](../packs/aliases-vs-forks-vs-overrides.md) —
-  Decision table for choosing between alias, fork, and override.
-- [fork-and-update.md](../packs/fork-and-update.md) — Scaffolding personal packs
-  for local experimentation, detecting and managing local edits with dirty
-  check and fork.
 
 ## Future Work
 

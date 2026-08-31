@@ -5,8 +5,8 @@ Locks the three public entrypoints in :mod:`astrid.sdk.rendering`:
 * ``renderer_main`` round-trips the committed raw-command fixture request and
   writes the SAME result JSON as the raw backend (wire parity, exact field
   equality — no SDK-only fields);
-* ``render`` / ``support`` produce valid outputs through a
-  FakeTransport-backed :class:`RenderService`;
+* ``support`` produces valid reports through a FakeTransport-backed
+  :class:`RenderService`;
 * importing ``astrid.sdk.rendering`` never imports the rendering service,
   transport, registries, artifacts, or pack backends eagerly.
 
@@ -406,76 +406,6 @@ def test_renderer_main_writes_frozen_protocol_error_for_malformed_request(
 
 
 # ---------------------------------------------------------------------------
-# render — public convenience through a FakeTransport-backed service
-# ---------------------------------------------------------------------------
-
-
-def test_render_returns_published_path_through_fake_transport(tmp_path: Path) -> None:
-    transport = FakeTransport()
-    service = _service(tmp_path, transport)
-    timeline = tmp_path / "timeline.json"
-    assets = tmp_path / "assets.json"
-    timeline.write_text('{"tracks": [], "clips": []}', encoding="utf-8")
-    assets.write_text('{"assets": {}}', encoding="utf-8")
-    out_path = tmp_path / "published" / "video.mp4"
-
-    published = sdk_rendering.render(
-        timeline,
-        assets_registry_path=assets,
-        output_name="video.mp4",
-        out_path=out_path,
-        selector="fixture.renderer",
-        service=service,
-    )
-
-    assert published == out_path
-    assert out_path.is_file()
-    assert out_path.stat().st_size > 0
-    assert Path(f"{out_path}.provenance.json").is_file()
-    assert ("support", "fixture.renderer") in transport.calls
-    assert ("render", "fixture.renderer") in transport.calls
-
-
-def test_render_builds_request_with_exact_frozen_wire_fields(tmp_path: Path) -> None:
-    transport = FakeTransport()
-    service = _service(tmp_path, transport)
-    timeline = tmp_path / "timeline.json"
-    assets = tmp_path / "assets.json"
-    timeline.write_text('{"tracks": [], "clips": []}', encoding="utf-8")
-    assets.write_text('{"assets": {}}', encoding="utf-8")
-    out_path = tmp_path / "video.mp4"
-
-    sdk_rendering.render(
-        timeline,
-        assets_registry_path=assets,
-        output_name="video.mp4",
-        out_path=out_path,
-        selector="fixture.renderer",
-        backend_config={"fixture.renderer": {"mode": "solid"}},
-        metadata={"fixture": "sdk"},
-        service=service,
-    )
-
-    render_payloads = [
-        payload for verb, _backend, payload in transport.payloads if verb == "render"
-    ]
-    assert render_payloads
-    payload = render_payloads[0]
-    # The SDK-built request serializes to EXACTLY the frozen wire field set:
-    # no SDK-only fields, no omissions.
-    assert set(payload) == RENDER_REQUEST_WIRE_FIELDS
-    assert payload["schema_version"] == SCHEMA_VERSION
-    assert payload["timeline_path"] == str(timeline.resolve())
-    assert payload["assets_registry_path"] == str(assets.resolve())
-    assert payload["output_name"] == "video.mp4"
-    assert payload["window"] is None
-    assert payload["audio"] is None
-    assert payload["profile"] is None
-    assert payload["backend_config"] == {"fixture.renderer": {"mode": "solid"}}
-    assert payload["metadata"] == {"fixture": "sdk"}
-
-
-# ---------------------------------------------------------------------------
 # support — public convenience through a FakeTransport-backed service
 # ---------------------------------------------------------------------------
 
@@ -503,6 +433,7 @@ def test_support_returns_report_through_fake_transport(tmp_path: Path) -> None:
         "fixture.renderer",
         request=request,
         service=service,
+        transport=transport,
     )
 
     assert isinstance(report, SupportReport)
@@ -526,6 +457,7 @@ def test_support_accepts_friendly_args_and_wire_mapping(tmp_path: Path) -> None:
         output_name="video.mp4",
         audio="none",
         service=service,
+        transport=transport,
     )
     assert friendly.supported is True
     assert friendly.backend == "fixture.renderer"
@@ -539,6 +471,7 @@ def test_support_accepts_friendly_args_and_wire_mapping(tmp_path: Path) -> None:
             "audio": "none",
         },
         service=service,
+        transport=transport,
     )
     assert mapping_report.backend == "fixture.renderer"
     assert mapping_report.supported is True

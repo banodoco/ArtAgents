@@ -28,7 +28,8 @@ from pathlib import Path
 import pytest
 
 from astrid.core.rendering.registry import load_default_registries
-from astrid.sdk.rendering import render, support
+from astrid.packs.rendering.executors.render.run import render
+from astrid.sdk.rendering import support
 from tests.packs.rendering._helpers import _execution_env, _source_video
 
 ROOT = Path(__file__).resolve().parents[3]

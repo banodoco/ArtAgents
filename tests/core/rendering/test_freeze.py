@@ -2,7 +2,7 @@
 
 These are the freeze-level locks requested by the T7.6 brief.  They reuse the
 exact fixtures the earlier batches introduced (``test_service``'s fake
-transport and ``test_attached_render``'s ledger harness) so the freeze
+transport harness) so the freeze
 asserts the same behavior from the whole-workspace angle:
 
 * every canonical built-in path (remotion, ffmpeg, optimized, and
@@ -10,8 +10,6 @@ asserts the same behavior from the whole-workspace angle:
   leaves no temporary invocation workspace behind;
 * every failure path (renderer, finalizer, support) removes its temporary
   artifacts and never commits a sidecar;
-* attached renders create only their intended ledger (the parent run record
-  and the child step's ``produces`` outputs — never a new ``run.json``);
 * the package ships the frozen data (schemas + manifests + parity fixtures)
   and the default registries expose exactly the frozen built-in surface.
 """
@@ -27,7 +25,6 @@ from typing import Any
 
 import pytest
 
-from astrid.core.rendering import attached
 from astrid.core.rendering.contracts import RendererManifest
 from astrid.core.rendering.errors import (
     RendererBinaryMissingError,
@@ -42,16 +39,9 @@ from astrid.core.rendering.registry import (
     load_default_registries,
 )
 from astrid.core.rendering.service import RenderService
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
 # Reuse the exact fixtures the earlier batches locked (sibling test modules;
 # `tests/` is a package, and this import style is used repo-wide).
-from tests.core.rendering.test_attached_render import (
-    _fake_success,
-    _patch_runtime_parent,
-    _Registry,
-    _seed_parent,
-)
 from tests.core.rendering.test_package_data import FIXTURES, RENDERING_MANIFESTS, SCHEMAS
 from tests.core.rendering.test_service import (
     FakeTransport,
@@ -267,75 +257,6 @@ def test_freeze_real_transport_missing_binary_no_sidecar_temps_cleaned(
     assert pinned["renderer_id"] == "fixture.missing"
     assert pinned["metadata"]["verb"] == "support"
     assert pinned["metadata"]["error_kind"] == "binary_missing"
-
-
-# ---------------------------------------------------------------------------
-# Attached renders create only their intended ledger
-# ---------------------------------------------------------------------------
-
-
-def test_freeze_attached_render_creates_only_its_intended_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    projects_root = tmp_path / "projects"
-    _seed_parent(projects_root)
-    _patch_runtime_parent(monkeypatch)
-    calls: list[object] = []
-    monkeypatch.setattr(attached, "run_executor", _fake_success(calls))
-    output = tmp_path / "freeze-attached" / "preview.mp4"
-
-    attached.invoke_attached_render(
-        tmp_path / "timeline.json",
-        tmp_path / "assets.json",
-        output,
-        project_slug="demo",
-        parent_run_id="parent-run",
-        step_id="freeze-child",
-        root=projects_root,
-        executor_registry=_Registry(),
-    )
-
-    # Parent identity is runtime-owned; attached rendering never creates a
-    # local run.json projection.
-    assert list(projects_root.rglob("run.json")) == []
-    produces = (
-        projects_root
-        / ".astrid-runtime-staging"
-        / "demo"
-        / "parent-run"
-        / "steps"
-        / "freeze-child"
-        / "v1"
-        / "produces"
-    )
-    assert (produces / "preview.mp4").is_file()
-    assert (produces / "preview.mp4.provenance.json").is_file()
-    # The intended ledger holds exactly one video and one sidecar.
-    assert len(list(projects_root.rglob("*.mp4"))) == 1
-    assert len(list(projects_root.rglob("*.provenance.json"))) == 1
-
-
-def test_freeze_unbound_attached_is_rejected_without_any_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The autouse suite sandbox already creates ``tmp_path / "projects"``;
-    # use a never-created caller-owned root so this test proves the unbound
-    # fallback does not initialize it.
-    projects_root = tmp_path / "unbound-projects"
-    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
-    for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):
-        monkeypatch.delenv(name, raising=False)
-    output = tmp_path / "public" / "standalone.mp4"
-
-    with pytest.raises(attached.AttachedRenderError, match="runtime parent"):
-        attached.invoke_attached_render(
-            tmp_path / "timeline.json",
-            tmp_path / "assets.json",
-            output,
-            selector="rendering.fixture",
-        )
-    assert not projects_root.exists()
-    assert not list(tmp_path.rglob("run.json"))
 
 
 # ---------------------------------------------------------------------------

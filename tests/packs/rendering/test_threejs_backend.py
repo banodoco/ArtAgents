@@ -44,7 +44,8 @@ from astrid.core.rendering.registry import load_default_registries
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.backends.threejs import run as threejs
-from astrid.sdk.rendering import render, support
+from astrid.packs.rendering.executors.render.run import render
+from astrid.sdk.rendering import support
 from tests.packs.rendering._helpers import _execution_env, _frame_md5, _probe
 
 ROOT = Path(__file__).resolve().parents[3]

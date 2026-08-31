@@ -251,8 +251,9 @@ orchestrator folders use
 `astrid/packs/<pack>/orchestrators/<slug>/{orchestrator.yaml,STAGE.md,run.py}`,
 with optional local `src/` modules. Element folders live at
 `astrid/packs/<pack>/elements/<kind>/<id>/{component.tsx,element.yaml}` where
-kind is `effects`, `animations`, or `transitions`. A gitignored `local` pack
-at `astrid/packs/local/` holds user-edited element forks.
+kind is `effects`, `animations`, or `transitions`. Runtime discovery has no
+special local-pack or filesystem-override precedence; edit a checked-out pack
+source and commit the change like any other code.
 
 - **Executor** — one concrete, independently runnable unit of work.
 - **Orchestrator** — a workflow that coordinates executors or child
@@ -281,13 +282,11 @@ Read the relevant `STAGE.md` before running a capability; it is the source of
 truth for invocation details. Do not package every STAGE.md into one merged
 prompt — open only the folder-level `STAGE.md` for the selected capability.
 
-### Aliases, Forks, and Overrides
+### Capability source policy
 
-Three mechanisms customize capabilities without editing originals: **aliases**
-(old ids mapped to current capabilities, declared in `pack.yaml`),
-**forks** (a copy into the local pack with provenance back to the source),
-and **overrides** (redirect an id to a preferred fork). Full details:
-[docs/packs/aliases-vs-forks-vs-overrides.md](../../../../docs/packs/aliases-vs-forks-vs-overrides.md).
+Capability ids resolve from canonical registered pack sources. There is no
+filesystem fork, local-pack priority, or override redirect at runtime. To
+change a capability, edit its canonical pack source and use normal Git review.
 
 ## Safety Rules
 
@@ -319,11 +318,9 @@ Built-in executors include `editorial.transcribe`, `video_editing.cut`,
 `generation.generate_image_openai`. External executors include `moirae.moirae`
 and `vibecomfy.run` (executor only, not an orchestrator).
 
-Element source priority: active theme →
-`astrid/packs/local/elements/<kind>/<id>` (gitignored scratch pack) →
-`astrid/packs/rendering/elements/<kind>/<id>`. Forking copies the source element
-into `astrid/packs/local/`, auto-creating `astrid/packs/local/pack.yaml` and
-rewriting the element's `pack_id` to `local`.
+Element definitions resolve from canonical registered pack sources. An admitted
+render snapshots and pins the selected definition; there is no local fork or
+filesystem override tier.
 
 ## Adding overlays to a rendered video
 
@@ -470,7 +467,7 @@ directory after Remotion exits.
 Discover elements through the SDK (`sdk.discover()` / `get_capability` with an
 element id), or read the index below. At time of writing: effects `text-card`
 (the built-in component is `() => null` — it expects a theme override to do
-the real DOM rendering; fork into the local pack and regenerate with
+the real DOM rendering; edit the canonical pack source and regenerate with
 `scripts/gen_effect_registry.py` to customize), `sliding-media`,
 `neon-orbit-card`, `model-trends`, `audio-reactive-colour`, `vibe-comfy-*`;
 animations `fade`, `fade-up`, `scale-in`, `slide-left`, `slide-up`, `type-on`;
@@ -541,7 +538,7 @@ orchestrator, or element manifests.
 | `media.gif_search` | Search GIPHY for GIF or sticker assets and optionally download a selected rendition. |
 | `media.speech_repair_lavasr` | Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass. |
 | `moirae.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
-| `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
+| `rendering.html_canvas_effect` | Scaffold an explicitly supplied editable Remotion HTML-in-canvas effect source; it does not install a runtime override. |
 | `rendering.render` | Render a hype timeline to opaque MP4 or explicitly stamped alpha MOV through the selected backend. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
 | `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |

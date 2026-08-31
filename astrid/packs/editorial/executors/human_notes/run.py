@@ -9,10 +9,8 @@ guard_canonical_entrypoint('editorial.human_notes')
 
 import argparse
 import json
-import os
 import subprocess
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -20,8 +18,6 @@ from typing import Any, Sequence
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.execution.executor.argv import executor_argv
 from astrid.core.media import require_runtime_materialized_file
-from astrid.core.rendering.attached import invoke_attached_render
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.timeline import load_arrangement, load_pool
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 from astrid.packs.editorial.executors.arrange.run import pool_digest
@@ -251,15 +247,6 @@ def _apply_pipeline(args: argparse.Namespace) -> None:
     for cmd in (arrange_cmd, cut_cmd, refine_cmd):
         subprocess.run(cmd, check=True)
 
-    attached_kwargs: dict[str, str] = {}
-    if os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV):
-        attached_kwargs["step_id"] = f"human-notes-render-{uuid.uuid4().hex[:8]}"
-    invoke_attached_render(
-        timeline_path,
-        assets_path,
-        args.brief_dir / "hype.mp4",
-        **attached_kwargs,
-    )
 
 
 def main(argv: Sequence[str] | None = None, *, client: ClaudeClient | None = None) -> Path:

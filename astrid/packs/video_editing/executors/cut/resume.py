@@ -8,7 +8,6 @@ re-processed for re-render or asset rebasing.
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,9 +15,6 @@ from typing import Any
 
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.contracts.errors import AstridError
-from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.rendering.attached import invoke_attached_render
-from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.timeline import (
     METADATA_VERSION,
     AssetRegistry,
@@ -181,30 +177,15 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
     prior_meta_path = source_dir / "hype.metadata.json"
     prior_meta = load_metadata(prior_meta_path) if prior_meta_path.exists() else None
     save_metadata(
-        build_resume_metadata(config, prior_meta, render=bool(args.render), renderer=args.renderer),
+        build_resume_metadata(config, prior_meta, render=False, renderer=args.renderer),
         metadata_path_out,
     )
 
     rendered_path: Path | None = None
-    if args.render:
-        render_kwargs: dict[str, Any] = {}
-        if os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV):
-            render_kwargs["step_id"] = "cut-resume-render"
-        rendered_path = invoke_attached_render(
-            timeline_path_out,
-            assets_path_out,
-            out_dir / "hype.mp4",
-            selector=args.renderer,
-            backend_config={
-                "rendering.remotion": {"project_dir": str(REPO_ROOT / "remotion")}
-            },
-            project_root=REPO_ROOT,
-            **render_kwargs,
-        )
     _register_cut_outputs(
         out_dir=out_dir,
         stage="cut.resume",
-        metadata={"mode": "timeline_resume", "render": bool(args.render), "renderer": args.renderer},
+        metadata={"mode": "timeline_resume", "renderer": args.renderer},
         rendered_path=rendered_path,
     )
     # --- universal result manifest (output-contract M2) -------------------
@@ -213,11 +194,6 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
         {"path": "hype.assets.json", "type": "file"},
         {"path": "hype.metadata.json", "type": "file"},
     ]
-    if args.render:
-        manifest_outputs.append({"path": "hype.mp4", "type": "file"})
-        manifest_outputs.append(
-            {"path": "hype.mp4.provenance.json", "type": "file"}
-        )
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "kind": "cut",

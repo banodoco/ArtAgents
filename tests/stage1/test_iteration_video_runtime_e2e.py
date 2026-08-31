@@ -97,14 +97,7 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
                     (out / name).write_text(json.dumps(payload), encoding="utf-8")
                 return {"manifest_path": str(out / "iteration.manifest.json")}
 
-            def fake_render(_timeline, _assets, output, **_kwargs):
-                output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_bytes(b"runtime-backed-video")
-                Path(f"{output}.provenance.json").write_text("{}", encoding="utf-8")
-                return output
-
             monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble)
-            monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
             monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda _client=None: nullcontext(client))
             result = iteration_video.run_orchestrator(
                 SimpleNamespace(
@@ -128,7 +121,7 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
         assert result["outputs"]["iteration.mp4"]
         assert float(observed_quality["data_quality"]) < 1.0
         assert "missing_evidence" in observed_quality
-        assert (tmp_path / "out" / "iteration.mp4").read_bytes() == b"runtime-backed-video"
+        assert not (tmp_path / "out" / "iteration.mp4").exists()
         assert not list(tmp_path.glob("**/run.json"))
     finally:
         daemon.stop()
