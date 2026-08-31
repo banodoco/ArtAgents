@@ -16,12 +16,11 @@ protocol command; they do not edit core or the `rendering.render` executor.
 ## Identity, discovery, and trust
 
 A renderer, planner, or finalizer has a qualified ID with at least one dot,
-such as `rendering.remotion`, `rendering.legacy_hybrid`, or the canonical
+such as `rendering.remotion`, `rendering.ffmpeg`, or
 `rendering.ffmpeg-finalizer`. Each dot-separated ID segment matches
 `[a-z0-9][a-z0-9_-]*`: lowercase ASCII letters, digits, hyphens, and
-underscores are valid. Bare `remotion` and `ffmpeg` are legacy selectors
-translated by the host; `hybrid` names a planning policy and is never a
-renderer ID.
+underscores are valid. Bare or shorthand selectors are not accepted; callers
+must select a qualified implementation ID.
 
 The first ID segment is the contributing pack's `id`. A pack named
 `video_tool` therefore owns ids such as `video_tool.renderer`; it cannot claim
@@ -83,12 +82,9 @@ the command surface, converts it into a neutral
 `RenderService` directly. Neither entry point imports a concrete renderer;
 pack commands are discovered from manifests and invoked by the transport.
 
-`engine` remains a compatibility spelling accepted by the facade. `backend`
-is its neutral synonym, and callers must not supply conflicting values.
-`remotion`, `ffmpeg`, and `hybrid` are the only legacy short selectors;
-qualified renderer ids are strict apart from ordinary aliases and overrides.
-New integrations should prefer `backend=<qualified-id>` and place private
-settings in `backend_config[<qualified-id>]`.
+The facade accepts one qualified `selector`; translated aliases and
+conflicting selector/configuration values are rejected. New integrations
+place private settings in `backend_config[<qualified-id>]`.
 
 ## Manifest format
 
@@ -190,11 +186,10 @@ not infer its identity from timeline shape or unrelated configuration.
 scheduling and remote render infrastructure are explicitly deferred beyond V1
 and are NOT part of the V1 renderer contract. The four verbs above are the
 complete V1 command surface: there is no submit/status/cancel queue and no
-remote render farm. Spatial stacking is an opt-in pack planner/finalizer
-(`rendering.layer-stack` / `rendering.ffmpeg-compositor`) that reuses those
-verbs plus the optional `LayerRef` field; it is not a fifth verb and is not
-the default. Submit/status/cancel/resume semantics and remote infrastructure
-each require a future protocol version.
+remote render farm. Optional layered plans may use `LayerRef` with a declared
+finalizer; this is not a fifth verb or the default route. Submit/status/cancel/
+resume semantics and remote infrastructure each require a future protocol
+version.
 
 ## Wire primitives
 
@@ -260,8 +255,8 @@ Profiles are evidence, not encoder wishes. The anchor depends on the route:
   window. Individual segment artifacts may differ only because the pinned
   finalizer can normalize them. The final artifact MUST match the plan profile.
 
-The service, not a backend-private fragment or legacy engine field, owns this
-anchor. `duration_tolerance` is evaluated in frames at the canonical profile's
+The service, not a backend-private fragment, owns this anchor.
+`duration_tolerance` is evaluated in frames at the canonical profile's
 rational FPS.
 
 ## Render request and configuration namespacing
@@ -405,8 +400,8 @@ strings, and secret environment values are forbidden.
 - nullable `backend_version`.
 
 An unsupported report should contain at least one actionable reason. Support
-is evidence, not routing authority: fallback happens only when an explicit
-planner or fallback policy permits it. Static manifest capabilities never turn
+is evidence, not routing authority: an unsupported request fails closed unless
+an explicitly selected external planner handles it. Static manifest capabilities never turn
 an unsupported report into support. Every segment's required report must name
 the same backend as the segment.
 
@@ -465,9 +460,7 @@ segment) still tile exactly in time: no overlap, gap, or reordering. Layered
 plans set `RenderSegment.layer` to a `LayerRef` on **every** segment (mixing
 implicit and explicit z is rejected). Same-z segments still tile; distinct-z
 segments may overlap in time — that overlap is stacking, consumed only by a
-finalizer that declares layer compositing (the built-in one is
-`rendering.ffmpeg-compositor`). See
-[layer-stack.md](../reference/layer-stack.md).
+finalizer that declares layer compositing.
 
 ### Optional LayerRef (opt-in stacking)
 
@@ -480,9 +473,9 @@ set `{window, renderer, input_hashes}`.
 Paint order is unchanged: the first visual track is TOP (highest z). The
 host stamps `metadata.astrid_layer.alpha = (z > 0)` on the materialized
 per-layer timeline; stamped remotion/threejs segments emit ProRes 4444.
-Stacking is opt-in via the `rendering.layer-stack` planner. It is not the
-default, and it does not add a new protocol verb — plan, render, support,
-and finalize are unchanged.
+Layered plans are an external extension; the built-in rendering pack exposes
+no layer planner. This field does not add a protocol verb — plan, render,
+support, and finalize are unchanged.
 
 ## Finalization
 
@@ -535,8 +528,8 @@ preserved rather than converted into an unrelated exit-code layer.
 
 The host lifecycle is:
 
-1. Resolve legacy selector/policy, aliases, overrides, and the precedence
-   winner.
+1. Resolve the qualified selector, declared pack aliases/overrides, and the
+   precedence winner.
 2. Verify trust eligibility, permissions, manifest digest, required binaries,
    and supported protocol version.
 3. Resolve the canonical timeline profile and localize required inputs into a
@@ -570,7 +563,7 @@ Provenance v2 is additive and has `schema_version: 2`. Core owns and writes:
 `request_digest`, `requested_policy`, `planner`, every segment's nested
 `renderer`, and `finalizer` are copied from the validated `RenderPlan`; the
 assembler accepts no parallel singular renderer identity. The nested records
-have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
+have exactly the resolution shapes defined in Planning, so a multi-segment plan keeps
 distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
 alias/override/trust/support evidence as renderer records. Rendered artifacts
@@ -595,15 +588,13 @@ character including `\u0085`, `\uFEFF`, and the `\u2000-\u200a` block. Replay
 can verify rendered outputs byte-for-byte. `input_hashes` describe inputs
 only, never rendered outputs.
 
-`engine` is only the legacy request projection. The `segments` key keeps the
-V1-compatible flat projection: one `{engine, from, to}` entry per segment,
-derived from `renderer.id` and the validated integer `FrameWindow` at its
-rational FPS — exactly the shape legacy consumers read. The additive
-`segments_v2` key carries the complete normalized v2 segment records
-(`window`, `renderer` resolution, `input_hashes`); it never overwrites or
-reshapes a V1 key. When the v1 `segment_provenance` top-level projection
-applies, core passes it through VERBATIM from the caller's compatibility
-projection — it is never rewritten or re-derived.
+`engine` records the selected qualified implementation. The `segments` key
+contains one `{engine, from, to}` entry per segment, derived from
+`renderer.id` and the validated integer `FrameWindow` at its rational FPS.
+The additive `segments_v2` key carries the complete normalized v2 segment
+records (`window`, `renderer` resolution, `input_hashes`); it never overwrites
+or reshapes a v1 key. When the v1 `segment_provenance` top-level projection
+applies, core passes it through verbatim from the caller's projection.
 
 For the whole epic, core also preserves every current v1 top-level projection:
 
@@ -1051,14 +1042,14 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 
 ## Locked epic decisions (verbatim)
 
-1. **Backend, planner, and finalizer are distinct concepts.** `hybrid` is a
-   planning policy, not a renderer backend.
+1. **Backend, planner, and finalizer are distinct concepts.** A planner is an
+   optional explicitly selected capability, not a renderer backend.
 2. **The timeline remains backend-neutral.** Renderer selection is invocation
    or plan configuration, never an arbitrary module path stored in timeline
    data.
-3. **Backends have qualified IDs.** Built-ins should resolve canonically as
-   names such as `rendering.remotion` and `rendering.ffmpeg`; short legacy names
-   remain compatibility aliases.
+3. **Backends have qualified IDs.** Built-ins resolve canonically as names
+   such as `rendering.remotion` and `rendering.ffmpeg`; shorthand names are
+   rejected.
 4. **Only trusted discovered packs contribute implementations.** Reuse existing
    pack permission, precedence, conflict, alias, and override semantics. Do not
    accept arbitrary CLI import strings.
@@ -1073,10 +1064,9 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 9. **Final assembly is explicit.** Ship an FFmpeg finalizer first, but keep
    finalization behind a contract so arbitrary backends do not become secretly
    coupled to inlined FFmpeg logic.
-10. **Compatibility precedes semantic cleanup.** Preserve current
-    `engine=remotion`, `engine=ffmpeg`, and `engine=hybrid` behavior during the
-    initial rollout. A later deprecation may make explicit Remotion strict and
-    move opportunistic selection to `planner=auto`.
+10. **Canonical selection is explicit.** Callers provide one qualified
+    renderer selector; unsupported requests fail closed with actionable
+    support evidence.
 11. **Provenance has core-owned keys and backend-owned fragments.** Backend
     fragments cannot overwrite core identity, routing, input, segment, or
     finalizer fields.
@@ -1090,9 +1080,8 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
     custom finalizers are optional layers exposed only when needed.
     V1 is synchronous local execution only; asynchronous job scheduling
     and remote render infrastructure are explicitly deferred beyond V1.
-    Spatial stacking is an opt-in pack feature (`rendering.layer-stack` +
-    `rendering.ffmpeg-compositor`) that uses the optional `LayerRef` field;
-    it is not a new protocol verb and is not the default planner.
+    Spatial stacking is an optional pack feature using the optional `LayerRef`
+    field; it is not a new protocol verb or the default route.
 15. **Astrid owns plumbing.** Core services own asset resolution, temporary
     workspace allocation, output probing and normalization, audio
     passthrough/muxing, hashes, core provenance, cleanup, and replay metadata.

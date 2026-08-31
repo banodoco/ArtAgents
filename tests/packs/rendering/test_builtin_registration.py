@@ -175,11 +175,7 @@ def test_builtin_registration_and_inspection_are_static(
             finalizers.get("rendering.ffmpeg-finalizer"),
         )
 
-    assert [candidate.id for candidate in planners.list()] == [
-        "rendering.layer-stack",
-        "rendering.legacy_hybrid",
-        "rendering.threejs-hybrid",
-    ]
+    assert planners.list() == ()
     assert remotion == (resolved[0],)
     assert ffmpeg == (resolved[1],)
     assert ffmpeg_finalizer == (resolved[2],)

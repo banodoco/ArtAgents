@@ -23,7 +23,7 @@ def build_plan_v2(
     target_run_id: str,
     repo_root: str | Path | None = None,
     run_id: str | None = None,
-    renderer: str = "remotion",
+    renderer: str = "rendering.remotion",
 ) -> dict[str, Any]:
     """Build a task plan for runtime discovery → assemble → render work."""
 
@@ -90,7 +90,7 @@ def _build_render_cmd(
     python_exec: str,
     run_root: Path,
     *,
-    renderer: str = "remotion",
+    renderer: str = "rendering.remotion",
 ) -> str:
     timeline = run_root / "steps" / "assemble" / "v1" / "produces" / "hype.timeline.json"
     assets = run_root / "steps" / "assemble" / "v1" / "produces" / "hype.assets.json"
@@ -108,7 +108,7 @@ def _build_render_cmd(
         ("timeline", timeline),
         ("assets_registry", assets),
         ("output_name", "iteration.mp4"),
-        ("engine", renderer),
+        ("selector", renderer),
     ):
         parts.extend(["--input", shlex.quote(f"{name}={value}")])
     return " ".join(parts)

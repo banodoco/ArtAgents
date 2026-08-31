@@ -214,8 +214,7 @@ def _threejs_project_reasons(project_dir: Path) -> list[str]:
         reasons.append(f"Remotion project is missing package.json: {package_json}")
     # Node_modules check is environment-dependent; planning should succeed
     # even when the JS environment is not installed. Heavy render tests guard
-    # via _missing_environment and skip, while the layer-stack planner only
-    # needs pure timeline eligibility. Keep support lenient here.
+    # Keep support lenient here; heavy render tests guard the environment.
     return reasons
 
 

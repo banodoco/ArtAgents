@@ -104,7 +104,7 @@ events, which makes the first failure harder to understand.
 
 To determine whether the renderer itself could work, I used the documented
 public `astrid.render(...)` facade (not a pack `run.py`) with
-`backend="rendering.remotion"` and an explicit output path under the isolated
+`selector="rendering.remotion"` and an explicit output path under the isolated
 project directory. This direct, non-project-scoped call succeeded and wrote:
 
 - MP4: `/tmp/astrid-live-render-vNeaFT/title-render/title-render-direct.mp4`

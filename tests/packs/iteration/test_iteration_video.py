@@ -388,7 +388,7 @@ def test_iteration_plan_uses_qualified_facade_and_declares_provenance(tmp_path: 
     render = plan["steps"][2]
     assert "-m astrid executors run rendering.render" in render["command"]
     assert "output_name=iteration.mp4" in render["command"]
-    assert "engine=rendering.fixture" in render["command"]
+    assert "selector=rendering.fixture" in render["command"]
     assert "astrid.packs.rendering.executors.render.run" not in render["command"]
     assert {item["path"] for item in render["produces"].values()} == {
         "iteration.mp4",

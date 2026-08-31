@@ -368,8 +368,6 @@ def render(
     assets_registry_path: str | Path | None = None,
     out_path: str | Path | None = None,
     selector: str | None = None,
-    engine: str | None = None,
-    backend: str | None = None,
     window: FrameWindow | Mapping[str, Any] | None = None,
     audio: AudioOwnership | str | None = None,
     profile: RenderProfile | Mapping[str, Any] | None = None,
@@ -391,8 +389,8 @@ def render(
     :class:`~astrid.core.rendering.service.RenderService` (injectable via
     ``service`` for embedding and tests).  ``out_path`` selects the
     published destination; when ``output_name`` is omitted its basename is
-    used.  ``selector``/``engine``/``backend`` are the service's three
-    spellings of the same renderer selector and must not disagree.
+    used.  ``selector`` is a qualified renderer id; omit it to use
+    ``rendering.remotion``.
     """
     from astrid.core.rendering.service import RenderService
 
@@ -431,8 +429,6 @@ def render(
         request,
         out_path=destination,
         selector=selector,
-        engine=engine,
-        backend=backend,
         sidecar_path=sidecar_path,
     )
 

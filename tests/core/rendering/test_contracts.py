@@ -96,13 +96,13 @@ def _support(backend: str = "acme.example") -> SupportReport:
 
 def _planner() -> PlannerResolution:
     return PlannerResolution(
-        id="rendering.legacy_hybrid",
+        id="fixture.planner",
         source_pack={"id": "rendering"},
         manifest_digest=SHA_C,
         trust_eligibility={"eligible": True, "method": "source-tree"},
-        alias_chain=["legacy-hybrid", "rendering.legacy_hybrid"],
+        alias_chain=["fixture-planner", "fixture.planner"],
         override=None,
-        support_decision=_support("rendering.legacy_hybrid"),
+        support_decision=_support("fixture.planner"),
     )
 
 
@@ -622,7 +622,7 @@ def test_provenance_rejects_spoofed_segment_projection_in_plan_mapping() -> None
     plan["segments"][0]["engine"] = "spoofed"
     with pytest.raises(RendererProtocolError):
         assemble_provenance_v2(
-            engine="hybrid",
+            engine="fixture.planner",
             output="out/video.mp4",
             timeline="timeline.json",
             assets_registry=None,
@@ -656,9 +656,9 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
     plan wire round-trip and the final provenance sidecar."""
     planner = replace(
         _planner(),
-        alias_chain=["legacy-hybrid", "rendering.legacy_hybrid"],
-        override={"from": "acme.hybrid-planner", "to": "rendering.legacy_hybrid"},
-        support_decision=_support("rendering.legacy_hybrid"),
+        alias_chain=["fixture-planner", "fixture.planner"],
+        override={"from": "acme.segment-planner", "to": "fixture.planner"},
+        support_decision=_support("fixture.planner"),
     )
     renderer = replace(
         _renderer("acme.visual"),
@@ -694,7 +694,7 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
 
     # Provenance sidecar carries the same evidence
     payload = assemble_provenance_v2(
-        engine="hybrid",
+        engine="fixture.planner",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
@@ -723,7 +723,7 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
     )
     assert payload["planner"]["alias_chain"] == planner.alias_chain
     assert payload["planner"]["override"] == planner.override
-    assert payload["planner"]["support_decision"]["backend"] == "rendering.legacy_hybrid"
+    assert payload["planner"]["support_decision"]["backend"] == "fixture.planner"
     assert payload["segments_v2"][0]["renderer"]["trust_eligibility"] == renderer.trust_eligibility
     assert payload["finalizer"]["alias_chain"] == finalizer.alias_chain
     assert payload["finalizer"]["trust_eligibility"] == finalizer.trust_eligibility
@@ -764,7 +764,7 @@ def test_provenance_emits_hashed_artifact_lineage() -> None:
         },
     )
     payload = assemble_provenance_v2(
-        engine="hybrid",
+        engine="fixture.planner",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
@@ -818,7 +818,7 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
     """Artifact lineage must carry a real sha256; profile-only entries and
     null hashes are rejected rather than stringified."""
     base = dict(
-        engine="hybrid",
+        engine="fixture.planner",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
@@ -1120,8 +1120,8 @@ def test_qualified_id_grammar_allows_hyphens_and_underscores() -> None:
     assert _finalizer().id == "rendering.ffmpeg-finalizer"
     assert replace(_finalizer(), id="1render.2-finalizer",
                    support_decision=_support("1render.2-finalizer")).id == "1render.2-finalizer"
-    assert replace(_finalizer(), id="rendering.legacy_hybrid",
-                   support_decision=_support("rendering.legacy_hybrid")).id == "rendering.legacy_hybrid"
+    assert replace(_finalizer(), id="fixture.planner",
+                   support_decision=_support("fixture.planner")).id == "fixture.planner"
     assert replace(_finalizer(), id="acme.bad_id",
                    support_decision=_support("acme.bad_id")).id == "acme.bad_id"
     for invalid in (

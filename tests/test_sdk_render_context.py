@@ -134,8 +134,8 @@ def _plan() -> RenderPlan:
     return RenderPlan(
         schema_version=SCHEMA_VERSION,
         request_digest="0" * 64,
-        requested_policy="hybrid",
-        planner=_planner_resolution("rendering.legacy_hybrid"),
+        requested_policy="fixture",
+        planner=_planner_resolution("fixture.planner"),
         segments=[
             RenderSegment(
                 window=FrameWindow(start_frame=0, end_frame=10, fps_rational=(10, 1)),

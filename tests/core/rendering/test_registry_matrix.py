@@ -160,13 +160,13 @@ def test_static_load_and_read_surface_never_imports_fixture_backend_modules(
 
     with _load_with_source(tmp_path / "project") as (renderers, planners, finalizers):
         renderers.get("rendering.remotion")
-        renderers.get("ffmpeg")
+        renderers.get("rendering.ffmpeg")
         renderers.list()
         renderers.inspect("rendering.remotion")
         renderers.candidates()
         renderers.candidates("rendering.remotion", eligible=True)
         renderers.conflicts()
-        renderers.resolve_evidence("remotion")
+        renderers.resolve_evidence("rendering.remotion")
         renderers.validate_all()
         planners.list()
         finalizers.list()
@@ -571,8 +571,7 @@ def test_hybrid_absent_from_every_renderer_surface(tmp_path: Path) -> None:
             renderers.get("hybrid")
         assert caught.value.code == "unknown_capability"
 
-        # The planner registry keeps its own hybrid translation capability.
-        assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
+        assert planners.list() == ()
 
 
 # ---------------------------------------------------------------------------
@@ -580,17 +579,17 @@ def test_hybrid_absent_from_every_renderer_surface(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_evidence_records_alias_chain_and_eligibility_for_bare_alias(
+def test_resolve_evidence_records_canonical_selection_and_eligibility(
     tmp_path: Path,
 ) -> None:
-    """Bare ``remotion`` evidence carries the full alias chain and trust."""
+    """Canonical renderer evidence carries trust without selector aliases."""
     with _load_with_source(tmp_path / "project") as (renderers, _, _):
-        evidence = renderers.resolve_evidence("remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
-    assert evidence["requested_id"] == "remotion"
+    assert evidence["requested_id"] == "rendering.remotion"
     assert evidence["canonical_id"] == "rendering.remotion"
     assert evidence["resolved_id"] == "rendering.remotion"
-    assert evidence["alias_chain"] == ["remotion", "rendering.remotion"]
+    assert evidence["alias_chain"] == []
     assert evidence["override"] is None
     assert evidence["priority"] == 0
     assert evidence["manifest_digest"]

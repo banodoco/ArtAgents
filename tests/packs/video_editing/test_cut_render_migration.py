@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("banodoco_timeline_schema")
+
 from astrid.core import timeline
 from astrid.packs.training.executors.pool_merge import run as pool_merge
 from astrid.packs.video_editing.executors.cut import resume as cut_resume
 from astrid.packs.video_editing.executors.cut import run as cut_run
 
 
-def test_cut_render_uses_attached_facade_and_forwards_deprecated_selector(
+def test_cut_render_uses_attached_facade_and_forwards_canonical_selector(
     tmp_path: Path, monkeypatch
 ) -> None:
     inputs = _write_visual_only_cut_inputs(tmp_path)
@@ -36,7 +40,7 @@ def test_cut_render_uses_attached_facade_and_forwards_deprecated_selector(
             "--out",
             str(out_dir),
             "--renderer",
-            "remotion",
+            "rendering.remotion",
             "--render",
         ]
     ) == 0
@@ -46,7 +50,7 @@ def test_cut_render_uses_attached_facade_and_forwards_deprecated_selector(
     assert Path(args[0]).name == "hype.timeline.json"
     assert Path(args[1]).name == "hype.assets.json"
     assert Path(args[2]) == out_dir / "hype.mp4"
-    assert kwargs["engine"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
     assert "rendering.remotion" in kwargs["backend_config"]
     assert "step_id" not in kwargs
     assert (out_dir / "hype.mp4").read_bytes() == b"cut-render"
@@ -93,7 +97,7 @@ def test_cut_resume_uses_attached_facade_and_task_step_without_extra_ledger(
             "--out",
             str(out_dir),
             "--renderer",
-            "remotion",
+            "rendering.remotion",
             "--render",
         ]
     )
@@ -102,12 +106,12 @@ def test_cut_resume_uses_attached_facade_and_task_step_without_extra_ledger(
     assert result.rendered_path == out_dir / "hype.mp4"
     assert len(calls) == 1
     _, kwargs = calls[0]
-    assert kwargs["engine"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
     assert kwargs["step_id"] == "cut-resume-render"
     assert (out_dir / "hype.mp4.provenance.json").is_file()
     assert _read_json(out_dir / "hype.metadata.json")["pipeline"]["config_snapshot"][
         "renderer"
-    ] == "remotion"
+    ] == "rendering.remotion"
     manifest_outputs = {
         item["path"] for item in _read_json(out_dir / "manifest.json")["outputs"]
     }

@@ -43,8 +43,6 @@ def invoke_attached_render(
     parent_run_id: str | None = None,
     step_id: str | None = None,
     selector: str | None = None,
-    engine: str | None = None,
-    backend: str | None = None,
     backend_config: Mapping[str, Mapping[str, Any]] | None = None,
     theme_path: str | Path | None = None,
     keep_previous_renders: bool = False,
@@ -69,7 +67,7 @@ def invoke_attached_render(
     timeline = Path(timeline_path).expanduser().resolve()
     assets = None if assets_path is None else Path(assets_path).expanduser().resolve()
     output = Path(output_path).expanduser().resolve()
-    selected = _one_selector(selector=selector, engine=engine, backend=backend)
+    selected = selector
     bound_project, bound_run = _resolve_parent_binding(
         project_slug=project_slug,
         parent_run_id=parent_run_id,
@@ -110,7 +108,7 @@ def invoke_attached_render(
     if assets is not None:
         inputs["assets_registry"] = str(assets)
     if selected is not None:
-        inputs["engine"] = selected
+        inputs["selector"] = selected
     if backend_config is not None:
         inputs["backend_config"] = {
             str(key): dict(value) for key, value in backend_config.items()
@@ -253,15 +251,6 @@ def _record_step_outputs(step_root: Path, *, video: Path, provenance: Path) -> N
         if source == target:
             continue
         link_into_produces(source, target)
-
-
-def _one_selector(
-    *, selector: str | None, engine: str | None, backend: str | None
-) -> str | None:
-    supplied = [value for value in (selector, engine, backend) if value is not None]
-    if len(supplied) > 1:
-        raise AttachedRenderError("selector, engine, and backend are mutually exclusive")
-    return supplied[0] if supplied else None
 
 
 __all__ = ["AttachedRenderError", "invoke_attached_render"]

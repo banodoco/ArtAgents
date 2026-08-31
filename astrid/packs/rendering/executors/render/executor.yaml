@@ -39,13 +39,8 @@
         "optional": true
       },
       {
-        "input": "engine",
-        "flag": "--engine",
-        "optional": true
-      },
-      {
-        "input": "backend",
-        "flag": "--backend",
+        "input": "selector",
+        "flag": "--selector",
         "optional": true
       },
       {
@@ -141,15 +136,8 @@
       "artifact_type": null
     },
     {
-      "description": "Render selector. Accepts a legacy selector or a qualified backend id resolved through the rendering registry. Do not combine with backend.",
-      "name": "engine",
-      "required": false,
-      "type": "string",
-      "artifact_type": null
-    },
-    {
-      "description": "Neutral selector synonym for engine. Prefer a qualified backend id for strict renderer selection. Do not combine with engine.",
-      "name": "backend",
+      "description": "Qualified renderer id: rendering.remotion, rendering.ffmpeg, or rendering.threejs.",
+      "name": "selector",
       "required": false,
       "type": "string",
       "artifact_type": null

@@ -19,7 +19,5 @@ extensions:
     renderers:
       - manifests/remotion.renderer.yaml
       - manifests/ffmpeg.renderer.yaml
-    planners:
-      - manifests/hybrid.planner.yaml
     finalizers:
       - manifests/ffmpeg.finalizer.yaml

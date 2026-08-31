@@ -123,9 +123,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_choice_arg(
         parser,
         "--renderer",
-        values=("remotion",),
-        default="remotion",
-        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
+        values=("rendering.remotion",),
+        default="rendering.remotion",
+        help="Qualified rendering backend id.",
     )
     parser.add_argument("--render", action="store_true", help="Render clips and concat them into hype.mp4.")
     # Managed binding seam (m3.5): when both --project and --timeline-slug are
@@ -375,7 +375,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeline_path,
             assets_path,
             out_dir / "hype.mp4",
-            engine=args.renderer,
+            selector=args.renderer,
             backend_config={
                 "rendering.remotion": {"project_dir": str(REPO_ROOT / "remotion")}
             },

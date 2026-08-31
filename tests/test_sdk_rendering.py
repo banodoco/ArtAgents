@@ -281,7 +281,7 @@ def _service(tmp_path: Path, transport: FakeTransport) -> RenderService:
         [_candidate(tmp_path, "fixture.renderer", "renderer")]
     )
     planners = PlannerRegistry(
-        [_candidate(tmp_path, "rendering.legacy_hybrid", "planner")]
+        [_candidate(tmp_path, "fixture.planner", "planner")]
     )
     finalizers = FinalizerRegistry(
         [_candidate(tmp_path, "rendering.ffmpeg-finalizer", "finalizer")]

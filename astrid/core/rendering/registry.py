@@ -38,11 +38,6 @@ from .contracts import FinalizerManifest, PlannerManifest, RendererManifest
 ManifestT = TypeVar("ManifestT", RendererManifest, PlannerManifest, FinalizerManifest)
 
 _FACADE_EXECUTOR_ID = "rendering.render"
-_PROGRAMMATIC_RENDERER_ALIASES: tuple[tuple[str, str], ...] = (
-    ("remotion", "rendering.remotion"),
-    ("ffmpeg", "rendering.ffmpeg"),
-)
-
 
 class RenderingRegistryError(RegistryError):
     """A registry failure with stable, machine-readable context."""
@@ -543,7 +538,6 @@ def load_default_registries(
         kind="renderer",
         pack_trust=pack_trust,
         registry=renderers,
-        programmatic_aliases=_PROGRAMMATIC_RENDERER_ALIASES,
         error_type=RendererRegistryError,
     )
     planner_resolver, planner_inspection_resolver = _build_alias_resolvers(

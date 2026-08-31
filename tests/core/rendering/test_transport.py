@@ -168,7 +168,7 @@ def test_explicit_or_versioned_python_command_is_not_rewritten(
     ("verb", "fixture_name", "backend", "result_type"),
     [
         ("support", "support.json", "acme.visual", SupportReport),
-        ("plan", "plan.json", "rendering.legacy_hybrid", RenderPlan),
+        ("plan", "plan.json", "fixture.planner", RenderPlan),
         ("finalize", "result.json", "rendering.ffmpeg-finalizer", RenderResult),
     ],
 )

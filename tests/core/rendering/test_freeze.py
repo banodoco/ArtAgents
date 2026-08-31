@@ -5,8 +5,8 @@ exact fixtures the earlier batches introduced (``test_service``'s fake
 transport and ``test_attached_render``'s ledger harness) so the freeze
 asserts the same behavior from the whole-workspace angle:
 
-* every built-in path (remotion, ffmpeg, optimized, audio-reactive, hybrid,
-  single-segment) commits exactly one video and exactly one sidecar, and
+* every canonical built-in path (remotion, ffmpeg, optimized, and
+  audio-reactive) commits exactly one video and exactly one sidecar, and
   leaves no temporary invocation workspace behind;
 * every failure path (renderer, finalizer, support) removes its temporary
   artifacts and never commits a sidecar;
@@ -94,8 +94,6 @@ from tests.core.rendering.test_service import (
             "rendering.ffmpeg",
             id="audio-reactive",
         ),
-        pytest.param("hybrid", (5, 5), {}, True, "hybrid", id="hybrid"),
-        pytest.param("hybrid", (10,), {}, True, "hybrid", id="single-segment"),
     ],
 )
 def test_freeze_builtin_paths_one_video_one_committed_sidecar(
@@ -107,16 +105,7 @@ def test_freeze_builtin_paths_one_video_one_committed_sidecar(
     expected_engine: str,
 ) -> None:
     transport = FakeTransport()
-    if plan_segments is not None:
-        transport.plan = _plan("fixture.window", segment_frames=plan_segments)
-        service = _service(
-            tmp_path,
-            transport,
-            renderer_ids=("fixture.window",),
-            planner_ids=("rendering.legacy_hybrid",),
-        )
-    else:
-        service = _service(tmp_path, transport)
+    service = _service(tmp_path, transport)
     output = tmp_path / "freeze-builtin.mp4"
     request = replace(_request(tmp_path), backend_config=backend_config)
 
@@ -130,8 +119,7 @@ def test_freeze_builtin_paths_one_video_one_committed_sidecar(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == expected_engine
-    assert payload["routing"]["auto_route"] is False
+    assert payload["engine"] == expected_engine
     if expect_finalize:
         assert ("finalize", "rendering.ffmpeg-finalizer") in transport.calls
     else:
@@ -148,8 +136,8 @@ def test_freeze_builtin_paths_one_video_one_committed_sidecar(
 
 @pytest.mark.parametrize(
     "mode",
-    ["backend-render", "finalizer", "support"],
-    ids=["backend-render", "finalizer", "support"],
+    ["backend-render", "support"],
+    ids=["backend-render", "support"],
 )
 def test_freeze_failure_paths_clean_temps_and_never_commit_sidecar(
     tmp_path: Path, mode: str
@@ -160,16 +148,6 @@ def test_freeze_failure_paths_clean_temps_and_never_commit_sidecar(
         transport.fail_render = "rendering.ffmpeg"
         service = _service(tmp_path, transport)
         selector = "rendering.ffmpeg"
-    elif mode == "finalizer":
-        transport.fail_finalize = "rendering.ffmpeg-finalizer"
-        transport.plan = _plan("fixture.window", segment_frames=(5, 5))
-        service = _service(
-            tmp_path,
-            transport,
-            renderer_ids=("fixture.window",),
-            planner_ids=("rendering.legacy_hybrid",),
-        )
-        selector = "hybrid"
     else:
         transport.fail_support = "rendering.ffmpeg"
         service = _service(tmp_path, transport)
@@ -220,7 +198,7 @@ def test_freeze_real_ffmpeg_transport_one_video_one_committed_sidecar(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert payload["engine"] == "rendering.ffmpeg"
     assert not list(tmp_path.glob(".*.render-service-*"))
     assert not list(tmp_path.rglob("outputs"))
 
@@ -391,11 +369,7 @@ def test_freeze_package_data_and_exact_builtin_registry_surface() -> None:
         "rendering.ffmpeg",
         "rendering.threejs",
     }
-    assert {candidate.id for candidate in planners.list()} == {
-        "rendering.legacy_hybrid",
-        "rendering.threejs-hybrid",
-        "rendering.layer-stack",
-    }
+    assert planners.list() == ()
     assert {candidate.id for candidate in finalizers.list()} == {
         "rendering.ffmpeg-finalizer",
         "rendering.ffmpeg-compositor",

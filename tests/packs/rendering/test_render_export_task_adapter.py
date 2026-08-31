@@ -16,6 +16,8 @@ from typing import Any
 
 import pytest
 
+pytest.importorskip("banodoco_timeline_schema")
+
 from astrid.core.events.registry import core_only_registry
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid

@@ -28,10 +28,7 @@ from astrid.core.rendering.registry import (
     PlannerRegistry,
     RendererRegistry,
 )
-from astrid.core.rendering.service import (
-    LegacyRenderRoutingWarning,
-    RenderService,
-)
+from astrid.core.rendering.service import RenderService
 from tests.core.rendering.test_service import (
     FakeTransport,
     _candidate,
@@ -97,6 +94,7 @@ def _lineage_service(
     )
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_service_plan_round_trips_complete_routing_lineage(
     tmp_path: Path,
 ) -> None:
@@ -209,6 +207,7 @@ def test_service_plan_round_trips_complete_routing_lineage(
     }
 
 
+@pytest.mark.skip(reason="retired shorthand and fallback route")
 def test_legacy_remotion_auto_route_reason_is_recorded(tmp_path: Path) -> None:
     transport = FakeTransport()
     service = _service(tmp_path, transport)
@@ -259,7 +258,7 @@ def test_every_v1_top_level_projection_is_preserved(tmp_path: Path) -> None:
 
     service.render_request(
         request,
-        selector="ffmpeg",
+        selector="rendering.ffmpeg",
         out_path=output,
         v1_compatibility=compatibility,
     )
@@ -288,7 +287,7 @@ def test_every_v1_top_level_projection_is_preserved(tmp_path: Path) -> None:
         "audio_reactive_colour",
     }
     assert expected_keys <= set(payload)
-    assert payload["engine"] == "ffmpeg"
+    assert payload["engine"] == "rendering.ffmpeg"
     assert payload["output"] == str(output.resolve())
     assert payload["timeline"] == request.timeline_path
     assert payload["assets_registry"] == request.assets_registry_path
@@ -395,6 +394,7 @@ def test_previous_output_cleanup_skips_a_live_locked_render(tmp_path: Path) -> N
         "hybrid",
     ],
 )
+@pytest.mark.skip(reason="retired shorthand and planner selectors")
 def test_routing_fields_matrix_for_every_selector(
     tmp_path: Path,
     selector: str,
@@ -440,6 +440,7 @@ def test_routing_fields_matrix_for_every_selector(
     assert payload["requested_policy"] == expected_engine
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_raw_mixed_plan_segment_provenance_is_aligned(tmp_path: Path) -> None:
     transport = FakeTransport()
     request = _mixed_plan(

@@ -788,9 +788,9 @@
       "plan": {
         "schema_version": 1,
         "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        "requested_policy": "hybrid",
+        "requested_policy": "example.timeline-planner",
         "planner": {
-          "id": "rendering.legacy_hybrid",
+        "id": "example.timeline-planner",
           "source_pack": {
             "id": "rendering"
           },

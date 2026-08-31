@@ -20,19 +20,11 @@ text PNGs composited over the video spine via `overlay` and `concat` — no
 - `run.py` builds the overlay specs and executes the command built by
   `command.py`; the filtergraph itself lives in `command.py`
   (`build_filter_graph`), not in a per-section loop in `run.py`.
-- Default `rendering.render` (no selector, or the legacy `remotion` selector)
-  is ffmpeg-first auto-route (`astrid/core/rendering/service.py`):
-  request-sensitive FFmpeg support gets the first opportunity, and any
-  timeline that passes support now renders on ffmpeg. Remotion remains the
-  fallback when ffmpeg fail-closes with `unsupported` or `binary_missing` —
-  unknown clip kinds (e.g. Remotion text-card), media `hold`, extra visual
-  media tracks, no usable system TTF, text `from`, x/y transforms, crops,
-  `speed != 1`, transitions. Other errors surface as hard failures rather
-  than silently re-routing, and a `LegacyRenderRoutingWarning` records when
-  the auto-route picked ffmpeg.
-
-The `hybrid` selector still maps to `rendering.legacy_hybrid`, which is
-unchanged and unused on the default path.
+- Select `rendering.ffmpeg` explicitly through `rendering.render` when the
+  request's support report accepts the media/text matrix above. Unsupported
+  requests fail closed with the support report; the host does not translate
+  shorthand selectors or silently fall back to another backend. Select
+  `rendering.remotion` explicitly for requests requiring that backend.
 
 ## How it works
 
@@ -125,5 +117,5 @@ veto lives in support features and the command builder, not in a third
 
 Transitions between media clips, media visual effects, per-clip x/y media
 transforms, and any font-management subsystem (no font downloading,
-embedding, or face discovery). The hybrid planner and Remotion internals are
-untouched.
+embedding, or face discovery). Renderer selection remains explicit and
+qualified; there is no planner or selector translation layer.

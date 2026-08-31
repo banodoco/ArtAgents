@@ -108,7 +108,7 @@ def run_iteration_video(
     target_run_id: str | None = None,
     max_iterations: int | None = None,
     renderers: str | None = None,
-    renderer: str = "remotion",
+    renderer: str = "rendering.remotion",
     clip_mode: str | None = None,
     direction: str | None = None,
     mode: str = "chaptered",
@@ -193,7 +193,7 @@ def run_builtin_render(
         project_slug=project_slug,
         parent_run_id=parent_run_id,
         step_id=step_id,
-        engine=renderer,
+        selector=renderer,
         project_root=repo_root,
     )
 
@@ -1205,8 +1205,8 @@ def _parse_passthrough(argv: tuple[str, ...]) -> argparse.Namespace:
     parser.add_argument("--renderers", default=None)
     parser.add_argument(
         "--renderer",
-        default="remotion",
-        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
+        default="rendering.remotion",
+        help="Qualified rendering backend id.",
     )
     parser.add_argument("--clip-mode", default=None)
     parser.add_argument("--direction", default=None)
@@ -1227,8 +1227,8 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--renderers", default=None)
     parser.add_argument(
         "--renderer",
-        default="remotion",
-        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
+        default="rendering.remotion",
+        help="Qualified rendering backend id.",
     )
     parser.add_argument("--clip-mode", default=None)
     parser.add_argument("--direction", default=None)

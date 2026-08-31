@@ -10,6 +10,7 @@ implementation stored beside each manifest.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -62,7 +63,7 @@ def _selects_finalizer(argv: Sequence[str]) -> bool:
 def _transport_selected_backend() -> str | None:
     """The transport sets ASTRID_RENDER_BACKEND to the qualified backend id
     it selected; this is authoritative over any request content."""
-    value = __import__("os").environ.get("ASTRID_RENDER_BACKEND")
+    value = os.environ.get("ASTRID_RENDER_BACKEND")
     if isinstance(value, str) and value:
         return value
     return None
@@ -73,8 +74,7 @@ def _selects_ffmpeg(argv: Sequence[str]) -> bool:
     backend-config namespace.
 
     The launcher never guesses from timeline shape: a shape guess can route a
-    Remotion request to FFmpeg or vice versa.  The legacy media-only
-    auto-route lives inside the Remotion backend's own support logic.
+    Remotion request to FFmpeg or vice versa.
     """
 
     selected = _transport_selected_backend()
@@ -97,29 +97,18 @@ def _selects_ffmpeg(argv: Sequence[str]) -> bool:
     return False
 
 
-def _selects_planner() -> bool:
-    """Route the transport-selected hybrid planner without shape guessing."""
-
-    return _transport_selected_backend() == "rendering.legacy_hybrid"
-
-
-def _selects_layer_stack() -> bool:
-    """Route the transport-selected layer-stack planner without shape guessing."""
-
-    return _transport_selected_backend() == "rendering.layer-stack"
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if _selects_layer_stack():
-        from astrid.packs.rendering.planners.layer_stack.run import (
-            main as backend_main,
-        )
-    elif _selects_planner():
-        from astrid.packs.rendering.planners.legacy_hybrid.run import (
-            main as backend_main,
-        )
-    elif _selects_compositor():
+    selected = _transport_selected_backend()
+    if selected is not None and selected not in {
+        "rendering.ffmpeg",
+        "rendering.remotion",
+        "rendering.threejs",
+        "rendering.ffmpeg-compositor",
+        "rendering.ffmpeg-finalizer",
+    }:
+        raise ValueError(f"unsupported rendering backend id {selected!r}")
+    if _selects_compositor():
         from astrid.packs.rendering.finalizers.compositor.run import (
             main as backend_main,
         )
@@ -129,6 +118,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif _selects_ffmpeg(args):
         from astrid.packs.rendering.backends.ffmpeg.run import main as backend_main
+    elif selected == "rendering.threejs":
+        from astrid.packs.rendering.backends.threejs.run import main as backend_main
     else:
         from astrid.packs.rendering.backends.remotion.run import main as backend_main
 

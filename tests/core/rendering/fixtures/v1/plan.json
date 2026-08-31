@@ -3,7 +3,7 @@
   "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "requested_policy": "hybrid",
   "planner": {
-    "id": "rendering.legacy_hybrid",
+    "id": "fixture.planner",
     "source_pack": {
       "id": "rendering"
     },

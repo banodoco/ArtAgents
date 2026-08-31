@@ -166,8 +166,8 @@
   "examples": [
     {
       "schema_version": 1,
-      "id": "rendering.legacy_hybrid",
-      "name": "Legacy Hybrid Planner",
+      "id": "example.timeline-planner",
+      "name": "Example Timeline Planner",
       "version": "1.0.0",
       "protocol_version": 1,
       "command": [
@@ -177,10 +177,10 @@
       "operations": [
         "plan"
       ],
-      "description": "Preserves the legacy hybrid segmentation policy",
+      "description": "Example timeline segmentation policy",
       "capabilities": {
         "policies": [
-          "hybrid"
+          "timeline"
         ],
         "supports_fallback": true,
         "features": {

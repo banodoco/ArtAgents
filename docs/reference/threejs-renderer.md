@@ -1,12 +1,10 @@
-# Three.js Renderer — `rendering.threejs` and `rendering.threejs-hybrid`
+# Three.js Renderer — `rendering.threejs`
 
 **Status**: active (epic: three.js rendering, 2026-08-13)
 **Scope**: The `rendering.threejs` renderer — a thin backend that renders
 background/plain-text Astrid timelines as three.js WebGL scenes captured
-through the existing Remotion project — and the opt-in
-`rendering.threejs-hybrid` planner that routes plain-text regions to
-Three.js and everything else to Remotion. It does **not** describe the
-ordinary `rendering.remotion` backend (see
+through the existing Remotion project. It does **not** describe the ordinary
+`rendering.remotion` backend (see
 [render-adapter.md](render-adapter.md)).
 
 ## What it is
@@ -83,11 +81,11 @@ published = render(
     timeline_path="timeline.json",
     assets_registry_path=None,
     out_path="out.mp4",
-    backend="rendering.threejs",
+    selector="rendering.threejs",
 )
 ```
 
-`render(..., backend="rendering.threejs")` accepts complete timelines only
+`render(..., selector="rendering.threejs")` accepts complete timelines only
 (no native frame windows) and takes **no backend_config in v1** — any
 non-empty `rendering.threejs` own-namespace config is rejected.
 
@@ -116,57 +114,15 @@ non-empty `rendering.threejs` own-namespace config is rejected.
 | `audio` other than `rendered` (e.g. passthrough) | Rejected |
 | Non-canonical profile | Rejected — 90 kHz declared timescale, always-muxed AAC, same as Remotion |
 
-## Hybrid use
-
-```python
-from astrid.sdk.rendering import render
-
-published = render(
-    timeline_path="timeline.json",
-    assets_registry_path="assets.json",
-    out_path="mixed.mp4",
-    backend="rendering.threejs-hybrid",
-    audio="rendered",
-)
-```
-
-`render(..., backend="rendering.threejs-hybrid")` is an opt-in planner that
-splits the timeline into integer-frame windows:
-
-- **Plain-text temporal regions → `rendering.threejs`** (exactly the
-  accepted matrix above).
-- **Everything else → `rendering.remotion`** — media clips, effects,
-  transitions, opacity, non-base visual tracks, audio fades, and gaps.
-  Overlapping text/media regions merge into one Remotion window (no
-  sub-frame splits; conservative occupancy tiling).
-- **`rendering.ffmpeg-finalizer` is pinned** as the finalizer: all segment
-  MP4s are normalized to the canonical profile and concatenated into ONE
-  output file. **Temporal concat only — there is no spatial compositing.**
-- Empty timelines are rejected by the hybrid planner (unlike the direct
-  backend, which accepts background-only).
-
-The planner is non-recursive, never dispatches a planner id as a segment
-renderer, and every segment carries real registry evidence (manifest
-digests, source pack ids, trust eligibility) — never fabricated support
-decisions.
-
 ## Provenance identity
 
 For a direct `rendering.threejs` render the sidecar reports:
 
-- `engine` / `legacy_v1.engine` → `threejs`
+- `engine` → `rendering.threejs`
 - backend fragment `rendering.threejs` with `renderer: "threejs"`,
   `three_version`, `capture_host: "remotion"`, and
   `composition: "ThreeTimelineComposition"`
 - `audio_ownership` → `rendered`
-
-For a hybrid render the sidecar additionally reports the planner
-(`rendering.threejs-hybrid`), the pinned finalizer
-(`rendering.ffmpeg-finalizer`), exact `segments_v2` windows with renderer
-ids and support decisions, and backend fragments for every segment renderer
-**plus** a `rendering.ffmpeg-finalizer` fragment (`finalizer_kind`,
-`finalizer_version`, `segment_count`, `stream_copied_segments`,
-`normalized_segments`, `audio_mode`).
 
 ## Explicit v1 exclusions
 
@@ -182,7 +138,7 @@ ids and support decisions, and backend fragments for every segment renderer
 - Arbitrary composition IDs — the backend is fixed to
   `ThreeTimelineComposition`; it cannot target other Remotion compositions.
 - Effects, transitions, opacity, and audio content (see the support matrix
-  above); the hybrid planner routes those to `rendering.remotion` instead.
+  above); callers must select a renderer whose support report accepts them.
 
 ## Related Documents
 
@@ -193,4 +149,3 @@ ids and support decisions, and backend fragments for every segment renderer
 - `remotion/src/ThreeTimelineComposition.tsx` — The Three.js composition contract
 - `remotion/remotion.config.ts` — ANGLE configuration
 - `astrid/packs/rendering/backends/threejs/run.py` — Backend implementation
-- `astrid/packs/rendering/planners/threejs_hybrid/run.py` — Hybrid planner implementation

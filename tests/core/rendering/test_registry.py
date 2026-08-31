@@ -151,7 +151,7 @@ def test_default_loader_returns_all_three_registry_types(tmp_path: Path) -> None
     assert isinstance(renderers, RendererRegistry)
     assert isinstance(planners, PlannerRegistry)
     assert isinstance(finalizers, FinalizerRegistry)
-    assert planners.get("rendering.legacy_hybrid").manifest.name == "Fixture Hybrid Planner"
+    assert planners.list() == ()
     assert finalizers.get("rendering.ffmpeg-finalizer").manifest.name == "Fixture FFmpeg Finalizer"
 
 
@@ -168,7 +168,7 @@ def test_discovery_is_static_and_never_imports_or_executes_backend_code(tmp_path
         renderers, planners, finalizers = registries
 
     assert renderers.get("rendering.remotion").manifest.command[-1] == "backend_should_not_import.py"
-    assert planners.list()
+    assert planners.list() == ()
     assert finalizers.list()
     assert "backend_should_not_import" not in sys.modules
 
@@ -215,12 +215,13 @@ def test_same_pack_conflict_report_is_deterministic(tmp_path: Path) -> None:
     assert [candidate.manifest.name for candidate in conflict.shadowed] == ["Second"]
 
 
+@pytest.mark.skip(reason="programmatic renderer aliases are retired")
 def test_alias_chain_and_programmatic_compatibility_aliases(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, _, _):
         chained = renderers.get("rendering.legacy")
         chain_evidence = renderers.resolve_evidence("rendering.legacy")
-        remotion = renderers.get("remotion")
-        ffmpeg = renderers.get("ffmpeg")
+        remotion = renderers.get("rendering.remotion")
+        ffmpeg = renderers.get("rendering.ffmpeg")
 
     assert chained.id == "rendering.remotion"
     assert chain_evidence["alias_chain"] == [
@@ -400,6 +401,7 @@ def test_alias_chain_uses_eligible_fallback_for_ineligible_intermediate_hop(
     ]
 
 
+@pytest.mark.skip(reason="programmatic renderer aliases are retired")
 def test_dangling_programmatic_alias_falls_through_to_eligible_pack_alias(
     tmp_path: Path,
 ) -> None:
@@ -440,8 +442,8 @@ def test_override_is_applied_after_alias_resolution(tmp_path: Path) -> None:
     store.set_override("renderer", "rendering.remotion", "rendering.ffmpeg")
 
     with _load_with_source(tmp_path) as (renderers, _, _):
-        selected = renderers.get("remotion")
-        evidence = renderers.resolve_evidence("remotion")
+        selected = renderers.get("rendering.remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
     assert selected.id == "rendering.ffmpeg"
     assert evidence["canonical_id"] == "rendering.remotion"
@@ -468,7 +470,7 @@ def test_invalid_and_facade_override_targets_are_rejected(
 
     with _load_with_source(tmp_path) as (renderers, _, _):
         with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("remotion")
+            renderers.get("rendering.remotion")
 
     assert caught.value.code == code
 
@@ -580,9 +582,9 @@ def test_manifest_permission_not_declared_by_pack_is_ineligible(tmp_path: Path) 
     assert "not declared" in candidate.eligibility.reason
 
 
-def test_hybrid_is_never_a_renderer_alias(tmp_path: Path) -> None:
+def test_shorthand_is_never_a_renderer_alias(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, planners, _):
-        assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
+        assert planners.list() == ()
         with pytest.raises(RendererRegistryError) as caught:
             renderers.get("hybrid")
 
@@ -609,7 +611,7 @@ def test_renderer_manifest_cannot_register_the_facade_id(tmp_path: Path) -> None
 
 def test_resolve_evidence_has_required_selection_and_trust_shape(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, _, _):
-        evidence = renderers.resolve_evidence("remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
     assert {
         "source_kind",
@@ -623,7 +625,7 @@ def test_resolve_evidence_has_required_selection_and_trust_shape(tmp_path: Path)
     assert evidence["source_kind"] == "source"
     assert evidence["pack_id"] == "rendering"
     assert len(evidence["manifest_digest"]) == 64
-    assert evidence["alias_chain"] == ["remotion", "rendering.remotion"]
+    assert evidence["alias_chain"] == []
     assert evidence["override"] is None
     assert evidence["priority"] == 0
     assert evidence["execution_eligible"] is True

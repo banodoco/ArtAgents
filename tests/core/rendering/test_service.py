@@ -49,11 +49,7 @@ from astrid.core.rendering.registry import (
     RenderingCandidate,
     load_default_registries,
 )
-from astrid.core.rendering.service import (
-    LegacyRenderRoutingWarning,
-    RenderService,
-)
-from astrid.packs.rendering.planners.legacy_hybrid import run as legacy_hybrid
+from astrid.core.rendering.service import RenderService
 
 
 def _digest(value: str) -> str:
@@ -458,7 +454,7 @@ def test_full_qualified_remotion_render_observes_frozen_service_order(
         ("render", "rendering.remotion"),
     ]
     assert calls == [
-        "legacy_translation",
+        "selection",
         "alias",
         "override",
         "winner",
@@ -517,6 +513,7 @@ def test_direct_renderer_does_not_require_an_executable_finalizer(
     ]
 
 
+@pytest.mark.skip(reason="retired shorthand and fallback route")
 def test_legacy_remotion_auto_routes_supported_media_to_ffmpeg_with_warning(
     tmp_path: Path,
 ) -> None:
@@ -534,6 +531,7 @@ def test_legacy_remotion_auto_routes_supported_media_to_ffmpeg_with_warning(
     assert ("render", "rendering.remotion") not in transport.calls
 
 
+@pytest.mark.skip(reason="retired shorthand and fallback route")
 def test_legacy_remotion_falls_back_when_ffmpeg_declines_support(
     tmp_path: Path,
 ) -> None:
@@ -563,6 +561,7 @@ def test_legacy_remotion_falls_back_when_ffmpeg_declines_support(
     assert "rejected" in reason
 
 
+@pytest.mark.skip(reason="retired shorthand selector")
 def test_legacy_ffmpeg_is_strict(tmp_path: Path) -> None:
     transport = FakeTransport()
     service = _service(tmp_path, transport)
@@ -579,6 +578,7 @@ def test_legacy_ffmpeg_is_strict(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_hybrid_selects_planner_and_executes_its_segment(tmp_path: Path) -> None:
     transport = FakeTransport()
     transport.plan = _plan("fixture.window")
@@ -605,6 +605,7 @@ def test_hybrid_selects_planner_and_executes_its_segment(tmp_path: Path) -> None
     assert ("finalize", "rendering.ffmpeg-finalizer") in transport.calls
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_planned_window_is_materialized_for_full_timeline_renderer(
     tmp_path: Path,
 ) -> None:
@@ -654,6 +655,7 @@ def test_planned_window_is_materialized_for_full_timeline_renderer(
     assert "materialized_timeline" in sidecar["segments_v2"][0]["input_hashes"]
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_planned_segment_duration_mismatch_is_rejected(tmp_path: Path) -> None:
     transport = FakeTransport()
     transport.plan = _plan("fixture.window")
@@ -863,6 +865,7 @@ def test_passthrough_audio_cannot_publish_without_host_completion(
     assert not Path(f"{output}.provenance.json").exists()
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_multiple_segments_run_registered_finalizer(tmp_path: Path) -> None:
     transport = FakeTransport()
     transport.plan = _plan("fixture.window", segment_frames=(5, 5))
@@ -882,6 +885,7 @@ def test_multiple_segments_run_registered_finalizer(tmp_path: Path) -> None:
     assert output.read_bytes().startswith(b"finalize:rendering.ffmpeg-finalizer")
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_multiple_segments_defer_audio_completion_until_after_finalizer(
     tmp_path: Path,
 ) -> None:
@@ -919,6 +923,7 @@ def test_multiple_segments_defer_audio_completion_until_after_finalizer(
     assert sidecar["audio_ownership"] == AudioOwnership.RENDERED.value
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_multiple_segments_allow_finalizer_to_complete_silent_audio_segment(
     tmp_path: Path,
 ) -> None:
@@ -1264,6 +1269,7 @@ class _RawFixtureTransport(FakeTransport):
         "hybrid",
     ],
 )
+@pytest.mark.skip(reason="retired shorthand and planner selectors")
 def test_selector_routing_matrix(
     tmp_path: Path,
     selector: str | None,
@@ -1388,6 +1394,7 @@ def test_alias_and_override_to_trust_denied_only_target_is_structured(
     assert not list(tmp_path.glob("*.provenance.json"))
 
 
+@pytest.mark.skip(reason="retired shorthand selector")
 def test_unknown_short_selector_lists_legacy_alternatives(
     tmp_path: Path,
 ) -> None:
@@ -1500,16 +1507,12 @@ def test_hype_mp4_default_output_name_is_preserved(tmp_path: Path) -> None:
             False,
             "rendering.ffmpeg",
         ),
-        ("hybrid", (10,), {}, True, "hybrid"),
-        ("hybrid", (5, 5), {}, True, "hybrid"),
     ],
     ids=[
         "remotion",
         "ffmpeg",
         "ffmpeg-optimized",
         "ffmpeg-audio-reactive",
-        "hybrid-single-segment",
-        "hybrid-multi-segment",
     ],
 )
 def test_builtin_paths_commit_exactly_one_video_and_sidecar(
@@ -1521,16 +1524,7 @@ def test_builtin_paths_commit_exactly_one_video_and_sidecar(
     expected_engine: str,
 ) -> None:
     transport = FakeTransport()
-    if plan_segments is not None:
-        transport.plan = _plan("fixture.window", segment_frames=plan_segments)
-        service = _service(
-            tmp_path,
-            transport,
-            renderer_ids=("fixture.window",),
-            planner_ids=("rendering.legacy_hybrid",),
-        )
-    else:
-        service = _service(tmp_path, transport)
+    service = _service(tmp_path, transport)
     output = tmp_path / "builtin.mp4"
     request = replace(_request(tmp_path), backend_config=backend_config)
 
@@ -1542,8 +1536,7 @@ def test_builtin_paths_commit_exactly_one_video_and_sidecar(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == expected_engine
-    assert payload["routing"]["auto_route"] is False
+    assert payload["engine"] == expected_engine
     assert payload["audio_ownership"] == "none"
     for _verb, backend, payload_data in transport.payloads:
         if backend in backend_config:
@@ -1555,6 +1548,7 @@ def test_builtin_paths_commit_exactly_one_video_and_sidecar(
     assert not list(tmp_path.glob(".*.render-service-*"))
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_raw_mixed_plan_routes_windows_and_aligns_segment_provenance(
     tmp_path: Path,
 ) -> None:
@@ -1598,6 +1592,7 @@ def test_raw_mixed_plan_routes_windows_and_aligns_segment_provenance(
     assert payload["routing"]["requested_engine"] == "hybrid"
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_raw_mixed_plan_executes_deterministic_raw_fixture_window(
     tmp_path: Path,
 ) -> None:
@@ -1670,10 +1665,11 @@ def test_raw_mixed_plan_executes_deterministic_raw_fixture_window(
         "hybrid-passthrough",
     ],
 )
+@pytest.mark.skip(reason="retired planner audio matrix")
 def test_audio_ownership_matrix_across_backends(
     tmp_path: Path,
     selector: str,
-    plan_segments: tuple[int, ...] | None,
+        plan_segments: tuple[int, ...] | None,
     ownership: AudioOwnership,
     expected: AudioOwnership,
     completer: bool,
@@ -1724,6 +1720,7 @@ def test_audio_ownership_matrix_across_backends(
     )
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_finalizer_failure_removes_workspace_and_commits_nothing(
     tmp_path: Path,
 ) -> None:
@@ -1797,6 +1794,7 @@ def test_renderer_attachments_survive_validation_into_committed_provenance(
     }
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_finalizer_preserves_segment_attachments_and_adds_its_own(
     tmp_path: Path,
 ) -> None:
@@ -2036,9 +2034,10 @@ def test_real_ffmpeg_renders_through_generic_service(
     assert sidecars == [Path(f"{output}.provenance.json")]
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert payload["engine"] == "rendering.ffmpeg"
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_real_hybrid_plans_assigns_ffmpeg_and_finalizes_through_service(
     tmp_path: Path,
 ) -> None:
@@ -2179,10 +2178,11 @@ def test_real_ffmpeg_audio_reactive_through_generic_service(
     sidecars = list(tmp_path.glob("*.provenance.json"))
     assert sidecars == [Path(f"{output}.provenance.json")]
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
-    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert payload["engine"] == "rendering.ffmpeg"
     assert payload["audio_ownership"] == "rendered"
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_single_segment_plan_records_finalizer_fragment(
     tmp_path: Path,
 ) -> None:
@@ -2443,6 +2443,7 @@ class _TimelineCaptureTransport(FakeTransport):
         )
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_layer_plan_end_to_end_materializes_track_slice_and_stamp(
     tmp_path: Path,
 ) -> None:

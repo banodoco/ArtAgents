@@ -38,7 +38,6 @@ from tests.helpers.cli_runner import run_cli
 BUILTIN_IDS = (
     "rendering.ffmpeg",
     "rendering.remotion",
-    "rendering.legacy_hybrid",
     "rendering.ffmpeg-finalizer",
 )
 

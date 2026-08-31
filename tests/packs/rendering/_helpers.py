@@ -1,7 +1,7 @@
 """Shared rendering test helpers (execution env, probes, source fixtures).
 
-Collapsed from the three.js backend, remotion backend, three.js hybrid and
-hyperframes tests so the duplicated ffprobe/ffmpeg scaffolding lives in one
+Shared by the three.js, Remotion, and FFmpeg backend tests so the duplicated
+ffprobe/ffmpeg scaffolding lives in one
 place.  The env-skip trios (``_missing_environment`` etc.) stay in their own
 test modules on purpose: they are genuinely divergent.
 """

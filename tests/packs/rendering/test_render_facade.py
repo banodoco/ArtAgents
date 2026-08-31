@@ -1,10 +1,8 @@
 """Facade-boundary tests for ``rendering.render`` after the T4.2 rework.
 
-The facade keeps its public ``render(...)`` signature and the
-``rendering.render`` capability id, but delegates all dispatch to
-:class:`RenderService`: legacy engine translation, renderer/planner selection,
-support, invocation, validation, and publication.  These tests pin the
-facade's delegation surface without spawning any media tool.
+The facade keeps the ``rendering.render`` capability id and delegates all
+dispatch to :class:`RenderService`. These tests pin the delegation surface
+without spawning any media tool.
 """
 
 from __future__ import annotations
@@ -56,30 +54,30 @@ def test_render_delegates_to_service_with_default_selector(fake_service: _FakeSe
     assert len(fake_service.calls) == 1
     (call_args, call_kwargs) = fake_service.calls[0]
     assert call_args == (timeline, assets, out)
-    assert call_kwargs["selector"] == "remotion"
+    assert call_kwargs["selector"] == "rendering.remotion"
     assert call_kwargs["previous_outputs"] == ()
-    # Legacy kwargs map onto namespaced backend config.
+    # Facade defaults map onto the canonical backend namespace.
     assert call_kwargs["backend_config"]["rendering.remotion"] == {
         "composition_id": "TimelineComposition"
     }
 
 
 @pytest.mark.parametrize(
-    "engine",
-    ["remotion", "ffmpeg", "hybrid", "rendering.remotion", "rendering.ffmpeg"],
+    "selector",
+    ["rendering.remotion", "rendering.ffmpeg", "rendering.threejs"],
 )
-def test_render_forwards_legacy_and_qualified_selectors(
-    fake_service: _FakeService, tmp_path: Path, engine: str
+def test_render_forwards_qualified_selectors(
+    fake_service: _FakeService, tmp_path: Path, selector: str
 ) -> None:
     timeline, assets, out = _inputs(tmp_path)
 
-    render_run.render(timeline, assets, out, engine=engine)
+    render_run.render(timeline, assets, out, selector=selector)
 
     assert len(fake_service.calls) == 1
-    assert fake_service.calls[0][1]["selector"] == engine
+    assert fake_service.calls[0][1]["selector"] == selector
 
 
-def test_render_maps_legacy_kwargs_into_namespaced_backend_config(
+def test_render_maps_backend_kwargs_into_namespaced_backend_config(
     fake_service: _FakeService, tmp_path: Path
 ) -> None:
     timeline, assets, out = _inputs(tmp_path)
@@ -88,7 +86,7 @@ def test_render_maps_legacy_kwargs_into_namespaced_backend_config(
         timeline,
         assets,
         out,
-        engine="hybrid",
+        selector="rendering.remotion",
         project_dir=tmp_path / "remotion",
         composition_id="CustomComposition",
         theme_path=tmp_path / "theme.json",
@@ -103,12 +101,9 @@ def test_render_maps_legacy_kwargs_into_namespaced_backend_config(
         "theme_path": str(tmp_path / "theme.json"),
         "min_free_gb": 2.0,
     }
-    assert config["rendering.legacy_hybrid"] == {
-        "theme_path": str(tmp_path / "theme.json")
-    }
 
 
-def test_render_merges_explicit_backend_config_after_legacy_kwargs(
+def test_render_merges_explicit_backend_config(
     fake_service: _FakeService, tmp_path: Path
 ) -> None:
     timeline, assets, out = _inputs(tmp_path)
@@ -117,7 +112,7 @@ def test_render_merges_explicit_backend_config_after_legacy_kwargs(
         timeline,
         assets,
         out,
-        engine="rendering.remotion",
+        selector="rendering.remotion",
         theme_path=tmp_path / "theme.json",
         backend_config={
             "rendering.remotion": {
@@ -167,7 +162,7 @@ def test_main_accepts_output_name_and_forward_parses_any_order(
             str(timeline),
             "--assets",
             str(assets),
-            "--engine",
+            "--selector",
             "rendering.ffmpeg",
         ]
     )
@@ -199,31 +194,6 @@ def test_main_rejects_traversal_output_name(
 
     assert result == 1
     assert "traverse" in capsys.readouterr().err
-
-
-def test_main_rejects_conflicting_engine_and_backend(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
-    timeline, assets, _out = _inputs(tmp_path)
-
-    result = render_run.main(
-        [
-            "--timeline",
-            str(timeline),
-            "--assets",
-            str(assets),
-            "--out",
-            str(tmp_path / "out" / "hype.mp4"),
-            "--engine",
-            "remotion",
-            "--backend",
-            "ffmpeg",
-        ]
-    )
-
-    assert result == 1
-    assert "conflict" in capsys.readouterr().err
 
 
 def test_main_surfaces_bounded_structured_renderer_reasons(
@@ -260,7 +230,7 @@ def test_main_surfaces_bounded_structured_renderer_reasons(
     assert len(stderr) <= 3_501
 
 
-def test_main_engine_defaults_to_remotion_when_absent(
+def test_main_selector_defaults_to_remotion_when_absent(
     tmp_path: Path, fake_service: _FakeService
 ) -> None:
     timeline, assets, out = _inputs(tmp_path)
@@ -279,4 +249,4 @@ def test_main_engine_defaults_to_remotion_when_absent(
 
     assert result == 0
     assert len(fake_service.calls) == 1
-    assert fake_service.calls[0][1]["selector"] == "remotion"
+    assert fake_service.calls[0][1]["selector"] == "rendering.remotion"

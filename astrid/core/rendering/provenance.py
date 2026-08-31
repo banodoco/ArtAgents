@@ -137,41 +137,20 @@ def _resolved_policy(plan: RenderPlan) -> dict[str, Any]:
 
 
 def _routing_record(
-    legacy_engine: str,
+    backend_id: str,
     plan: RenderPlan,
     resolved_policy: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Derive selected-policy lineage and visible legacy translation.
-
-    The service's legacy ``remotion`` policy tries the qualified FFmpeg route
-    first and emits a warning when that supported route wins.  The plan pins
-    the selected renderer but cannot by itself explain why its legacy
-    ``engine`` projection still says ``remotion``.  Record that explanation
-    additively while leaving the frozen nested resolution records authoritative
-    for aliases, overrides, trust, manifests, and support decisions.
-    """
+    """Derive selected-policy lineage from the canonical render plan."""
 
     renderer_ids = list(resolved_policy["renderers"])
     resolved_backend = renderer_ids[0] if len(renderer_ids) == 1 else None
-    auto_routed = (
-        legacy_engine == "remotion"
-        and len(plan.segments) == 1
-        and _resolution_request_id(plan.segments[0]) == "rendering.ffmpeg"
-    )
-    auto_route_reason = None
-    if auto_routed:
-        auto_route_reason = (
-            "legacy selector 'remotion' auto-routed the supported request to "
-            f"{plan.segments[0].renderer.id}"
-        )
     return {
-        "requested_engine": legacy_engine,
+        "backend": backend_id,
         "requested_policy": plan.requested_policy,
         "resolved_policy": dict(resolved_policy),
         "resolved_backend": resolved_backend,
         "resolved_backends": renderer_ids,
-        "auto_route": auto_routed,
-        "auto_route_reason": auto_route_reason,
         "segment_reasons": dict(plan.reasons),
     }
 
@@ -410,14 +389,13 @@ def assemble_provenance_v2(
 ) -> dict[str, Any]:
     """Assemble additive provenance v2 with protected ownership boundaries.
 
-    ``engine`` is intentionally the legacy request projection. Routing and
-    replay lineage come exclusively from the validated ``RenderPlan`` so a
-    hybrid invocation cannot collapse multiple renderer identities. Optional
-    v1 fields are accepted only through ``v1_compatibility`` and cannot replace
+    ``engine`` records the selected qualified backend id. Routing and replay
+    lineage come exclusively from the validated ``RenderPlan``. Optional v1
+    fields are accepted only through ``v1_compatibility`` and cannot replace
     any v2 core field.
     """
 
-    legacy_engine = _require_string(engine, "engine")
+    backend_id = _require_string(engine, "engine")
     output_path = _require_string(str(output), "output")
     timeline_path = _require_string(str(timeline), "timeline")
     assets_path = None if assets_registry is None else _require_string(
@@ -441,7 +419,7 @@ def assemble_provenance_v2(
 
     payload: dict[str, Any] = {
         "schema_version": PROVENANCE_SCHEMA_VERSION,
-        "engine": legacy_engine,
+        "engine": backend_id,
         "output": output_path,
         "timeline": timeline_path,
         "assets_registry": assets_path,
@@ -449,7 +427,7 @@ def assemble_provenance_v2(
         "requested_policy": normalized_plan.requested_policy,
         "resolved_policy": resolved_policy,
         "routing": _routing_record(
-            legacy_engine,
+            backend_id,
             normalized_plan,
             resolved_policy,
         ),

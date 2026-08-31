@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytest.importorskip("banodoco_timeline_schema")
+
 from astrid.core.timeline.validators.timeline import validate_timeline
 from astrid.packs.rendering.executors.render import audio_reactive_colour
 from astrid.packs.rendering.executors.render import run as render_run
@@ -129,12 +131,14 @@ def test_fast_spec_rejects_ambiguous_markers(
         )
 
 
-@pytest.mark.parametrize("engine", ["remotion", "ffmpeg", "hybrid"])
+@pytest.mark.parametrize(
+    "selector", ["rendering.remotion", "rendering.ffmpeg", "rendering.threejs"]
+)
 def test_render_dispatches_compact_effect_to_ffmpeg_specialization(
-    tmp_path: Path, engine: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, selector: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     timeline_path, assets_path, _audio_path = _write_inputs(tmp_path)
-    out_path = tmp_path / engine / "hype.mp4"
+    out_path = tmp_path / selector.replace(".", "-") / "hype.mp4"
 
     class _FakeService:
         def render(self, *args, **kwargs) -> Path:
@@ -147,7 +151,7 @@ def test_render_dispatches_compact_effect_to_ffmpeg_specialization(
             timeline_path,
             assets_path,
             out_path,
-            engine=engine,
+            selector=selector,
             keep_previous_renders=True,
         )
 

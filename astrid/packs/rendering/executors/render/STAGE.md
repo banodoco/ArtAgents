@@ -108,16 +108,14 @@ The equivalent product command is
 | expected_version | integer | no | Positive stream-head CAS pin; valid only with `timeline_ref`. |
 | assets_registry | file   | no       | Optional Hype media asset registry JSON. Pass as the `assets_registry` input when the timeline references media assets. If omitted, the runner supplies an empty registry. |
 | theme           | file   | no       | Optional theme configuration. |
-| engine          | string | no       | Compatibility selector. Accepts legacy `remotion`, `ffmpeg`, `hybrid`, or a qualified renderer id. Legacy `remotion` preserves support-based FFmpeg auto-routing; `hybrid` selects `rendering.legacy_hybrid`. Do not combine with `backend`. |
-| backend         | string | no       | Neutral selector synonym. Prefer a qualified id such as `rendering.remotion` for strict renderer selection. Do not combine with `engine`. |
+| selector        | string | no       | Qualified renderer id: `rendering.remotion`, `rendering.ffmpeg`, or `rendering.threejs`. Omit to select `rendering.remotion`. |
 | backend_config  | JSON   | no       | Object keyed by qualified implementation id. The service forwards only the selected implementation's namespace. |
 | output_name     | string | no       | Plain basename; defaults to `hype.mp4`. `.mov` is admitted only when the timeline has the exact `metadata.astrid_layer.alpha: true` stamp, and an explicit profile must declare MOV/ProRes/`yuva444p12le` plus PCM S16LE/48 kHz/stereo. The video and sidecar outputs use this value. |
 | keep_previous_renders | boolean | no | Preserve prior provenance-linked sibling render outputs. |
 
 Qualified renderer selection fails closed when that implementation reports the
-request unsupported. Only an explicit planner/fallback policy may route to an
-alternative. The legacy `remotion` selector is the one compatibility policy
-that tries supported FFmpeg media rendering before Remotion.
+request unsupported. There is no implicit planner or fallback route; select a
+different qualified renderer explicitly.
 
 ## Outputs
 

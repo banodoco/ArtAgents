@@ -32,6 +32,7 @@ RENDERING_MANIFESTS = {
     "packs/rendering/pack.yaml",
     "packs/rendering/backends/ffmpeg/renderer.yaml",
     "packs/rendering/backends/remotion/renderer.yaml",
+    "packs/rendering/backends/threejs/renderer.yaml",
     "packs/rendering/elements/animations/fade-up/element.yaml",
     "packs/rendering/elements/animations/fade/element.yaml",
     "packs/rendering/elements/animations/scale-in/element.yaml",
@@ -46,8 +47,6 @@ RENDERING_MANIFESTS = {
     "packs/rendering/executors/render/executor.yaml",
     "packs/rendering/executors/sprite_sheet/executor.yaml",
     "packs/rendering/executors/timeline_storyboard/executor.yaml",
-    "packs/rendering/planners/legacy_hybrid/planner.yaml",
-    "packs/rendering/planners/layer_stack/planner.yaml",
     "packs/rendering/finalizers/ffmpeg/finalizer.yaml",
     "packs/rendering/finalizers/compositor/finalizer.yaml",
 }
@@ -79,7 +78,7 @@ def test_rendering_manifests_are_package_resources_and_discoverable() -> None:
         "rendering.remotion",
         "rendering.ffmpeg",
     }
-    assert {candidate.id for candidate in planners.list()} >= {"rendering.legacy_hybrid"}
+    assert planners.list() == ()
     assert {candidate.id for candidate in finalizers.list()} >= {
         "rendering.ffmpeg-finalizer"
     }

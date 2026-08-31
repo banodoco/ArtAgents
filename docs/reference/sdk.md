@@ -383,7 +383,7 @@ import astrid
 out = astrid.render(
     "out/hype.timeline.json",
     assets_registry_path="out/hype.assets.json",
-    backend="rendering.remotion",        # strict qualified selector
+    selector="rendering.remotion",       # qualified canonical selector
     backend_config={"rendering.remotion": {"quality": "preview"}},
     out_path="out/hype.mp4",
 )
@@ -391,9 +391,9 @@ print(out)          # out/hype.mp4
 # sidecar: out/hype.mp4.provenance.json
 ```
 
-`selector`/`engine`/`backend` are the service's three spellings of the same
-renderer selector and must not disagree. `window` accepts a `FrameWindow` or a
-wire mapping, `audio` accepts `AudioOwnership` or its string value, and
+`selector` is the renderer's qualified canonical ID. Shorthand aliases and
+implicit fallback are rejected. `window` accepts a `FrameWindow` or a wire
+mapping, `audio` accepts `AudioOwnership` or its string value, and
 `profile` accepts a `RenderProfile` or a wire mapping. `out_path` selects the
 published destination; when `output_name` is omitted its basename is used.
 

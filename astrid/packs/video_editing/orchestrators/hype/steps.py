@@ -187,7 +187,6 @@ def invoke_hype_render(args: argparse.Namespace) -> Path:
     if theme is not None:
         attached_kwargs["backend_config"] = {
             "rendering.remotion": {"theme_path": str(theme)},
-            "rendering.legacy_hybrid": {"theme_path": str(theme)},
         }
 
     return invoke_attached_render(

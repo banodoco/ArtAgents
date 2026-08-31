@@ -98,9 +98,8 @@ _SHIM_EXTENSIONS = (".ts", ".js", ".d.ts", ".js.map", ".d.ts.map")
 _RangeHTTPRequestHandler = _rendering_assets.RangeHTTPRequestHandler
 
 
-# Re-export-only names: legacy_engine.py and tests alias ``remotion._X`` for
-# these provenance/theme helpers, so they stay bound on this module even
-# though remotion/run.py itself no longer calls them.
+# Keep these helpers bound on this module because direct backend tests and
+# protocol callers use them as the Remotion provenance/theme seam.
 def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
     """Pack order bound to THIS module's REPO_ROOT (patchable in tests)."""
     return _shared._active_pack_order_for_provenance(project_root=REPO_ROOT)

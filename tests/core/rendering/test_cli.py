@@ -30,7 +30,7 @@ from astrid.core.rendering.scaffold import create_renderer_scaffold
 BUILTIN_IDS = (
     "rendering.ffmpeg",
     "rendering.remotion",
-    "rendering.legacy_hybrid",
+    "rendering.threejs",
     "rendering.ffmpeg-finalizer",
 )
 
@@ -201,11 +201,10 @@ def test_smoke_unknown_id_fails_with_message(capsys) -> None:
     assert "unknown renderer id 'no.such.renderer'" in _stderr(capsys)
 
 
-def test_smoke_planner_id_hints_kind_mismatch(capsys) -> None:
+def test_smoke_removed_planner_id_fails_closed(capsys) -> None:
     assert renderers_cli_main(["smoke", "rendering.legacy_hybrid"]) == 2
     message = _stderr(capsys)
     assert "unknown renderer id 'rendering.legacy_hybrid'" in message
-    assert "is a planner id" in message
 
 
 # ---------------------------------------------------------------------------

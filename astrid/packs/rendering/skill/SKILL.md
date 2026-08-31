@@ -1,8 +1,8 @@
 ---
 name: rendering
 description: >
-  Rendering pack: the stable rendering.render facade, protocol-v1 Remotion
-  and FFmpeg renderers, the legacy hybrid planner, the FFmpeg finalizer, and
+  Rendering pack: the stable rendering.render facade, protocol-v1 Remotion,
+  FFmpeg, and Three.js renderers, the FFmpeg finalizer, and
   element escape hatches for custom visual effects.
 ---
 
@@ -13,7 +13,8 @@ registries into finished video files. `rendering.render` is a stable neutral
 facade over `RenderService`: the service resolves a renderer or planner from
 pack manifests, probes support, invokes protocol-v1 commands, validates media,
 completes audio/finalization when required, and publishes the video plus
-provenance. `hybrid` is a legacy planning policy, not a renderer.
+provenance. Select implementations by their qualified renderer IDs; shorthand
+and automatic fallback are unavailable.
 
 ## Render flow
 
@@ -30,9 +31,9 @@ timeline.json + optional assets.json
 1. **Input**: `hype.timeline.json` (clip sequence, effects, animations,
    transitions) and, when the timeline references media files,
    `hype.assets.json` (asset registry with file paths).
-2. **Selection**: The service resolves a qualified renderer/planner through
-   trust-aware registries. Legacy `remotion`, `ffmpeg`, and `hybrid` selectors
-   are translated only at the compatibility boundary.
+2. **Selection**: The service resolves a qualified renderer through
+   trust-aware registries. Unsupported selectors fail closed with the
+   canonical renderer IDs in the recovery details.
 3. **Invocation**: The selected protocol command receives one request file
    and writes one authoritative result file in an isolated workspace.
 4. **Validation/publication**: Astrid probes the media, validates profile,
@@ -307,9 +308,9 @@ successful `data` includes run/kernel IDs and durable artifact paths, while
 invalid selectors and foreign sources return a typed validation error before
 ledger admission.
 
-Use an `engine` input of `hybrid` only when compatibility with the legacy hybrid
-planning policy is required. Legacy `engine=remotion` preserves its historical
-support-based FFmpeg auto-route; `backend=rendering.remotion` is strict.
+Use the qualified `selector` input (`rendering.remotion`, `rendering.ffmpeg`, or
+`rendering.threejs`). The host does not translate shorthand selectors or
+automatically route to another backend.
 
 The normal SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`. The sidecar records the resolved plan,

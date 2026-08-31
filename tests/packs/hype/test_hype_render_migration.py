@@ -72,7 +72,6 @@ def test_hype_render_step_uses_qualified_facade_and_declares_pair(
     steps.invoke_hype_render(args)
     assert calls[0]["backend_config"] == {
         "rendering.remotion": {"theme_path": str(args.theme)},
-        "rendering.legacy_hybrid": {"theme_path": str(args.theme)},
     }
 
 

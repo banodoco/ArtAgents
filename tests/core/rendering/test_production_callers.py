@@ -8,8 +8,6 @@ source tree (site-packages and vendored code are never scanned) and fails
 if any production module:
 
 * imports ``astrid.packs.rendering.backends.*``,
-* imports the legacy engine
-  (``astrid.packs.rendering.executors.render.legacy_engine``), or
 * references the facade runtime module
   (``astrid.packs.rendering.executors.render.run``) in argv / imports —
   i.e. spawns ``python -m astrid.packs.rendering.executors.render.run``
@@ -37,7 +35,7 @@ ASTRID_DIR = REPO_ROOT / "astrid"
 # ``from astrid.packs.rendering.backends... import ...`` (any depth).
 _BACKEND_IMPORT = r"(?:import|from)\s+astrid\.packs\.rendering\.backends(?:\.[A-Za-z_]\w*)*"
 
-# The legacy engine module, imported either as a dotted module
+# The retired legacy engine import pattern, retained only as a negative scan.
 # (``import astrid.packs.rendering.executors.render.legacy_engine`` /
 # ``from astrid.packs.rendering.executors.render.legacy_engine import ...``)
 # or as a name in a package import
@@ -94,15 +92,6 @@ _ALLOWED_FILES: dict[str, str] = {
     "astrid/packs/rendering/executors/render/audio_reactive_colour.py": (
         "render facade compatibility alias: keeps the historical module path "
         "for the FFmpeg backend specialization"
-    ),
-    "astrid/packs/rendering/executors/render/legacy_engine.py": (
-        "legacy engine itself: characterized pre-facade implementation, "
-        "preserved verbatim for parity fixtures"
-    ),
-    "astrid/packs/rendering/planners/threejs_hybrid/run.py": (
-        "rendering.threejs-hybrid planner: reuses the Three.js backend's "
-        "pure text-eligibility predicate (and the legacy planner's pure "
-        "helpers); dispatch still goes through the registry/planner contract"
     ),
 }
 
@@ -186,7 +175,6 @@ def test_backend_import_pattern_still_observes_known_importers() -> None:
     matches = _run_grep(_BACKEND_IMPORT, _PY_GLOBS)
     paths = {_rel_path(m) for m in matches}
 
-    assert "astrid/packs/rendering/executors/render/legacy_engine.py" in paths
     assert "astrid/packs/rendering/executors/render/audio_reactive_colour.py" in paths
     assert "astrid/packs/rendering/run.py" in paths
     assert any(p.startswith(_BACKEND_IMPL_PREFIX) for p in paths)

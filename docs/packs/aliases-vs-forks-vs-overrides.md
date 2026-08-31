@@ -13,7 +13,7 @@ guide builds on the vocabulary in
 | Redirect a capability id to a replacement | Override | `.overrides.json` in local pack | Your project |
 | Shadow a builtin with a local replacement | Override | `.overrides.json` in local pack | Your project |
 | Maintain backward-compat after renaming | Alias | In pack manifest | All consumers |
-| Keep an old renderer/planner/finalizer id working | Alias with the matching rendering `kind` | In pack manifest | All render-service callers |
+| Expose an alternate qualified external capability id | Alias with the matching rendering `kind` | In pack manifest | All render-service callers |
 | Redirect one rendering implementation to another | Typed override | `.overrides.json` in local pack | Facade and direct-service calls in your project |
 
 ---
@@ -26,7 +26,8 @@ canonical id, declared in the owning pack's manifest.
 **Where they live:** Aliases are a top-level pack manifest field — they live in
 `pack.yaml` on the canonical pack that owns the target capability, not in the
 capability's own manifest. This keeps alias ownership explicit: the pack that
-provides the canonical capability declares the legacy ids that route to it.
+provides the canonical capability declares any alternate qualified ids that
+route to it. Built-in rendering selectors remain canonical and strict.
 
 **Schema (pack.json v1):**
 
@@ -211,7 +212,6 @@ its own namespace. These keys are distinct:
 {
   "executor": {"rendering.render": "local.render"},
   "renderer": {"rendering.remotion": "video_tool.renderer"},
-  "planner": {"rendering.legacy_hybrid": "video_tool.planner"},
   "finalizer": {"rendering.ffmpeg-finalizer": "video_tool.finalizer"}
 }
 ```
@@ -241,11 +241,9 @@ ineligible override targets fail closed.
 
 `rendering.render` is reserved for the executor facade. A renderer registration,
 alias terminal, or renderer override that resolves to it is rejected as facade
-recursion. The legacy short names `remotion` and `ffmpeg` are core compatibility
-aliases for renderer lookup, while the facade's legacy selector
-`engine=remotion` retains its characterized auto-route policy. To demand the
-Remotion implementation strictly, select the qualified id
-`backend=rendering.remotion`; qualified selectors have no implicit fallback.
+recursion. Renderer selection requires a qualified implementation id such as
+`selector=rendering.remotion`; shorthand selectors and implicit fallback are
+rejected.
 
 Renderer/planner/finalizer overrides are stored by the same project-local
 `OverrideStore` in `astrid/packs/local/.overrides.json`. There is no separate

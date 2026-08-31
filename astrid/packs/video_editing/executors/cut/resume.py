@@ -172,7 +172,7 @@ def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
             timeline_path_out,
             assets_path_out,
             out_dir / "hype.mp4",
-            engine=args.renderer,
+            selector=args.renderer,
             backend_config={
                 "rendering.remotion": {"project_dir": str(REPO_ROOT / "remotion")}
             },

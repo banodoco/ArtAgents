@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("banodoco_timeline_schema")
+
 from astrid.packs.rendering.executors.render.managed_timeline import (
     materialize_managed_render_snapshot,
     resolve_managed_render_snapshot,

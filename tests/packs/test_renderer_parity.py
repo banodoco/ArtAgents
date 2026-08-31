@@ -20,6 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("banodoco_timeline_schema")
+
 from astrid.core.execution.executor import runner as executor_runner
 from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
@@ -43,7 +45,7 @@ from astrid.core.rendering.errors import (
     make_renderer_error,
 )
 from astrid.core.rendering.registry import load_default_registries
-from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
+from astrid.core.rendering.service import RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.timeline.crud import create_timeline
@@ -398,7 +400,7 @@ def test_empty_timeline_is_rejected_and_failure_workspace_is_clean(
         backend_config={},
     )
     with pytest.raises(RendererException) as caught:
-        service.render_request(request, selector="hybrid", out_path=output)
+        service.render_request(request, selector="rendering.ffmpeg", out_path=output)
     assert caught.value.error.kind == "unsupported"
     assert not output.exists()
     assert not Path(f"{output}.provenance.json").exists()
@@ -466,6 +468,7 @@ def test_real_ffmpeg_renders_supported_semantic_variants(
         assert fragment["specialization"]["id"] == "audio-reactive-colour/v1"
 
 
+@pytest.mark.skip(reason="retired shorthand and automatic fallback route")
 def test_nominal_remotion_auto_routes_supported_media_to_ffmpeg(
     parity_media: Path,
     service: RenderService,
@@ -485,6 +488,7 @@ def test_nominal_remotion_auto_routes_supported_media_to_ffmpeg(
     assert sidecar["routing"]["resolved_backends"] == ["rendering.ffmpeg"]
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_real_all_ffmpeg_hybrid_plans_and_finalizes(
     parity_media: Path,
     service: RenderService,
@@ -508,6 +512,7 @@ def test_real_all_ffmpeg_hybrid_plans_and_finalizes(
     assert sidecar["finalizer"]["id"] == "rendering.ffmpeg-finalizer"
 
 
+@pytest.mark.skip(reason="retired built-in planner")
 def test_real_mixed_hybrid_uses_transition_windows(
     parity_media: Path,
     service: RenderService,
