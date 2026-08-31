@@ -156,17 +156,17 @@ def test_iteration_relation_media_objects_are_not_promoted_to_run_lineage() -> N
 def test_iteration_events_drop_mismatched_aggregate_ids() -> None:
     class Runs:
         def events(self, run_id):
-            return [
+            return [[
                 {"event_id": "exact", "aggregate_id": run_id},
                 {"event_id": "other", "aggregate_id": ROOT_RUN_ID},
-            ]
+            ], None]
 
     class Tasks:
         def events(self, task_id):
-            return [
+            return [[
                 {"event_id": "exact", "aggregate_id": task_id},
                 {"event_id": "other", "aggregate_id": "task-other"},
-            ]
+            ], None]
 
     runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks()})()
     run_events, run_available = iteration_video._runtime_run_events(runtime, "demo", TARGET_RUN_ID)
@@ -186,6 +186,75 @@ def test_iteration_malformed_event_response_is_unavailable() -> None:
     events, available = iteration_video._runtime_run_events(runtime, "demo", TARGET_RUN_ID)
     assert events == []
     assert available is False
+
+
+def test_iteration_runtime_reads_follow_nonterminal_page_cursors() -> None:
+    run_one = {"run_id": "run-one", "project_id": "demo"}
+    run_two = {"run_id": "run-two", "project_id": "demo"}
+    calls: list[tuple[str, str | None, int | None]] = []
+
+    class Runs:
+        def list(self, project, *, cursor=None, limit=50):
+            calls.append((f"runs:{project}", cursor, limit))
+            return [[run_one], "run-cursor"] if cursor is None else [[run_two], None]
+
+        def events(self, run_id, *, cursor=None, limit=50):
+            calls.append((f"run-events:{run_id}", cursor, limit))
+            row = {"event_id": f"event-{cursor or 'first'}", "aggregate_id": run_id}
+            return [[row], "event-cursor"] if cursor is None else [[{"event_id": "event-last", "aggregate_id": run_id}], None]
+
+    class Tasks:
+        def list(self, project, *, cursor=None, limit=50):
+            calls.append((f"tasks:{project}", cursor, limit))
+            first = [{"task_id": "task-one", "run_id": "run-one", "project_id": "demo"}]
+            second = [{"task_id": "task-two", "run_id": "run-two", "project_id": "demo"}]
+            return [first, "task-cursor"] if cursor is None else [second, None]
+
+        def events(self, task_id, *, cursor=None, limit=50):
+            calls.append((f"task-events:{task_id}", cursor, limit))
+            first = [{"event_id": "task-first", "aggregate_id": task_id}]
+            second = [{"event_id": "task-last", "aggregate_id": task_id}]
+            return [first, "task-event-cursor"] if cursor is None else [second, None]
+
+    runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks()})()
+    assert iteration_video._runtime_run_list(runtime, "demo") == [run_one, run_two]
+    task_records, task_available = iteration_video._runtime_task_records(runtime, "demo")
+    assert task_available is True
+    assert [task["task_id"] for task in task_records["run-two"]] == ["task-two"]
+    run_events, run_available = iteration_video._runtime_run_events(runtime, "demo", "run-one")
+    task_events, task_events_available = iteration_video._runtime_task_events(runtime, "demo", "task-one")
+    assert run_available is True and len(run_events) == 2
+    assert task_events_available is True and len(task_events) == 2
+    assert ("runs:demo", "run-cursor", 50) in calls
+    assert ("tasks:demo", "task-cursor", 50) in calls
+    assert ("run-events:run-one", "event-cursor", 50) in calls
+    assert ("task-events:task-one", "task-event-cursor", 50) in calls
+
+
+def test_iteration_runtime_readers_reject_bare_lists_and_mappings() -> None:
+    class Runs:
+        def list(self, _project):
+            return {"items": []}
+
+        def events(self, _run_id):
+            return []
+
+    class Tasks:
+        def list(self, _project):
+            return []
+
+        def events(self, _task_id):
+            return {"items": []}
+
+    runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks()})()
+    with pytest.raises(iteration_video.IterationVideoError, match="invalid response"):
+        iteration_video._runtime_run_list(runtime, "demo")
+    task_records, task_available = iteration_video._runtime_task_records(runtime, "demo")
+    assert task_records == {} and task_available is False
+    run_events, run_available = iteration_video._runtime_run_events(runtime, "demo", TARGET_RUN_ID)
+    task_events, task_events_available = iteration_video._runtime_task_events(runtime, "demo", "task-one")
+    assert run_events == [] and run_available is False
+    assert task_events == [] and task_events_available is False
 
 
 def test_iteration_task_project_mismatch_is_not_attached() -> None:

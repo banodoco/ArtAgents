@@ -281,7 +281,10 @@ class RemoteTasks(_RemoteFamily):
     def show(self, task_id): return self._typed("get_task", task_id)
     def cancel(self, task_id, *, idempotency_key=None): return self._typed("cancel_task", task_id, key=idempotency_key, idempotency_key=idempotency_key or uuid.uuid4().hex)
     def retry(self, task_id, *, idempotency_key=None): return self._typed("retry_task", task_id, key=idempotency_key, idempotency_key=idempotency_key or uuid.uuid4().hex)
-    def events(self, task_id): return self._typed("list_events", aggregate_id=task_id)
+    def events(self, task_id, *, cursor=None, limit=50):
+        return self._typed(
+            "list_events", cursor=cursor, limit=limit, aggregate_id=task_id
+        )
 
 
 class RemoteRuns(_RemoteFamily):
@@ -294,7 +297,10 @@ class RemoteRuns(_RemoteFamily):
     def retry(self, run_id, *, selected_task_ids=None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("retry_run", run_id, key=key, idempotency_key=key, selected_task_ids=selected_task_ids)
-    def events(self, run_id): return self._typed("list_run_events", run_id)
+    def events(self, run_id, *, cursor=None, limit=50):
+        return self._typed(
+            "list_events", cursor=cursor, limit=limit, aggregate_id=run_id
+        )
 
 
 class RemoteReferences(_RemoteFamily):

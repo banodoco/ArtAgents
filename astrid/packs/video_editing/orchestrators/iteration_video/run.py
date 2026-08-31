@@ -20,6 +20,7 @@ from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
+from astrid.sdk.workspace_client import page_pair
 SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
 
@@ -35,6 +36,10 @@ OUTPUT_FILES = (
 
 class IterationVideoError(RuntimeError):
     pass
+
+
+_RUNTIME_PAGE_LIMIT = 50
+_RUNTIME_MAX_PAGES = 1000
 
 
 @dataclass
@@ -320,33 +325,54 @@ def _unwrap_runtime_result(value: Any) -> Any:
     return value
 
 
+def _runtime_paged_read(
+    method: Any, *args: Any, initial_kwargs: Mapping[str, Any] | None = None
+) -> list[Any] | None:
+    """Read every page from one generated runtime list operation.
+
+    Runtime list operations have exactly one wire shape: the JSON-safe
+    ``[items, next_cursor]`` pair decoded by :func:`page_pair`.  In
+    particular, a bare list and a mapping are not alternate spellings of a
+    terminal page; accepting either would hide a contract mismatch and lose
+    rows whenever a continuation cursor is present.
+    """
+
+    rows: list[Any] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _ in range(_RUNTIME_MAX_PAGES):
+        try:
+            kwargs = dict(initial_kwargs or {})
+            if cursor is not None:
+                kwargs.update(cursor=cursor, limit=_RUNTIME_PAGE_LIMIT)
+            value = method(*args, **kwargs)
+            pair = page_pair(_unwrap_runtime_result(value))
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            return None
+        if pair is None:
+            return None
+        page_rows, next_cursor = pair
+        rows.extend(page_rows)
+        if next_cursor is None:
+            return rows
+        if next_cursor in seen_cursors or next_cursor == cursor:
+            return None
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return None
+
+
 def _runtime_run_list(client: Any, project: str) -> list[Any]:
     runs = getattr(client, "runs", None)
     method = getattr(runs, "list", None)
-    if callable(method):
-        value = _unwrap_runtime_result(method(project))
-    else:
+    if not callable(method):
         method = getattr(client, "list_project_runs", None)
         if not callable(method):
             raise IterationVideoError("runtime client does not expose project run listing")
-        value = _unwrap_runtime_result(method(project))
-    # Generated list operations return ``(items, next_cursor)``.  The typed
-    # SDK preserves that pair as a JSON-shaped list, so unwrap either Python
-    # sequence without mistaking a two-item page for two resources.
-    if (
-        isinstance(value, (list, tuple))
-        and len(value) == 2
-        and value[1] is None
-        and isinstance(value[0], (list, tuple))
-    ):
-        value = value[0]
-    if isinstance(value, Mapping):
-        if "items" not in value:
-            raise IterationVideoError("runtime project run listing returned an invalid response")
-        value = value["items"]
-    if not isinstance(value, (list, tuple)):
+    value = _runtime_paged_read(method, project)
+    if value is None:
         raise IterationVideoError("runtime project run listing returned an invalid response")
-    return list(value)
+    return value
 
 
 def _runtime_run_show(
@@ -481,24 +507,8 @@ def _runtime_task_records(
         method = getattr(client, "list_project_tasks", None)
     if not callable(method):
         return {}, False
-    try:
-        value = _unwrap_runtime_result(
-            method(project) if tasks_family is not None and hasattr(tasks_family, "list") else method(project)
-        )
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        return {}, False
-    if isinstance(value, Mapping):
-        if "items" not in value:
-            return {}, False
-        value = value["items"]
-    if (
-        isinstance(value, (list, tuple))
-        and len(value) == 2
-        and value[1] is None
-        and isinstance(value[0], (list, tuple))
-    ):
-        value = value[0]
-    if not isinstance(value, (list, tuple)):
+    value = _runtime_paged_read(method, project)
+    if value is None:
         return {}, False
     by_run: dict[str, list[dict[str, Any]]] = {}
     accepted_projects = project_identities or {str(project)}
@@ -539,17 +549,8 @@ def _runtime_relations(client: Any, project: str) -> tuple[list[dict[str, Any]],
         method = getattr(client, "list_media_relations", None)
     if not callable(method):
         return [], False
-    try:
-        value = _unwrap_runtime_result(method(project))
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        return [], False
-    if isinstance(value, Mapping):
-        if "items" not in value:
-            return [], False
-        value = value["items"]
-    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (list, tuple)):
-        value = value[0]
-    if not isinstance(value, (list, tuple)):
+    value = _runtime_paged_read(method, project)
+    if value is None:
         return [], False
     return [item for raw in value if (item := _as_mapping(raw)) is not None], True
 
@@ -655,9 +656,8 @@ def _runtime_run_events(
         method = getattr(client, "list_run_events", None)
     if not callable(method):
         return [], False
-    try:
-        value = _unwrap_runtime_result(method(run_id)) if runs is not None and hasattr(runs, "events") else _unwrap_runtime_result(method(run_id))
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+    value = _runtime_paged_read(method, run_id)
+    if value is None:
         return [], False
     return _scoped_events(value, aggregate_id=run_id)
 
@@ -671,9 +671,13 @@ def _runtime_task_events(
         method = getattr(client, "list_events", None)
     if not callable(method):
         return [], False
-    try:
-        value = _unwrap_runtime_result(method(task_id)) if tasks is not None and hasattr(tasks, "events") else _unwrap_runtime_result(method(aggregate_id=task_id))
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+    if tasks is not None and callable(getattr(tasks, "events", None)):
+        value = _runtime_paged_read(method, task_id)
+    else:
+        value = _runtime_paged_read(
+            method, initial_kwargs={"aggregate_id": task_id}
+        )
+    if value is None:
         return [], False
     return _scoped_events(value, aggregate_id=task_id)
 
@@ -686,15 +690,7 @@ def _scoped_events(value: Any, *, aggregate_id: str) -> tuple[list[dict[str, Any
     broad project event read from becoming an accidental lineage source.
     """
 
-    if isinstance(value, Mapping):
-        if "items" not in value:
-            return [], False
-        raw = value["items"]
-    else:
-        raw = value
-    if not isinstance(raw, (list, tuple)):
-        return [], False
-    events = [_as_mapping(item) for item in raw]
+    events = [_as_mapping(item) for item in value]
     if any(item is None for item in events):
         return [], False
     exact = [item for item in events if item.get("aggregate_id") == aggregate_id]

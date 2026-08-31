@@ -493,8 +493,16 @@ class WorkspaceClient:
     def list_project_runs(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
         return self._call_generated("list_project_runs", project_id, cursor=cursor, limit=limit)
 
-    def list_events(self, *, aggregate_id: str | None = None) -> Any:
-        return self._call_generated("list_events", aggregate_id=aggregate_id)
+    def list_events(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 50,
+        aggregate_id: str | None = None,
+    ) -> Any:
+        return self._call_generated(
+            "list_events", cursor=cursor, limit=limit, aggregate_id=aggregate_id
+        )
 
     def list_run_events(self, run_id: str) -> Any:
         return self._call_generated("list_run_events", run_id)
