@@ -28,7 +28,7 @@ result = sdk.invoke(
     inputs={
         "pool": "./out/unified_pool.json",
         "brief": "./briefs/my-hype.md",
-        "theme": "./themes/default.json",
+        "theme": "/absolute/task-inputs/theme.json",
         "target_duration": "60",
     },
 )
@@ -55,7 +55,7 @@ result = sdk.invoke(
 |----------------|--------|----------|----------------------------------------------|
 | pool           | file   | no       | Unified clip pool from training.pool_merge    |
 | brief          | file   | yes      | Creative brief describing the desired output  |
-| theme          | file   | no       | Theme/style configuration                     |
+| theme          | file   | no       | Explicit absolute path to a runtime-materialized `theme.json`; no slug, directory, URL, or workspace fallback |
 | target_duration| number | no       | Target duration in seconds                    |
 | env_file       | file   | no       | Optional environment file for API credentials |
 
@@ -83,3 +83,9 @@ feeds into video_editing.cut (step 10) for timeline assembly.
 - `editorial.quote_scout`
 - `training.pool_build` (cross-pack)
 - `training.pool_merge` (cross-pack)
+
+When supplied, `theme` must be an existing absolute runtime-materialized
+`theme.json` file. Arrange does not search checkout theme directories, resolve
+slugs, fetch URLs, or inject a default; omit it when theme-dependent guidance
+is not needed. A downstream `video_editing.cut` invocation must receive the
+same materialized file when the arrangement uses generative visual effects.

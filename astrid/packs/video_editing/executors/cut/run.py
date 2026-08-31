@@ -20,6 +20,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.contracts.errors import AstridError
@@ -27,7 +28,7 @@ from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
-from astrid.core.theme import load_theme, theme_root
+from astrid.core.theme import load_theme
 from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,
@@ -121,7 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--arrangement", type=Path, help="Arrangement JSON for pool-based multitrack assembly.")
     parser.add_argument("--pool", type=Path, help="Pool JSON used with --arrangement.")
     parser.add_argument("--brief", type=Path, help="brief.txt used with --arrangement.")
-    parser.add_argument("--theme", help="Theme id, theme directory, or path to theme.json.")
+    parser.add_argument(
+        "--theme",
+        help="Explicit absolute path to a runtime-materialized theme.json file.",
+    )
     parser.add_argument("--asset", action="append", default=[], help="Additional source asset mapping in KEY=PATH form.")
     parser.add_argument("--verbose", action="store_true", help="Print ffprobe cache activity.")
     parser.add_argument(
@@ -148,37 +152,44 @@ def load_json(path: Path) -> Any:
 
 
 def _resolve_theme_path(theme_value: str | None) -> Path | None:
+    """Resolve only an explicit absolute, materialized theme document.
+
+    Cut runs in a task-owned attempt directory.  It must never search the
+    checkout (or a theme directory) and must not turn an arbitrary slug into
+    an implicit workspace dependency.  The orchestrator already materializes
+    and validates this path; keep the executor strict as well because it is a
+    public subprocess entrypoint.
+    """
     if theme_value is None:
         return None
-    candidate = Path(theme_value)
-    if candidate.name == "theme.json":
-        return candidate
-    if candidate.exists() and candidate.is_dir():
-        return candidate / "theme.json"
-    if candidate.exists():
-        return candidate
-    return None
+    raw = str(theme_value).strip()
+    candidate = Path(raw).expanduser()
+    if urlparse(raw).scheme or not candidate.is_absolute():
+        raise AstridError(
+            "cut requires --theme to be an explicit absolute runtime-materialized theme.json file; "
+            "theme slugs, directories, URLs, and relative paths are not supported",
+            recovery_command="Pass --theme /absolute/path/to/theme.json, or omit theme-dependent effects",
+        )
+    candidate = candidate.resolve()
+    if candidate.name != "theme.json" or not candidate.is_file():
+        raise AstridError(
+            f"cut theme file not found or invalid: {candidate}; expected an existing theme.json file",
+            recovery_command="Materialize theme.json in the task inputs and pass its absolute path with --theme",
+        )
+    return candidate
 
 
-def _theme_slug(theme_value: str | None, theme_path: Path | None) -> str | None:
-    if theme_path is not None:
-        return _theme_slug_from_path(theme_path)
-    if theme_value is None:
+def _theme_id(theme: dict[str, Any] | None) -> str | None:
+    """Return the canonical id from the materialized theme document."""
+    if theme is None:
         return None
-    value = str(theme_value).strip()
-    return value or None
-
-
-def _theme_slug_from_path(theme_path: Path | None) -> str | None:
-    """Derive the theme slug (directory name) from a theme.json or theme dir path."""
-    if theme_path is None:
-        return None
-    path = Path(theme_path)
-    if path.name == "theme.json":
-        return path.parent.name
-    if path.is_dir():
-        return path.name
-    return path.parent.name
+    value = theme.get("id")
+    if not isinstance(value, str) or not value.strip():
+        raise AstridError(
+            "cut theme.json must contain a non-empty string 'id'",
+            recovery_command="Materialize a schema-valid theme.json with its canonical id",
+        )
+    return value.strip()
 
 
 def arrangement_uses_generative_visuals(arrangement: dict[str, Any], pool: dict[str, Any]) -> bool:
@@ -229,8 +240,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_resume_mode(args)
     theme_path = _resolve_theme_path(args.theme)
     theme = load_theme(theme_path) if theme_path is not None else None
-    theme_dir = theme_root(theme_path).resolve() if theme_path is not None else None
-    theme_slug = _theme_slug(args.theme, theme_path)
+    theme_slug = _theme_id(theme)
     pure_generative = args.video is None and args.audio is not None
     no_audio = args.video is None and args.audio is None
     if args.scenes is None and not (pure_generative or no_audio):
@@ -319,11 +329,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         validate_arrangement_duration_window(arrangement)
     compiled_plan = compile_arrangement_plan(arrangement, pool)
     edl_rows = arrangement_edl_rows(arrangement, pool, transcript, compiled_plan=compiled_plan)
-    if theme_slug is None:
-        # Timelines now reference a theme by slug at top level. Default to the
-        # banodoco-default theme when --theme isn't supplied so the timeline still
-        # validates; callers needing a specific brand pass --theme.
-        theme_slug = "banodoco-default"
+    theme_needed = any(
+        isinstance(plan.get("overlay_entry"), dict)
+        and plan["overlay_entry"].get("kind") == "generative"
+        for plan in compiled_plan
+    )
+    if theme_needed and theme is None:
+        raise AstridError(
+            "cut requires --theme to be an explicit absolute runtime-materialized theme.json file "
+            "when the arrangement contains generative visual effects",
+            recovery_command="Materialize theme.json in the task inputs and pass its absolute path with --theme",
+        )
     timeline = build_multitrack_timeline(
         arrangement,
         pool,
@@ -331,7 +347,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         primary_asset,
         compiled_plan=compiled_plan,
         theme=theme,
-        theme_dir=theme_dir,
         theme_slug=theme_slug,
     )
     meta = build_metadata_from_arrangement(

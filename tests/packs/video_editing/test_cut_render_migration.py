@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core import timeline
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.training.executors.pool_merge import run as pool_merge
 from astrid.packs.video_editing.executors.cut import resume as cut_resume
 from astrid.packs.video_editing.executors.cut import run as cut_run
@@ -16,6 +17,7 @@ from astrid.packs.video_editing.executors.cut import run as cut_run
 def test_cut_cli_emits_only_attempt_outputs(tmp_path: Path) -> None:
     pytest.importorskip("banodoco_timeline_schema")
     inputs = _write_visual_only_inputs(tmp_path)
+    theme = _write_theme(tmp_path)
     out = tmp_path / "out"
 
     assert cut_run.main(
@@ -23,14 +25,63 @@ def test_cut_cli_emits_only_attempt_outputs(tmp_path: Path) -> None:
             "--pool", str(inputs["pool"]),
             "--arrangement", str(inputs["arrangement"]),
             "--brief", str(inputs["brief"]),
+            "--theme", str(theme),
             "--out", str(out),
         ]
     ) == 0
 
     assert (out / "hype.timeline.json").is_file()
     assert (out / "hype.assets.json").is_file()
+    emitted_timeline = json.loads((out / "hype.timeline.json").read_text(encoding="utf-8"))
+    assert emitted_timeline["theme"] == "materialized-fixture"
     assert not list(tmp_path.rglob("assembly.json"))
     assert not list(tmp_path.rglob("events.jsonl"))
+
+
+def test_cut_rejects_generative_arrangement_without_explicit_theme(tmp_path: Path) -> None:
+    pytest.importorskip("banodoco_timeline_schema")
+    inputs = _write_visual_only_inputs(tmp_path)
+
+    with pytest.raises(AstridError, match="explicit absolute runtime-materialized theme.json"):
+        cut_run.main(
+            [
+                "--pool", str(inputs["pool"]),
+                "--arrangement", str(inputs["arrangement"]),
+                "--brief", str(inputs["brief"]),
+                "--out", str(tmp_path / "out"),
+            ]
+        )
+
+
+@pytest.mark.parametrize("value", ["banodoco-default", "themes/my-theme", "https://example.test/theme.json"])
+def test_cut_theme_resolver_rejects_slug_directory_and_url(value: str) -> None:
+    with pytest.raises(AstridError, match="absolute runtime-materialized theme.json"):
+        cut_run._resolve_theme_path(value)
+
+
+def test_cut_theme_resolver_requires_existing_theme_json(tmp_path: Path) -> None:
+    with pytest.raises(AstridError, match="theme file not found or invalid"):
+        cut_run._resolve_theme_path(str((tmp_path / "missing.json").resolve()))
+    directory = tmp_path / "theme-dir"
+    directory.mkdir()
+    with pytest.raises(AstridError, match="theme file not found or invalid"):
+        cut_run._resolve_theme_path(str(directory.resolve()))
+
+
+def test_cut_theme_id_comes_from_materialized_document_not_directory() -> None:
+    assert cut_run._theme_id({"id": "canonical-theme"}) == "canonical-theme"
+
+
+def test_source_only_cut_timeline_does_not_inject_a_theme() -> None:
+    config = cut_run.build_multitrack_timeline(
+        {"clips": []},
+        {"entries": []},
+        {"assets": {}},
+        None,
+        compiled_plan=[],
+    )
+    assert "theme" not in config
+    assert "banodoco-default" not in config
 
 
 def test_cut_resume_copies_materialized_artifacts_without_workspace_lookup(
@@ -122,3 +173,28 @@ def _write_visual_only_inputs(root: Path) -> dict[str, Path]:
         "arrangement": arrangement_path,
         "brief": brief_path,
     }
+
+
+def _write_theme(root: Path) -> Path:
+    path = root / "materialized" / "theme.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "id": "materialized-fixture",
+                "visual": {
+                    "color": {"fg": "#fff", "bg": "#000", "accent": "#f00"},
+                    "type": {
+                        "families": {"heading": "Arial", "body": "Arial"},
+                        "size": {"base": 16, "small": 12, "large": 24},
+                        "weight": {"normal": 400, "bold": 700},
+                        "lineHeight": 1.5,
+                    },
+                    "motion": {"fadeMs": 300},
+                    "canvas": {"width": 1920, "height": 1080, "fps": 30},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path.resolve()

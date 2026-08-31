@@ -158,7 +158,6 @@ def build_multitrack_timeline(
     primary_asset: str | None,
     compiled_plan: list[dict[str, Any]] | None = None,
     theme: dict[str, Any] | None = None,
-    theme_dir: Path | None = None,
     theme_slug: str | None = None,
 ) -> TimelineConfig:
     """Build a standalone Remotion timeline from arrangement + pool data.
@@ -276,10 +275,6 @@ def build_multitrack_timeline(
                     "text": text_data,
                 }
             )
-    if not theme_slug:
-        raise AstridError(
-            "build_multitrack_timeline requires a theme_slug — pass --theme so the timeline can reference it."
-        )
     # If the source's resolution/fps doesn't match the theme canvas, surface that
     # via theme_overrides.visual.canvas so the renderer knows what to do. We only
     # write an override if it actually diverges from the theme.
@@ -324,11 +319,10 @@ def build_multitrack_timeline(
             tracks.append({"id": "v2", "kind": "visual", "label": "B-roll"})
         if "a1" in track_ids:
             tracks.append({"id": "a1", "kind": "audio", "label": "Dialogue"})
-    config: dict[str, Any] = {
-        "theme": theme_slug,
-        "tracks": tracks,
-        "clips": clips,
-    }
+    config: dict[str, Any] = {}
+    if theme_slug is not None:
+        config["theme"] = theme_slug
+    config.update({"tracks": tracks, "clips": clips})
     if theme_overrides:
         config["theme_overrides"] = theme_overrides
     # SD-009: every emitted timeline carries the canonical `output` block so

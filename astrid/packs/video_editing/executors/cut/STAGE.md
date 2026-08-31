@@ -35,7 +35,7 @@ result = sdk.invoke(
         "pool": "./out/pool.json",
         "arrangement": "./out/arrangement.json",
         "brief": "./brief.json",
-        "theme": "./themes/my-theme",
+        "theme": "/absolute/task-inputs/theme.json",
     },
 )
 ```
@@ -53,7 +53,7 @@ result = sdk.invoke(
         "brief": "./brief.json",
         "video": "./source.mp4",
         "audio": "./source.mp3",
-        "theme": "./themes/my-theme",
+        "theme": "/absolute/task-inputs/theme.json",
     },
 )
 ```
@@ -67,7 +67,7 @@ result = sdk.invoke(
 | arrangement | file | no       | Arrangement decisions           |
 | video       | file | no       | Source video file               |
 | audio       | file | no       | Source audio file               |
-| theme       | file | no       | Theme configuration             |
+| theme       | file | conditional | Absolute path to an existing runtime-materialized `theme.json`; required for generative visual effects |
 
 ## Outputs
 
@@ -95,3 +95,9 @@ Step 10 of the editorial pipeline. Runs after `editorial.arrange` and
 - `training.pool_build`
 - `training.pool_merge`
 - `editorial.arrange`
+
+`cut` never resolves a theme slug, theme directory, URL, or checkout-relative
+path, and it never injects a default theme. Source-only arrangements may omit
+`theme`; arrangements containing generative visual effects must provide the
+absolute task-materialized `theme.json` path. The theme id emitted into the
+timeline comes from the document's canonical `id` field.
