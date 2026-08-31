@@ -13,6 +13,8 @@ import json
 import hashlib
 import hmac
 import socketserver
+import select
+import socket
 import threading
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -52,6 +54,26 @@ class _BrokerHandler(socketserver.StreamRequestHandler):
             name, separator, value = raw.decode("iso-8859-1", "replace").partition(":")
             if separator:
                 headers[name.lower()] = value.strip()
+        if line.startswith("CONNECT "):
+            target = line.split(" ", 2)[1] if len(line.split(" ", 2)) > 1 else ""
+            allowed = broker._route_allowed(f"https://{target}/")
+            broker._record("route", f"https://{target}/", allowed=allowed)
+            if not allowed:
+                self._response(HTTPStatus.FORBIDDEN, b"broker route was not admitted")
+                return
+            try:
+                host, raw_port = target.rsplit(":", 1)
+                upstream = socket.create_connection((host.strip("[]"), int(raw_port)), timeout=10)
+            except (OSError, ValueError):
+                self._response(HTTPStatus.BAD_GATEWAY, b"broker could not connect upstream")
+                return
+            try:
+                self.wfile.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                self.wfile.flush()
+                self._tunnel(upstream)
+            finally:
+                upstream.close()
+            return
         if not line.startswith(("GET ", "POST ", "HEAD ")):
             broker.events.append(BrokerEvent("rejected", line[:120]))
             self._response(HTTPStatus.BAD_REQUEST, b"broker requires absolute-form HTTP")
@@ -62,10 +84,51 @@ class _BrokerHandler(socketserver.StreamRequestHandler):
         if not allowed:
             self._response(HTTPStatus.FORBIDDEN, b"broker route was not admitted")
             return
-        if broker.response_body is None:
-            self._response(HTTPStatus.BAD_GATEWAY, b"no broker route configured")
+        if broker.response_body is not None:
+            self._response(HTTPStatus.OK, broker.response_body)
             return
-        self._response(HTTPStatus.OK, broker.response_body)
+        try:
+            self._forward_http(line, headers)
+        except (OSError, ValueError):
+            self._response(HTTPStatus.BAD_GATEWAY, b"broker could not connect upstream")
+
+    def _forward_http(self, line: str, headers: Mapping[str, str]) -> None:
+        """Forward an absolute-form HTTP request when no fixture body exists."""
+        parts = line.split(" ", 2)
+        if len(parts) != 3:
+            raise ValueError("malformed proxy request")
+        method, target, _version = parts
+        parsed = urlsplit(target)
+        if parsed.scheme != "http" or not parsed.hostname:
+            raise ValueError("absolute HTTP target required")
+        port = parsed.port or 80
+        upstream = socket.create_connection((parsed.hostname, port), timeout=10)
+        try:
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            request = f"{method} {path} HTTP/1.1\r\n"
+            for name, value in headers.items():
+                if name not in {"proxy-connection", "connection", "host"}:
+                    request += f"{name}: {value}\r\n"
+            request += f"Host: {parsed.hostname}:{port}\r\nConnection: close\r\n\r\n"
+            upstream.sendall(request.encode("iso-8859-1"))
+            self._tunnel(upstream)
+        finally:
+            upstream.close()
+
+    def _tunnel(self, upstream: socket.socket) -> None:
+        """Relay a CONNECT stream until either side closes it."""
+        client = self.connection
+        while True:
+            readable, _, _ = select.select((client, upstream), (), (), 15)
+            if not readable:
+                return
+            for source in readable:
+                data = source.recv(65536)
+                if not data:
+                    return
+                (upstream if source is client else client).sendall(data)
 
     def _response(self, status: HTTPStatus, body: bytes) -> None:
         self.wfile.write(

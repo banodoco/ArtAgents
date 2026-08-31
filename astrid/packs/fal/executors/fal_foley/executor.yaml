@@ -41,8 +41,8 @@
     "pricing": "$0.10 per 10s of input video",
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.fal.executors.fal_foley.run"
-  },
+    "runtime_module": "astrid.packs.fal.executors.fal_foley.run",
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["queue.fal.run:443","fal.run:443"],"allow_redirects":false}},
   "name": "fal Hunyuan-Video Foley",
   "outputs": [
     {

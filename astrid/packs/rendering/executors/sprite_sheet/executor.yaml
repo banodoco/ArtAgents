@@ -60,8 +60,8 @@
     "output_result_manifest": true,
     "requires_timeline": false,
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.rendering.executors.sprite_sheet.run"
-  },
+    "runtime_module": "astrid.packs.rendering.executors.sprite_sheet.run",
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["api.openai.com:443","queue.fal.run:443","fal.run:443","storage.fal.run:443"],"allow_redirects":false}},
   "name": "Sprite Sheet",
   "outputs": [
     {

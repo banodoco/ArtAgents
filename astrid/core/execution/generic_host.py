@@ -50,6 +50,20 @@ class HostCancelled(HostError):
     """The runtime cancelled the attempt while the subprocess was running."""
 
 
+@dataclass
+class _NetworkBrokerContext:
+    """Host-owned strict broker for one admitted network attempt."""
+
+    broker: Any
+    policy: dict[str, Any]
+    evidence_key: str
+
+    def stop(self) -> None:
+        stop = getattr(self.broker, "stop", None)
+        if callable(stop):
+            stop()
+
+
 @dataclass(frozen=True)
 class AdapterSpec:
     family: str
@@ -458,8 +472,16 @@ def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path)
             except (OSError, ValueError):
                 install_payload = {}
             if isinstance(install_payload, Mapping):
-                metadata.setdefault("source_type", install_payload.get("source_type", "git"))
-                metadata.setdefault("commit_sha", install_payload.get("commit_sha", ""))
+                # Pack manifests are allowed to carry an explicit provenance
+                # field, but empty placeholders must not mask the stronger
+                # install record.  This matters for installed revisions whose
+                # executor metadata was authored before Git pinning existed.
+                source_type = install_payload.get("source_type") or "git"
+                commit_sha = install_payload.get("commit_sha") or ""
+                if not metadata.get("source_type") and source_type:
+                    metadata["source_type"] = source_type
+                if not metadata.get("commit_sha") and commit_sha:
+                    metadata["commit_sha"] = commit_sha
         if not metadata.get("commit_sha"):
             checkout = next((candidate for candidate in (pack_root, *pack_root.parents) if (candidate / ".git").exists()), None)
             if checkout is not None:
@@ -471,8 +493,10 @@ def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path)
                 except (OSError, subprocess.SubprocessError):
                     revision = ""
                 if revision:
-                    metadata.setdefault("source_type", "git")
-                    metadata.setdefault("commit_sha", revision)
+                    if not metadata.get("source_type"):
+                        metadata["source_type"] = "git"
+                    if not metadata.get("commit_sha"):
+                        metadata["commit_sha"] = revision
     return replace(definition, metadata=metadata)
 
 
@@ -1156,6 +1180,53 @@ class GenericPackHost:
                 values[name] = str(path)
         return values
 
+    def _start_network_broker(
+        self,
+        record: CapabilityRecord,
+        attempt: Path,
+        admission: Mapping[str, Any],
+    ) -> _NetworkBrokerContext | None:
+        """Start a strict host-owned broker when the manifest requests one.
+
+        A broker descriptor is deliberately declarative: the child never gets
+        to choose its endpoint or admission.  The host creates the loopback
+        listener, binds the exact admission/route set, and supplies its
+        endpoint only through the child environment.
+        """
+        policy = _network_policy(record)
+        descriptor = policy.get("broker") if isinstance(policy, Mapping) else None
+        if not isinstance(descriptor, Mapping):
+            return None
+        if not bool(descriptor.get("host_managed", descriptor.get("managed", True))):
+            return None
+        from astrid.core.execution.network_broker import ObservableNetworkBroker
+
+        evidence_key = secrets_module.token_hex(32)
+        evidence_path = attempt / "broker-evidence.json"
+        routes = policy.get("allowed_routes", policy.get("allowed_destinations", ()))
+        if isinstance(routes, str):
+            routes = (routes,)
+        broker = ObservableNetworkBroker(response_body=None)
+        broker.register_admission(
+            admission,
+            allowed_routes=[str(route) for route in (routes or ())],
+            evidence_path=evidence_path,
+            evidence_key=evidence_key,
+        ).start()
+        effective = dict(policy)
+        # The loopback endpoint is the only network destination the child
+        # needs to reach; the broker itself enforces the upstream route set.
+        effective["proxy"] = broker.endpoint
+        destinations = effective.get("allowed_destinations", ())
+        if isinstance(destinations, str):
+            destinations = (destinations,)
+        effective["allowed_destinations"] = list(dict.fromkeys([
+            *(str(item) for item in (destinations or ())),
+            broker.endpoint,
+        ]))
+        effective["broker"] = {**dict(descriptor), "evidence_path": str(evidence_path)}
+        return _NetworkBrokerContext(broker=broker, policy=effective, evidence_key=evidence_key)
+
     def _typed_outputs(self, record: CapabilityRecord, result: Any, attempt: Path) -> list[dict[str, Any]]:
         paths = getattr(result, "outputs", {}) or {}
         outputs: list[dict[str, Any]] = []
@@ -1181,6 +1252,7 @@ class GenericPackHost:
         *,
         explicit_env: Mapping[str, str] | None = None,
         admission: Mapping[str, Any] | None = None,
+        network_broker: _NetworkBrokerContext | None = None,
     ) -> tuple[dict[str, str], dict[str, str]]:
         """Build a redacted, manifest-scoped child environment.
 
@@ -1207,7 +1279,7 @@ class GenericPackHost:
             secret_values=secrets,
             declared_secrets=declared,
         )
-        policy = _network_policy(record)
+        policy = network_broker.policy if network_broker is not None else _network_policy(record)
         if policy is not None:
             hook_root = attempt / ".astrid-network-hook"
             hook_root.mkdir(parents=True, exist_ok=True)
@@ -1216,7 +1288,7 @@ class GenericPackHost:
                 encoding="utf-8",
             )
             evidence_path = attempt / "network-evidence.json"
-            evidence_key = secrets_module.token_hex(32)
+            evidence_key = network_broker.evidence_key if network_broker is not None else secrets_module.token_hex(32)
             env["ASTRID_NETWORK_POLICY"] = json.dumps(policy, sort_keys=True, separators=(",", ":"))
             env["ASTRID_NETWORK_EVIDENCE"] = str(evidence_path)
             env["ASTRID_NETWORK_EVIDENCE_KEY"] = evidence_key
@@ -1251,7 +1323,7 @@ class GenericPackHost:
         return result
 
     @staticmethod
-    def _network_evidence(attempt: Path, *, evidence_key: str | None = None, admission: Mapping[str, Any] | None = None, required: bool = False) -> Mapping[str, Any] | None:
+    def _network_evidence(attempt: Path, *, evidence_key: str | None = None, admission: Mapping[str, Any] | None = None, required: bool = False, broker_required: bool = False) -> Mapping[str, Any] | None:
         path = attempt / "network-evidence.json"
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -1269,6 +1341,18 @@ class GenericPackHost:
         bound = isinstance(admission, Mapping) and dict(value.get("admission") or {}) == dict(admission)
         if required and (not valid or not bound):
             raise HostError("network evidence signature or admission binding is invalid")
+        if broker_required:
+            broker = value.get("broker_evidence")
+            broker_events = broker.get("events") if isinstance(broker, Mapping) else None
+            if not isinstance(broker_events, list):
+                raise HostError("network-required task produced no signed broker route evidence")
+            observed = {
+                str(event.get("kind"))
+                for event in broker_events
+                if isinstance(event, Mapping) and str(event.get("detail", "")).endswith("|allowed=true")
+            }
+            if not {"handshake", "route"}.issubset(observed):
+                raise HostError("network-required task produced incomplete broker route evidence")
         return value if valid and bound else (None if not required else value)
 
     def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1296,7 +1380,7 @@ class GenericPackHost:
                 uploaded.append({key: value for key, value in descriptor.items() if key != "path"})
         return uploaded
 
-    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None, admission: Mapping[str, Any] | None = None) -> Any:
+    def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None, admission: Mapping[str, Any] | None = None, network_broker: _NetworkBrokerContext | None = None) -> Any:
         """Run a manifest command without importing Astrid's project authority.
 
         The legacy runner is still available for built-in pipeline steps, but
@@ -1335,6 +1419,7 @@ class GenericPackHost:
             record,
             attempt,
             admission=admission,
+            network_broker=network_broker,
             explicit_env={
                 "PYTHONPATH": package_parent,
                 ASTRID_INTERNAL_INVOCATION: "1",
@@ -1565,6 +1650,7 @@ class GenericPackHost:
         root.mkdir(parents=True, exist_ok=True)
         settled = False
         network_evidence_key: str | None = None
+        network_broker: _NetworkBrokerContext | None = None
         # Every network attempt gets a fresh host-issued nonce.  It is part of
         # the immutable admission presented to an observable broker, so a
         # handshake captured from another task cannot be replayed.
@@ -1579,6 +1665,7 @@ class GenericPackHost:
             "allowed_routes": list((_network_policy(record) or {}).get("allowed_routes", (_network_policy(record) or {}).get("allowed_destinations", ()))),
         }
         try:
+            network_broker = self._start_network_broker(record, root, network_admission)
             inputs = self._materialize_inputs(spec, root)
             output_root = root / "outputs"
             output_root.mkdir(parents=True, exist_ok=True)
@@ -1632,6 +1719,7 @@ class GenericPackHost:
                         root,
                         cancelled=cancelled,
                         admission=network_admission,
+                        network_broker=network_broker,
                     )
                     network_evidence_key = getattr(result, "network_evidence_key", None)
                 else:
@@ -1639,7 +1727,7 @@ class GenericPackHost:
                     # admitted definition is serialized for the child so a
                     # registry reload cannot silently select a different pack.
                     worker_admission = network_admission
-                    worker_env, worker_secrets = self._child_environment(record, root, admission=worker_admission)
+                    worker_env, worker_secrets = self._child_environment(record, root, admission=worker_admission, network_broker=network_broker)
                     network_evidence_key = worker_env.get("ASTRID_NETWORK_EVIDENCE_KEY")
                     try:
                         result = self.invoke_capability(
@@ -1685,6 +1773,7 @@ class GenericPackHost:
                 # Python child emits it through the hook; a native child must
                 # have its admitted proxy/broker emit the same contract.
                 required=bool(record.adapter.requires_network or record.definition.isolation.network),
+                broker_required=network_broker is not None,
             )
             if network_evidence is not None:
                 payload["network_evidence"] = network_evidence
@@ -1735,6 +1824,8 @@ class GenericPackHost:
                     self.client.fail(task_id, lease_token, str(exc), retryable=False)
             raise
         finally:
+            if network_broker is not None:
+                network_broker.stop()
             if not keep_attempt and self.attempt_root is None and settled:
                 shutil.rmtree(root, ignore_errors=True)
 

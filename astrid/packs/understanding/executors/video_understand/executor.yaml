@@ -71,8 +71,8 @@
     "requires_timeline": false,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.understanding.executors.video_understand.run"
-  },
+    "runtime_module": "astrid.packs.understanding.executors.video_understand.run",
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["generativelanguage.googleapis.com:443"],"allow_redirects":false}},
   "name": "Video Understand",
   "short_description": "Inspect synchronized audio+video windows with a video-understanding model.",
   "version": "1.0"

@@ -67,8 +67,8 @@
     "pipeline_step_order": 0,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.editorial.executors.transcribe.run"
-  },
+    "runtime_module": "astrid.packs.editorial.executors.transcribe.run",
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["api.openai.com:443"],"allow_redirects":false}},
   "name": "Transcribe",
   "outputs": [
     {

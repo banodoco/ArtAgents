@@ -223,8 +223,8 @@
     "runtime_entrypoint": "run_sdk",
     "runtime_entrypoint_note": "run_sdk is the in-process entrypoint returning a JSON-safe payload dict; subprocess / CLI compatibility remains via main() and the __main__ guard at the bottom of run.py.",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.generation.executors.generate_image.run"
-  },
+    "runtime_module": "astrid.packs.generation.executors.generate_image.run",
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["queue.fal.run:443","fal.run:443","storage.fal.run:443"],"allow_redirects":false}},
   "name": "Generate Image",
   "outputs": [
     {
