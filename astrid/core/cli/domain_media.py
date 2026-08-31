@@ -21,8 +21,9 @@ Verbs (exactly these five, one SDK call each):
 - ``show <ref>`` — ``client.media.show`` by exact project-scoped media id
   (aliases resolve through the repository; cross-project ids are
   indistinguishable from missing);
-- ``verify <ref>`` — ``client.media.verify`` with a required ``--realm``
-  (fingerprint-verified; missing/mutated bytes change zero rows);
+- ``verify <ref>`` — ``client.media.verify`` with the required managed
+  ``--realm managed_local`` (runtime-CAS verification; unsupported
+  path-backed realms are rejected before any SDK call);
 - ``relate`` — ``client.media.relate`` with ``--from``/``--to``/``--kind``
   restricted to the frozen five media relation kinds (``derived_from``,
   ``variant_of``, ``uses_as_input``, ``mask_for``, ``audio_for``) plus

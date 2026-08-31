@@ -88,11 +88,25 @@ class RemoteTimelines(_RemoteFamily):
     def save(self, project, ref, *, expected_version=1, shots=None, references=None, idempotency_key=None, **kwargs):
         config = kwargs.pop("config", None)
         registry = kwargs.pop("registry", None)
-        if config is not None or registry is not None:
-            current = self._client.get_document(project, f"timeline:{ref}")
-            content = dict(current.content) if hasattr(current, "content") and isinstance(current.content, dict) else {}
-            return self._typed("update_timeline_document", project, ref, expected_version=expected_version, config=config or content.get("config", {}), registry=registry or content.get("registry", {}), slug=kwargs.pop("slug", None), name=kwargs.pop("name", None))
-        return self._typed("update_timeline", ref, key=idempotency_key, expected_version=expected_version, shots=shots, references=references)
+        del shots, references
+        key = idempotency_key or uuid.uuid4().hex
+        if not project:
+            return DomainResult.failure(
+                ErrorObject("validation_error", "timeline save requires a project", {"field": "project"}),
+                idempotency_key=key,
+            )
+        if config is None and registry is None:
+            return DomainResult.failure(
+                ErrorObject(
+                    "unsupported_operation",
+                    "timeline save requires project-scoped config and registry",
+                    {"operation": "timelines.save", "legacy_route": "update_timeline"},
+                ),
+                idempotency_key=key,
+            )
+        current = self._client.get_document(project, f"timeline:{ref}")
+        content = dict(current.content) if hasattr(current, "content") and isinstance(current.content, dict) else {}
+        return self._typed("update_timeline_document", project, ref, expected_version=expected_version, config=config or content.get("config", {}), registry=registry or content.get("registry", {}), slug=kwargs.pop("slug", None), name=kwargs.pop("name", None))
     def history(self, project, ref, *, cursor=None, limit=50, **kwargs):
         result = self._typed("list_timeline_history", ref, cursor=cursor, limit=limit)
         if result.ok and isinstance(result.data, dict): return DomainResult.success(result.data.get("items", []), idempotency_key=result.idempotency_key)
@@ -115,13 +129,42 @@ class RemoteTimelines(_RemoteFamily):
 
 
 class RemoteMedia(_RemoteFamily):
+    @staticmethod
+    def _managed_realm_error(realm: str | None, *, idempotency_key: str | None = None) -> DomainResult[Any] | None:
+        if realm == "managed_local":
+            return None
+        return DomainResult.failure(
+            ErrorObject(
+                "validation_error",
+                "only the managed_local media realm is supported",
+                {"field": "realm", "value": realm, "valid_options": ["managed_local"]},
+            ),
+            idempotency_key=idempotency_key or "",
+        )
+
     def import_file(self, *, project=None, path: Path, realm="managed_local", idempotency_key=None, **kwargs):
+        if kwargs.get("reference_in_place") or kwargs.get("locator") is not None:
+            return DomainResult.failure(
+                ErrorObject("validation_error", "reference-in-place media is not supported", {"field": "reference_in_place"}),
+                idempotency_key=idempotency_key or "",
+            )
+        realm_error = self._managed_realm_error(realm, idempotency_key=idempotency_key)
+        if realm_error is not None:
+            return realm_error
         try: data = path.read_bytes()
         except OSError: return DomainResult.failure(ErrorObject("not_found", "media source is unavailable", {}), idempotency_key=idempotency_key or "")
         if project is None: return DomainResult.failure(ErrorObject("validation_error", "media import requires a project", {"field": "project"}), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("ingest_project_object", project, data, key=key, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream", idempotency_key=key, filename=path.name)
     def import_directory(self, *, project=None, directory: Path, realm="managed_local", idempotency_key=None, **kwargs):
+        if kwargs.get("reference_in_place") or kwargs.get("locator") is not None:
+            return DomainResult.failure(
+                ErrorObject("validation_error", "reference-in-place media is not supported", {"field": "reference_in_place"}),
+                idempotency_key=idempotency_key or "",
+            )
+        realm_error = self._managed_realm_error(realm, idempotency_key=idempotency_key)
+        if realm_error is not None:
+            return realm_error
         items = []
         for path in sorted(p for p in directory.rglob("*") if p.is_file()):
             result = self.import_file(project=project, path=path, realm=realm, idempotency_key=f"{idempotency_key or 'import'}-{path.name}")
@@ -138,7 +181,15 @@ class RemoteMedia(_RemoteFamily):
         if not any(isinstance(item, dict) and str(ref) in {str(item.get("digest")), str(item.get("object_id"))} for item in (listed.data or [])):
             return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
         return self._typed("get_object", ref)
-    def verify(self, project, ref, *, idempotency_key=None, **kwargs):
+    def verify(self, project, ref, *, realm="managed_local", idempotency_key=None, **kwargs):
+        realm_error = self._managed_realm_error(realm, idempotency_key=idempotency_key)
+        if realm_error is not None:
+            return realm_error
+        if kwargs.get("reference_in_place") or kwargs.get("locator") is not None:
+            return DomainResult.failure(
+                ErrorObject("validation_error", "reference-in-place media is not supported", {"field": "reference_in_place"}),
+                idempotency_key=idempotency_key or "",
+            )
         scoped = self.show(project, ref)
         if not scoped.ok: return scoped
         result = self._typed("head_object", ref, key=idempotency_key)
@@ -244,7 +295,10 @@ class RemoteReferences(_RemoteFamily):
     def create(self, *, project=None, timeline_id=None, **kwargs):
         key = kwargs.pop("idempotency_key", None) or uuid.uuid4().hex
         if timeline_id is not None:
-            return self._typed("create_reference", timeline_id, kwargs, key=key, idempotency_key=key)
+            return DomainResult.failure(
+                ErrorObject("unsupported_operation", "timeline-scoped references are retired", {"operation": "create_reference"}),
+                idempotency_key=key,
+            )
         if not project:
             return DomainResult.failure(ErrorObject("validation_error", "reference creation requires a project", {}), idempotency_key=key)
         reference_id = str(kwargs.pop("reference_id", None) or uuid.uuid5(uuid.NAMESPACE_URL, f"astrid:reference:{key}"))
@@ -260,38 +314,44 @@ class RemoteReferences(_RemoteFamily):
     def show(self, project, ref): return self._typed("get_project_reference", project, ref)
     def _version(self, ref, expected_version, project=None):
         if expected_version is not None: return int(expected_version)
-        current = self._client.get_project_reference(project, ref) if project is not None else self._client.get_reference(ref)
+        current = self._client.get_project_reference(project, ref)
         return int(current.get("version", 1))
     def update(self, project, ref, *, expected_version=None, object_id=None, role=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "update_reference"}), idempotency_key=idempotency_key or "")
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("update_project_reference", project, ref, key=key, expected_version=version, name=kwargs.get("name"), description=kwargs.get("description"), metadata=kwargs.get("metadata"), idempotency_key=key)
-        return self._typed("update_reference", ref, key=key, expected_version=version, object_id=object_id, role=role)
+        return self._typed("update_project_reference", project, ref, key=key, expected_version=version, name=kwargs.get("name"), description=kwargs.get("description"), metadata=kwargs.get("metadata"), idempotency_key=key)
     def archive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "archive_reference"}), idempotency_key=idempotency_key or "")
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("archive_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
-        return self._typed("archive_reference", ref, key=key, expected_version=version, idempotency_key=key)
+        return self._typed("archive_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
     def unarchive(self, project, ref, *, expected_version=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "recover_reference"}), idempotency_key=idempotency_key or "")
         try: version = self._version(ref, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("recover_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
-        return self._typed("recover_reference", ref, key=key, expected_version=version, idempotency_key=key)
+        return self._typed("recover_project_reference", project, ref, key=key, expected_version=version, idempotency_key=key)
     def associate(self, project, ref, *, media_id=None, role="depicts", idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "associate_reference"}), idempotency_key=key)
         return self._typed("associate_reference", project, ref, {"media_id": media_id, "role": role, **({"association_id": kwargs["association_id"]} if kwargs.get("association_id") else {})}, key=key, idempotency_key=key)
     def link(self, project, from_reference_id, to_reference_id, kind, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "link_references"}), idempotency_key=key)
         return self._typed("link_references", project, {"from_reference_id": from_reference_id, "to_reference_id": to_reference_id, "kind": kind, "metadata": kwargs.get("metadata", {})}, key=key, idempotency_key=key)
     def set_primary(self, project, ref, *, association_id=None, media_reference_id=None, expected_version=None, idempotency_key=None, **kwargs):
         association_id = association_id or media_reference_id
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped references are required", {"operation": "set_primary_reference"}), idempotency_key=key)
         if not association_id:
             return DomainResult.failure(ErrorObject("validation_error", "media reference association is required", {}), idempotency_key=key)
         try: version = self._version(ref, expected_version, project)
@@ -308,7 +368,10 @@ class RemoteShots(_RemoteFamily):
     def create(self, *, timeline_id=None, shot=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
         if timeline_id is not None:
-            return self._typed("create_shot", timeline_id, shot or kwargs, key=key, idempotency_key=key)
+            return DomainResult.failure(
+                ErrorObject("unsupported_operation", "timeline-scoped shots are retired", {"operation": "create_shot"}),
+                idempotency_key=key,
+            )
         project = kwargs.pop("project", None)
         if not project:
             return DomainResult.failure(ErrorObject("validation_error", "shot creation requires a project", {}), idempotency_key=key)
@@ -320,41 +383,47 @@ class RemoteShots(_RemoteFamily):
         return self._typed("create_project_shot", project, body, key=key, idempotency_key=key)
     def _version(self, shot_id, expected_version, project=None):
         if expected_version is not None: return int(expected_version)
-        current = self._client.get_project_shot(project, shot_id) if project is not None else self._client.get_shot(shot_id)
+        current = self._client.get_project_shot(project, shot_id)
         return int(current.get("version", 1))
     def update(self, project, shot_id, *, expected_version=None, start_ms=None, duration_ms=None, reference_ids=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "update_shot"}), idempotency_key=idempotency_key or "")
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("update_project_shot", project, shot_id, key=key, expected_version=version, name=kwargs.get("name"), metadata=kwargs.get("metadata"), idempotency_key=key)
-        return self._typed("update_shot", shot_id, key=key, expected_version=version, start_ms=start_ms, duration_ms=duration_ms, reference_ids=reference_ids)
+        return self._typed("update_project_shot", project, shot_id, key=key, expected_version=version, name=kwargs.get("name"), metadata=kwargs.get("metadata"), idempotency_key=key)
     def archive(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "archive_shot"}), idempotency_key=idempotency_key or "")
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("archive_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
-        return self._typed("archive_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
+        return self._typed("archive_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
     def recover(self, project, shot_id, *, expected_version=None, idempotency_key=None, **kwargs):
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "recover_shot"}), idempotency_key=idempotency_key or "")
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=idempotency_key or "")
         key = idempotency_key or uuid.uuid4().hex
-        if project is not None:
-            return self._typed("recover_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
-        return self._typed("recover_shot", shot_id, key=key, expected_version=version, idempotency_key=key)
+        return self._typed("recover_project_shot", project, shot_id, key=key, expected_version=version, idempotency_key=key)
 
     unarchive = recover
     def add_item(self, project, shot_id, *, media_id, position=None, source_frame=None, metadata=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "add_shot_item"}), idempotency_key=key)
         return self._typed("add_shot_item", project, shot_id, {"media_id": media_id, "position": position, "source_frame": source_frame, "metadata": metadata or {}}, key=key, idempotency_key=key)
     def remove_item(self, project, shot_id, item_id, *, expected_version=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "remove_shot_item"}), idempotency_key=key)
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("remove_shot_item", project, shot_id, item_id, key=key, expected_version=version, idempotency_key=key)
     def reorder(self, project, shot_id, item_ids=None, *, expected_version=None, idempotency_key=None, **kwargs):
         key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(ErrorObject("unsupported_operation", "project-scoped shots are required", {"operation": "reorder_shot_items"}), idempotency_key=key)
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("reorder_shot_items", project, shot_id, list(item_ids or []), key=key, expected_version=version, idempotency_key=key)

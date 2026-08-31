@@ -566,25 +566,15 @@ def test_media_import_rejects_non_file_or_directory(tmp_path) -> None:
     assert client.calls == []
 
 
-def test_media_import_forwards_realm() -> None:
+def test_media_import_rejects_external_realm_before_sdk_call() -> None:
     import os
 
     path = os.path.abspath(__file__)
     client = _FakeClient()
-    rc = _run(
-        "media",
-        [
-            "import",
-            path,
-            "--project",
-            "demo",
-            "--realm",
-            "external_local",
-        ],
-        client=client,
-    )
-    assert rc == 0
-    assert client.calls[0][1]["realm"] == "external_local"
+    with pytest.raises(SystemExit) as excinfo:
+        _run("media", ["import", path, "--project", "demo", "--realm", "external_local"], client=client)
+    assert excinfo.value.code == 2
+    assert client.calls == []
 
 
 def test_media_list_is_one_sdk_call(capsys) -> None:

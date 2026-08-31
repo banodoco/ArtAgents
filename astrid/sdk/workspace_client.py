@@ -288,15 +288,6 @@ class WorkspaceClient:
             idempotency_key=idempotency_key,
         )
 
-    def update_timeline(self, timeline_id: str, *, expected_version: int, shots=None, references=None) -> Any:
-        return self._call_generated("update_timeline", timeline_id, expected_version=expected_version, shots=shots, references=references)
-
-    def create_shot(self, timeline_id: str, shot: Mapping[str, Any], *, idempotency_key: str) -> Any:
-        return self._call_generated("create_shot", timeline_id, shot, idempotency_key=idempotency_key)
-
-    def get_shot(self, shot_id: str) -> Any:
-        return self._call_generated("get_shot", shot_id)
-
     def list_project_shots(
         self,
         project_id: str,
@@ -338,38 +329,6 @@ class WorkspaceClient:
     def reorder_shot_items(self, project_id: str, shot_id: str, item_ids: list[str], *, expected_version: int, idempotency_key: str) -> Any:
         return self._call_generated("reorder_shot_items", project_id, shot_id, item_ids, expected_version=expected_version, idempotency_key=idempotency_key)
 
-    def update_shot(
-        self,
-        shot_id: str,
-        *,
-        expected_version: int,
-        start_ms: int | None = None,
-        duration_ms: int | None = None,
-        reference_ids: list[str] | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        return self._call_generated(
-            "update_shot",
-            shot_id,
-            expected_version=expected_version,
-            start_ms=start_ms,
-            duration_ms=duration_ms,
-            reference_ids=reference_ids,
-            idempotency_key=idempotency_key,
-        )
-
-    def archive_shot(self, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
-        return self._call_generated("archive_shot", shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
-
-    def recover_shot(self, shot_id: str, *, expected_version: int, idempotency_key: str) -> Any:
-        return self._call_generated("recover_shot", shot_id, expected_version=expected_version, idempotency_key=idempotency_key)
-
-    def create_reference(self, timeline_id: str, reference: Mapping[str, Any], *, idempotency_key: str) -> Any:
-        return self._call_generated("create_reference", timeline_id, reference, idempotency_key=idempotency_key)
-
-    def get_reference(self, reference_id: str) -> Any:
-        return self._call_generated("get_reference", reference_id)
-
     def list_project_references(
         self,
         project_id: str,
@@ -410,30 +369,6 @@ class WorkspaceClient:
 
     def link_references(self, project_id: str, link: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("link_references", project_id, link, idempotency_key=idempotency_key)
-
-    def update_reference(
-        self,
-        reference_id: str,
-        *,
-        expected_version: int,
-        object_id: str | None = None,
-        role: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Any:
-        return self._call_generated(
-            "update_reference",
-            reference_id,
-            expected_version=expected_version,
-            object_id=object_id,
-            role=role,
-            idempotency_key=idempotency_key,
-        )
-
-    def archive_reference(self, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
-        return self._call_generated("archive_reference", reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
-
-    def recover_reference(self, reference_id: str, *, expected_version: int, idempotency_key: str) -> Any:
-        return self._call_generated("recover_reference", reference_id, expected_version=expected_version, idempotency_key=idempotency_key)
 
     def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> Any:
         return self._call_generated("create_document", project_id, document_id, kind, content)

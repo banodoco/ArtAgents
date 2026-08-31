@@ -11,6 +11,50 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+class _NoTransport:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"retired transport operation reached: {name}")
+
+
+class _NoReadPath:
+    def read_bytes(self):
+        raise AssertionError("path was read before rejecting unsupported realm")
+
+
+def test_sdk_rejects_path_backed_media_before_reading_or_transport() -> None:
+    from astrid.sdk.remote import RemoteMedia
+
+    media = RemoteMedia(_NoTransport())
+    for realm in ("external_local", "remote", None):
+        result = media.import_file(
+            project="demo", path=_NoReadPath(), realm=realm, idempotency_key="unsupported-media"
+        )
+        assert not result.ok
+        assert result.error is not None and result.error.code == "validation_error"
+
+    result = media.import_file(
+        project="demo", path=_NoReadPath(), reference_in_place=True, idempotency_key="reference-in-place"
+    )
+    assert not result.ok
+    assert result.error is not None and result.error.code == "validation_error"
+
+    result = media.verify("demo", "object-1", realm="external_local", idempotency_key="unsupported-verify")
+    assert not result.ok
+    assert result.error is not None and result.error.code == "validation_error"
+
+
+def test_sdk_rejects_retired_legacy_children_without_transport() -> None:
+    from astrid.sdk.remote import RemoteReferences, RemoteShots, RemoteTimelines
+
+    transport = _NoTransport()
+    assert RemoteTimelines(transport).save("demo", "main", shots=[]).error.code == "unsupported_operation"
+    assert RemoteReferences(transport).create(timeline_id="legacy", object_id="m").error.code == "unsupported_operation"
+    assert RemoteShots(transport).create(timeline_id="legacy", shot={}).error.code == "unsupported_operation"
+    for operation in ("update", "archive", "unarchive"):
+        assert getattr(RemoteReferences(transport), operation)(None, "ref", expected_version=1).error.code == "unsupported_operation"
+        assert getattr(RemoteShots(transport), operation)(None, "shot", expected_version=1).error.code == "unsupported_operation"
+
+
 def _source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 

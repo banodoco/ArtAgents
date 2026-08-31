@@ -5,9 +5,9 @@ agentic consumers (both human operators and AI agents).  It covers stream
 discipline, output modes, error signaling, and the behavioral guarantees
 that agents can rely on when invoking Astrid subcommands.
 
-The gateway owns **exactly eight families** — the five product families
-(`projects`, `timelines`, `media`, `tasks`, `runs`) and the three
-operational families (`serve`, `doctor`, `backup`) — plus the two
+The gateway owns **exactly seven families** — the five product families
+(`projects`, `timelines`, `media`, `tasks`, `runs`) and the two
+operational families (`doctor`, `backup`) — plus the two
 manifest-declared nested mounts (`timelines shots`, `media references`).
 One verb = one SDK call. No other top-level command exists; see
 [the CLI census](../getting-started.md) and
@@ -88,7 +88,7 @@ These decisions are locked and must not be re-litigated:
   SDK error (envelope `ok=false`), `2`=usage/parse error (argparse).
 - **SD4**: Help is side-effect-free. Top-level, family, and verb help parses
   without opening, migrating, or locking the selected project database; it
-  remains printable while `astrid serve` exclusively owns that database.
+  remains printable while the workspace runtime exclusively owns that database.
 
 ## Verb Reference
 
@@ -102,9 +102,11 @@ The gateway families and their verbs:
   compare-and-swap; a stale `--expected-version` is the typed
   `stale_version` and changes nothing. `visualize` emits a run-owned evidence
   pack, while `render` accepts a pinned canonical timeline.
-- **`media`** — `import`, `list`, `show`, `verify`, `relocate`, `relate`.
-  `verify`/`relocate` require `--realm`; `verify` checks every matching local
-  location by default and accepts `--location-id`/`--locator` selectors;
+- **`media`** — `import`, `list`, `show`, `verify`, `relate`.
+  The only supported realm is the runtime-managed `managed_local` CAS;
+  reference-in-place (`external_local`), `remote`, and `relocate` are not
+  product or SDK operations. `verify` requires `--realm managed_local` and
+  accepts `--location-id`/`--locator` selectors;
   `relate` has the frozen five-kind
   `--kind` (`derived_from`, `variant_of`, `uses_as_input`, `mask_for`,
   `audio_for`).
@@ -113,12 +115,9 @@ The gateway families and their verbs:
 - **`runs`** — `list`, `show`, `cancel`, `retry-failed`, `events`.
   `retry-failed` is the batch-retry surface (all-failed-children by default,
   explicit repeatable `--task` subset otherwise).
-- **`serve`** — start the HTTP editor bridge (`--host`, `--port`,
-  `--projects-root`, `--editor-path`, `--no-open-editor`).
 - **`doctor`** — read-only health check (`schema_versions`, managed and
-  external media-path byte integrity, SQLite quick-check, FK status, and
-  bounded orphan-staging diagnostics). `media_paths` hashes every
-  `external_local` locator by default; `--projects-root` selects the root.
+  runtime-managed media-byte integrity, SQLite quick-check, FK status, and
+  bounded orphan-staging diagnostics).
 - **`backup`** — `create` (staged, validated, `--out`) and `restore`
   (journaled, idempotent).
 
