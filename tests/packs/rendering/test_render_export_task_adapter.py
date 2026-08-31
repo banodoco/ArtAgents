@@ -187,7 +187,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
     assert sha256_file_bytes(managed) == digest
     assert sha256_file_bytes(captured["staged_asset"]) == digest
     assert not captured["owned_root"].exists()
-    assert captured["execution_mode"] == "in_process"
+    assert captured["execution_mode"] == "subprocess"
 
 
 def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:

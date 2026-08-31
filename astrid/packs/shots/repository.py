@@ -68,7 +68,6 @@ or opens a transaction.
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -86,9 +85,7 @@ from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.errors import RepositoryError
 from astrid.core.repositories.projects import ProjectNotFoundError
 from astrid.core.store.uow import UnitOfWork
-from astrid.core.store.writer import DatabaseWriter
 from astrid.core.util.time import utc_now_iso
-from astrid.packs.shots.generation_repository import GenerationRepository
 
 SHOT_STREAM_TYPE = "shot.shot"
 """The pack stream type every shot aggregate owns (one per shot)."""
@@ -1431,7 +1428,7 @@ class ShotRepository:
 
     def show(
         self,
-        writer: DatabaseWriter,
+        writer: Any,
         project_id: str,
         shot_id: str,
     ) -> ShotReadModel:
@@ -1445,7 +1442,9 @@ class ShotRepository:
         _require_non_empty_string("project_id", project_id)
         _require_non_empty_string("shot_id", shot_id)
         with writer.read_only_connection() as conn:
-            conn.row_factory = sqlite3.Row
+            conn.row_factory = lambda cursor, values: {
+                column[0]: value for column, value in zip(cursor.description, values)
+            }
             project = conn.execute(
                 "SELECT id FROM projects WHERE id = ?", (project_id,)
             ).fetchone()
@@ -1500,7 +1499,7 @@ class ShotRepository:
 
     def list(
         self,
-        writer: DatabaseWriter,
+        writer: Any,
         project_id: str,
     ) -> list[ShotListRow]:
         """Sorted shot list in stable sort-key/id order.
@@ -1512,7 +1511,9 @@ class ShotRepository:
         """
         _require_non_empty_string("project_id", project_id)
         with writer.read_only_connection() as conn:
-            conn.row_factory = sqlite3.Row
+            conn.row_factory = lambda cursor, values: {
+                column[0]: value for column, value in zip(cursor.description, values)
+            }
             project = conn.execute(
                 "SELECT id FROM projects WHERE id = ?", (project_id,)
             ).fetchone()
@@ -1538,7 +1539,6 @@ class ShotRepository:
 
 
 __all__ = [
-    "GenerationRepository",
     "SHOT_ADD_ITEM_COMMAND_KIND",
     "SHOT_CREATE_COMMAND_KIND",
     "SHOT_CREATED_EVENT_KIND",

@@ -55,8 +55,13 @@ __all__ = ["COMMANDS", "build_parser"]
 
 _FAMILY = "media"
 
-REALMS: tuple[str, ...] = ("managed_local", "external_local")
-"""The two supported media realms (m4 SDK contract)."""
+REALMS: tuple[str, ...] = ("managed_local",)
+"""The sole supported local media realm.
+
+Local-v1 is ingest-only: runnable bytes are owned by the neutral runtime's
+CAS.  The former path-backed realm was a persistent path authority and is
+intentionally not part of the product parser.
+"""
 
 MEDIA_RELATION_KINDS: tuple[str, ...] = (
     "derived_from",

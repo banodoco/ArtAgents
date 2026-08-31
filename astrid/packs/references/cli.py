@@ -55,10 +55,29 @@ from typing import Any
 
 from astrid.core.cli.domain_output import print_result
 from astrid.core.cli.registration import CommandSpec, register_product_commands
-from astrid.packs.references.repository import (
-    MEDIA_REFERENCE_ROLES,
-    REFERENCE_KINDS,
-    REFERENCE_LINK_KINDS,
+
+# Parser vocabularies are presentation-only.  Keep them here instead of
+# importing the retired kernel-writer repository merely to obtain constants:
+# importing a product parser must not load SQLite or any local authority.
+REFERENCE_KINDS: tuple[str, ...] = (
+    "character",
+    "place",
+    "object",
+    "clothing",
+    "other",
+)
+MEDIA_REFERENCE_ROLES: tuple[str, ...] = (
+    "canonical",
+    "used_as_input",
+    "depicts",
+    "inspired_by",
+)
+REFERENCE_LINK_KINDS: tuple[str, ...] = (
+    "belongs_to",
+    "wears",
+    "located_in",
+    "associated_with",
+    "related_to",
 )
 
 __all__ = ["COMMANDS", "build_parser"]
