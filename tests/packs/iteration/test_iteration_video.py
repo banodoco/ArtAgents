@@ -1,8 +1,10 @@
 import contextlib
+import hashlib
 import io
 import json
 from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
@@ -118,6 +120,72 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
     assert "Estimated cost: ~$0.000" in text
     assert "content: suppressed" in text
     assert "SECRET prompt" not in text
+
+
+def test_iteration_video_public_route_materializes_runtime_output_object(tmp_path: Path, monkeypatch) -> None:
+    payload = b"runtime-owned image bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+            self.objects: list[tuple[str, str]] = []
+            self.runs = self
+            self.media = self
+
+        def list(self, project: str):
+            self.calls.append(("list", project))
+            return SimpleNamespace(ok=True, data=[{
+                "run_id": TARGET_RUN_ID,
+                "thread_id": THREAD_ID,
+                "status": "succeeded",
+                "output_artifacts": [{
+                    "kind": "image",
+                    "object_id": "object-image-1",
+                    "digest": f"sha256:{digest}",
+                    "size": len(payload),
+                    "media_type": "image/png",
+                }],
+            }])
+
+        def show(self, project: str, object_id: str):
+            self.objects.append((project, object_id))
+            return SimpleNamespace(data=payload)
+
+    runtime = Runtime()
+    out_dir = tmp_path / "iteration-video"
+
+    def fake_render(timeline: Path, assets: Path, output: Path, **_kwargs) -> Path:
+        assert json.loads(timeline.read_text(encoding="utf-8"))["clips"][0]["clipType"] == "media"
+        asset = next(iter(json.loads(assets.read_text(encoding="utf-8"))["assets"].values()))
+        assert Path(asset["file"]).read_bytes() == payload
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"rendered-mp4")
+        Path(f"{output}.provenance.json").write_text("{}\n", encoding="utf-8")
+        return output
+
+    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
+    monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id="video_editing.iteration_video",
+            out=out_dir,
+            project="demo",
+            project_was_auto_resolved=True,
+            run_root=None,
+            execution_mode="in_process",
+            inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
+            orchestrator_args=("--repo-root", str(tmp_path), "--renderer", "rendering.fixture"),
+        )
+    )
+
+    assert result.ok
+    assert runtime.calls == [("list", "demo")]
+    assert runtime.objects == [("demo", "object-image-1")]
+    assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
+    assert _read_json(out_dir / "iteration.quality.json")["data_quality"] == 1.0
+    assert not (out_dir / "run.json").exists()
 
 
 def test_iteration_video_orchestrator_declares_no_cut_child() -> None:

@@ -18,6 +18,11 @@ helpers (`prepare_project_run`, `finalize_project_run`, and `run.json` CRUD)
 must not be imported or invoked by this pack. Legacy files are accepted only
 by the explicitly provider-independent experiment import/prepare surfaces.
 
+Runtime output objects are also runtime-owned. When a run output has an
+`object_id`/digest/size but no path, `iteration.assemble` resolves and verifies
+it through the injected runtime object API for short-lived render staging; an
+unavailable object is reported as an explicit quality-degrading fallback.
+
 ## Executors
 
 | Executor | What it does |

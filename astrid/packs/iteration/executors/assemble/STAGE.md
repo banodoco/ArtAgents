@@ -24,5 +24,12 @@ renderers by artifact `kind`, uses `generic_card` loudly for unsupported kinds,
 and refuses `data_quality < 0.6` before adapter files are created unless
 `--force` is supplied.
 
+Runtime output rows may provide `object_id`, digest, and size without a local
+path. The public runtime route fetches those bytes through the runtime object
+API and verifies digest/size before deriving an invocation-local staging path.
+If the object cannot be fetched or verified, assembly emits an explicit
+fallback and lowers `data_quality`; it never silently presents the result as a
+fully materialized media clip.
+
 Only `--mode chaptered` is supported in v1. `--direction` is preserved as a
 label; it is not parsed into structured creative instructions.

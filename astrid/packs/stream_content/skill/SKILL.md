@@ -38,7 +38,9 @@ The orchestrator writes:
 - `review.html`: static local review page with segment links and candidate
   playback.
 
+Run identity and status come from the runtime kernel; this pack does not write
+or consult a local `run.json` authority.
+
 Use `stream_content.segment_map` directly when you only need the labeled
 timeline. Use `stream_content.clip_candidates` directly when you already have a
 transcript and optional segment map.
-

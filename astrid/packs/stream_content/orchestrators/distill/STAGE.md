@@ -23,6 +23,8 @@ Outputs:
 - `candidates.json`: scored candidate clips.
 - `review.html`: static self-contained review page.
 
+The invocation and run status are owned by the runtime kernel. This
+orchestrator does not write a local `run.json` ledger.
+
 Use `--dry-run` to emit `plan.json` only. Use `--no-scenes` to skip scene
 detection.
-

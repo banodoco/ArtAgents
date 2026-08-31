@@ -150,6 +150,8 @@ def run_iteration_video(
             audio_bed=audio_bed,
             input_manifest=input_manifest,
             input_quality=input_quality,
+            runtime_client=client,
+            runtime_project=target["project_slug"],
         )
     _record_requested_flags(
         out_path / "iteration.manifest.json",

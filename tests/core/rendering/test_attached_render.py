@@ -125,6 +125,9 @@ def test_attached_invocation_records_unique_child_step_and_outputs(
     assert (produces / "preview.mp4.provenance.json").resolve() == Path(
         f"{output.resolve()}.provenance.json"
     )
+    # Parent validation is runtime-backed; no legacy project run.json is
+    # required to attach the child render.
+    assert not list(projects_root.rglob("run.json"))
     with pytest.raises(attached.AttachedRenderError, match="already exists"):
         attached.invoke_attached_render(
             tmp_path / "timeline.json",

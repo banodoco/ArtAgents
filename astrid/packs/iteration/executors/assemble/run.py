@@ -9,8 +9,10 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_mai
 
 guard_canonical_entrypoint('iteration.assemble')
 import argparse
+import hashlib
 import html
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -195,6 +197,8 @@ def assemble_iteration(
     audio_bed: str = "auto",
     input_manifest: Mapping[str, Any] | None = None,
     input_quality: Mapping[str, Any] | None = None,
+    runtime_client: Any | None = None,
+    runtime_project: str | None = None,
 ) -> dict[str, Any]:
     if mode != "chaptered":
         raise AssembleError("iteration.assemble supports only --mode chaptered in v1; parallel and interleaved are deferred.")
@@ -216,6 +220,10 @@ def assemble_iteration(
         raise AssembleError("either prepare_dir or runtime-derived input artifacts are required")
     _enforce_quality_floor(quality, force=force)
 
+    # Runtime object outputs are materialized into this invocation's derived
+    # staging area. They are never treated as local authority or searched for
+    # in a project tree.
+    out_path.mkdir(parents=True, exist_ok=True)
     assembly = build_assembly(
         prepare_manifest,
         quality,
@@ -226,8 +234,10 @@ def assemble_iteration(
         theme=theme,
         style_preset=style_preset,
         audio_bed=audio_bed,
+        runtime_client=runtime_client,
+        runtime_project=runtime_project,
+        materialize_dir=out_path / "runtime-assets",
     )
-    out_path.mkdir(parents=True, exist_ok=True)
     timeline_path = out_path / "iteration.timeline.json"
     hype_timeline_path = out_path / "hype.timeline.json"
     manifest_path = out_path / "iteration.manifest.json"
@@ -305,11 +315,15 @@ def build_assembly(
     theme: str | None,
     style_preset: str | None,
     audio_bed: str,
+    runtime_client: Any | None = None,
+    runtime_project: str | None = None,
+    materialize_dir: Path | None = None,
 ) -> dict[str, Any]:
     clips: list[dict[str, Any]] = []
     assets: dict[str, dict[str, Any]] = {}
     decisions: list[dict[str, Any]] = []
     diagnostics: list[str] = []
+    unresolved_runtime_output = False
     current_at = 0.0
     total_duration = 0.0
     audio_duration = 0.0
@@ -320,8 +334,26 @@ def build_assembly(
         for artifact_index, artifact in enumerate(run.get("output_artifacts", []) or []):
             if not isinstance(artifact, Mapping):
                 continue
+            artifact = _materialize_runtime_artifact(
+                dict(artifact),
+                runtime_client=runtime_client,
+                runtime_project=runtime_project,
+                materialize_dir=materialize_dir,
+                ordinal=len(clips),
+            )
             duration = float(artifact.get("duration") or DEFAULT_CLIP_SECONDS)
             resolution = modalities.resolve_artifact(dict(artifact))
+            unresolved = artifact.get("_resolution_error")
+            if unresolved:
+                unresolved_runtime_output = True
+            if unresolved and not resolution.get("fallback"):
+                diagnostic = str(unresolved)
+                resolution = {
+                    **resolution,
+                    "fallback": True,
+                    "diagnostic": diagnostic,
+                    "html_aside": f'<aside class="renderer-fallback">{html.escape(diagnostic)}</aside>',
+                }
             renderer_id = str(resolution["renderer"])
             renderer_info = modalities.inspect_renderer(renderer_id)
             asset_id = f"asset_{run.get('run_id')}_{artifact_index}"
@@ -367,6 +399,14 @@ def build_assembly(
     }
     assembled_quality = dict(quality)
     assembled_quality["forced"] = bool(force)
+    if unresolved_runtime_output:
+        # A rendered text-card fallback is intentionally visible in both the
+        # report and quality metadata; claiming perfect source quality would
+        # conceal an unresolved runtime object.
+        try:
+            assembled_quality["data_quality"] = min(float(assembled_quality.get("data_quality", 0.0)), 0.5)
+        except (TypeError, ValueError):
+            assembled_quality["data_quality"] = 0.0
     final_manifest = dict(prepare_manifest)
     final_manifest["assembly"] = {
         "schema_version": SCHEMA_VERSION,
@@ -435,6 +475,105 @@ def _clip_for_artifact(
         "clipType": "media",
         "asset": asset_id,
     }
+
+
+def _materialize_runtime_artifact(
+    artifact: dict[str, Any],
+    *,
+    runtime_client: Any | None,
+    runtime_project: str | None,
+    materialize_dir: Path | None,
+    ordinal: int,
+) -> dict[str, Any]:
+    """Resolve one pathless runtime object through the neutral object API.
+
+    Runtime output rows deliberately carry object identity, digest, and size,
+    not filesystem paths.  Assembly may derive a short-lived local staging
+    path from those bytes for the renderer, but only after fetching and
+    verifying the object through the injected runtime client.  Missing or
+    unverifiable objects become an explicit quality fallback.
+    """
+
+    if artifact.get("path"):
+        return artifact
+    object_id = artifact.get("object_id")
+    digest_raw = artifact.get("sha256") or artifact.get("digest")
+    digest = str(digest_raw or "").removeprefix("sha256:").lower()
+    if not object_id and digest:
+        object_id = f"sha256:{digest}"
+    if not object_id:
+        artifact["_resolution_error"] = "runtime output has no path or object identity"
+        return artifact
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        artifact["_resolution_error"] = f"runtime output {object_id!r} has no verified digest"
+        return artifact
+    getter = getattr(runtime_client, "get_object", None) if runtime_client is not None else None
+    media_show = None
+    if not callable(getter) and runtime_client is not None and runtime_project:
+        media = getattr(runtime_client, "media", None)
+        media_show = getattr(media, "show", None)
+    if not callable(getter) and not callable(media_show):
+        artifact["_resolution_error"] = f"runtime object {object_id!r} cannot be fetched"
+        return artifact
+    try:
+        response = (
+            getter(str(object_id))
+            if callable(getter)
+            else media_show(runtime_project, str(object_id))
+        )
+        if hasattr(response, "ok") and hasattr(response, "data"):
+            if not bool(response.ok):
+                raise ValueError(str(getattr(response, "error", None) or "runtime object read failed"))
+            response = response.data
+        data = response if isinstance(response, (bytes, bytearray)) else getattr(response, "data", None)
+        if data is None and isinstance(response, Mapping):
+            data = response.get("data")
+            if data is None:
+                data = response.get("bytes")
+        if not isinstance(data, (bytes, bytearray)):
+            raise ValueError("runtime object response did not contain bytes")
+        data = bytes(data)
+        actual_digest = hashlib.sha256(data).hexdigest()
+        if actual_digest != digest:
+            raise ValueError(f"digest mismatch (expected {digest}, got {actual_digest})")
+        expected_size = artifact.get("size")
+        if expected_size is not None and int(expected_size) != len(data):
+            raise ValueError(f"size mismatch (expected {expected_size}, got {len(data)})")
+        if materialize_dir is None:
+            raise ValueError("no assembly staging directory is available")
+        materialize_dir.mkdir(parents=True, exist_ok=True)
+        suffix = _runtime_artifact_suffix(artifact)
+        destination = materialize_dir / f"{ordinal:04d}-{digest[:16]}{suffix}"
+        destination.write_bytes(data)
+        artifact["path"] = str(destination)
+        artifact["sha256"] = digest
+        return artifact
+    except (OSError, TypeError, ValueError) as exc:
+        artifact["_resolution_error"] = f"runtime object {object_id!r} was not materialized: {exc}"
+        return artifact
+
+
+def _runtime_artifact_suffix(artifact: Mapping[str, Any]) -> str:
+    media_type = str(artifact.get("media_type") or artifact.get("mime_type") or "").lower()
+    by_media_type = {
+        "video/mp4": ".mp4",
+        "video/quicktime": ".mov",
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+        "model/gltf-binary": ".glb",
+    }
+    if media_type in by_media_type:
+        return by_media_type[media_type]
+    return {
+        "video": ".mp4",
+        "audio": ".wav",
+        "image": ".png",
+        "model_3d": ".glb",
+    }.get(str(artifact.get("kind") or ""), ".bin")
 
 
 def _asset_entry(artifact: Mapping[str, Any], *, repo_root: Path, duration: float) -> dict[str, Any]:

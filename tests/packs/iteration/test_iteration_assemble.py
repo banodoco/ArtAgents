@@ -1,4 +1,6 @@
+import hashlib
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -65,6 +67,87 @@ def test_assemble_outputs_do_not_depend_on_deferred_preview_modes(tmp_path: Path
 
     combined = "\n".join(path.read_text(encoding="utf-8") for path in out_dir.glob("*.json"))
     assert "preview_modes" not in combined
+
+
+def test_assemble_materializes_runtime_object_output_before_rendering(tmp_path: Path) -> None:
+    payload = b"runtime-owned image bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.requested: list[str] = []
+
+        def get_object(self, object_id: str):
+            self.requested.append(object_id)
+            return SimpleNamespace(data=payload)
+
+    runtime = Runtime()
+    manifest = {
+        "schema_version": 1,
+        "target_run_id": RUN_ID,
+        "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FG1",
+        "runs": [{
+            "run_id": RUN_ID,
+            "output_artifacts": [{
+                "kind": "image",
+                "role": "result",
+                "object_id": "object-image-1",
+                "digest": f"sha256:{digest}",
+                "size": len(payload),
+            }],
+        }],
+    }
+    quality = {"schema_version": 1, "target_run_id": RUN_ID, "data_quality": 1.0}
+
+    result = assemble.assemble_iteration(
+        out_path=tmp_path / "assembled",
+        repo_root=tmp_path,
+        input_manifest=manifest,
+        input_quality=quality,
+        runtime_client=runtime,
+    )
+
+    assert runtime.requested == ["object-image-1"]
+    assets = _read_json(tmp_path / "assembled" / "hype.assets.json")["assets"]
+    asset = next(iter(assets.values()))
+    materialized = Path(asset["file"])
+    assert materialized.read_bytes() == payload
+    timeline = _read_json(tmp_path / "assembled" / "iteration.timeline.json")
+    assert timeline["clips"][0]["clipType"] == "media"
+    assert _read_json(tmp_path / "assembled" / "iteration.quality.json")["data_quality"] == 1.0
+    assert result["diagnostics"] == []
+
+
+def test_assemble_degrades_explicitly_when_runtime_object_cannot_be_materialized(tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"missing runtime bytes").hexdigest()
+    manifest = {
+        "schema_version": 1,
+        "target_run_id": RUN_ID,
+        "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FG1",
+        "runs": [{
+            "run_id": RUN_ID,
+            "output_artifacts": [{
+                "kind": "image",
+                "object_id": "missing-object",
+                "digest": digest,
+                "size": 19,
+            }],
+        }],
+    }
+    quality = {"schema_version": 1, "target_run_id": RUN_ID, "data_quality": 1.0}
+
+    result = assemble.assemble_iteration(
+        out_path=tmp_path / "assembled",
+        repo_root=tmp_path,
+        input_manifest=manifest,
+        input_quality=quality,
+    )
+
+    assert "cannot be fetched" in result["diagnostics"][0]
+    timeline = _read_json(tmp_path / "assembled" / "iteration.timeline.json")
+    assert timeline["clips"][0]["clipType"] == "text-card"
+    assert timeline["clips"][0]["params"]["fallback"] is True
+    assert _read_json(tmp_path / "assembled" / "iteration.quality.json")["data_quality"] == 0.5
 
 
 def _write_prepare_outputs(tmp_path: Path, *, data_quality: float) -> Path:

@@ -170,5 +170,6 @@ def test_distill_dry_run_emits_plan_shape(tmp_path: Path) -> None:
         "review",
     ]
     assert all(step["adapter"] == "local" for step in plan["steps"])
-    assert (out / "run.json").is_file()
-
+    # Runtime admission owns the run ledger; the orchestrator emits only its
+    # plan and derived artifacts, never a competing local run record.
+    assert not (out / "run.json").exists()

@@ -308,23 +308,6 @@ def run_full(args: argparse.Namespace) -> int:
     plan_path = out / "plan.json"
     emit_plan_json(plan, plan_path)
     plan_hash = compute_plan_hash(plan_path)
-    (out / "run.json").write_text(
-        json.dumps(
-            {
-                "orchestrator": "stream_content.distill",
-                "video": str(video),
-                "transcript": str(transcript) if transcript else None,
-                "brief": str(brief) if brief else None,
-                "plan_hash": plan_hash,
-                "authority": "local",
-                "note": "non-authority local orchestrator metadata; kernel is status authority",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     if args.dry_run:
         print(f"stream_content.distill: plan emitted to {plan_path} (plan_hash={plan_hash})")
         return 0
@@ -439,4 +422,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
