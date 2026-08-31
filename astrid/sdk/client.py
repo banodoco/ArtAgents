@@ -118,11 +118,16 @@ class AstridClient:
             raise ServiceUnavailableError(
                 str(exc), details={"next_action": "banodoco-local up --profile astrid"}
             ) from exc
-        credential_value = credential if credential is not None else os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "")
+        credential_value: str | Path = (
+            credential
+            if credential is not None
+            else os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "")
+        )
         if not credential_value:
             # `up --json` deliberately hands off a file path, not the secret.
             # Let the explicit client boundary read that owner-only file.
-            credential_value = str(result.get("credential_file", ""))
+            credential_file = result.get("credential_file", "")
+            credential_value = Path(str(credential_file)) if credential_file else ""
         if not credential_value:
             raise ServiceUnavailableError(
                 "runtime credential is required; run `banodoco-local up --profile astrid`",
