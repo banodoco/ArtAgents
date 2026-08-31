@@ -11,9 +11,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.timeline import CARRY_FORWARD_SOURCE_FIELDS, AssetRegistry
 
 _PRESERVED_REGISTRY_FIELDS = (
@@ -25,10 +25,6 @@ _PRESERVED_REGISTRY_FIELDS = (
     "generationId",
     "variantId",
 )
-
-
-def _is_url(value: str) -> bool:
-    return urlparse(value).scheme.lower() in {"http", "https"}
 
 
 def _lookup_probe_asset():
@@ -52,12 +48,12 @@ def resolve_materialized_asset_paths(args: Any) -> dict[str, Path]:
             raise AstridError(f"Invalid --asset value {raw_entry!r}: expected KEY=PATH")
         if key in paths:
             raise AstridError(f"Duplicate asset key {key!r} in --asset")
-        if _is_url(raw_path):
-            raise AstridError(
-                "cut workers accept only runtime-materialized files; URL inputs must "
-                "be ingested before task admission"
+        try:
+            paths[key] = require_runtime_materialized_file(
+                raw_path, label=f"asset {key!r}"
             )
-        paths[key] = Path(raw_path).expanduser().resolve()
+        except ValueError as exc:
+            raise AstridError(str(exc)) from exc
 
     for key, value, flag in (
         ("main", getattr(args, "video", None), "--video"),
@@ -65,14 +61,12 @@ def resolve_materialized_asset_paths(args: Any) -> dict[str, Path]:
     ):
         if value is None or (key == "rant" and getattr(args, "video", None) is not None):
             continue
-        text = str(value)
-        if _is_url(text):
-            raise AstridError(
-                f"{flag} must be a runtime-materialized file, not a URL"
-            )
         if key in paths:
             raise AstridError(f"Duplicate asset key {key!r}")
-        paths[key] = Path(text).expanduser().resolve()
+        try:
+            paths[key] = require_runtime_materialized_file(value, label=flag)
+        except ValueError as exc:
+            raise AstridError(str(exc)) from exc
     return paths
 
 
@@ -97,7 +91,10 @@ def build_attempt_registry(
     prior_sources = (prior_meta or {}).get("sources", {})
 
     for key, path in asset_paths.items():
-        resolved = path.resolve()
+        try:
+            resolved = require_runtime_materialized_file(path, label=f"asset {key!r}")
+        except ValueError as exc:
+            raise AstridError(str(exc)) from exc
         prior = prior_sources.get(key, {}) if isinstance(prior_sources, dict) else {}
         if not isinstance(prior, dict):
             prior = {}
@@ -144,4 +141,3 @@ def build_attempt_registry(
         _carry_forward(entry, existing)
         registry["assets"][key] = entry
     return registry, sources_meta
-

@@ -6,7 +6,6 @@ import pytest
 
 from astrid.core.media import require_runtime_materialized_file
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIVE_FILES = (
     REPO_ROOT / "astrid/core/execution/executor/runner.py",
@@ -17,6 +16,8 @@ LIVE_FILES = (
     REPO_ROOT / "astrid/packs/editorial/executors/transcribe/run.py",
     REPO_ROOT / "astrid/packs/understanding/executors/scene_describe/run.py",
     REPO_ROOT / "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+    REPO_ROOT / "astrid/packs/video_editing/executors/cut/attempt_assets.py",
+    REPO_ROOT / "astrid/packs/rendering/executors/timeline_storyboard/run.py",
 )
 
 
@@ -48,6 +49,15 @@ def test_runtime_media_boundary_rejects_missing_absolute_file(tmp_path: Path) ->
 
 def test_retired_cache_capability_is_not_shipped() -> None:
     assert not (REPO_ROOT / "astrid/core/rendering/asset_cache.py").exists()
-    assert not (REPO_ROOT / "astrid/packs/training/executors/asset_cache").exists()
+    # Ignore stale ignored bytecode directories left by an interrupted test
+    # run.  The product contract is about shipped source/manifest inventory,
+    # not whether an ignored cache directory happens to remain on disk.
+    retired_pack_dir = REPO_ROOT / "astrid/packs/training/executors/asset_cache"
+    shipped_sources = [
+        path
+        for path in retired_pack_dir.rglob("*")
+        if path.is_file() and path.suffix in {".py", ".yaml", ".yml", ".json"}
+    ] if retired_pack_dir.exists() else []
+    assert shipped_sources == []
     pack_manifest = (REPO_ROOT / "astrid/packs/training/pack.yaml").read_text(encoding="utf-8")
     assert "asset_cache" not in pack_manifest

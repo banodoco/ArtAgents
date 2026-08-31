@@ -457,6 +457,72 @@ def test_image_and_video_groups_use_their_declared_fallbacks_and_shot_filter(
         )
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"file": "relative/frame.png", "url": "https://example.invalid/frame.png"},
+        {"file": "file:///tmp/frame.png", "thumbnailUrl": "https://example.invalid/thumb.png"},
+        {"file": "data:image/png;base64,AAAA", "thumbnailUrl": "https://example.invalid/thumb.png"},
+        {"file": "https://example.invalid/frame.png", "thumbnailUrl": "https://example.invalid/thumb.png"},
+        {"file": "/does/not/exist/frame.png", "thumbnailUrl": "https://example.invalid/thumb.png"},
+    ],
+)
+def test_storyboard_never_resolves_locator_or_thumbnail_fallbacks(
+    tmp_path: Path, entry: dict[str, str]
+) -> None:
+    view_model = storyboard.build_view_model(
+        {
+            "clips": [
+                {
+                    "id": "c1",
+                    "at": 0,
+                    "clipType": "media",
+                    "asset": "frame",
+                    "hold": 1,
+                }
+            ],
+            "pinnedShotGroups": [
+                {"shotId": "shot-1", "clipIds": ["c1"], "mode": "images"}
+            ],
+        },
+        {"assets": {"frame": entry}},
+        registry_dir=tmp_path,
+    )
+
+    item = view_model["shots"][0]["inputs"][0]
+    assert item["src"] is None
+    assert item["missing"] is True
+    assert "example.invalid" not in storyboard.render_html(view_model)
+
+
+def test_storyboard_accepts_only_existing_absolute_materialized_file(
+    tmp_path: Path,
+) -> None:
+    image_path = _image(tmp_path / "frame.png")
+    view_model = storyboard.build_view_model(
+        {
+            "clips": [
+                {
+                    "id": "c1",
+                    "at": 0,
+                    "clipType": "media",
+                    "asset": "frame",
+                    "hold": 1,
+                }
+            ],
+            "pinnedShotGroups": [
+                {"shotId": "shot-1", "clipIds": ["c1"], "mode": "images"}
+            ],
+        },
+        {"assets": {"frame": {"file": str(image_path), "type": "image/png"}}},
+        registry_dir=tmp_path,
+    )
+
+    item = view_model["shots"][0]["inputs"][0]
+    assert item["src"] == str(image_path.resolve())
+    assert item["missing"] is False
+
+
 def test_placeholder_shot_carries_prompt_metadata_and_authored_bounds(
     tmp_path: Path,
 ) -> None:

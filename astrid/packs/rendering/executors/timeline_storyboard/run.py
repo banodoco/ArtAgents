@@ -16,12 +16,12 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from astrid.core import timeline
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.atomic_io import write_json_atomic, write_text_atomic
+from astrid.core.media import require_runtime_materialized_file
 
 _DISCORD_INPUT_RE = re.compile(r"^input_media(?:_([2-9]|10))?$")
 CONTACT_SHEET_COLUMNS = 2
@@ -142,10 +142,6 @@ def _shot_bounds(clips: list[Mapping[str, Any]]) -> tuple[float, float]:
     return min(starts), max(ends)
 
 
-def _is_remote_source(value: str) -> bool:
-    return urlparse(value).scheme in {"http", "https", "data", "file"}
-
-
 def _resolved_asset(
     asset_id: str,
     assets: Mapping[str, Any],
@@ -156,24 +152,23 @@ def _resolved_asset(
     entry = raw_entry if isinstance(raw_entry, Mapping) else {}
     asset_type = _string(entry.get("type"))
     file_value = _string(entry.get("file"))
-    url_value = _string(entry.get("url"))
-    thumbnail_value = _string(entry.get("thumbnailUrl"))
 
     src: str | None = None
     missing = not bool(entry)
     if file_value is not None:
-        file_path = Path(file_value).expanduser()
-        if not file_path.is_absolute():
-            file_path = registry_dir / file_path
-        file_path = file_path.resolve()
-        src = str(file_path)
-        missing = not file_path.is_file()
-    if (src is None or missing) and url_value is not None:
-        src = url_value
-        missing = False
-    if src is None and thumbnail_value is not None:
-        src = thumbnail_value
-        missing = False
+        try:
+            file_path = require_runtime_materialized_file(
+                file_value, label=f"asset {asset_id!r}"
+            )
+        except ValueError:
+            # Invalid locators remain visible as a missing card.  In
+            # particular, never fall back to URL or thumbnail fields: the
+            # neutral runtime must materialize and verify bytes before this
+            # pack receives them.
+            file_path = None
+        if file_path is not None:
+            src = str(file_path)
+            missing = False
     if src is None:
         missing = True
 
@@ -354,9 +349,10 @@ def build_view_model(
 def _html_source(src: str | None) -> str | None:
     if src is None:
         return None
-    if _is_remote_source(src):
-        return src
-    return Path(src).resolve().as_uri()
+    try:
+        return require_runtime_materialized_file(src, label="storyboard image").as_uri()
+    except ValueError:
+        return None
 
 
 def _pil() -> tuple[Any, Any, Any, Any]:
@@ -449,10 +445,11 @@ def _paste_contact_sheet_image(
     if bool(item.get("missing")):
         return False
     src = _string(item.get("src"))
-    if src is None or _is_remote_source(src):
+    if src is None:
         return False
-    path = Path(src)
-    if not path.is_file():
+    try:
+        path = require_runtime_materialized_file(src, label="storyboard image")
+    except ValueError:
         return False
 
     Image, _ImageDraw, _ImageFont, ImageOps = _pil()
