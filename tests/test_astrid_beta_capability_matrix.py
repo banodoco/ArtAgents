@@ -8,7 +8,7 @@ from astrid.core.execution.generic_host import GenericPackHost
 def test_beta_matrix_covers_every_discovered_capability_and_declaration():
     host = GenericPackHost(pack_roots=[Path("astrid/packs")])
     records = host.discover()
-    assert len(records) == len(host.matrix) == 64
+    assert len(records) == len(host.matrix) == 59
     assert {record.matrix["disposition"] for record in records} <= {"required", "optional", "unsupported", "retired"}
     for record in records:
         assert record.matrix["evidence_reason"]

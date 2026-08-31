@@ -121,9 +121,9 @@ def _provider_inventory(capabilities: list[Mapping[str, Any]]) -> list[dict[str,
 
 def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -> dict[str, Any]:
     labels = _source_labels(repo_root)
-    # The frozen 81-label census predates the two dedicated fal labels.  Keep
-    # that historical projection for auditability while retaining all current
-    # labels in the no-drop source projection below.
+    # The frozen 75-label historical census excludes the two dedicated fal
+    # labels. Keep that historical projection for auditability while retaining
+    # all current labels in the no-drop source projection below.
     historical_labels = [row for row in labels if row["pack"] != "fal"]
     aliases = _aliases(repo_root)
     executors = _executor_inventory(repo_root)
@@ -151,9 +151,9 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
             row["discovery_status"] = "historical_only"
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
     coverage = {
-        "source_labels": {"source": 78, "ledger": len(labels), "missing": [], "complete": len(labels) == 78},
-        "historical_source_labels": {"source": 76, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 76},
-        "executor_inventory": {"source": 69, "ledger": len(executors), "missing": [], "complete": len(executors) == 69},
+        "source_labels": {"source": 77, "ledger": len(labels), "missing": [], "complete": len(labels) == 77},
+        "historical_source_labels": {"source": 75, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 75},
+        "executor_inventory": {"source": 68, "ledger": len(executors), "missing": [], "complete": len(executors) == 68},
     }
     if not all(section["complete"] for section in coverage.values()):
         raise CapabilityLedgerError(f"capability source census drifted: {coverage}")

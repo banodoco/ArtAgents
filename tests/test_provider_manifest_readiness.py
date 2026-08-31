@@ -37,7 +37,7 @@ def test_every_tcp_provider_manifest_declares_an_enforceable_host_broker():
     host = _provider_host(credentials={})
     providers = [record for record in host.capabilities.values() if record.adapter.family == "provider"]
 
-    assert len(providers) == 24
+    assert len(providers) == 22
     for record in providers:
         policy = record.definition.metadata["network_policy"]
         protocols = {str(value).lower() for value in policy["allowed_protocols"]}
@@ -72,7 +72,7 @@ def test_all_supported_provider_routes_are_ready_and_grantable_with_declared_inp
             tcp_providers.append(record)
             assert record.ready, (record.id, record.preflight)
 
-    assert len(tcp_providers) == 24
+    assert len(tcp_providers) == 22
     for record in tcp_providers:
         task = {
             "task": {

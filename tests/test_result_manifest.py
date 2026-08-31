@@ -282,6 +282,7 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
     listed_ids = non_exempt_ids | exempted_ids
     assert non_exempt_ids.isdisjoint(exempted_ids)
     assert registry_ids.issubset(listed_ids)
+    assert payload["total_executors"] == len(listed_ids)
     assert payload["m1_adopters"] == len(non_exempt_ids)
     assert payload["exempted"] == len(exempted_ids)
 
