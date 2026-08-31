@@ -279,7 +279,12 @@ def test_unknown_effect_structured_schema_and_opaque_params_contracts() -> None:
     with pytest.raises(ManagedRenderValidationError, match="unregistered reusable visual element"):
         validate_managed_render_snapshot(_snapshot(runtime))
 
-    runtime.timeline["config"]["clips"][0]["clipType"] = "text"
+    runtime.timeline["config"]["clips"][0].update(
+        clipType="text",
+        # Keep this a valid built-in text clip so the assertion below reaches
+        # the deliberately malformed reusable-effect payload.
+        text={"content": "fixture"},
+    )
     runtime.timeline["config"]["clips"][0]["effects"] = [{"id": "bad", "params": {"amount": 1}}]
     with pytest.raises(ManagedRenderValidationError) as error:
         validate_managed_render_snapshot(_snapshot(runtime))

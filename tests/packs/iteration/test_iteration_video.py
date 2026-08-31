@@ -70,7 +70,9 @@ def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> N
     class Runs:
         def list(self, project):
             assert project == "selected"
-            return []
+            # Generated runtime clients return the canonical page pair,
+            # including the terminal null cursor.
+            return [[], None]
 
         def show(self, run_id):
             return {
@@ -381,7 +383,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
 
         def list(self, project: str):
             self.calls.append(("list", project))
-            return SimpleNamespace(ok=True, data=[{
+            return SimpleNamespace(ok=True, data=[[{
                 "run_id": TARGET_RUN_ID,
                 "project_id": "demo",
                 "status": "succeeded",
@@ -392,7 +394,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
                     "size": len(payload),
                     "media_type": "image/png",
                 }],
-            }])
+            }], None])
 
         def show(self, project: str, object_id: str):
             self.objects.append((project, object_id))
