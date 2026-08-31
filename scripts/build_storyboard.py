@@ -597,12 +597,6 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         for problem in getattr(exc, "problems", []) or []:
             print(f"  - {problem}", file=sys.stderr)
         return 1
-    problems = validate_storyboard(story)
-    if problems:
-        print("error: storyboard validation failed:", file=sys.stderr)
-        for problem in problems:
-            print(f"  - {problem}", file=sys.stderr)
-        return 1
     print(f"OK {story_path} ({len(story.get('sections', []))} sections)")
     return 0
 

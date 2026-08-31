@@ -1,4 +1,0 @@
-ThreeTimelineComposition proof (host re-verify after camera-prop fix, 160x90@24fps, bg #1a2e3f)
-- bg-only frame 0:  size=(160, 90) distinct_colors=1 non_bg_samples=0   [uniform background, zero clips]
-- text frame 0:     size=(160, 90) distinct_colors=52 non_bg_samples=567 [HELLO visible]
-- late-clip frame 0: size=(160, 90) distinct_colors=1 non_bg_samples=0   [clip at 0.5s not visible at frame 0]

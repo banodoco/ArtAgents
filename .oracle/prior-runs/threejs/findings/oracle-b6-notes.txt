@@ -1,6 +1,0 @@
-All 9 tasks complete. The output block was delivered in the prior message — summary of verdicts:
-
-- **DEAD_CODE: PASS** — `_effective_registry_state`, `_clip_end`, `asset_entries` removed; zero remaining references; no behavior change.
-- **FINALIZER_ASSERT: PASS** — assertion at test_threejs_hybrid.py:814-821 exactly mirrors the emitter (finalizers/ffmpeg/run.py:1479-1494), non-vacuous; offline npm test restores config in `finally`.
-- **BLE001: FAIL (one genuine lost catch)** — hybrid planner run.py:540 `except RendererException` no longer catches `RendererRegistryError` from the resolver's `registry.get`/`resolve_evidence` on a missing/execution-ineligible planned renderer; error envelope degrades from structured `RendererUnsupportedError` to `RendererInternalError` (transport) or a raw leak (in-process). Minor: threejs/run.py:367/386/453 lose `ImportError` for the missing timeline-schema package.
-- **ALLOWLIST: justified** — per-file entry with reason; not a blanket exemption.

@@ -375,6 +375,7 @@ def test_skill_discovery_finds_pack_skills() -> None:
         "foley",
         "generation",
         "media",
+        "references",
         "reigh",
         "rendering",
         "stream_content",

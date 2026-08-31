@@ -174,6 +174,9 @@ The `references` family is a manifest-declared **nested mount**: it is
 reachable only beneath `media` (for example, `astrid media references list`) and is
 never a top-level command.
 
+For the short creative workflow and reference-boundary rule, use
+[`astrid/packs/references/skill/SKILL.md`](../../astrid/packs/references/skill/SKILL.md).
+
 ```bash
 # create — one client.references.create call; frozen --kind, --name, --media
 python3 -m astrid media references create --project demo \

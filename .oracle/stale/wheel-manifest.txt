@@ -1,8 +1,0 @@
-Wheel: astrid-0.1.0-py3-none-any.whl (python3 -m build --wheel --no-isolation)
-astrid/packs/rendering/backends/threejs/__init__.py
-astrid/packs/rendering/backends/threejs/renderer.yaml
-astrid/packs/rendering/backends/threejs/run.py
-astrid/packs/rendering/planners/threejs_hybrid/__init__.py
-astrid/packs/rendering/planners/threejs_hybrid/planner.yaml
-astrid/packs/rendering/planners/threejs_hybrid/run.py
-clean wheel-install smoke: PASSED (make wheel)
