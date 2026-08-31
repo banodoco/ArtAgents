@@ -47,6 +47,18 @@ def test_live_classifier_requires_project_scoped_runtime_admission(tmp_path: Pat
     assert classify_asset("main", entry, project_ref="main", media_snapshot=cross_project).state == "unsupported"
 
 
+@pytest.mark.parametrize("snapshot", [
+    {"items": [{"object_id": "obj-a", "digest": "a" * 64}]},
+    {"obj-a": {"digest": "a" * 64}},
+    [[{"object_id": "obj-a", "digest": "a" * 64}], "cursor-1"],
+])
+def test_live_classifier_rejects_mapping_or_incomplete_media_snapshots(snapshot) -> None:
+    entry = {"object_id": "obj-a", "content_sha256": "a" * 64}
+    assert classify_asset(
+        "main", entry, project_ref="main", media_snapshot=snapshot
+    ).state == "unsupported"
+
+
 def test_materializer_stages_only_verified_runtime_object_bytes(tmp_path: Path) -> None:
     payload = b"runtime bytes"
     digest = hashlib.sha256(payload).hexdigest()

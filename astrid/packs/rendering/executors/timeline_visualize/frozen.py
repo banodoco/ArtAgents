@@ -92,6 +92,52 @@ class FocusResolutionError(FrozenViewError):
 
 _REHYDRATED_PACKS_LOCK = threading.Lock()
 _REHYDRATED_PACKS: dict[Path, tuple[int, int, int, int]] = {}
+_RUNTIME_PAGE_LIMIT = 50
+_RUNTIME_MAX_PAGES = 10_000
+
+
+def _terminal_page(value: Any) -> list[Any] | None:
+    """Return one complete canonical page, rejecting truncated reads.
+
+    Run-event reads currently have no cursor-bearing client method, so a
+    continuation cannot be followed safely here.  The page pair is still
+    required: accepting a bare list or mapping would silently erase the
+    authority's pagination boundary.
+    """
+
+    page = page_pair(value)
+    if page is None or page[1] is not None:
+        return None
+    return page[0]
+
+
+def _paged_rows(reader: Any, *args: Any) -> list[Any] | None:
+    """Read all canonical pages from a cursor-bearing generated method."""
+
+    rows: list[Any] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _ in range(_RUNTIME_MAX_PAGES):
+        try:
+            value = (
+                reader(*args)
+                if cursor is None
+                else reader(*args, cursor=cursor, limit=_RUNTIME_PAGE_LIMIT)
+            )
+        except Exception:
+            return None
+        page = page_pair(value)
+        if page is None:
+            return None
+        page_rows, next_cursor = page
+        rows.extend(page_rows)
+        if next_cursor is None:
+            return rows
+        if next_cursor in seen_cursors or next_cursor == cursor:
+            return None
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return None
 
 
 def _register_rehydrated_pack(root: Path) -> None:
@@ -210,18 +256,16 @@ def _rehydrate_managed_pack(
     if runtime_client is None:
         return None
     try:
-        project_page = page_pair(runtime_client.list_projects())
-        if project_page is None or project_page[1] is not None:
+        project_rows = _paged_rows(runtime_client.list_projects)
+        if project_rows is None:
             return None
-        project_rows, _project_cursor = project_page
         project = next((item for item in project_rows if isinstance(item, Mapping) and item.get("slug") == project_root.name), None)
         project_id = project.get("project_id") if isinstance(project, dict) else None
         if not project_id:
             return None
-        run_page = page_pair(runtime_client.list_project_runs(str(project_id)))
-        if run_page is None or run_page[1] is not None:
+        run_rows = _paged_rows(runtime_client.list_project_runs, str(project_id))
+        if run_rows is None:
             return None
-        run_rows, _run_cursor = run_page
     except Exception:
         return None
 
@@ -239,8 +283,10 @@ def _rehydrate_managed_pack(
         if str(raw_run.get("status", raw_run.get("state", ""))) not in {"completed", "succeeded"}:
             continue
         try:
-            run_events = runtime_client.list_run_events(run_id)
+            run_events = _terminal_page(runtime_client.list_run_events(run_id))
         except Exception:
+            continue
+        if run_events is None:
             continue
         outputs: list[dict[str, Any]] = []
         for event in run_events or []:
@@ -1102,12 +1148,10 @@ def _runtime_settled_outputs(runtime_client: Any, run_id: str, run_info: Mapping
     if not callable(reader):
         return None
     try:
-        events = reader(run_id)
+        events = _terminal_page(reader(run_id))
     except Exception:
         return None
-    if isinstance(events, Mapping):
-        events = events.get("items")
-    if not isinstance(events, (list, tuple)):
+    if events is None:
         return None
     # The event stream is ordered.  Use the last terminal settlement so a
     # retry cannot make an older attempt's outputs appear to belong to the
@@ -1272,10 +1316,9 @@ def _kernel_frozen_run_info(
         run_project_id = info.get("project_id") or info.get("project")
         projects_reader = getattr(runtime_client, "list_projects", None)
         if callable(projects_reader):
-            projects_page = page_pair(projects_reader())
-            if projects_page is None or projects_page[1] is not None:
+            rows = _paged_rows(projects_reader)
+            if rows is None:
                 return None
-            rows, _projects_cursor = projects_page
             current = next((item for item in rows or [] if isinstance(item, Mapping) and item.get("slug") == project_slug), None)
             current_project_id = current.get("project_id") or current.get("id") if isinstance(current, Mapping) else None
             result["project_id"] = run_project_id

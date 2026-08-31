@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from astrid.core import timeline
 from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.io.media_import import validate_digest
+from astrid.sdk.workspace_client import page_pair
 
 
 class ManagedRenderValidationError(ValueError):
@@ -158,12 +159,12 @@ def _runtime_media_admissions(client: Any, project_ref: str) -> dict[str, str]:
         return {}
     if not result.ok:
         return {}
-    page = result.data
-    if not isinstance(page, list) or len(page) != 2:
+    page = page_pair(result.data)
+    # ``RemoteMedia.list`` has no cursor argument. Do not authorize a
+    # partial media admission when the runtime says more pages exist.
+    if page is None or page[1] is not None:
         return {}
-    rows, next_cursor = page
-    if not isinstance(rows, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
-        return {}
+    rows = page[0]
     admitted: dict[str, str] = {}
     for row in rows:
         if not isinstance(row, Mapping):

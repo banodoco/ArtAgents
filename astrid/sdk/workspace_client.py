@@ -41,7 +41,14 @@ def page_pair(value: Any) -> tuple[list[Any], str | None] | None:
     items, next_cursor = value
     if not isinstance(items, list):
         return None
-    if next_cursor is not None and not isinstance(next_cursor, str):
+    if next_cursor is not None and (
+        not isinstance(next_cursor, str)
+        or not next_cursor
+        or any(
+            character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+            for character in next_cursor
+        )
+    ):
         return None
     return items, next_cursor
 
@@ -234,8 +241,8 @@ class WorkspaceClient:
             metadata=metadata,
         )
 
-    def list_projects(self) -> Any:
-        return self._call_generated("list_projects")
+    def list_projects(self, *, cursor: str | None = None, limit: int = 50) -> Any:
+        return self._call_generated("list_projects", cursor=cursor, limit=limit)
 
     def select_project(self, project: str, *, scope: str = "workspace", idempotency_key: str | None = None) -> Any:
         return self._call_generated("select_project", project, scope=scope, idempotency_key=idempotency_key)

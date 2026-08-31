@@ -16,6 +16,7 @@ from astrid.packs.rendering.executors.render.managed_timeline import (
     resolve_managed_render_snapshot,
     validate_managed_render_snapshot,
 )
+from astrid.packs.rendering.executors.render import managed_timeline
 from astrid.sdk.exceptions import CapabilityValidationError
 from astrid.sdk.invocation import _prepare_managed_render_inputs
 
@@ -105,6 +106,18 @@ def test_runtime_admitted_media_stays_an_identity_not_a_local_cas_path(tmp_path:
     assert asset["content_sha256"] == digest
     assert "file" not in asset
     assert ".astrid" not in json.dumps(snapshot.registry)
+
+
+@pytest.mark.parametrize("page", [
+    [{"media_id": "media-1"}],
+    {"items": [{"media_id": "media-1"}], "next_cursor": None},
+    [[{"media_id": "media-1"}], "cursor-1"],
+])
+def test_runtime_media_admission_requires_terminal_canonical_page(page) -> None:
+    class Client:
+        media = SimpleNamespace(list=lambda _project: _result(page))
+
+    assert managed_timeline._runtime_media_admissions(Client(), "demo") == {}
 
 
 def test_runtime_media_identity_mismatch_fails_closed() -> None:

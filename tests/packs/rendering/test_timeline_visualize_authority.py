@@ -100,6 +100,50 @@ def test_frozen_run_info_requires_generated_project_page_pair(monkeypatch):
     assert frozen._kernel_frozen_run_info("demo", "run-1", Path("/unused")) is None
 
 
+@pytest.mark.parametrize("events", [
+    [{"event_type": "task.completed"}],
+    {"items": [{"event_type": "task.completed"}], "next_cursor": None},
+    [[{"event_type": "task.completed"}], "cursor-1"],
+])
+def test_settled_outputs_rejects_noncanonical_event_pages(events):
+    class Runtime:
+        def list_run_events(self, _run_id):
+            return events
+
+    assert frozen._runtime_settled_outputs(Runtime(), "run-1", {}) is None
+
+
+def test_settled_outputs_accepts_terminal_canonical_event_page():
+    event = {
+        "event_type": "task.completed",
+        "payload": {"result": {"outputs": [{"name": "manifest.json"}]}},
+    }
+
+    class Runtime:
+        def list_run_events(self, _run_id):
+            return [[event], None]
+
+    assert frozen._runtime_settled_outputs(Runtime(), "run-1", {}) == [
+        {"name": "manifest.json"}
+    ]
+
+
+def test_paged_runtime_rows_follows_canonical_cursor_and_rejects_truncation():
+    calls = []
+
+    def reader(*, cursor=None, limit=50):
+        calls.append((cursor, limit))
+        return [[{"id": len(calls)}], "next"] if cursor is None else [[{"id": 2}], None]
+
+    assert frozen._paged_rows(reader) == [{"id": 1}, {"id": 2}]
+    assert calls == [(None, 50), ("next", 50)]
+
+    def truncated(*, cursor=None, limit=50):
+        return [[{"id": 1}], "next"]
+
+    assert frozen._paged_rows(truncated) is None
+
+
 def _owned_manifest(tmp_path: Path, run_id: str, payload: bytes) -> tuple[Path, dict]:
     project = tmp_path / "demo"
     path = project / "runs" / run_id / "agent-view" / "manifest.json"

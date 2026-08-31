@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from astrid.core.io.media_import import validate_digest
+from astrid.sdk.workspace_client import page_pair
 
 _HASH_KEYS = ("digest", "content_sha256", "sha256", "hash")
 _ROLE_KEYS = ("role", "kind")
@@ -69,18 +70,17 @@ def _runtime_rows(runtime_client: Any | None, project_ref: str, media_snapshot: 
             return []
         try:
             result = runtime_client.media.list(project_ref)
-            if not result.ok or not isinstance(result.data, list) or len(result.data) != 2:
+            if not result.ok:
                 return []
-            rows, next_cursor = result.data
-            if not isinstance(rows, list) or (next_cursor is not None and not isinstance(next_cursor, str)):
+            page = page_pair(result.data)
+            # ``RemoteMedia.list`` has no cursor argument. A continuation is
+            # therefore an incomplete authority read, never a terminal page.
+            if page is None or page[1] is not None:
                 return []
+            rows = page[0]
         except Exception:  # noqa: BLE001 - a runtime read failure is fail-closed
             return []
-    if isinstance(rows, Mapping):
-        rows = rows.get("items", rows.get("media", rows.get(project_ref, rows)))
-    if isinstance(rows, Mapping):
-        rows = [{"object_id": key, **value} for key, value in rows.items() if isinstance(value, Mapping)]
-    if not isinstance(rows, (list, tuple, set)):
+    if not isinstance(rows, list):
         return []
     scoped: list[Mapping[str, Any]] = []
     for row in rows:
