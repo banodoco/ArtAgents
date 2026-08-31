@@ -107,7 +107,13 @@ def _owned_manifest(tmp_path: Path, run_id: str, payload: bytes) -> tuple[Path, 
     path.write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
     manifest = {
-        "inputs": {"timeline_source": ["demo"]},
+        # This is the canonical evidence-pack project identity.  Frozen
+        # ownership must validate it before checking the exact settled output;
+        # omitting it would exercise an obsolete pre-runtime manifest shape.
+        "inputs": {
+            "timeline_source": ["demo"],
+            "resolved_project": {"slug": "demo"},
+        },
         "outputs": [{"path": "manifest.json", "content_hash": f"sha256:{digest}", "bytes": len(payload)}],
     }
     return path, manifest
