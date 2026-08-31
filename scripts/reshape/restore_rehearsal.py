@@ -48,16 +48,7 @@ def _project_files(projects_dir: Path) -> list[Path]:
 
 
 def _repo_state_files(repo_dir: Path) -> list[Path]:
-    files: list[Path] = []
-    threads_json = repo_dir / ".astrid" / "threads.json"
-    if threads_json.is_file():
-        files.append(threads_json)
-    threads_root = repo_dir / ".astrid" / "threads"
-    if threads_root.is_dir():
-        files.extend(path for path in threads_root.glob("**/groups.json") if path.is_file())
-        files.extend(path for path in threads_root.glob("**/selections.jsonl") if path.is_file())
-    files.extend(path for path in repo_dir.rglob(".astrid.variants.json") if path.is_file())
-    return sorted({path.resolve() for path in files})
+    return sorted({path.resolve() for path in repo_dir.rglob(".astrid.variants.json") if path.is_file()})
 
 
 def _prove_readable(paths: Iterable[Path], label: str) -> None:
@@ -126,7 +117,7 @@ def rehearse_restore(
     if not project_files:
         raise SystemExit("ERROR: extracted projects/ contains no readable project files")
     if not repo_files:
-        raise SystemExit("ERROR: extracted repo/ contains no declared thread or variant rollback files")
+        raise SystemExit("ERROR: extracted repo/ contains no declared variant rollback files")
 
     _prove_readable(project_files, "project")
     _prove_readable(repo_files, "repo rollback")

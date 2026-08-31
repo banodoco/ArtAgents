@@ -1,6 +1,4 @@
-import contextlib
 import hashlib
-import io
 import json
 from contextlib import nullcontext
 from pathlib import Path
@@ -14,91 +12,6 @@ from astrid.packs.video_editing.orchestrators.iteration_video import run as iter
 
 TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
-
-
-def test_iteration_video_public_route_uses_runtime_authority(
-    tmp_path: Path, monkeypatch
-) -> None:
-    repo = tmp_path
-    out_dir = repo / "runs" / "iteration-video"
-    forwarded: dict[str, object] = {}
-    runtime = _runtime_client()
-
-    def fake_assemble_iteration(**kwargs):
-        forwarded["input_manifest"] = kwargs["input_manifest"]
-        out = kwargs["out_path"]
-        out.mkdir(parents=True, exist_ok=True)
-        _write_json(out / "iteration.manifest.json", {"runs": [], "quality": kwargs["input_quality"]})
-        _write_json(out / "iteration.quality.json", kwargs["input_quality"])
-        _write_json(out / "hype.timeline.json", {})
-        _write_json(out / "hype.assets.json", {})
-        return {"manifest_path": str(out / "iteration.manifest.json")}
-
-    def fake_render(timeline: Path, assets: Path, output: Path, **kwargs) -> Path:
-        forwarded["render_timeline"] = timeline
-        forwarded["render_assets"] = assets
-        forwarded["render_output"] = output
-        forwarded["render_kwargs"] = kwargs
-        assert timeline.is_file()
-        assert assets.is_file()
-        output.write_bytes(b"rendered-mp4")
-        Path(f"{output}.provenance.json").write_text(
-            json.dumps({"output": str(output)}) + "\n",
-            encoding="utf-8",
-        )
-        return output
-
-    monkeypatch.setattr(iteration_video, "_runtime_client_context", lambda *_args: nullcontext(runtime))
-    monkeypatch.setattr(iteration_video.assemble, "assemble_iteration", fake_assemble_iteration)
-    monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
-
-    stdout = io.StringIO()
-    with contextlib.redirect_stdout(stdout):
-        result = run_orchestrator(
-            OrchestratorRunRequest(
-                orchestrator_id="video_editing.iteration_video",
-                out=out_dir,
-                project="demo",
-                project_was_auto_resolved=True,
-                run_root=out_dir,
-                inputs={"target_run_id": TARGET_RUN_ID},
-                orchestrator_args=(
-                    "--repo-root",
-                    str(repo),
-                    "--max-iterations",
-                    "7",
-                    "--direction",
-                    "label only",
-                    "--clip-mode",
-                    "hold",
-                    "--renderer",
-                    "rendering.fixture",
-                ),
-            )
-        )
-
-    assert result.ok
-    assert runtime.calls == [("list", "demo")]
-    assert forwarded["input_manifest"]["authority"] == {"kind": "runtime", "project": "demo", "run_ids": [TARGET_RUN_ID]}
-    assert forwarded["input_manifest"]["quality"]["data_quality"] == 1.0
-    assert Path(forwarded["render_timeline"]).name == "hype.timeline.json"
-    assert Path(forwarded["render_assets"]).name == "hype.assets.json"
-    assert Path(forwarded["render_output"]).name == "iteration.mp4"
-    render_kwargs = forwarded["render_kwargs"]
-    assert render_kwargs["engine"] == "rendering.fixture"
-    assert render_kwargs["project_slug"] == "demo"
-    assert render_kwargs["parent_run_id"] == out_dir.name
-    assert render_kwargs["step_id"] == "iteration-render"
-    assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
-    assert _read_json(out_dir / "iteration.mp4.provenance.json")["output"] == str(
-        out_dir / "iteration.mp4"
-    )
-    assert not (out_dir / "hype.mp4").exists()
-    assert not (out_dir / "hype.mp4.provenance.json").exists()
-    assert not (out_dir / "_prepare").exists()
-
-    assert not (out_dir / "run.json").exists()
-    assert not (out_dir / ".astrid.variants.json").exists()
 
 
 def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_content(tmp_path: Path, monkeypatch) -> None:
@@ -152,6 +65,142 @@ def test_iteration_lineage_quality_is_conservative_when_parent_ids_resolve() -> 
     assert quality["data_quality"] < 1.0
     assert quality["missing_evidence"] == [ROOT_RUN_ID, TARGET_RUN_ID]
     assert quality["missing_receipts"] == [ROOT_RUN_ID, TARGET_RUN_ID]
+
+
+def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> None:
+    class Runs:
+        def list(self, project):
+            assert project == "selected"
+            return []
+
+        def show(self, project, run_id):
+            return {
+                "run_id": run_id,
+                "project_id": "other-project",
+                "output_artifacts": [{"kind": "secret"}],
+            }
+
+    runtime = type("Runtime", (), {"runs": Runs()})()
+    with pytest.raises(iteration_video.IterationVideoError, match="not selected project"):
+        iteration_video.resolve_target_run_id(
+            Path("."),
+            target_run_id=TARGET_RUN_ID,
+            project_slug="selected",
+            runtime_client=runtime,
+        )
+
+
+def test_iteration_only_uses_supported_known_run_relation_direction() -> None:
+    relations = [
+        {"from_run_id": TARGET_RUN_ID, "to_run_id": ROOT_RUN_ID, "kind": "derived_from"},
+        {"from_run_id": "unrelated", "to_run_id": ROOT_RUN_ID, "kind": "derived_from"},
+    ]
+    selected, available = iteration_video._runtime_run_relations(
+        relations, known_run_ids={TARGET_RUN_ID, ROOT_RUN_ID}
+    )
+    assert available is False
+    assert selected == [
+        {"from_run_id": TARGET_RUN_ID, "to_run_id": ROOT_RUN_ID, "kind": "derived_from"}
+    ]
+    _selected, available = iteration_video._runtime_run_relations(
+        [{"from_run_id": TARGET_RUN_ID, "to_run_id": ROOT_RUN_ID, "kind": "mystery"}],
+        known_run_ids={TARGET_RUN_ID, ROOT_RUN_ID},
+    )
+    assert available is False
+
+
+def test_iteration_relation_media_objects_are_not_promoted_to_run_lineage() -> None:
+    selected, available = iteration_video._runtime_run_relations(
+        [{"from_object_id": "object-a", "to_object_id": "object-b", "kind": "derived_from"}],
+        known_run_ids={TARGET_RUN_ID, ROOT_RUN_ID},
+    )
+    assert selected == []
+    assert available is False
+
+
+def test_iteration_events_drop_mismatched_aggregate_ids() -> None:
+    class Runs:
+        def events(self, project, run_id):
+            return [
+                {"event_id": "exact", "aggregate_id": run_id},
+                {"event_id": "other", "aggregate_id": ROOT_RUN_ID},
+            ]
+
+    class Tasks:
+        def events(self, task_id, project=None):
+            return [
+                {"event_id": "exact", "aggregate_id": task_id},
+                {"event_id": "other", "aggregate_id": "task-other"},
+            ]
+
+    runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks()})()
+    run_events, run_available = iteration_video._runtime_run_events(runtime, "demo", TARGET_RUN_ID)
+    task_events, task_available = iteration_video._runtime_task_events(runtime, "demo", "task-target")
+    assert run_events == [{"event_id": "exact", "aggregate_id": TARGET_RUN_ID}]
+    assert task_events == [{"event_id": "exact", "aggregate_id": "task-target"}]
+    assert run_available is False
+    assert task_available is False
+
+
+def test_iteration_malformed_event_response_is_unavailable() -> None:
+    class Runs:
+        def events(self, project, run_id):
+            return {"unexpected": "shape"}
+
+    runtime = type("Runtime", (), {"runs": Runs()})()
+    events, available = iteration_video._runtime_run_events(runtime, "demo", TARGET_RUN_ID)
+    assert events == []
+    assert available is False
+
+
+def test_iteration_task_project_mismatch_is_not_attached() -> None:
+    class Tasks:
+        def list(self, project):
+            return [{
+                "task_id": "task-secret",
+                "run_id": TARGET_RUN_ID,
+                "project_id": "other-project",
+                "output_artifacts": [{"kind": "secret"}],
+            }]
+
+    runtime = type("Runtime", (), {"tasks": Tasks()})()
+    task_records, available = iteration_video._runtime_task_records(runtime, "selected")
+    assert task_records == {}
+    assert available is False
+
+
+def test_iteration_evidence_and_receipts_require_run_binding() -> None:
+    run = {
+        "run_id": TARGET_RUN_ID,
+        "evidence": [{"id": "secret", "run_id": "other-run"}, {"id": "bound", "run_id": TARGET_RUN_ID}],
+        "receipts": [{"id": "unbound", "run_id": "other-run"}, {"id": "bound-receipt", "run_id": TARGET_RUN_ID}],
+    }
+    attached_evidence = iteration_video._runtime_attached_values(run, [], "evidence")
+    attached_receipts = iteration_video._runtime_attached_values(run, [], "receipts")
+    assert attached_evidence == [{"id": "bound", "run_id": TARGET_RUN_ID}]
+    assert attached_receipts == [{"id": "bound-receipt", "run_id": TARGET_RUN_ID}]
+
+
+def test_generated_runtime_run_without_parent_fields_is_incomplete() -> None:
+    record = iteration_video._normalize_runtime_record(
+        {"run_id": TARGET_RUN_ID, "project_id": "demo"}, client=object(), project="demo"
+    )
+    assert "parent_run_ids" not in record
+    assert "provenance" not in record
+    assert record["runtime_parent_lineage_available"] is False
+
+    node = iteration_video.RuntimeRunNode(
+        run_id=TARGET_RUN_ID,
+        record=record,
+        depth=0,
+        label="target",
+    )
+    _manifest, quality = iteration_video._build_runtime_inputs(
+        [node], target_run_id=TARGET_RUN_ID, project_slug="demo"
+    )
+    assert quality["data_quality"] < 1.0
+    assert quality["missing_lineage"] == [TARGET_RUN_ID]
+    assert "lineage_unavailable" in quality["unavailable_sources"]
 
 
 def test_iteration_video_public_route_materializes_runtime_output_object(tmp_path: Path, monkeypatch) -> None:
@@ -262,7 +311,7 @@ def _runtime_client(*, include_root: bool = False):
             return type("Result", (), {"ok": True, "data": records})()
 
         def events(self, project, run_id):
-            return [{"event_id": f"event-{run_id}", "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}]
+            return [{"event_id": f"event-{run_id}", "aggregate_id": run_id, "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}]
 
     class Tasks:
         def list(self, project):
@@ -272,11 +321,11 @@ def _runtime_client(*, include_root: bool = False):
             }]})()
 
         def events(self, task_id, project=None):
-            return [{"event_id": f"event-{task_id}", "event_type": "task.completed", "payload": {}}]
+            return [{"event_id": f"event-{task_id}", "aggregate_id": task_id, "event_type": "task.completed", "payload": {}}]
 
     class Media:
         def list_relations(self, project):
-            return [{"from_object_id": "d", "to_object_id": "e", "kind": "derived"}]
+            return [{"from_run_id": TARGET_RUN_ID, "to_run_id": ROOT_RUN_ID, "kind": "derived_from"}]
 
     runtime = type("Runtime", (), {"runs": Runs(), "tasks": Tasks(), "media": Media()})()
     runtime.calls = calls

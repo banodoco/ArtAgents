@@ -212,28 +212,7 @@ def _iter_variant_sidecars(repo_root: Path) -> Iterable[Path]:
 
 def _repo_rows(repo_root: Path) -> list[InventoryRow]:
     rows: list[InventoryRow] = []
-    _add_if_file(
-        rows,
-        root_kind="repo",
-        root=repo_root,
-        path=repo_root / ".astrid" / "threads.json",
-        state_kind="repo_thread_index",
-    )
-
-    threads_root = repo_root / ".astrid" / "threads"
-    if threads_root.is_dir():
-        for path in sorted(threads_root.glob("**/groups.json")):
-            if path.is_file():
-                rows.append(
-                    _row(root_kind="repo", root=repo_root, path=path, state_kind="repo_thread_group")
-                )
-        for path in sorted(threads_root.glob("**/selections.jsonl")):
-            if path.is_file():
-                rows.append(
-                    _row(root_kind="repo", root=repo_root, path=path, state_kind="repo_thread_selection")
-                )
-
-    seen = {row.relative_path for row in rows}
+    seen: set[str] = set()
     for path in sorted(_iter_variant_sidecars(repo_root), key=lambda p: p.relative_to(repo_root).as_posix()):
         rel = path.relative_to(repo_root).as_posix()
         if path.is_file() and rel not in seen:

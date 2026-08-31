@@ -47,6 +47,7 @@ class RuntimeRunNode:
     label: str
     parent_edges: list[dict[str, Any]] = field(default_factory=list)
     unresolved_parent_run_ids: list[str] = field(default_factory=list)
+    lineage_incomplete: bool = False
     selection_order: int = 999_999
 
 
@@ -333,37 +334,66 @@ def _runtime_run_list(client: Any, project: str) -> list[Any]:
         method = getattr(client, "list_project_runs", None)
         if not callable(method):
             raise IterationVideoError("runtime client does not expose project run listing")
-        value = method(project)
+        value = _unwrap_runtime_result(method(project))
     if isinstance(value, Mapping):
-        value = value.get("items", ())
+        if "items" not in value:
+            raise IterationVideoError("runtime project run listing returned an invalid response")
+        value = value["items"]
     if not isinstance(value, (list, tuple)):
         raise IterationVideoError("runtime project run listing returned an invalid response")
     return list(value)
 
 
-def _runtime_run_show(client: Any, project: str, run_id: str) -> dict[str, Any] | None:
+def _runtime_run_show(
+    client: Any,
+    project: str,
+    run_id: str,
+    *,
+    project_identities: set[str] | None = None,
+) -> dict[str, Any] | None:
     runs = getattr(client, "runs", None)
     method = getattr(runs, "show", None)
     try:
-        value = _unwrap_runtime_result(method(project, run_id)) if callable(method) else client.get_run(run_id)
+        value = (
+            _unwrap_runtime_result(method(project, run_id))
+            if callable(method)
+            else _unwrap_runtime_result(client.get_run(run_id))
+        )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return None
-    return _normalize_runtime_record(value, client=client, project=project)
+    record = _normalize_runtime_record(value, client=client, project=project)
+    _assert_runtime_project(record, project, project_identities=project_identities)
+    return record
 
 
-def _load_runtime_records(client: Any, project: str) -> dict[str, dict[str, Any]]:
+def _load_runtime_records(
+    client: Any,
+    project: str,
+    *,
+    project_identities: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for raw in _runtime_run_list(client, project):
         record = _normalize_runtime_record(raw, client=client, project=project)
+        _assert_runtime_project(record, project, project_identities=project_identities)
         run_id = str(record.get("run_id") or "")
         if run_id:
             records[run_id] = record
-    _attach_runtime_lineage(records, client=client, project=project)
+    _attach_runtime_lineage(
+        records,
+        client=client,
+        project=project,
+        project_identities=project_identities,
+    )
     return records
 
 
 def _attach_runtime_lineage(
-    records: dict[str, dict[str, Any]], *, client: Any, project: str
+    records: dict[str, dict[str, Any]],
+    *,
+    client: Any,
+    project: str,
+    project_identities: set[str] | None = None,
 ) -> None:
     """Attach only runtime-owned lineage reads to each run resource.
 
@@ -374,8 +404,15 @@ def _attach_runtime_lineage(
     inferred from parent ids.
     """
 
-    tasks, tasks_available = _runtime_task_records(client, project)
+    if project_identities is None:
+        project_identities = _runtime_project_identities(client, project)
+    tasks, tasks_available = _runtime_task_records(
+        client, project, project_identities=project_identities
+    )
     relations, relations_available = _runtime_relations(client, project)
+    run_relations, relation_binding_available = _runtime_run_relations(
+        relations, known_run_ids=set(records)
+    )
     for run_id, record in records.items():
         run_tasks = tasks.get(run_id, [])
         record["task_records"] = run_tasks
@@ -395,8 +432,12 @@ def _attach_runtime_lineage(
                 for task in run_tasks
                 for artifact in task.get("output_artifacts", [])
             ]
-        record["runtime_relations"] = relations
-        record["runtime_relations_available"] = relations_available
+        record["runtime_relations"] = [
+            relation
+            for relation in run_relations
+            if relation.get("from_run_id") == run_id or relation.get("to_run_id") == run_id
+        ]
+        record["runtime_relations_available"] = relations_available and relation_binding_available
         record["runtime_tasks_available"] = tasks_available
         record["runtime_run_events"], run_events_available = _runtime_run_events(
             client, project, run_id
@@ -423,7 +464,10 @@ def _attach_runtime_lineage(
 
 
 def _runtime_task_records(
-    client: Any, project: str
+    client: Any,
+    project: str,
+    *,
+    project_identities: set[str] | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], bool]:
     tasks_family = getattr(client, "tasks", None)
     method = getattr(tasks_family, "list", None)
@@ -438,13 +482,23 @@ def _runtime_task_records(
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return {}, False
     if isinstance(value, Mapping):
-        value = value.get("items", ())
+        if "items" not in value:
+            return {}, False
+        value = value["items"]
     if not isinstance(value, (list, tuple)):
         return {}, False
     by_run: dict[str, list[dict[str, Any]]] = {}
+    accepted_projects = project_identities or {str(project)}
+    binding_available = True
     for raw in value:
         item = _as_mapping(raw)
         if item is None:
+            continue
+        supplied_project = item.get("project_id") or item.get("project") or item.get("project_slug")
+        if supplied_project is not None and str(supplied_project) not in accepted_projects:
+            # A project-scoped list must never contribute a task from another
+            # project, even if a hostile/misbehaving service reuses a run id.
+            binding_available = False
             continue
         task_id = str(item.get("task_id") or item.get("id") or "")
         run_id = str(item.get("run_id") or "")
@@ -458,7 +512,7 @@ def _runtime_task_records(
             output_raw = result.get("output_artifacts") or result.get("outputs")
         task["output_artifacts"] = _artifact_list(output_raw)
         by_run.setdefault(run_id, []).append(task)
-    return by_run, True
+    return by_run, binding_available
 
 
 def _runtime_relations(client: Any, project: str) -> tuple[list[dict[str, Any]], bool]:
@@ -473,10 +527,80 @@ def _runtime_relations(client: Any, project: str) -> tuple[list[dict[str, Any]],
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return [], False
     if isinstance(value, Mapping):
-        value = value.get("items", ())
+        if "items" not in value:
+            return [], False
+        value = value["items"]
     if not isinstance(value, (list, tuple)):
         return [], False
     return [item for raw in value if (item := _as_mapping(raw)) is not None], True
+
+
+def _runtime_run_relations(
+    relations: list[dict[str, Any]], *, known_run_ids: set[str]
+) -> tuple[list[dict[str, Any]], bool]:
+    """Filter media relations to explicit, supported run-to-run bindings.
+
+    The runtime contract defines media relations as directional
+    ``from_object_id``/``to_object_id`` links.  Those object links cannot be
+    promoted to run lineage.  A relation is usable here only when the runtime
+    explicitly supplies ``from_run_id`` and ``to_run_id`` and uses the
+    canonical ``derived_from`` kind (from/child -> to/parent).
+    """
+
+    if not relations:
+        return [], True
+    selected: list[dict[str, Any]] = []
+    binding_available = True
+    for relation in relations:
+        kind = relation.get("kind")
+        from_run = relation.get("from_run_id")
+        to_run = relation.get("to_run_id")
+        if kind != "derived_from" or not isinstance(from_run, str) or not isinstance(to_run, str):
+            return [], False
+        if from_run in known_run_ids and to_run in known_run_ids:
+            selected.append({"from_run_id": from_run, "to_run_id": to_run, "kind": kind})
+        else:
+            binding_available = False
+    return selected, binding_available
+
+
+def _runtime_project_identities(client: Any, project: str) -> set[str]:
+    """Resolve the selected runtime project's accepted id and slug."""
+
+    identities = {str(project)}
+    projects = getattr(client, "projects", None)
+    method = getattr(projects, "show", None)
+    if not callable(method):
+        method = getattr(client, "get_project", None)
+    if not callable(method):
+        return identities
+    try:
+        value = _unwrap_runtime_result(method(project))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return identities
+    resource = _as_mapping(value)
+    if resource is None:
+        return identities
+    for key in ("project_id", "id", "slug", "project_slug"):
+        value = resource.get(key)
+        if value is not None and str(value):
+            identities.add(str(value))
+    return identities
+
+
+def _assert_runtime_project(
+    record: Mapping[str, Any],
+    project: str,
+    *,
+    project_identities: set[str] | None = None,
+) -> None:
+    supplied = record.get("project_id") or record.get("project") or record.get("project_slug")
+    accepted = project_identities or {str(project)}
+    if supplied is not None and str(supplied) not in accepted:
+        raise IterationVideoError(
+            f"runtime run {record.get('run_id') or '<unknown>'} belongs to project {supplied!r}, "
+            f"not selected project {project!r}"
+        )
 
 
 def _runtime_run_events(
@@ -492,7 +616,7 @@ def _runtime_run_events(
         value = _unwrap_runtime_result(method(project, run_id)) if runs is not None and hasattr(runs, "events") else _unwrap_runtime_result(method(run_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return [], False
-    return _event_list(value), True
+    return _scoped_events(value, aggregate_id=run_id)
 
 
 def _runtime_task_events(
@@ -508,15 +632,30 @@ def _runtime_task_events(
         value = _unwrap_runtime_result(method(task_id, project)) if tasks is not None and hasattr(tasks, "events") else _unwrap_runtime_result(method(aggregate_id=task_id))
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return [], False
-    return _event_list(value), True
+    return _scoped_events(value, aggregate_id=task_id)
 
 
-def _event_list(value: Any) -> list[dict[str, Any]]:
+def _scoped_events(value: Any, *, aggregate_id: str) -> tuple[list[dict[str, Any]], bool]:
+    """Return only events explicitly bound to the requested run/task.
+
+    A malformed response or one containing an event for another aggregate is
+    unavailable, even when some entries happen to match.  This prevents a
+    broad project event read from becoming an accidental lineage source.
+    """
+
     if isinstance(value, Mapping):
-        value = value.get("items", ())
-    if not isinstance(value, (list, tuple)):
-        return []
-    return [item for raw in value if (item := _as_mapping(raw)) is not None]
+        if "items" not in value:
+            return [], False
+        raw = value["items"]
+    else:
+        raw = value
+    if not isinstance(raw, (list, tuple)):
+        return [], False
+    events = [_as_mapping(item) for item in raw]
+    if any(item is None for item in events):
+        return [], False
+    exact = [item for item in events if item.get("aggregate_id") == aggregate_id]
+    return exact, len(exact) == len(events)
 
 
 def _as_mapping(value: Any) -> dict[str, Any] | None:
@@ -532,6 +671,8 @@ def _runtime_attached_values(
 ) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     for resource in (run, *tasks):
+        owner_run_id = str(run.get("run_id") or "")
+        owner_task_id = str(resource.get("task_id") or "")
         for key in keys:
             value = resource.get(key)
             if key == "receipt" and value is not None and not isinstance(value, (list, tuple)):
@@ -539,7 +680,17 @@ def _runtime_attached_values(
             if isinstance(value, Mapping):
                 value = [value]
             if isinstance(value, (list, tuple)):
-                found.extend(item for raw in value if (item := _as_mapping(raw)) is not None)
+                found.extend(
+                    item
+                    for raw in value
+                    if (item := _as_mapping(raw)) is not None
+                    and _fact_belongs_to(
+                        item,
+                        run_id=owner_run_id,
+                        task_id=owner_task_id,
+                        require_subject=True,
+                    )
+                )
         events = list(resource.get("runtime_run_events", ()) or ())
         task_events = resource.get("runtime_task_events", {})
         if isinstance(task_events, Mapping):
@@ -550,14 +701,49 @@ def _runtime_attached_values(
                 for key in keys:
                     value = payload.get(key)
                     if isinstance(value, Mapping):
-                        found.append(dict(value))
+                        item = dict(value)
+                        if _fact_belongs_to(
+                            item,
+                            run_id=owner_run_id,
+                            task_id=owner_task_id,
+                            require_subject=False,
+                        ):
+                            found.append(item)
                     elif isinstance(value, (list, tuple)):
-                        found.extend(item for raw in value if (item := _as_mapping(raw)) is not None)
+                        found.extend(
+                            item
+                            for raw in value
+                            if (item := _as_mapping(raw)) is not None
+                            and _fact_belongs_to(
+                                item,
+                                run_id=owner_run_id,
+                                task_id=owner_task_id,
+                                require_subject=False,
+                            )
+                        )
     return found
+
+
+def _fact_belongs_to(
+    fact: Mapping[str, Any],
+    *,
+    run_id: str,
+    task_id: str,
+    require_subject: bool,
+) -> bool:
+    fact_run_id = fact.get("run_id")
+    if fact_run_id is not None and str(fact_run_id) != run_id:
+        return False
+    fact_task_id = fact.get("task_id")
+    if fact_task_id is not None and task_id and str(fact_task_id) != task_id:
+        return False
+    return not require_subject or fact_run_id is not None or fact_task_id is not None
 
 
 def _lineage_gaps(record: Mapping[str, Any]) -> list[str]:
     gaps: list[str] = []
+    if not record.get("runtime_parent_lineage_available"):
+        gaps.append("lineage_unavailable")
     if not record.get("runtime_tasks_available"):
         gaps.append("tasks_unavailable")
     if not record.get("runtime_relations_available"):
@@ -598,8 +784,13 @@ def _normalize_runtime_record(raw: Any, *, client: Any, project: str) -> dict[st
         or spec.get("executor_id") or "runtime.run"
     )
     record["out_path"] = source.get("out_path") or source.get("run_root") or spec.get("out_path")
-    record["parent_run_ids"] = source.get("parent_run_ids") or spec.get("parent_run_ids") or []
-    record["provenance"] = source.get("provenance") or spec.get("provenance") or {}
+    parent_run_ids = source.get("parent_run_ids") if "parent_run_ids" in source else spec.get("parent_run_ids")
+    if parent_run_ids is not None:
+        record["parent_run_ids"] = parent_run_ids
+    provenance = source.get("provenance") if "provenance" in source else spec.get("provenance")
+    if provenance is not None:
+        record["provenance"] = provenance
+    record["runtime_parent_lineage_available"] = parent_run_ids is not None or provenance is not None
     record["input_artifacts"] = _artifact_list(
         source.get("input_artifacts") or spec.get("input_artifacts") or source.get("inputs") or spec.get("inputs")
     )
@@ -675,6 +866,7 @@ def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id:
         if existing is not None and existing.depth >= depth:
             continue
         parents, unresolved = _runtime_parent_edges(record, records)
+        lineage_incomplete = not bool(record.get("runtime_parent_lineage_available"))
         nodes[run_id] = RuntimeRunNode(
             run_id=run_id,
             record=record,
@@ -682,6 +874,7 @@ def _collect_runtime_graph(records: Mapping[str, dict[str, Any]], target_run_id:
             label="target" if run_id == target_run_id else "pulled_by_ancestry",
             parent_edges=parents,
             unresolved_parent_run_ids=unresolved,
+            lineage_incomplete=lineage_incomplete,
         )
         queue.extend((str(edge["run_id"]), depth + 1) for edge in parents)
     return sorted(nodes.values(), key=lambda item: (-item.depth, item.selection_order, item.run_id))
@@ -691,6 +884,12 @@ def _runtime_parent_edges(record: Mapping[str, Any], records: Mapping[str, dict[
     raw_edges: list[Any] = list(record.get("parent_run_ids") or [])
     provenance = record.get("provenance") if isinstance(record.get("provenance"), Mapping) else {}
     raw_edges.extend(provenance.get("contributing_runs") or [])
+    for relation in record.get("runtime_relations", []) or []:
+        if isinstance(relation, Mapping) and relation.get("from_run_id") == record.get("run_id"):
+            raw_edges.append({
+                "run_id": relation.get("to_run_id"),
+                "kind": relation.get("kind"),
+            })
     edges: list[dict[str, Any]] = []
     unresolved: list[str] = []
     seen: set[str] = set()
@@ -714,6 +913,12 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
         {"run_id": node.run_id, "missing_parent_run_ids": node.unresolved_parent_run_ids}
         for node in nodes if node.unresolved_parent_run_ids
     ]
+    missing_lineage = [
+        node.run_id
+        for node in nodes
+        if node.lineage_incomplete
+        or not node.record.get("runtime_parent_lineage_available")
+    ]
     missing_task_outputs = [
         node.run_id
         for node in nodes
@@ -731,7 +936,7 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
         or not node.record.get("runtime_task_events_available")
     ]
     dimensions = {
-        "lineage": not unresolved,
+        "lineage": not unresolved and not missing_lineage,
         "task_outputs": not missing_task_outputs,
         "evidence": not missing_evidence,
         "relations": not missing_relations,
@@ -741,7 +946,11 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
     # A complete score requires every canonical runtime source.  In
     # particular, resolved parent IDs alone never imply complete lineage.
     data_quality = round(sum(dimensions.values()) / len(dimensions), 3) if total else 0.0
-    unavailable_sources = sorted({gap for node in nodes for gap in node.record.get("runtime_lineage_gaps", [])})
+    unavailable_sources = {
+        gap for node in nodes for gap in node.record.get("runtime_lineage_gaps", [])
+    }
+    if missing_lineage:
+        unavailable_sources.add("lineage_unavailable")
     quality = {
         "schema_version": SCHEMA_VERSION,
         "target_run_id": target_run_id,
@@ -749,12 +958,13 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
         "data_quality": data_quality,
         "dimensions": dimensions,
         "unresolved_producer_runs": unresolved,
+        "missing_lineage": missing_lineage,
         "missing_task_outputs": missing_task_outputs,
         "missing_evidence": missing_evidence,
         "missing_relations": missing_relations,
         "missing_receipts": missing_receipts,
         "missing_events": missing_events,
-        "unavailable_sources": unavailable_sources,
+        "unavailable_sources": sorted(unavailable_sources),
         "relation_count": sum(len(node.record.get("runtime_relations", [])) for node in nodes),
         "evidence_count": sum(len(node.record.get("runtime_evidence", [])) for node in nodes),
         "receipt_count": sum(len(node.record.get("runtime_receipts", [])) for node in nodes),
@@ -764,6 +974,7 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
             for node in nodes
             for events in (node.record.get("runtime_task_events", {}) or {}).values()
         ),
+        "events_role": "observational_only",
         "authority": {"kind": "runtime", "project": project_slug},
     }
     runs = []
@@ -775,6 +986,7 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
             "selection_order": node.selection_order,
             "parent_run_ids": node.parent_edges,
             "unresolved_parent_run_ids": node.unresolved_parent_run_ids,
+            "lineage_incomplete": node.lineage_incomplete,
             "out_path": node.record.get("out_path"),
             "executor_id": node.record.get("executor_id"),
             "orchestrator_id": node.record.get("orchestrator_id"),
@@ -788,7 +1000,6 @@ def _build_runtime_inputs(nodes: list[RuntimeRunNode], *, target_run_id: str, pr
             "lineage_gaps": list(node.record.get("runtime_lineage_gaps", [])),
             "summary": None,
         })
-    target = next((node for node in nodes if node.run_id == target_run_id), None)
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "target_run_id": target_run_id,
@@ -813,16 +1024,29 @@ def resolve_target_run_id(
     if client is None:
         raise IterationVideoError("runtime client is required for iteration-video run discovery")
     project = _resolve_runtime_project(client, project_slug)
-    all_records = _load_runtime_records(client, project)
+    project_identities = _runtime_project_identities(client, project)
+    all_records = _load_runtime_records(
+        client, project, project_identities=project_identities
+    )
     if not target_run_id or not _is_runtime_identifier(target_run_id):
         raise IterationVideoError(
             "target_run_id is required; pass the runtime-issued run id explicitly"
         )
     if target_run_id not in all_records:
-        fetched = _runtime_run_show(client, project, target_run_id)
+        fetched = _runtime_run_show(
+            client,
+            project,
+            target_run_id,
+            project_identities=project_identities,
+        )
         if fetched is not None:
             all_records[target_run_id] = fetched
-            _attach_runtime_lineage(all_records, client=client, project=project)
+            _attach_runtime_lineage(
+                all_records,
+                client=client,
+                project=project,
+                project_identities=project_identities,
+            )
     record = all_records.get(target_run_id)
     if record is None:
         raise IterationVideoError(f"unknown runtime run: {target_run_id}")

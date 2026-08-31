@@ -75,11 +75,6 @@ def _iter_variant_sidecars(repo_root: Path) -> Iterable[Path]:
 
 def _repo_subset_paths(repo_root: Path) -> list[Path]:
     candidates: list[Path] = []
-    threads_root = repo_root / ".astrid" / "threads"
-    candidates.append(repo_root / ".astrid" / "threads.json")
-    if threads_root.is_dir():
-        candidates.extend(sorted(threads_root.glob("**/groups.json")))
-        candidates.extend(sorted(threads_root.glob("**/selections.jsonl")))
     candidates.extend(_iter_variant_sidecars(repo_root))
 
     unique: dict[Path, None] = {}

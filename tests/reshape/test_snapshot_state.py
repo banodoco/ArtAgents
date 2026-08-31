@@ -23,10 +23,6 @@ def test_snapshot_state_writes_stable_multi_root_tarball(tmp_path: Path) -> None
     _write(projects_root / "alpha" / "runs" / "run-1" / "events.jsonl", "{}\n")
     _write(projects_root / "alpha" / "runs" / "run-1" / "media.mp4", "not-real-media\n")
 
-    _write(repo_root / ".astrid" / "threads.json")
-    _write(repo_root / ".astrid" / "threads" / "thread-1" / "groups.json")
-    _write(repo_root / ".astrid" / "threads" / "thread-1" / "selections.jsonl", "{}\n")
-    _write(repo_root / ".astrid" / "threads" / "thread-1" / "scratch.txt")
     _write(repo_root / "runs" / "out-1" / ".astrid.variants.json")
     _write(repo_root / "src" / "not-rollback-state.py", "print('no')\n")
 
@@ -50,11 +46,8 @@ def test_snapshot_state_writes_stable_multi_root_tarball(tmp_path: Path) -> None
     assert "projects/alpha/runs/run-1/lease.json" in names
     assert "projects/alpha/runs/run-1/events.jsonl" in names
     assert "projects/alpha/runs/run-1/media.mp4" in names
-    assert "repo/.astrid/threads.json" in names
-    assert "repo/.astrid/threads/thread-1/groups.json" in names
-    assert "repo/.astrid/threads/thread-1/selections.jsonl" in names
     assert "repo/runs/out-1/.astrid.variants.json" in names
-    assert "repo/.astrid/threads/thread-1/scratch.txt" not in names
+    assert not any("threads" in name for name in names)
     assert "repo/src/not-rollback-state.py" not in names
 
 
@@ -77,8 +70,8 @@ def test_snapshot_state_cli_accepts_explicit_roots(tmp_path: Path, capsys: pytes
     projects_root = tmp_path / "projects-root"
     repo_root = tmp_path / "repo-root"
     out_dir = tmp_path / "outside-snapshots"
+    repo_root.mkdir(parents=True)
     _write(projects_root / "alpha" / "active_run.json")
-    _write(repo_root / ".astrid" / "threads.json")
 
     rc = main(
         [

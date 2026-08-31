@@ -21,12 +21,11 @@ def _snapshot_fixture(tmp_path: Path) -> Path:
     repo_root = tmp_path / "source-repo"
     out_dir = tmp_path / "snapshots"
 
+    repo_root.mkdir(parents=True)
     _write(projects_root / "alpha" / "current_run.json")
     _write(projects_root / "alpha" / "runs" / "run-1" / "events.jsonl")
     _write(projects_root / "alpha" / "runs" / "run-1" / "lease.json")
-    _write(repo_root / ".astrid" / "threads.json")
-    _write(repo_root / ".astrid" / "threads" / "thread-1" / "groups.json")
-    _write(repo_root / ".astrid" / "threads" / "thread-1" / "selections.jsonl")
+    _write(repo_root / "runs" / "out-1" / ".astrid.variants.json")
     return create_snapshot(
         projects_root=projects_root,
         repo_root=repo_root,
