@@ -10,7 +10,7 @@ import ast
 from pathlib import Path
 import unittest
 
-from astrid.sdk.remote import RemoteProjects, RemoteTasks
+from astrid.sdk.remote import RemoteAstridClient, RemoteProjects, RemoteTasks
 
 
 class _RecordingClient:
@@ -28,6 +28,25 @@ class _RecordingClient:
     def admit_task(self, **kwargs: object) -> dict[str, str]:
         self.task_call = kwargs
         return {"task_id": "task-1"}
+
+
+class _ReceiptClient(_RecordingClient):
+    def admit_task(self, **kwargs: object) -> dict[str, object]:
+        self.task_call = kwargs
+        return {
+            "data": {"task_id": "task-1"},
+            "receipt": {
+                "receipt_id": "txn-1",
+                "command_kind": "task.create",
+                "idempotency_key": str(kwargs["idempotency_key"]),
+                "request_hash": "hash-1",
+                "project_id": "project-1",
+                "project_seq": [1, 1],
+                "event_ids": ["event-1"],
+                "result": {"task_id": "task-1"},
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        }
 
 
 class GeneratedClientCutoverRegressionTest(unittest.TestCase):
@@ -64,6 +83,15 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
         self.assertEqual(client.task_call["spec"], spec)
         self.assertEqual(client.task_call["capability_id"], "capability-1")
         self.assertEqual(client.task_call["input_object_ids"], ["sha256:input"])
+
+    def test_generic_invoke_forwards_server_receipt(self) -> None:
+        result = RemoteAstridClient(_ReceiptClient()).invoke(
+            "capability-1", project_id="project-1", idempotency_key="task-key"
+        )
+        self.assertTrue(result.ok)
+        assert result.receipt is not None
+        self.assertEqual(result.receipt.receipt_id, "txn-1")
+        self.assertEqual(result.receipt.event_ids, ("event-1",))
 
     def test_product_sdk_has_no_raw_request_seam(self) -> None:
         sdk_root = Path(__file__).resolve().parents[2] / "astrid" / "sdk"

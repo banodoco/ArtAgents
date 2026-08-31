@@ -480,8 +480,19 @@ class RemoteAstridClient:
         try:
             capability = next((item for item in self._transport.list_capabilities() if item.get("capability_id") == capability_id), None)
             if capability is None: return DomainResult.failure(ErrorObject("not_found", "capability is not registered", {"capability_id": capability_id}), idempotency_key=key)
-            task = self._transport.admit_task(capability_id=capability_id, capability_digest=capability["definition_digest"], input_object_ids=list(kwargs.get("input_object_ids", [])), idempotency_key=key, project_id=kwargs.get("project_id"), spec=kwargs.get("spec"))
-            return DomainResult.success(task, idempotency_key=key)
+            # Keep the generated client's complete mutation result intact.
+            # In particular, ``admit_task`` carries the server's committed
+            # receipt out-of-band alongside the task resource.
+            return self.tasks._typed(
+                "admit_task",
+                key=key,
+                capability_id=capability_id,
+                capability_digest=capability["definition_digest"],
+                input_object_ids=list(kwargs.get("input_object_ids", [])),
+                idempotency_key=key,
+                project_id=kwargs.get("project_id"),
+                spec=kwargs.get("spec"),
+            )
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
     def render(self, *args, **kwargs): return self.invoke(*args, **kwargs)
     def close(self): pass
