@@ -156,7 +156,7 @@ def test_no_declaration_returns_none_without_filename_guessing(tmp_path: Path) -
     assert discover_attachment(project, timeline_dir=timeline) is None
 
 
-def test_sources_json_declared_transcript_entry_resolves(tmp_path: Path) -> None:
+def test_sources_json_cannot_supply_a_transcript_authority(tmp_path: Path) -> None:
     project = tmp_path / "project"
     digest = _write(project / "sources" / "words" / "main.json", b"source transcript")
     declaration = _declaration(file="words/main.json", sha256=digest)
@@ -169,124 +169,29 @@ def test_sources_json_declared_transcript_entry_resolves(tmp_path: Path) -> None
         {"version": 1, "sources": {"transcript:source-entry": declaration}},
     )
 
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.source_id == "transcript:source-entry"
-    assert result.source_version == "whisper-v1"
-    assert result.integrity == "ok"
-    assert result.file == (project / "sources" / "words" / "main.json").resolve()
+    assert discover_attachment(project) is None
 
 
-@pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
-def test_sources_json_path_outside_sources_is_uncontained(
-    tmp_path: Path,
-    outside_kind: str,
-) -> None:
+def test_local_run_projection_cannot_supply_a_transcript_authority(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    outside = project / "outside.json"
-    digest = _write(outside, b"outside sources")
-    declared = str(outside) if outside_kind == "absolute" else "../outside.json"
-    declaration = _declaration(file=declared, sha256=digest)
-    declaration["kind"] = "transcript"
-    _json(
-        project / "sources.json",
-        {"version": 1, "sources": {"transcript:main": declaration}},
-    )
-
-    result = discover_attachment(project)
-
-    assert result is not None
-    assert result.integrity == "uncontained"
-    assert result.file is None
-
-
-def test_legacy_run_artifact_is_not_a_local_authority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = tmp_path / "project"
-    declared_out = project / "runs" / "R19" / "output"
-    digest = _write(declared_out / "attached.json", b"declared run transcript")
+    run_root = project / "runs" / "R19" / "output"
+    digest = _write(run_root / "attached.json", b"declared run transcript")
     _json(
         project / "runs" / "R19" / "run.json",
         {
             "schema_version": 1,
             "run_id": "R19",
             "out": "runs/R19/output",
-            "artifacts": {
-                "transcript": _declaration(file="attached.json", sha256=digest)
-            },
+            "artifacts": {"transcript": _declaration(file="attached.json", sha256=digest)},
         },
     )
-    unrelated_cwd = tmp_path / "cwd"
-    _write(unrelated_cwd / "attached.json", b"wrong nearby file")
-    monkeypatch.chdir(unrelated_cwd)
 
-    # Runtime-owned run/object APIs are the only run authority.  A local
-    # run.json projection must not be read or used as a fallback.
     assert discover_attachment(project) is None
 
 
-@pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
-def test_legacy_run_artifact_path_is_ignored(
+def test_pipeline_metadata_is_runtime_authority_even_when_sources_json_exists(
     tmp_path: Path,
-    outside_kind: str,
 ) -> None:
-    project = tmp_path / "project"
-    run_root = project / "runs" / "R19"
-    outside = project / "runs" / "outside.json"
-    digest = _write(outside, b"outside owning run")
-    declared = str(outside) if outside_kind == "absolute" else "../../outside.json"
-    _json(
-        run_root / "run.json",
-        {
-            "out": "runs/R19/output",
-            "artifacts": {
-                "transcript": _declaration(file=declared, sha256=digest)
-            },
-        },
-    )
-
-    assert discover_attachment(project) is None
-
-
-def test_legacy_run_artifact_contained_absolute_path_is_ignored(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    run_root = project / "runs" / "R19"
-    transcript = run_root / "evidence" / "absolute.json"
-    digest = _write(transcript, b"run-contained absolute")
-    _json(
-        run_root / "run.json",
-        {
-            "out": "runs/R19",
-            "artifacts": {
-                "transcript": _declaration(file=str(transcript), sha256=digest)
-            },
-        },
-    )
-
-    assert discover_attachment(project) is None
-
-
-def test_legacy_run_artifact_with_uncontained_declared_out_is_ignored(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    run_root = project / "runs" / "R19"
-    outside_out = project / "runs" / "other"
-    digest = _write(outside_out / "attached.json", b"wrong run")
-    _json(
-        run_root / "run.json",
-        {
-            "out": "runs/other",
-            "artifacts": {
-                "transcript": _declaration(file="attached.json", sha256=digest)
-            },
-        },
-    )
-
-    assert discover_attachment(project) is None
-
-
-def test_pipeline_metadata_precedes_sources_json(tmp_path: Path) -> None:
     project = tmp_path / "project"
     run_root = project / "runs" / "pipeline"
     transcript = run_root / "spoken.json"

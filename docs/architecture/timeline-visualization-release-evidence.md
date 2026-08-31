@@ -40,9 +40,9 @@ media.
 
 ## M2 — Source text and VLM proof (gates below)
 
-- **Transcript attachment**: one durable project-owned reference (metadata
-  home, hash-verified, no filename guessing, integrity states incl.
-  uncontained).
+- **Transcript attachment**: one durable runtime-owned/materialized reference
+  (metadata home, hash-verified, no filename guessing, integrity states incl.
+  uncontained); project registries and local run projections are not scanned.
 - **TS/SP mapping**: `timeline = at + (source − from)/speed`, distinct SP per
   reuse, speaker/word-timing null states explicit, speech/caption/pixel-text
   lanes distinct, reciprocal TS→SP/CL↔SP action hierarchy.

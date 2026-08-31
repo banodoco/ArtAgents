@@ -1,6 +1,6 @@
 """Discover the single durable transcript attachment for a timeline.
 
-The preferred, project-owned contract is the optional top-level ``transcript``
+The preferred, runtime-owned contract is the optional top-level ``transcript``
 field in Astrid pipeline metadata (normally persisted as
 ``hype.metadata.json``)::
 
@@ -24,30 +24,25 @@ The existing metadata validator preserves additive top-level fields, so this
 contract does not require changing the frozen timeline container/projection
 schema.  In particular, ``assembly.json`` is *not* a second home for it.
 
-Two compatibility fallbacks accept the same hash-bound declaration:
-
-* ``sources.json#sources.<id>`` with ``kind: "transcript"``.  A relative
-  ``file`` is rooted at the project's ``sources/`` directory, matching the
-  existing flat source registry contract.  Existing camel-case source identity
-  and ``content_sha256`` spellings are accepted.
-* ``runs/<id>/run.json#artifacts.transcript``.  A relative ``file`` is rooted
-  at the run record's declared ``out`` path.  It is never rooted at process
-  CWD or inferred from the run-record filename.
+Only runtime-owned or already-materialized metadata is accepted.  The helper
+never scans project files for a transcript: in particular, ``sources.json``
+and ``runs/<id>/run.json`` are not transcript authorities.  A relative
+``file`` in accepted metadata is resolved only below the owning materialized
+root, and is hash-verified before it is exposed to normalization.
 
 No transcript filename, extension, directory proximity, or transcript content
-is inspected during discovery.  Multiple declarations at one fallback level
+is inspected during discovery.  Multiple declarations at one metadata level
 fail closed rather than creating an implicit competing authority.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
@@ -88,11 +83,11 @@ def discover_attachment(
 ) -> TranscriptAttachment | None:
     """Find the one explicitly declared transcript attachment for a timeline.
 
-    Resolution is strictly ordered: supplied timeline metadata, preserved
-    pipeline metadata, project ``sources.json``, then a run record's explicit
-    transcript artifact.  A declaration at a higher-priority level blocks
-    lower-priority fallbacks even when malformed or ambiguous; stale metadata
-    must never be silently replaced by a different authority.
+    Resolution is strictly ordered: supplied timeline metadata, then
+    runtime-supplied pipeline metadata.  A declaration at a higher-priority
+    level blocks the lower-priority level even when malformed; stale metadata
+    must never be silently replaced by a different authority.  No project
+    file is inspected to discover a declaration.
     """
 
     project_base = Path(project_root).expanduser().resolve()
@@ -133,28 +128,9 @@ def discover_attachment(
             root=metadata_root,
         )
 
-    source_declarations = _source_declarations(project_base / "sources.json")
-    if source_declarations:
-        if len(source_declarations) != 1:
-            return None
-        return _attachment_from_declaration(
-            source_declarations[0],
-            base=project_base / "sources",
-            root=project_base / "sources",
-        )
-
-    run_declarations = _run_declarations(project_base, timeline_base if timeline_dir else None)
-    if not run_declarations:
-        return None
-    if len(run_declarations) != 1:
-        return None
-    declaration, run_base, run_root, base_is_contained = run_declarations[0]
-    return _attachment_from_declaration(
-        declaration,
-        base=run_base or run_root,
-        root=run_root,
-        force_uncontained=not base_is_contained,
-    )
+    # There is deliberately no project-file fallback here.  The runtime must
+    # materialize the declaration into one of the metadata mappings above.
+    return None
 
 
 def _attachment_from_declaration(
@@ -162,7 +138,6 @@ def _attachment_from_declaration(
     *,
     base: Path,
     root: Path,
-    force_uncontained: bool = False,
 ) -> TranscriptAttachment | None:
     schema_version = declaration.get("schema_version", 1)
     if schema_version != 1:
@@ -194,9 +169,7 @@ def _attachment_from_declaration(
     if media.get("sha256") is not None and media_sha256 is None:
         return None
 
-    transcript_file = (
-        None if force_uncontained else _resolve_contained_path(file_value, base=base, root=root)
-    )
+    transcript_file = _resolve_contained_path(file_value, base=base, root=root)
     observed: str | None = None
     integrity = "uncontained" if transcript_file is None else "missing"
     notes: list[str] = []
@@ -236,25 +209,6 @@ def _attachment_from_declaration(
     )
 
 
-def _source_declarations(sources_path: Path) -> list[Mapping]:
-    payload = _read_mapping(sources_path)
-    if payload is None:
-        return []
-    sources = payload.get("sources")
-    if not isinstance(sources, Mapping):
-        return []
-
-    declarations: list[Mapping] = []
-    for entry_id in sorted(sources, key=str):
-        entry = sources[entry_id]
-        if not isinstance(entry, Mapping) or entry.get("kind") != "transcript":
-            continue
-        normalized = dict(entry)
-        normalized.setdefault("source_id", str(entry_id))
-        declarations.append(normalized)
-    return declarations
-
-
 def _pipeline_declarations(metadata: Mapping | None) -> list[object] | None:
     """Return explicitly declared pipeline transcript authorities.
 
@@ -262,8 +216,8 @@ def _pipeline_declarations(metadata: Mapping | None) -> list[object] | None:
     metadata may place the path at ``sources.<asset>.transcript_ref``; that
     path is accepted only as part of a complete hash-bound declaration in the
     same source entry (or its nested ``transcript`` mapping).  A bare ref is
-    therefore reachable but malformed, and blocks lower-priority fallbacks
-    rather than being guessed into a trusted attachment.
+    therefore reachable but malformed, and blocks a trusted attachment rather
+    than being guessed into one.
     """
 
     if metadata is None:
@@ -293,82 +247,6 @@ def _pipeline_declarations(metadata: Mapping | None) -> list[object] | None:
     return declarations or None
 
 
-def _run_declarations(
-    project_root: Path,
-    timeline_dir: Path | None,
-) -> list[tuple[Mapping, Path | None, Path, bool]]:
-    # Runtime runs are authoritative.  This transcript helper has no runtime
-    # artifact lookup API yet, so it intentionally declines to infer producer
-    # declarations from local run files (including the old directory scan).
-    run_paths = _declared_timeline_run_paths(project_root, timeline_dir)
-    if run_paths is None:
-        return []
-
-    runs_root = (project_root / "runs").resolve()
-    declarations: list[tuple[Mapping, Path | None, Path, bool]] = []
-    for run_path in run_paths:
-        if run_path.parent.is_symlink():
-            continue
-        run_root = run_path.parent.resolve()
-        if run_root.parent != runs_root:
-            continue
-        resolved_run_path = run_path.resolve()
-        if resolved_run_path.parent != run_root:
-            continue
-        record = _read_mapping(resolved_run_path)
-        if record is None:
-            continue
-        artifacts = record.get("artifacts")
-        if not isinstance(artifacts, Mapping) or "transcript" not in artifacts:
-            continue
-        declaration = artifacts.get("transcript")
-        if not isinstance(declaration, Mapping):
-            continue
-        run_base, base_is_contained = _declared_run_base(
-            record,
-            project_root,
-            run_root,
-        )
-        declarations.append((declaration, run_base, run_root, base_is_contained))
-    return declarations
-
-
-def _declared_timeline_run_paths(
-    project_root: Path,
-    timeline_dir: Path | None,
-) -> list[Path] | None:
-    if timeline_dir is None:
-        return None
-    manifest = _read_mapping(timeline_dir / "manifest.json")
-    if manifest is None or "contributing_runs" not in manifest:
-        return None
-    run_ids = manifest.get("contributing_runs")
-    if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
-        return []
-    # A frozen timeline may retain producer ids for provenance, but this
-    # module cannot turn those ids into authoritative artifact declarations
-    # without the runtime's artifact read operation.  Fail closed until that
-    # API exists rather than reading a local run.json projection.
-    del project_root, run_ids
-    return []
-
-
-def _declared_run_base(
-    record: Mapping,
-    project_root: Path,
-    run_root: Path,
-) -> tuple[Path | None, bool]:
-    out = _non_empty_string(record.get("out"))
-    if out is None:
-        return run_root, True
-    path = Path(out).expanduser()
-    if path.is_absolute():
-        resolved = path.resolve()
-    else:
-        resolved = (project_root / path).resolve()
-    return (resolved, True) if resolved.is_relative_to(run_root) else (None, False)
-
-
 def _declared_media_identity(media: Mapping) -> str | None:
     asset_key = _non_empty_string(media.get("asset_key"))
     source_id = _non_empty_string(media.get("source_id"))
@@ -385,14 +263,6 @@ def _resolve_contained_path(value: str, *, base: Path, root: Path) -> Path | Non
         resolved = (base / path).resolve()
     contained_root = Path(root).expanduser().resolve()
     return resolved if resolved.is_relative_to(contained_root) else None
-
-
-def _read_mapping(path: Path) -> dict[str, Any] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return None
-    return value if isinstance(value, dict) else None
 
 
 def _sha256_file(path: Path) -> str:

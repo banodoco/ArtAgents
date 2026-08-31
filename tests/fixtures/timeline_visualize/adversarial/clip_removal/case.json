@@ -1,7 +1,7 @@
 {
   "id": "clip_removal",
   "kind": "speech_occurrence_dangling_clip",
-  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242) + sources.json transcript",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242) + runtime-materialized transcript",
   "mutation": {
     "description": "A root view freezes SP01 with clip_ref TL01.CL01. The clip is then removed from the timeline; the frozen transcript-index is re-pointed at a clip that no longer exists (TL01.CL99).",
     "removed_clip_ref": "TL01.CL01",
