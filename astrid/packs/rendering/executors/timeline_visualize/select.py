@@ -1,38 +1,21 @@
-"""Pure, read-only managed-timeline selection for ``rendering.timeline_visualize``.
+"""Pure, read-only runtime timeline selection for ``rendering.timeline_visualize``.
 
-R6: deterministic SELECTION of which managed timeline(s) a visualization run
-targets.  This module is deliberately standalone (stdlib plus the visualize
-pack's own ``ids`` module for qualified-ref parsing) and never imports
-``astrid.core.timeline.crud`` or the repair paths in
-``astrid.core.timeline.paths`` — those mutate disk on read
-(``load_display_json_with_repair`` rewrites ``display.json``,
-``load_assembly_json_with_repair`` regenerates ``assembly.json``).  All reads
-go through plain ``json.load`` directly against ``display.json`` (live slug /
-default state, when present), ``assembly.identity.json`` (identity fields plus
-the creation-time display fallback), and ``manifest.json``.
+R6: deterministic selection of which runtime timeline(s) a visualization run
+targets. This module is deliberately standalone (stdlib plus the visualize
+pack's own ``ids`` module for qualified-ref parsing). Runtime rows are
+materialized into in-memory event envelopes; frozen visualization manifests
+remain supported via :func:`select_from_manifest`. Arbitrary timeline files,
+project-tree scans, local event-log backends, and repair sidecars are not
+product inputs.
 
-Tombstone evidence (how the repo marks tombstones): ``tombstone_timeline()``
-stamps a non-null ``tombstoned_at`` into ``manifest.json``
-(``astrid/core/timeline/crud.py:524-555``, write at line 554).  The repo's own
-read-side check ``_timeline_home_is_tombstoned()`` at
-``astrid/core/timeline/paths.py:115-123`` returns
-``isinstance(manifest, dict) and manifest.get("tombstoned_at") is not None``.
-There is no ``provenance: tombstoned`` identity value and no tombstone marker
-file — the manifest stamp is the only mechanism.  R6 mirrors that check with a
-plain ``json.load`` (no repair).
+Runtime rows carry archival state explicitly; frozen manifests are validated
+against their immutable schema and never consult project-tree markers.
 
-R6-FIX: selection is ULID-backed and deterministic.  A timeline is only
-accepted when ``assembly.identity.json`` carries a *canonical* UUID
-(``uuid.UUID`` round-trip, lowercase hyphenated hex) and a *canonical* ULID
-(26-char Crockford base32, ``^[0-9A-HJKMNP-TV-Z]{26}$``) that equals the
-containing directory's name.  Frozen visualization manifests (prior runs)
-remain supported via :func:`select_from_manifest`, which accepts a frozen
-root manifest dict whose kind/version match ``manifest.json`` and whose
-timeline identity satisfies the full five-field ``timeline_identity``
-contract from ``_defs.json`` (``stable_id``, ``qualified_ref``, ``uuid``,
-``ulid``, ``slug``); it yields a ``ManagedTimeline`` with
-``timeline_dir=None`` and ``is_frozen_manifest=True``; arbitrary standalone
-timeline files are never accepted.
+Frozen visualization manifests (prior runs) remain supported via
+:func:`select_from_manifest`, which accepts only the full five-field
+``timeline_identity`` contract from ``_defs.json`` and yields a
+``ManagedTimeline`` with ``timeline_dir=None`` and
+``is_frozen_manifest=True``.
 
 R6-FIX3: schema-exact frozen-manifest validation, symlink containment, and
 live display state.
@@ -49,15 +32,8 @@ live display state.
   ULIDs, extra identity properties, boolean/float/wrong ``schema_version``,
   and extra top-level keys are all rejected.  When jsonschema is
   unavailable, a hand-mirror fallback enforces the identical checks.
-* ``discover_timelines`` skips any timeline directory whose ``Path.resolve()``
-  escapes ``project_dir/timelines/`` (symlink containment); symlinks that
-  resolve to another directory inside ``timelines/`` are allowed.
-* Slug/default selection reads ``display.json`` first (plain ``json.load``,
-  never repair) because rename/default operations rewrite it — evidence:
-  ``crud.py:352,402-413`` (``rename_timeline``) and ``crud.py:605-613,637,648``
-  (``set_default``) — and falls back to the creation-time ``display`` block
-  inside ``assembly.identity.json`` only when ``display.json`` is absent or
-  malformed.
+* Runtime slug/default selection uses the generated workspace-client row; no
+  local display or identity sidecar is consulted.
 
 R6-FIX4: :func:`select_from_manifest` accepts the *real* full root manifest
 shape from ``schemas/manifest.json``.  The full form is validated against the
@@ -88,10 +64,6 @@ from typing import Any, Mapping
 from astrid.packs.rendering.executors.timeline_visualize.ids import (
     parse_qualified_ref,
 )
-
-_IDENTITY_FILE = "assembly.identity.json"
-_DISPLAY_FILE = "display.json"
-_MANIFEST_FILE = "manifest.json"
 
 # Frozen-manifest envelope contract (``schemas/manifest.json``).
 _MANIFEST_KIND = "timeline_visualize"
@@ -205,10 +177,9 @@ def select_kernel_timelines(
 ) -> tuple[list[KernelTimeline], list[str]]:
     """Resolve public kernel timeline rows without mutating the ledger.
 
-    The timeline CRUD service is authoritative for newly-created timelines,
-    even when no legacy ``timelines/<ULID>/assembly.jsonl`` projection exists.
-    This read-only bridge lets visualization share the public UUID/ULID/slug/
-    default vocabulary and defer materialization until an admitted run.
+    The workspace runtime is authoritative for newly-created and updated
+    timelines. This read-only bridge shares the public UUID/ULID/slug/default
+    vocabulary and defers materialization until an admitted run.
     """
 
     del project_dir  # runtime client is the sole timeline authority
@@ -355,204 +326,6 @@ def _canonical_ulid(value: object) -> str | None:
     if not isinstance(value, str) or not _ULID_RE.fullmatch(value):
         return None
     return value.upper()
-
-
-def _identity_problem(timeline_dir: Path, identity: dict) -> str | None:
-    """Diagnostic for a malformed identity, or ``None`` when it is valid.
-
-    A timeline identity is valid only when it carries a canonical UUID, a
-    canonical ULID, and the ULID equals the containing directory's name (the
-    timeline dir is ULID-named).
-    """
-    if _canonical_uuid(identity.get("timeline_id")) is None:
-        return "malformed identity: timeline_id is not a canonical UUID"
-    if _canonical_ulid(identity.get("timeline_ulid")) is None:
-        return "malformed identity: timeline_ulid is not a canonical ULID"
-    if _canonical_ulid(identity.get("timeline_ulid")) != Path(timeline_dir).name:
-        return "identity ULID does not match directory name"
-    return None
-
-
-def _is_tombstoned(timeline_dir: Path) -> bool:
-    """Evidence-based tombstone detection (see module docstring)."""
-    manifest_file = Path(timeline_dir) / _MANIFEST_FILE
-    if not manifest_file.is_file():
-        return False
-    try:
-        with manifest_file.open("r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-    except (OSError, ValueError):
-        return False
-    return isinstance(manifest, dict) and manifest.get("tombstoned_at") is not None
-
-
-def _read_display_state(timeline_dir: Path, identity: dict) -> tuple[str | None, bool]:
-    """Current ``(slug, is_default)`` for a timeline.
-
-    Live state lives in ``display.json`` — ``rename_timeline`` rewrites it
-    (``crud.py:352,402-413``) and ``set_default`` rewrites it on both the old
-    and new default (``crud.py:605-613,637,648``); the repo's own slug lookup
-    scans ``timelines/*/display.json`` (``paths.py:85-112``).  It is read with
-    a plain ``json.load`` (never repair).  Only when ``display.json`` is
-    absent or malformed do we fall back to the creation-time ``display``
-    block stamped into ``assembly.identity.json`` (``crud.py:130``).
-    """
-    display_file = Path(timeline_dir) / _DISPLAY_FILE
-    display: object = None
-    if display_file.is_file():
-        try:
-            with display_file.open("r", encoding="utf-8") as handle:
-                display = json.load(handle)
-        except (OSError, ValueError):
-            display = None
-    if not isinstance(display, dict):
-        display = identity.get("display")
-    slug: str | None = None
-    is_default = False
-    if isinstance(display, dict):
-        raw_slug = display.get("slug")
-        if isinstance(raw_slug, str):
-            slug = raw_slug
-        is_default = display.get("is_default") is True
-    return slug, is_default
-
-
-def _timeline_from_identity(timeline_dir: Path, identity: dict) -> ManagedTimeline:
-    """Build a ``ManagedTimeline`` from a *validated* identity dict.
-
-    Callers must have confirmed ``_identity_problem(timeline_dir, identity)``
-    is ``None`` first.  Values are canonicalized (lowercase UUID, uppercase
-    ULID) so selection is deterministic regardless of input casing.  Slug /
-    default come from ``display.json`` (live state) when it exists, falling
-    back to the identity's creation-time ``display`` block.
-    """
-    timeline_id = _canonical_uuid(identity.get("timeline_id"))
-    timeline_ulid = _canonical_ulid(identity.get("timeline_ulid"))
-    slug, is_default = _read_display_state(timeline_dir, identity)
-    return ManagedTimeline(
-        timeline_dir=Path(timeline_dir),
-        timeline_id=timeline_id or "",
-        timeline_ulid=timeline_ulid or "",
-        slug=slug,
-        is_default=is_default,
-        is_tombstoned=_is_tombstoned(timeline_dir),
-    )
-
-
-def _is_within(resolved: Path, root_resolved: Path) -> bool:
-    """True when *resolved* (an absolute ``Path.resolve()`` result) stays
-    inside *root_resolved* — the symlink-containment rule."""
-    try:
-        return resolved.is_relative_to(root_resolved)
-    except ValueError:  # pragma: no cover - different drives / edge cases
-        return False
-
-
-def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
-    """Scan ``project_dir/timelines/*`` for managed timelines.
-
-    Each managed timeline is a directory (ULID-named by convention) holding
-    ``assembly.identity.json``.  Directories without a valid identity file —
-    and directories whose identity carries a non-canonical UUID/ULID or a ULID
-    that does not match the directory name — are skipped and recorded in the
-    diagnostics list.  Symlink containment: any child whose ``Path.resolve()``
-    escapes ``project_dir/timelines/`` (a symlink pointing outside the root)
-    is skipped with a diagnostic; symlinks resolving to another directory
-    inside the root are allowed.  The result is sorted deterministically by
-    ULID.
-    """
-    timelines_root = Path(project_dir) / "timelines"
-    timelines: list[ManagedTimeline] = []
-    diagnostics: list[str] = []
-    if not timelines_root.is_dir():
-        return timelines, diagnostics
-    timelines_root_resolved = timelines_root.resolve()
-    for child in sorted(timelines_root.iterdir(), key=lambda p: p.name):
-        if not child.is_dir() or child.name.startswith("."):
-            continue
-        try:
-            resolved = child.resolve()
-        except OSError:
-            diagnostics.append(f"skipped {child.name}: unreadable path")
-            continue
-        if not _is_within(resolved, timelines_root_resolved):
-            diagnostics.append(f"skipped {child.name}: symlink escapes timelines root")
-            continue
-        identity = read_identity(child)
-        if identity is None:
-            diagnostics.append(f"skipped {child.name}: no valid assembly.identity.json")
-            continue
-        problem = _identity_problem(child, identity)
-        if problem is not None:
-            diagnostics.append(f"skipped {child.name}: {problem}")
-            continue
-        timelines.append(_timeline_from_identity(child, identity))
-    timelines.sort(key=lambda t: (t.timeline_ulid, str(t.timeline_dir) if t.timeline_dir else ""))
-    return timelines, diagnostics
-
-
-def _select_by_slug(
-    timelines: list[ManagedTimeline], slug: str, diagnostics: list[str]
-) -> tuple[list[ManagedTimeline], list[str]]:
-    """Select by the human slug or one of the stable timeline identities.
-
-    The public timeline service teaches agents that a timeline is addressable
-    by UUID, ULID, or slug.  Visualization must honor the same addressing
-    contract; keeping the resolver here read-only avoids forcing callers to
-    make a second ``timelines show`` call merely to translate an id.
-    """
-
-    raw = str(slug).strip()
-    lowered = raw.lower()
-    matches = [
-        t
-        for t in timelines
-        if not t.is_tombstoned
-        and (
-            t.slug == raw or t.timeline_id.lower() == lowered or t.timeline_ulid.lower() == lowered
-        )
-    ]
-    if len(matches) == 1:
-        return matches, diagnostics
-    if len(matches) > 1:
-        ulids = ", ".join(t.timeline_ulid for t in matches)
-        diagnostics.append(f"ambiguous slug {slug!r} matches {len(matches)} timelines: {ulids}")
-        return [], diagnostics
-    tombstoned = [
-        t
-        for t in timelines
-        if t.is_tombstoned
-        and (
-            t.slug == raw or t.timeline_id.lower() == lowered or t.timeline_ulid.lower() == lowered
-        )
-    ]
-    if tombstoned:
-        diagnostics.append(f"timeline {slug!r} is tombstoned")
-        return [], diagnostics
-    diagnostics.append(f"no timeline with slug {slug!r}")
-    return [], diagnostics
-
-
-def _select_default(
-    timelines: list[ManagedTimeline], diagnostics: list[str]
-) -> tuple[list[ManagedTimeline], list[str]]:
-    eligible = [t for t in timelines if not t.is_tombstoned]
-    marked = [t for t in eligible if t.is_default]
-    if len(marked) == 1:
-        return marked, diagnostics
-    if len(marked) > 1:
-        ulids = ", ".join(t.timeline_ulid for t in marked)
-        diagnostics.append(f"multiple timelines marked default: {ulids}")
-        return [], diagnostics
-    if len(eligible) == 1:
-        return eligible, diagnostics
-    if not eligible:
-        diagnostics.append("no eligible (non-tombstoned) managed timelines found")
-        return [], diagnostics
-    diagnostics.append(
-        f"no timeline marked default and {len(eligible)} timelines exist (expected exactly 1)"
-    )
-    return [], diagnostics
 
 
 def _manifest_timeline_identity(manifest: dict) -> dict | None:

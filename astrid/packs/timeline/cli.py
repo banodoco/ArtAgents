@@ -229,7 +229,7 @@ def _cmd_visualize(parsed: argparse.Namespace) -> int:
     inputs: dict[str, Any] = {"formats": formats}
     timeline_slug = parsed.timeline_slug or parsed.timeline_ref
     for name in (
-        "timeline_source", "layout", "filmstrip", "rendered_video", "shot",
+        "layout", "filmstrip", "rendered_video", "shot",
         "range", "at", "clip", "asset", "context", "neighbors", "from_view",
         "focus",
     ):
@@ -456,15 +456,6 @@ def _configure_visualize(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--all", dest="select_all", action="store_true",
         help="Visualize every active timeline in the project.",
-    )
-    subparser.add_argument(
-        "--timeline-source", action="append", default=[],
-        help=(
-            "Explicit legacy managed timeline directory/file; repeat for multiple "
-            "sources. In result manifests, inputs.timeline_source remains a "
-            "project-slug compatibility field; inspect source_mode and resolved "
-            "identities for authority/provenance."
-        ),
     )
     subparser.add_argument("--shot", default=None, help="Focus an authored shot id.")
     subparser.add_argument("--range", dest="range", default=None, help="Focus a closed-open START..END window.")

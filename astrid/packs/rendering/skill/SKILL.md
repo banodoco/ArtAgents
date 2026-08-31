@@ -150,9 +150,9 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
   the service selects the supporting renderer from request-sensitive evidence.
-- Use `rendering.timeline_visualize` to inspect one or all managed timelines
-  through a deterministic evidence pack. It reads event logs without repair,
-  owns retention through run metadata, and never mutates timeline manifests.
+- Use `rendering.timeline_visualize` to inspect one or all runtime-managed
+  timelines through a deterministic evidence pack. It owns retention through
+  run metadata and never mutates timeline manifests.
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect
@@ -256,9 +256,9 @@ result = sdk.invoke(
 )
 print(result.ok, result.outputs)
 
-# The same default/slug/UUID/ULID selectors resolve the SQLite kernel timeline
+# The same default/slug/UUID/ULID selectors resolve the runtime timeline
 # immediately after the public
-# `client.timelines.create/save` journey; no hand-authored assembly.jsonl is
+# `client.timelines.create/save` journey; no hand-authored event log is
 # required. Kernel config is materialized privately and pinned to the real
 # immutable stream head version/hash for this run.
 # A project-owned registry `media_id` is enough for visualization to derive
@@ -266,16 +266,6 @@ print(result.ok, result.outputs)
 # hash-fanout paths into timeline state. Explicit `file` remains appropriate
 # for project-owned legacy/external sources.
 
-# A project-owned event-log file is also accepted:
-result = sdk.invoke(
-    "rendering.timeline_visualize",
-    kind="executor",
-    project="demo",
-    inputs={
-        "timeline_source": [".../demo/timelines/<timeline-ulid>/assembly.jsonl"],
-        "formats": ["md"],
-    },
-)
 ```
 
 The SDK field is plural (`formats`), while the direct runner uses repeatable
@@ -285,12 +275,12 @@ evidence artifact to managed CAS. Treat `result.manifest_path` as the durable
 navigation handle. `result.outputs["pack_root"]` is a verified, browsable copy
 under `.astrid/views/timeline_visualize/`, not a second authority; private
 attempt staging is removed and `result.run_root` is therefore `None`.
-Admission freezes the selected timeline/event-log or frozen-manifest identity
-and the executor-definition digest into the kernel task. The runner checks that
-authority again before materialization; if the head, event-log bytes, frozen
-manifest, focus, or executor definition changed meanwhile, retry the invocation
-instead of treating the failed run as a view of either state. Exact terminal
-replays report the executor version stored with the original task.
+Admission freezes the selected runtime timeline or frozen-manifest identity and
+the executor-definition digest into the kernel task. The runner checks that
+authority again before materialization; if the head, frozen manifest, focus, or
+executor definition changed meanwhile, retry the invocation instead of treating
+the failed run as a view of either state. Exact terminal replays report the
+executor version stored with the original task.
 
 The public CLI equivalent is the nested timeline command (the gateway still
 has eight top-level families):
@@ -301,12 +291,10 @@ python3 -m astrid timelines visualize --project demo \
 ```
 
 Omit `--timeline-slug` for the project default, or pass `--all` for every
-active timeline. `--timeline-source PATH` is repeatable for a project-owned
-legacy managed timeline directory/file and cannot be combined with a selector
-or `--all`. The command returns the stable five-key envelope synchronously;
-successful `data` includes run/kernel IDs and durable artifact paths, while
-invalid selectors and foreign sources return a typed validation error before
-ledger admission.
+active timeline. The command returns the stable five-key envelope
+synchronously; successful `data` includes run/kernel IDs and durable artifact
+paths, while invalid selectors return a typed validation error before ledger
+admission.
 
 Use the qualified `selector` input (`rendering.remotion`, `rendering.ffmpeg`, or
 `rendering.threejs`). The host does not translate shorthand selectors or

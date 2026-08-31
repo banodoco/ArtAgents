@@ -65,7 +65,7 @@ python3 -m astrid projects list --json
 python3 -m astrid timelines create primary --project demo --name "Primary" --default --json
 python3 -m astrid media import ./shot.png --project demo --json
 python3 -m astrid tasks create --project demo --capability rendering.timeline_visualize \
-  --spec '{"timeline_source": "..."}' --json
+  --spec '{"timeline_slug": "primary"}' --json
 python3 -m astrid runs list --project demo --json
 ```
 
@@ -192,8 +192,9 @@ like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
 a canonical runtime slug/UUID/ULID and optionally enforces `expected_version`;
 use `astrid timelines render <ref>` for the product CLI. Managed visualization
 likewise resolves the canonical runtime timeline and pins its actual stream
-head. Visualization's `timeline_source` remains the explicit legacy filesystem
-compatibility route.
+head. Visualization resolves only runtime-owned timeline references and frozen
+materializations; raw timeline paths and event-log files are not product
+inputs.
 
 ### How capabilities execute
 

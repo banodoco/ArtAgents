@@ -2,16 +2,13 @@
 
 `rendering.timeline_visualize` freezes one or more managed timeline generations
 and produces a deterministic evidence pack for agent inspection. Default,
-slug, UUID, ULID, and `all` selectors resolve only the canonical SQLite kernel
+slug, UUID, ULID, and `all` selectors resolve only the canonical runtime
 timeline; the current row is the snapshot projection and the immutable stream
-head/version/hash pins provenance. A legacy filesystem event log is accepted
-only through the explicit `timeline_source` compatibility input.
+head/version/hash pins provenance.
 Leaf evidence manifests make this boundary explicit with
-`inputs.source_mode`: `kernel` for current canonical selection, `legacy` only
-when `timeline_source` was supplied, and `frozen` for navigation from an
-existing view. `resolved_project` and `resolved_timelines` carry the exact
-selected identities; the historical `timeline_source: [project_slug]` field
-is retained only for frozen-v1 compatibility.
+`inputs.source_mode`: `kernel` for current canonical selection and `frozen`
+for navigation from an existing view. `resolved_project` and
+`resolved_timelines` carry the exact selected identities.
 
 ULID spelling has one deliberate compatibility seam. Public v10 timeline
 `create`, `list`, and `show` DTOs use the kernel's canonical lowercase
@@ -28,12 +25,11 @@ bound to, or recorded in, a timeline `manifest.json`.
 
 ## Read-only contract
 
-The executor reads kernel timeline rows/config/history or
-`assembly.identity.json`, `assembly.jsonl`, and compatible read-only sidecars
-beneath legacy selected project timelines. It does not call
-timeline repair or CRUD paths, does not append events, and does not update
-`manifest.json.contributing_runs`. Existing timeline manifests remain
-byte-identical; a missing timeline manifest remains missing.
+The executor reads timeline rows/config/history from the workspace runtime and
+materializes one attempt-local snapshot for rendering. It does not read or
+repair project timeline files, append events, or update
+`manifest.json.contributing_runs`. Existing timeline files remain outside the
+product authority boundary.
 
 The managed run ledger owns operational identity and retention. Its metadata
 contains sorted `timeline_ids`, `evidence: true`, and the executor contract
@@ -62,11 +58,9 @@ timeline reference (slug, UUID, or ULID), `--all`, `--shot`, `--range`, `--at`,
 `--clip`, `--asset`, `--context`, `--neighbors`, `--layout`, repeatable
 `--format`, `--filmstrip`, and `--rendered-video`. `project_slug` is the
 executor-level project identity and is derived from `project=<slug>` for a
-managed SDK invocation. `timeline_source` is the contained, repeatable SDK
-handoff form: pass a managed timeline directory or any file inside that
-directory. Without `timeline_source`, selectors also resolve canonical kernel
-timelines created/saved through the public timeline SDK. The source form is
-mutually exclusive with a timeline reference or `all`.
+managed SDK invocation. All selectors resolve canonical runtime timelines
+created/saved through the public timeline SDK. Standalone timeline paths and
+raw event-log files are not product inputs.
 
 The command spelling is singular and repeatable while the SDK field is plural:
 
@@ -111,39 +105,16 @@ python3 -m astrid timelines visualize --project desert-plant-growth \
 ```
 
 `--format` is repeatable and comma-separated (`png`, `svg`, `md`, or `all`),
-with `all` exclusive of other formats. `--timeline-source` is repeatable for
-legacy project-owned managed directories/files and is mutually exclusive with
-`--timeline-slug` and `--all`. Invalid ownership, selectors, and combinations
-are returned as typed validation errors before a run/task is admitted.
+with `all` exclusive of other formats. Invalid ownership, selectors, and
+combinations are returned as typed validation errors before a run/task is
+admitted.
 
-The CLI/SDK `timeline_source` input is the explicit legacy path. The emitted
-manifest's older `inputs.timeline_source` field is different: it is frozen-v1
-compatibility data containing `[project_slug]`. It is intentionally retained,
-but it is not evidence of which timeline path or authority was read. Use
-`source_mode`, `resolved_project`, `resolved_timelines`, and
+Use `source_mode`, `resolved_project`, `resolved_timelines`, and
 `canonical_timeline_identities` for provenance and cross-surface comparison.
-
-Equivalent source-file addressing is safe when the file belongs to the
-project's managed timeline directory:
-
-```python
-result = sdk.invoke(
-    "rendering.timeline_visualize",
-    kind="executor",
-    project="desert-plant-growth",
-    inputs={
-        "timeline_source": [
-            ".../desert-plant-growth/timelines/<timeline-ulid>/assembly.jsonl",
-        ],
-        "formats": ["md"],
-    },
-)
-```
 
 Do not pass `out` together with `project`: the project-scoped runner supplies
 the private staging output and publishes the evidence pack under the managed
-run. A source path outside the owning project's managed timeline directory is
-rejected before execution.
+run.
 
 Snapshot-safe `--from-view`/`--focus` navigation accepts the durable managed
 manifest path returned by a successful visualization (Astrid rehydrates and

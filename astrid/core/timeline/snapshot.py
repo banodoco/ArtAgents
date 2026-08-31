@@ -1,10 +1,8 @@
 """Pure, event-sourced timeline snapshots.
 
-This module deliberately does not use the timeline CRUD, repair, bridge, or
-``LocalFsBackend.head`` paths.  A snapshot is projected and verified from the
-same in-memory event read.  Display lifecycle events are projected over the
-identity-sidecar root, with a plain ``display.json`` read only for legacy logs
-that contain no display events.  ``assembly.head.json`` is diagnostic-only.
+A snapshot is projected and verified from one in-memory runtime event read.
+The runtime materialization is the only timeline authority; filesystem
+timeline paths, local event-log backends, and repair sidecars are not read.
 """
 
 from __future__ import annotations
@@ -15,15 +13,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
-from uuid import UUID
-
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.timeline.eventlog.projector import project_display
 from astrid.core.timeline.events.schema import (
     TimelineEvent,
     with_event_hash,
 )
-from astrid.core.timeline.model import Display
 from astrid.core.timeline.projection import project_to_assembly
 from astrid.core.timeline.resolution import resolve_asset_authorized_path
 from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
@@ -37,23 +31,7 @@ from astrid.packs.rendering.executors.timeline_visualize.validate import (
 )
 
 _REGISTRY_EVENT_KIND = "timeline.asset_registry_replaced"
-_DISPLAY_EVENT_KINDS = frozenset(
-    {
-        "timeline.created",
-        "timeline.renamed",
-        "timeline.default_set",
-        "timeline.deleted",
-    }
-)
-_READ_CHUNK_SIZE = 1024 * 1024
 _ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-
-def _validate_runtime_ulid(value: object) -> str:
-    """Validate the detached runtime identity without project-path helpers."""
-    if not isinstance(value, str) or _ULID_RE.fullmatch(value) is None:
-        raise ValueError("timeline ULID must be an uppercase canonical ULID")
-    return value
 
 
 class ConcurrentAppendError(RuntimeError):
@@ -62,10 +40,6 @@ class ConcurrentAppendError(RuntimeError):
 
 class SnapshotIntegrityError(RuntimeError):
     """Raised when authoritative snapshot input fails integrity validation."""
-
-
-class _EventReadError(SnapshotIntegrityError):
-    """Internal marker for an incomplete or malformed event-log read."""
 
 
 @dataclass(frozen=True)
@@ -157,169 +131,6 @@ def snapshot_from_runtime(
 
 def _dedupe_diagnostics(items: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(items))
-
-
-def _read_required_object(path: Path, *, label: str) -> dict[str, Any]:
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise SnapshotIntegrityError(f"{label} is missing: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise SnapshotIntegrityError(
-            f"{label} is invalid JSON: {exc.msg}"
-        ) from exc
-    except OSError as exc:
-        raise SnapshotIntegrityError(f"failed to read {label}: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise SnapshotIntegrityError(f"{label} must contain a JSON object")
-    return raw
-
-
-def _read_identity(timeline_dir: Path) -> tuple[str, str, Any]:
-    identity = _read_required_object(
-        timeline_dir / "assembly.identity.json",
-        label="assembly.identity.json",
-    )
-    timeline_id = identity.get("timeline_id")
-    if not isinstance(timeline_id, str):
-        raise SnapshotIntegrityError("assembly.identity.json.timeline_id must be a string")
-    try:
-        canonical_id = str(UUID(timeline_id))
-    except (ValueError, AttributeError) as exc:
-        raise SnapshotIntegrityError(
-            "assembly.identity.json.timeline_id must be a UUID"
-        ) from exc
-    if timeline_id != canonical_id:
-        raise SnapshotIntegrityError(
-            "assembly.identity.json.timeline_id must be a canonical UUID"
-        )
-
-    timeline_ulid = identity.get("timeline_ulid")
-    try:
-        canonical_ulid = _validate_runtime_ulid(timeline_ulid)
-    except ValueError as exc:
-        raise SnapshotIntegrityError(
-            "assembly.identity.json.timeline_ulid must be a canonical ULID"
-        ) from exc
-    return canonical_id, canonical_ulid, deepcopy(identity.get("display"))
-
-
-def _read_display(timeline_dir: Path) -> tuple[dict[str, Any] | None, str | None]:
-    """Plain-read the legacy display fallback without invoking repair."""
-
-    path = timeline_dir / "display.json"
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None, None
-    except json.JSONDecodeError as exc:
-        raise SnapshotIntegrityError(
-            f"display.json is invalid JSON: {exc.msg}"
-        ) from exc
-    except OSError as exc:
-        raise SnapshotIntegrityError(f"failed to read display.json: {exc}") from exc
-    try:
-        display = Display.from_dict(raw)
-    except ValueError as exc:
-        raise SnapshotIntegrityError(f"display.json is invalid: {exc}") from exc
-    return display.to_json_obj(), display.slug
-
-
-def _display_from_captured_events(
-    events: Sequence[TimelineEvent],
-    *,
-    timeline_dir: Path,
-    identity_display: Any,
-) -> tuple[dict[str, Any] | None, str | None]:
-    """Project display state from the captured generation when it is evented.
-
-    Creation stores the original display in ``assembly.identity.json`` before
-    the event log exists.  Current local CRUD emits rename events but may omit
-    ``timeline.created``, so that immutable identity display is the replay
-    baseline.  A live ``display.json`` is consulted only when the captured log
-    has no display lifecycle event at all.
-    """
-
-    display_events = [event for event in events if event.kind in _DISPLAY_EVENT_KINDS]
-    if not display_events:
-        return _read_display(timeline_dir)
-
-    try:
-        projection = project_display(display_events)
-    except ValueError as exc:
-        raise SnapshotIntegrityError(
-            f"captured display event projection failed: {exc}"
-        ) from exc
-
-    # A created event is a complete display root, and a deleted event can also
-    # determine the final state without a baseline.  Rename/default-only logs
-    # need the immutable creation display stored in the identity sidecar.
-    if projection.display is None and not projection.deleted:
-        if identity_display is None:
-            raise SnapshotIntegrityError(
-                "captured display events require assembly.identity.json.display "
-                "as their replay baseline"
-            )
-        try:
-            fallback_display = Display.from_dict(identity_display)
-        except ValueError as exc:
-            raise SnapshotIntegrityError(
-                f"assembly.identity.json.display is invalid: {exc}"
-            ) from exc
-        try:
-            projection = project_display(
-                display_events,
-                fallback_display=fallback_display,
-            )
-        except ValueError as exc:
-            raise SnapshotIntegrityError(
-                f"captured display event projection failed: {exc}"
-            ) from exc
-
-    if projection.deleted or projection.display is None:
-        return None, None
-    return projection.display.to_json_obj(), projection.display.slug
-
-
-def _event_file_fingerprint(path: Path) -> tuple[int, int, int, int] | None:
-    """Return identity/size/mtime facts sufficient for append detection."""
-
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise SnapshotIntegrityError(f"failed to stat {path}: {exc}") from exc
-    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
-
-
-def _read_event_dicts(path: Path) -> list[dict[str, Any]]:
-    """Read exactly one JSONL generation without using a backend repair path."""
-
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            events: list[dict[str, Any]] = []
-            for line_number, line in enumerate(handle, start=1):
-                if not line.endswith("\n"):
-                    raise _EventReadError(
-                        f"{path} line {line_number} is not newline-terminated"
-                    )
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise _EventReadError(
-                        f"invalid JSON in {path} line {line_number}: {exc.msg}"
-                    ) from exc
-                if not isinstance(raw, dict):
-                    raise _EventReadError(
-                        f"{path} line {line_number} must contain a JSON object"
-                    )
-                events.append(raw)
-            return events
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise _EventReadError(f"failed to read {path}: {exc}") from exc
 
 
 def _parse_events(
@@ -537,72 +348,6 @@ def _resolve_media_hashes(
                 f"observed {observed}"
             )
     return hashes, diagnostics
-
-
-def _read_head_sidecar(
-    timeline_dir: Path,
-) -> tuple[dict[str, Any] | None, list[str]]:
-    path = timeline_dir / "assembly.head.json"
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None, []
-    except json.JSONDecodeError as exc:
-        return None, [
-            f"HEAD_SIDECAR_INVALID: assembly.head.json is invalid JSON: {exc.msg}"
-        ]
-    except OSError as exc:
-        return None, [f"HEAD_SIDECAR_UNREADABLE: {exc}"]
-    if not isinstance(raw, dict):
-        return None, ["HEAD_SIDECAR_INVALID: assembly.head.json is not an object"]
-    return raw, []
-
-
-def _head_sidecar_diagnostics(
-    head: dict[str, Any] | None,
-    *,
-    timeline_id: str,
-    events: Sequence[TimelineEvent],
-) -> list[str]:
-    if head is None:
-        return []
-
-    count = len(events)
-    last_event_id = events[-1].event_id if events else None
-    last_hash = events[-1].hash if events else None
-    diagnostics: list[str] = []
-
-    for field in ("version", "event_count"):
-        value = head.get(field)
-        if isinstance(value, bool) or not isinstance(value, int):
-            diagnostics.append(
-                f"HEAD_SIDECAR_INVALID: {field} must be an integer"
-            )
-            continue
-        if value > count:
-            diagnostics.append(
-                "HEAD_SIDECAR_AHEAD: "
-                f"assembly.head.json {field} {value} is ahead of captured "
-                f"event count {count}"
-            )
-        if value < count:
-            diagnostics.append(
-                f"HEAD_SIDECAR_STALE: {field} is {value}, event tail is {count}"
-            )
-
-    if head.get("timeline_id") != timeline_id:
-        diagnostics.append(
-            "HEAD_SIDECAR_MISMATCH: timeline_id differs from assembly.identity.json"
-        )
-    if head.get("last_event_id") != last_event_id:
-        diagnostics.append(
-            "HEAD_SIDECAR_MISMATCH: last_event_id differs from the event tail"
-        )
-    if head.get("last_hash") != last_hash:
-        diagnostics.append(
-            "HEAD_SIDECAR_MISMATCH: last_hash differs from the event tail"
-        )
-    return diagnostics
 
 
 def _build_snapshot(

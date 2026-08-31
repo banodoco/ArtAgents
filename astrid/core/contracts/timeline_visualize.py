@@ -194,7 +194,14 @@ def _validated_timeline_visualize_view_context(
         if not isinstance(manifest, dict) or select_from_manifest(manifest) is None:
             return None
         inputs = manifest.get("inputs")
-        if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project_slug]:
+        # New packs identify their authority explicitly.  A raw
+        # ``timeline_source`` field is forbidden: accepting it would revive
+        # the retired filesystem timeline handoff on the sessionless route.
+        if (
+            not isinstance(inputs, dict)
+            or "timeline_source" in inputs
+            or inputs.get("source_mode") not in {"kernel", "frozen"}
+        ):
             return None
         frozen = load_frozen_view(
             manifest_path,
