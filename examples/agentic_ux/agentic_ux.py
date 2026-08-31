@@ -142,13 +142,12 @@ def main() -> None:
     capability_id: str = args.capability_id
 
     # ── 1. Discover ──────────────────────────────────────────────────────
-    discovery = astrid.discover(include_installed=False)
+    discovery = astrid.discover()
 
     # ── 2. Inspect ───────────────────────────────────────────────────────
     capability = astrid.get_capability(
         capability_id,
         kind="executor",
-        include_installed=False,
     )
 
     # ── 3. Dry-run invoke ────────────────────────────────────────────────
@@ -156,7 +155,6 @@ def main() -> None:
         invocation = astrid.invoke(
             capability_id,
             kind="executor",
-            include_installed=False,
             out=Path(tmp_out),
             inputs={
                 "brief": "example brief for agentic UX demo",

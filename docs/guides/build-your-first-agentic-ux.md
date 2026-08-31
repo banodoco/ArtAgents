@@ -44,7 +44,7 @@ package.
 ## Step 2 — Discover Capabilities
 
 ```python
-discovery = astrid.discover(include_installed=False)
+discovery = astrid.discover()
 
 print(f"Found {len(discovery.capabilities)} total capabilities")
 print(f"  Executors:     {len(discovery.executors)}")
@@ -54,8 +54,8 @@ print(f"  Elements:      {len(discovery.elements)}")
 
 `discover()` returns a `DiscoveryResult` with typed groupings
 (`executors`, `orchestrators`, `elements`) and a flat
-`capabilities` tuple.  Set `include_installed=False` to limit
-discovery to the repository packs — no system-wide or pip-installed
+`capabilities` tuple. Discovery reads repository packs and any explicitly
+supplied extra roots — no user-wide installed-pack overlay.
 packs are included.
 
 ## Step 3 — Inspect a Capability
@@ -67,7 +67,6 @@ Choose one capability to inspect.  This tutorial uses
 capability = astrid.get_capability(
     "editorial.arrange",
     kind="executor",
-    include_installed=False,
 )
 
 print(f"ID:              {capability.id}")
@@ -122,7 +121,6 @@ with tempfile.TemporaryDirectory(prefix="astrid-tutorial-") as tmp_out:
     result = astrid.invoke(
         "editorial.arrange",
         kind="executor",
-        include_installed=False,
         out=Path(tmp_out),
         inputs={
             "brief": "example brief for the tutorial",

@@ -11,7 +11,7 @@ PortType = Literal[
 ]
 OutputMode = Literal["mutate", "create", "create_or_replace"]
 CacheMode = Literal["none", "sentinel", "always_run"]
-IsolationMode = Literal["in_process", "subprocess"]
+IsolationMode = Literal["subprocess"]
 LocalEditState = Literal["clean", "dirty", "conflict"]
 
 # Runtime-validation allowlists, derived from the Literal aliases so the two

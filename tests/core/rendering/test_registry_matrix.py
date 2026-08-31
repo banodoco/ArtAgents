@@ -12,9 +12,7 @@ raise ``AssertionError`` if anything tries to run them).
 from __future__ import annotations
 
 import importlib
-import json
 import os
-import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -23,11 +21,8 @@ from unittest import mock
 
 import pytest
 
-from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack.override import OverrideStore
-from astrid.core.pack.store import InstallRecord, InstalledPackStore
-from astrid.core.pack.validate import extract_trust_summary
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
     RendererRegistryError,
@@ -39,9 +34,6 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "renderer_packs" /
 SOURCE_ROOT = FIXTURES / "source"
 ENV_ROOT = FIXTURES / "env"
 EXTRA_ROOT = FIXTURES / "extra"
-INSTALLED_FIXTURES = FIXTURES / "installed"
-
-
 
 def _scanner(source_root: Path):
     def scan(root: str | Path | None = None):
@@ -56,7 +48,6 @@ def _load_with_source(
     source_root: Path = SOURCE_ROOT,
     *,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = False,
 ):
     with (
         mock.patch.object(
@@ -69,7 +60,6 @@ def _load_with_source(
         yield load_default_registries(
             project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
 
 
@@ -134,48 +124,6 @@ def _write_renderer_pack(
     return pack_root
 
 
-def _stage_installed_fixture(
-    astrid_home: Path,
-    pack_id: str,
-    *,
-    accepted_permissions: list[dict] | None = None,
-) -> Path:
-    fixture_name = pack_id
-    fixture = INSTALLED_FIXTURES / fixture_name
-    install_root = astrid_home / "packs" / pack_id
-    revision = install_root / "revisions" / pack_id
-    revision.parent.mkdir(parents=True)
-    shutil.copytree(fixture, revision)
-    (install_root / "active").symlink_to(Path("revisions") / pack_id)
-
-    summary = extract_trust_summary(revision)
-    if accepted_permissions is None:
-        accepted_permissions = summary["permissions"]
-    record = InstallRecord(
-        pack_id=pack_id,
-        name=summary["name"],
-        version=str(summary["version"]),
-        schema_version=summary["schema_version"],
-        source_path=str(fixture),
-        installed_at="2026-01-01T00:00:00Z",
-        revision=pack_id,
-        install_root=str(install_root),
-        active=True,
-        manifest_digest=sha256_file(revision / "pack.yaml"),
-        trust_summary=summary,
-        source_type="local",
-        trust_tier="local",
-        last_validation_time="2026-01-01T00:00:00Z",
-        trust_acknowledged_at="2026-01-01T00:00:00Z",
-        trust_method="test",
-        trust_actor="test",
-        no_sandbox_warning_version=1,
-        permissions_accepted=accepted_permissions,
-    )
-    InstalledPackStore(astrid_home / "packs").record_install(record)
-    return revision
-
-
 def _load_env_registries(project_root: Path, *, extra_pack_roots: tuple[str, ...] = ()):
     empty_source = project_root / "empty-source"
     empty_source.mkdir(parents=True, exist_ok=True)
@@ -191,7 +139,6 @@ def _load_env_registries(project_root: Path, *, extra_pack_roots: tuple[str, ...
         return load_default_registries(
             project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=False,
         )
 
 
@@ -487,9 +434,8 @@ def _write_alias_to_absent_pack(packs_root: Path) -> Path:
     """A source pack whose renderer alias points at a canonical in ANOTHER
     pack namespace that does not exist in the discovery tree. Cross-pack
     alias targets are not statically checked (validate.py only validates
-    same-pack targets), so this pack passes validate_pack and can be
-    installed, while resolution still requires the override to supply the
-    implementation."""
+    same-pack targets), so this pack passes validate_pack while resolution
+    still requires the override to supply the implementation."""
     pack_root = _write_renderer_pack(
         packs_root,
         "alias_missing",
@@ -509,63 +455,6 @@ def _write_alias_to_absent_pack(packs_root: Path) -> Path:
     lines[idx:idx] = alias_block
     pack_yaml.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return pack_root
-
-
-def test_installed_pack_alias_is_not_a_public_discovery_authority(
-    tmp_path: Path,
-) -> None:
-    """Installed aliases do not enter the public registry or override route."""
-    project_root = tmp_path / "project"
-    source_root = tmp_path / "source"
-    source_root.mkdir()
-    pack_root = _write_alias_to_absent_pack(source_root)
-
-    # The cross-pack alias must pass static pack validation (the same-pack
-    # target rule does not apply) so the pack remains installable.
-    from astrid.core.pack.validate import validate_pack
-    from astrid.core.pack.install_local import install_pack
-    from astrid.core.pack.store import InstalledPackStore
-
-    errors, warnings = validate_pack(str(pack_root))
-    assert not errors, errors
-
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    store = InstalledPackStore(astrid_home / "packs")
-    exit_code = install_pack(
-        pack_root,
-        store=store,
-        dry_run=False,
-        skip_confirm=True,
-        trust_acknowledged=True,
-        trust_method="test",
-        trust_actor="test",
-    )
-    assert exit_code == 0, f"install failed with exit {exit_code}"
-
-    override_store = OverrideStore(project_root)
-    override_store.set_override("renderer", "other.abstract.renderer", "alias_missing.renderer")
-
-    # Resolve from the INSTALLED revision (include_installed=True, empty
-    # source tree) so the override route is proven on the installed pack.
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(project_root, include_installed=True)
-
-    assert renderers.inspect("alias_missing.legacy") == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("alias_missing.legacy")
-    assert caught.value.code == "unknown_capability"
 
 
 def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
@@ -619,7 +508,6 @@ def test_env_candidate_cannot_shadow_eligible_extra_in_natural_discovery_order(
         renderers, _, _ = load_default_registries(
             tmp_path / "project",
             extra_pack_roots=(str(extra_root),),
-            include_installed=False,
         )
 
     winner = renderers.get("sharedrender.renderer")
@@ -634,39 +522,6 @@ def test_env_candidate_cannot_shadow_eligible_extra_in_natural_discovery_order(
         ("Extra Eligible", "extra", True),
         ("Env Ineligible", "env", False),
     ]
-
-
-def test_installed_pack_with_unaccepted_permissions_is_not_publicly_discovered(
-    tmp_path: Path,
-) -> None:
-    """An install record that accepted no permissions is not trustworthy.
-
-    The fixture pack declares ``subprocess`` and the manifest requires it,
-    but the install record's accepted-permission list is empty — the trust
-    audit cannot be validated, so the candidate is inspectable only.
-    """
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir(exist_ok=True)
-    _stage_installed_fixture(astrid_home, "installed_render", accepted_permissions=[])
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path / "project", include_installed=True)
-
-    assert renderers.inspect("installed_render.renderer") == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("installed_render.renderer")
-    assert caught.value.code == "unknown_capability"
 
 
 def test_permission_deficiency_reason_lists_all_missing_permissions_sorted(

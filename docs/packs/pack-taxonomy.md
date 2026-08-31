@@ -27,7 +27,7 @@ descriptions. The taxonomy layer makes these answers machine-readable.
 ### `origin`
 
 Describes the provenance of the pack. Ship with `builtin` for packs that are
-part of the Astrid distribution. Use `external` for packs installed from Git,
+part of the Astrid distribution. Use `external` for packs supplied from Git,
 a registry, or scaffolded inside a user's project. Use `unknown` when the
 origin cannot be determined (the default for manifests that omit the field).
 

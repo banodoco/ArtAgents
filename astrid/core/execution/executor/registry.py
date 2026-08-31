@@ -254,12 +254,10 @@ def load_default_registry(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> ExecutorRegistry:
     packs = _discover_executor_packs(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="executor"))
@@ -282,12 +280,10 @@ def load_pack_executors(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> tuple[ExecutorDefinition, ...]:
     packs = _discover_executor_packs(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     return _load_pack_executors_from_packs(packs)
 
@@ -296,12 +292,10 @@ def _discover_executor_packs(
     *,
     project_root: str | Path,
     extra_pack_roots: tuple[str, ...],
-    include_installed: bool,
 ) -> tuple[Any, ...]:
     return discover_packs_ordered(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         discover_packs_fn=discover_packs,
     )
 
@@ -312,7 +306,7 @@ def _load_pack_executors_from_packs(
     executors: list[ExecutorDefinition] = []
     for pack in packs:
         # Per-pack fault tolerance: one broken content manifest (e.g. an
-        # installed external pack whose executor.yaml fails schema
+        # external pack whose executor.yaml fails schema
         # validation) must not abort the whole discovery/invoke. The pack is
         # skipped with a warning; pack-alignment failures
         # (``PackValidationError`` from ``validate_content_id_in_pack``)

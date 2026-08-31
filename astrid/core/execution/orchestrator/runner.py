@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import subprocess
 import sys
 import pickle
 import tempfile
-from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Mapping
 
 from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
@@ -31,11 +29,6 @@ from astrid.core.project.runtime import (
     ProjectRuntimeError,
     _project_subprocess_env,
     reject_project_with_out,
-)
-from astrid.core.runtime import (
-    InProcessExecutionPreconditionError,
-    InProcessInvocationError,
-    invoke_in_process_command,
 )
 from astrid.core.runtime._normalize import normalize_python_runtime_result
 from astrid.core.runtime.log_capture import (
@@ -68,7 +61,6 @@ class OrchestratorRunRequest:
     dry_run: bool = False
     python_exec: str | None = None
     verbose: bool = False
-    execution_mode: Literal["subprocess", "in_process"] = "subprocess"
     project_was_auto_resolved: bool = False
     invocation: str = "cli"
     projects_root: Path | str | None = None
@@ -252,22 +244,8 @@ def _run_python_orchestrator(orchestrator: OrchestratorDefinition, request: Orch
     runtime = orchestrator.runtime
     if not runtime.module or not runtime.function:
         raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} has an invalid Python runtime")
-    if request.execution_mode == "subprocess" and not request.dry_run:
+    if not request.dry_run:
         return _run_python_orchestrator_subprocess(orchestrator, request)
-    try:
-        module = importlib.import_module(runtime.module)
-    except Exception as exc:
-        raise OrchestratorRunnerError(f"failed to import orchestrator runtime module {runtime.module!r}: {exc}") from exc
-    target = getattr(module, runtime.function, None)
-    if not callable(target):
-        raise OrchestratorRunnerError(f"orchestrator runtime target {runtime.module}.{runtime.function} is not callable")
-    try:
-        raw_result = target(request, orchestrator)
-    except OrchestratorRunnerError:
-        raise
-    except Exception as exc:
-        raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} Python runtime failed: {exc}") from exc
-    return _normalize_python_result(orchestrator, request, raw_result)
 
 
 def _run_python_orchestrator_subprocess(
@@ -360,14 +338,6 @@ def _run_command_orchestrator(
             dry_run=True,
             plan=_plan_from_commands(planned_commands, prefix=orchestrator.id),
         )
-    if request.execution_mode == "in_process":
-        return _run_in_process_command_orchestrator(
-            orchestrator,
-            request,
-            command=command,
-            cwd=cwd,
-            env=env,
-        )
     effective_env = _command_subprocess_env(orchestrator, request, env)
     run_root = request.run_root
     if run_root is not None and not request.project_was_auto_resolved:
@@ -396,87 +366,6 @@ def _run_command_orchestrator(
         cwd=cwd,
         env=env,
         returncode=returncode,
-    )
-
-
-def _run_in_process_command_orchestrator(
-    orchestrator: OrchestratorDefinition,
-    request: OrchestratorRunRequest,
-    *,
-    command: tuple[str, ...],
-    cwd: str | None,
-    env: Mapping[str, str],
-) -> OrchestratorRunResult:
-    effective_env = _command_subprocess_env(orchestrator, request, env)
-    log_capture = (
-        open_run_log_capture(request.run_root)
-        if request.run_root is not None and not request.project_was_auto_resolved
-        else None
-    )
-    try:
-        with log_capture or nullcontext():
-            result = invoke_in_process_command(
-                command,
-                metadata=orchestrator.metadata,
-                owner_id=orchestrator.id,
-                cwd=cwd,
-                env=effective_env,
-                parent_env=effective_env,
-                stdout_log=None if log_capture is None else log_capture.stdout,
-                stderr_log=None if log_capture is None else log_capture.stderr,
-            )
-    except InProcessExecutionPreconditionError as exc:
-        return _in_process_orchestrator_error_result(
-            orchestrator,
-            command=command,
-            cwd=cwd,
-            env=env,
-            error=OrchestratorRunError(
-                message=str(exc),
-                kind="precondition",
-            ),
-        )
-    except InProcessInvocationError as exc:
-        return _in_process_orchestrator_error_result(
-            orchestrator,
-            command=command,
-            cwd=cwd,
-            env=env,
-            error=OrchestratorRunError(
-                message=str(exc),
-                kind="runtime",
-            ),
-        )
-    return OrchestratorRunResult(
-        orchestrator_id=orchestrator.id,
-        kind=orchestrator.kind,
-        runtime_kind="command",
-        command=command,
-        planned_commands=(command,),
-        cwd=cwd,
-        env=dict(env),
-        returncode=result.returncode,
-    )
-
-
-def _in_process_orchestrator_error_result(
-    orchestrator: OrchestratorDefinition,
-    *,
-    command: tuple[str, ...],
-    cwd: str | None,
-    env: Mapping[str, str],
-    error: OrchestratorRunError,
-) -> OrchestratorRunResult:
-    return OrchestratorRunResult(
-        orchestrator_id=orchestrator.id,
-        kind=orchestrator.kind,
-        runtime_kind="command",
-        command=command,
-        planned_commands=(command,),
-        cwd=cwd,
-        env=dict(env),
-        returncode=1,
-        errors=(error,),
     )
 
 

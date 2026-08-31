@@ -7,13 +7,12 @@ import os
 import shutil
 import subprocess
 import sys
-from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Mapping
+from typing import Any, Mapping
 
 from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
@@ -45,18 +44,12 @@ from astrid.core.project.runtime import (
     _project_subprocess_env,
     reject_project_with_out,
 )
-from astrid.core.runtime import (
-    InProcessExecutionPreconditionError,
-    InProcessInvocationError,
-    invoke_in_process_command,
-)
 from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
 )
 from astrid.core.subprocess_env import build_child_subprocess_env
 
-from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
 from .schema import (
     ConditionSpec,
@@ -148,7 +141,6 @@ class ExecutorRunRequest:
     python_exec: str | None = None
     verbose: bool = False
     argv: tuple[str, ...] = ()
-    execution_mode: Literal["subprocess", "in_process"] = "subprocess"
     project_was_auto_resolved: bool = False
     invocation: str = "cli"
     projects_root: Path | str | None = None
@@ -581,14 +573,6 @@ def _run_explicit_command_executor(
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
-    if request.execution_mode == "in_process":
-        return _run_in_process_executor_command(
-            executor,
-            request,
-            command=command,
-            cwd=cwd,
-            env=env,
-        )
     effective_env = _command_subprocess_env(executor, request, env)
     run_root = request.run_root
     if run_root is not None and not request.project_was_auto_resolved:
@@ -627,141 +611,6 @@ def _run_explicit_command_executor(
         executor_version=executor_definition_digest(executor),
         outputs=_resolve_declared_outputs(executor, request) if returncode == 0 else {},
     )
-
-
-def _run_in_process_executor_command(
-    executor: ExecutorDefinition,
-    request: ExecutorRunRequest,
-    *,
-    command: tuple[str, ...],
-    cwd: str | None,
-    env: Mapping[str, str],
-) -> ExecutorRunResult:
-    # Keep in-process and subprocess lanes on the same project-scoped
-    # environment.  In particular, SDK-bound ``projects_root`` must reach
-    # timeline/generation packs; otherwise an in-process invocation silently
-    # resolves the user's default workspace instead of its bound root.
-    effective_env = _command_subprocess_env(executor, request, env)
-    log_capture = (
-        open_run_log_capture(request.run_root)
-        if request.run_root is not None and not request.project_was_auto_resolved
-        else None
-    )
-    try:
-        with log_capture or nullcontext():
-            result = invoke_in_process_command(
-                command,
-                metadata=executor.metadata,
-                owner_id=executor.id,
-                cwd=cwd,
-                env=effective_env,
-                # ``effective_env`` already contains the request-authoritative
-                # project routing. Reusing it as the propagated parent keeps
-                # the in-process policy pass from restoring ambient routing.
-                parent_env=effective_env,
-                stdout_log=None if log_capture is None else log_capture.stdout,
-                stderr_log=None if log_capture is None else log_capture.stderr,
-            )
-    except InProcessExecutionPreconditionError as exc:
-        return _in_process_executor_error_result(
-            executor,
-            request,
-            command=command,
-            cwd=cwd,
-            env=env,
-            error=ExecError(
-                code="in_process_precondition",
-                type="precondition",
-                message=str(exc),
-                recovery="use subprocess mode or make the executor command match the current interpreter/runtime module",
-            ),
-        )
-    except InProcessInvocationError as exc:
-        return _in_process_executor_error_result(
-            executor,
-            request,
-            command=command,
-            cwd=cwd,
-            env=env,
-            error=ExecError(
-                code="in_process_runtime",
-                type="process",
-                message=str(exc),
-                recovery="fix the executor runtime import/entrypoint or run it in subprocess mode",
-            ),
-        )
-    return ExecutorRunResult(
-        executor_id=executor.id,
-        kind=executor.kind,
-        command=command,
-        cwd=cwd,
-        # ``effective_env`` is the private child-process environment and may
-        # contain safe inherited process variables (PATH, HOME, project
-        # routing, etc.).  It is an execution detail, not the executor's
-        # declared environment.  Returning it here leaked parent state into
-        # result envelopes and made in-process results disagree with the
-        # subprocess path, which already reports only declared values.
-        env=dict(env),
-        payload=_merge_runner_payload(
-            result.payload,
-            executor_id=executor.id,
-            returncode=result.returncode,
-        ),
-        returncode=result.returncode,
-        run_id=request.run_id,
-        run_root=request.run_root,
-        executor_version=executor_definition_digest(executor),
-        outputs=_resolve_declared_outputs(executor, request) if result.returncode == 0 else {},
-    )
-
-
-def _in_process_executor_error_result(
-    executor: ExecutorDefinition,
-    request: ExecutorRunRequest,
-    *,
-    command: tuple[str, ...],
-    cwd: str | None,
-    env: Mapping[str, str],
-    error: ExecError,
-) -> ExecutorRunResult:
-    return ExecutorRunResult(
-        executor_id=executor.id,
-        kind=executor.kind,
-        command=command,
-        cwd=cwd,
-        env=dict(env),
-        payload={
-            "executor_id": executor.id,
-            "missing_binaries": [],
-            "returncode": 1,
-            "skipped": False,
-            "skipped_reason": "",
-        },
-        returncode=1,
-        error=error,
-        run_id=request.run_id,
-        run_root=request.run_root,
-        executor_version=executor_definition_digest(executor),
-    )
-
-
-def _merge_runner_payload(
-    payload: Mapping[str, Any],
-    *,
-    executor_id: str,
-    returncode: int | None,
-) -> dict[str, Any]:
-    merged = dict(payload)
-    merged.update(
-        {
-            "executor_id": executor_id,
-            "missing_binaries": [],
-            "returncode": returncode,
-            "skipped": False,
-            "skipped_reason": "",
-        }
-    )
-    return merged
 
 
 def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> ExecutorRunResult:
@@ -1334,14 +1183,6 @@ def _resolve_python_exec(executor: ExecutorDefinition, request: ExecutorRunReque
         return str(request.python_exec)
     if not _executor_uses_placeholder(executor, "python_exec"):
         return None
-    if executor.kind == "external" and executor.isolation.mode == "subprocess":
-        installed_python = executor_python_path(executor)
-        if installed_python.is_file():
-            return str(installed_python)
-        raise ExecutorRunnerError(
-            f"executor {executor.id!r} requires an installed Python environment; "
-            f"run `python3 -m astrid executors install {executor.id}` or pass python_exec as an input override"
-        )
     return sys.executable
 
 

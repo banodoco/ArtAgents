@@ -282,7 +282,6 @@ def _backend_render(
     validator: Any = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> RenderResult:
     """Dispatch one render through the public backend path and validate it.
 
@@ -303,7 +302,6 @@ def _backend_render(
         registries=registries,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     backend = _resolve_backend(request)
     candidate = _resolve_candidate(renderers, backend)
@@ -380,7 +378,6 @@ def render(
     sidecar_path: str | Path | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     service: Any = None,
     transport: Any = None,
     transport_factory: Any = None,
@@ -428,7 +425,6 @@ def render(
     selected_service = service or RenderService(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         **_service_injection(transport=transport, transport_factory=transport_factory, validator=validator, publisher=publisher),
     )
     return selected_service.render(
@@ -460,7 +456,6 @@ def support(
     metadata: Mapping[str, str] | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     service: Any = None,
     registries: Any = None,
     transport: Any = None,
@@ -508,7 +503,6 @@ def support(
         transport_factory=transport_factory,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         workspace=workspace,
     )
 
@@ -529,7 +523,6 @@ def _support_report(
     transport_factory: Any = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> SupportReport:
     """Resolve *backend* and dispatch its support verb via the service.
 
@@ -545,7 +538,6 @@ def _support_report(
         service=service,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     renderers, _planners, _finalizers = resolved_registries
     candidate = _resolve_candidate(renderers, selected_backend)
@@ -580,7 +572,6 @@ def _resolve_registries(
     service: Any = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> Any:
     """Return ``(renderers, planners, finalizers)`` registries lazily.
 
@@ -600,7 +591,6 @@ def _resolve_registries(
     return load_default_registries(
         project_root,
         extra_pack_roots=(*extra_pack_roots, *_owning_pack_roots()),
-        include_installed=include_installed,
     )
 
 

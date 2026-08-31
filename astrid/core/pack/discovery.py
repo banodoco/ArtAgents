@@ -4,7 +4,7 @@ Each registry consumes the same manifest-ledger discovery walk. The walk is
 read-only: it can see source-tree packs, an already-materialized project
 ``local`` pack, explicit extra roots, and read-only roots named by
 ``ASTRID_PACKS_PATH``. It never creates a project pack and never consults an
-installed-pack store.
+    mutable user pack store.
 
 Fault tolerance: the ``extra`` / ``env`` layers are
 external by definition. A pack whose manifest fails to load is skipped
@@ -44,7 +44,7 @@ class DiscoveredPack:
 
     ``priority_index`` is the position of this pack in the ordered discovery
     list; lower indices were discovered first. It encodes layer precedence
-    (source < local < extra < installed) and is distinct from the per-content
+    (source < local < extra < env) and is distinct from the per-content
     ``metadata["priority"]`` value that registries use to pick winners.
     """
 
@@ -86,7 +86,6 @@ def discover_pack_metadata(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     discover_packs_fn: DiscoverPacksFn | None = None,
 ) -> tuple[DiscoveredPack, ...]:
     """Return discovered packs in layered priority order.
@@ -94,8 +93,6 @@ def discover_pack_metadata(
     Layers, in order: source-tree packs (excluding ``local``), an existing
     project-scoped ``local`` pack, explicit extra pack roots (excluding
     ``local``), and ``ASTRID_PACKS_PATH`` roots (excluding ``local``).
-    ``include_installed`` is retained as a source-compatible keyword but is
-    intentionally ignored; installed packs are not a discovery authority.
 
     *discover_packs_fn* overrides the source/local/extra layer scanner; callers
     pass their own module-level ``discover_packs`` so the historical per-registry
@@ -245,7 +242,6 @@ def discover_packs_ordered(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     discover_packs_fn: DiscoverPacksFn | None = None,
 ) -> tuple[Any, ...]:
     """Convenience wrapper returning just the ``PackDefinition`` objects.
@@ -258,7 +254,6 @@ def discover_packs_ordered(
         for dp in discover_pack_metadata(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             discover_packs_fn=discover_packs_fn,
         )
     )

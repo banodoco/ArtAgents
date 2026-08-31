@@ -21,7 +21,7 @@ import astrid.sdk as sdk
 
 inventory = sdk.discover()  # manifest-ledger packs, pack by pack
 cap = sdk.get_capability(
-    "rendering.render", kind="executor", include_installed=False
+    "rendering.render", kind="executor"
 )  # typed lookup of one capability
 ```
 
@@ -67,7 +67,7 @@ metadata. There is no separate "skills list" step — pack skills are the
 
 ```python
 cap = sdk.get_capability(
-    "generation.generate_image", kind="executor", include_installed=False
+    "generation.generate_image", kind="executor"
 )
 ```
 `get_capability` resolves the qualified id (aliases included) and raises the
@@ -84,7 +84,6 @@ definition (inputs, outputs, isolation, graph, metadata) — see below.
 result = sdk.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     inputs={"review": "experiments/prompt-brevity/review.json"},
     project="my-project",
 )

@@ -306,8 +306,8 @@ def cmd_new(argv: list[str]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _list_installed_packs() -> int:
-    """Render the source/manifest pack list for legacy wrapper callers."""
+def _list_discovered_packs() -> int:
+    """Render the source/manifest pack list."""
     for pack in discover_packs(packs_root()):
         if pack.visibility != "hidden":
             print(f"{pack.id}\t{pack.name}\t{pack.version}")
@@ -324,7 +324,7 @@ def cmd_list(argv: list[str]) -> int:
         description="List source and explicitly configured external packs.",
     )
     parser.parse_args(argv)  # no arguments, just parses --help
-    return _list_installed_packs()
+    return _list_discovered_packs()
 
 
 # ── Grouped-output helpers (used by _handle_list / _handle_status) ──────────

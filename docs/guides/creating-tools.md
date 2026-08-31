@@ -119,7 +119,7 @@ concrete backend or add engine branches to the facade. To start, scaffold the
 canonical four-file renderer pack with
 `python3 -m astrid.core.rendering.cli create <name> <dest>`, then walk the
 golden path (implement `render.py` → generated test → `renderers validate` →
-trusted `packs install` → `renderers smoke` → provenance sidecar) described in
+validated pack source → `renderers smoke` → provenance sidecar) described in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 The `renderers`/`packs` verbs live on the internal module CLIs
 (`python3 -m astrid.core.rendering.cli`, `python3 -m astrid.core.pack.cli`),

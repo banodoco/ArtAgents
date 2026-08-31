@@ -229,7 +229,6 @@ class RenderService:
         | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
-        include_installed: bool = True,
         transport: Any | None = None,
         transport_factory: Callable[[str], Any] = CommandTransport,
         validator: Callable[..., RenderResult] = validate_render_result,
@@ -255,7 +254,6 @@ class RenderService:
                 registries = load_default_registries(
                     project_root,
                     extra_pack_roots=extra_pack_roots,
-                    include_installed=include_installed,
                 )
             elif any(item is None for item in supplied):
                 raise ValueError("all three rendering registries must be supplied together")
@@ -1941,9 +1939,6 @@ class RenderService:
             "root": str(candidate.pack_root),
             "priority_index": candidate.priority_index,
         }
-        revision = candidate.eligibility.active_revision
-        if revision is not None:
-            source["active_revision"] = revision
         manifest_path = evidence.get("manifest_path")
         if isinstance(manifest_path, str):
             source["manifest_path"] = manifest_path

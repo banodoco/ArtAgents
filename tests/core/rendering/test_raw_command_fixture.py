@@ -9,8 +9,7 @@ These tests lock the pack's static discovery surface (no code import), drive
 both ``render`` and ``support`` through :class:`CommandTransport`, verify the
 generated artifact (real sha256, duration, workspace containment), assert no
 ``run.json`` is ever created, and prove the pack works from an explicit extra
-pack root. Installed revisions are intentionally excluded from public
-discovery.
+pack root.
 """
 
 from __future__ import annotations
@@ -29,11 +28,10 @@ import pytest
 
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs, load_pack_manifest
-from astrid.core.pack.store import InstallRecord, InstalledPackStore
-from astrid.core.pack.validate import extract_trust_summary, validate_pack
+from astrid.core.pack.validate import validate_pack
 from astrid.core.rendering import RenderResult, SupportReport
 from astrid.core.rendering import registry as rendering_registry_module
-from astrid.core.rendering.registry import RendererRegistryError, load_default_registries
+from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.transport import CommandTransport
 
 
@@ -64,7 +62,6 @@ def _load_with_source(
     source_root: Path,
     *,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = False,
 ):
     with (
         mock.patch.object(
@@ -77,7 +74,6 @@ def _load_with_source(
         yield load_default_registries(
             project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
 
 
@@ -85,40 +81,6 @@ def _copy_pack(dest_root: Path) -> Path:
     """Copy the committed fixture pack under *dest_root* (pack dir name == id)."""
     dest_root.mkdir(parents=True, exist_ok=True)
     return shutil.copytree(PACK_ROOT, dest_root / PACK_ID)
-
-
-def _stage_installed_fixture(astrid_home: Path, pack_root: Path = PACK_ROOT) -> Path:
-    """Install the fixture pack into a tmp ASTRID_HOME with an accepted trust audit."""
-    install_root = astrid_home / "packs" / PACK_ID
-    revision = install_root / "revisions" / PACK_ID
-    revision.parent.mkdir(parents=True)
-    shutil.copytree(pack_root, revision)
-    (install_root / "active").symlink_to(Path("revisions") / PACK_ID)
-
-    summary = extract_trust_summary(revision)
-    record = InstallRecord(
-        pack_id=PACK_ID,
-        name=summary["name"],
-        version=str(summary["version"]),
-        schema_version=summary["schema_version"],
-        source_path=str(pack_root),
-        installed_at="2026-01-01T00:00:00Z",
-        revision=PACK_ID,
-        install_root=str(install_root),
-        active=True,
-        manifest_digest=sha256_file(revision / "pack.yaml"),
-        trust_summary=summary,
-        source_type="local",
-        trust_tier="local",
-        last_validation_time="2026-01-01T00:00:00Z",
-        trust_acknowledged_at="2026-01-01T00:00:00Z",
-        trust_method="test",
-        trust_actor="test",
-        no_sandbox_warning_version=1,
-        permissions_accepted=summary["permissions"],
-    )
-    InstalledPackStore(astrid_home / "packs").record_install(record)
-    return revision
 
 
 def _write_request(workspace: Path, request_name: str) -> Path:
@@ -364,7 +326,7 @@ def test_render_and_support_never_create_run_json(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Extra pack root and trusted install resolution
+# Extra pack root resolution
 # ---------------------------------------------------------------------------
 
 
@@ -385,7 +347,6 @@ def test_fixture_works_from_explicit_extra_pack_root(tmp_path: Path) -> None:
         renderers, _, _ = load_default_registries(
             tmp_path / "project",
             extra_pack_roots=(str(extra_root),),
-            include_installed=False,
         )
 
     candidate = renderers.get(BACKEND_ID)
@@ -394,31 +355,3 @@ def test_fixture_works_from_explicit_extra_pack_root(tmp_path: Path) -> None:
 
     _, result, workspace = _run_transport(tmp_path / "workspace-extra", extra_pack, verb="render")
     _assert_clean_render(result, workspace)
-
-
-def test_fixture_install_is_not_a_public_discovery_authority(tmp_path: Path) -> None:
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    revision = _stage_installed_fixture(astrid_home)
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch.object(
-            rendering_registry_module,
-            "discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path / "project", include_installed=True)
-
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get(BACKEND_ID)
-    assert caught.value.code == "unknown_capability"
-    with pytest.raises(RendererRegistryError) as alias_caught:
-        renderers.get(ALIAS_ID)
-    assert alias_caught.value.code == "unknown_capability"

@@ -92,7 +92,7 @@
     "isolation": {
       "type": "object",
       "properties": {
-        "mode": {"type": "string", "enum": ["in_process", "subprocess"]},
+        "mode": {"type": "string", "enum": ["subprocess"]},
         "requirements": {"type": "array", "items": {"type": "string"}},
         "binaries": {"type": "array", "items": {"type": "string"}},
         "network": {"type": "boolean"},

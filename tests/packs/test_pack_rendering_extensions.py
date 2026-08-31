@@ -10,10 +10,7 @@ from referencing import Registry, Resource
 
 from astrid.core.pack import PackValidationError, load_pack_manifest
 from astrid.core.pack.alias_resolver import extract_pack_aliases
-from astrid.core.pack.cli_basic import cmd_validate
-from astrid.core.pack.install import install_pack
 from astrid.core.pack.registry import pack_rendering_manifest_paths
-from astrid.core.pack.store import InstalledPackStore
 from astrid.core.pack.validate import validate_pack
 
 
@@ -259,27 +256,3 @@ def test_validate_pack_rejects_malformed_rendering_manifests(
         and "missing required field operations" in error
         for error in errors
     ), errors
-
-
-def test_pack_cli_validate_and_local_install_accept_rendering_aliases(
-    tmp_path: Path,
-) -> None:
-    pack_root = _write_valid_rendering_pack(tmp_path, aliases=True)
-    store = InstalledPackStore(packs_home=tmp_path / "installed-packs")
-
-    assert cmd_validate([str(pack_root)]) == 0
-    assert install_pack(
-        pack_root,
-        store=store,
-        skip_confirm=True,
-        trust_acknowledged=True,
-        trust_method="test",
-        trust_actor="test",
-    ) == 0
-
-    installed_root = store.active_revision_path("renderpack")
-    assert installed_root is not None
-    errors, _warnings = validate_pack(installed_root)
-    assert errors == []
-    for kind in RENDERING_OPERATIONS:
-        assert (installed_root / "manifests" / f"{kind}.yaml").is_file()

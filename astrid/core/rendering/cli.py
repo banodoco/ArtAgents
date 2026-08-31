@@ -501,7 +501,6 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
                     if evidence is not None
                     else candidate.priority_index
                 ),
-                "active_revision": candidate.eligibility.active_revision,
                 "alias_chain": (
                     list(evidence.get("alias_chain") or [])
                     if evidence is not None
@@ -560,8 +559,6 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
             else candidate.priority_index
         )
     )
-    active_revision = candidate.eligibility.active_revision
-    print(f"active_revision: {active_revision if active_revision is not None else 'none'}")
     alias_chain = list(evidence.get("alias_chain") or []) if evidence is not None else []
     print(f"aliases: {', '.join(alias_chain) if alias_chain else 'none'}")
     override = evidence.get("override") if evidence is not None else None
@@ -927,7 +924,6 @@ def _cmd_replay(args: argparse.Namespace) -> int:
     renderers, _planners, _finalizers = load_default_registries(
         REPO_ROOT,
         extra_pack_roots=tuple(args.pack_root),
-        include_installed=True,
     )
     try:
         candidate = renderers.get(renderer_id)

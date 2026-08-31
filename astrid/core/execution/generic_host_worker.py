@@ -36,12 +36,10 @@ def _request_object(raw: Mapping[str, Any], *, kind: str, capability_id: str) ->
         from astrid.core.execution.executor.runner import ExecutorRunRequest
 
         request.setdefault("executor_id", capability_id)
-        request.setdefault("execution_mode", "subprocess")
         return ExecutorRunRequest(**request)
     from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
 
     request.setdefault("orchestrator_id", capability_id)
-    request.setdefault("execution_mode", "subprocess")
     return OrchestratorRunRequest(**request)
 
 

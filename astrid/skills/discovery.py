@@ -128,7 +128,7 @@ def _try_add_skill(
 
 
 def _scan_discovered_packs(descriptors: list[SkillDescriptor]) -> None:
-    """Append skills from installed and extra-root packs via shared metadata.
+    """Append skills from discovered extra-root packs via shared metadata.
 
     The source-tree walk above already covers source packs (including
     manifest-less ones such as ``_core`` that pack discovery does not
@@ -140,7 +140,7 @@ def _scan_discovered_packs(descriptors: list[SkillDescriptor]) -> None:
     from astrid.core.pack.discovery import discover_pack_metadata
 
     seen_ids = {descriptor.pack_id for descriptor in descriptors}
-    for discovered in discover_pack_metadata(include_installed=True):
+    for discovered in discover_pack_metadata():
         if discovered.source_kind not in ("extra", "installed"):
             continue
         pack = discovered.pack

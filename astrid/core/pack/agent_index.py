@@ -13,11 +13,9 @@ manifest fields, component metadata, doc paths, and bounded STAGE.md excerpts.
 1.  **Primary — pack-system canonical resolver** (``discover_packs()``):
     Enumerates built-in packs via the pack-system's canonical discovery
     mechanism (``packs_root()`` → ``discover_packs()``).  This is the
-    authoritative source and always runs first.  When a pack is also
-    installed, the installed entry overwrites the built-in entry on collision.
+    authoritative source and always runs first.
 
-External roots are supplied explicitly through the pack discovery API; there
-is no user-local installed-pack overlay or mutation store.
+External roots are supplied explicitly through the pack discovery API.
 
 The dual-path design preserves backward compatibility with PR #8's index
 format while anchoring enumeration on the pack-system's canonical resolver.
@@ -288,19 +286,13 @@ def _normalize_dependencies(manifest: dict[str, Any]) -> dict[str, list[str]]:
     return result
 
 
-def build_agent_index(
-    store: object | None = None,
-    *,
-    pack_id: str | None = None,
-) -> dict[str, Any]:
+def build_agent_index(*, pack_id: str | None = None) -> dict[str, Any]:
     """Build a deterministic agent-facing pack index.
 
     Enumeration uses the pack-system's canonical manifest resolver
-    (``discover_packs()``).  The deprecated *store* positional argument is
-    accepted only so older callers fail soft; it is ignored and never loaded.
+    (``discover_packs()``).
 
     Parameters:
-        store: Deprecated compatibility argument; ignored.
         pack_id: When set, return only the matching pack (or ``None``).
 
     Returns:

@@ -380,23 +380,7 @@ def _hivemind_source_preflight(record: "CapabilityRecord") -> dict[str, Any] | N
         return {"ok": False, "reason": "hivemind source root is unavailable"}
     checkout = next((candidate for candidate in (pack_root, *pack_root.parents) if (candidate / ".git").exists()), None)
     if checkout is None:
-        # An installed revision may carry source provenance in its install
-        # record.  Accept only when that record points at a real, clean Git
-        # checkout; a copied revision without provenance is unavailable.
-        install_record = pack_root / ".astrid" / "install.json"
-        if not install_record.is_file():
-            return {"ok": False, "reason": "hivemind source is not pinned to a Git checkout"}
-        try:
-            payload = json.loads(install_record.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"ok": False, "reason": "hivemind install provenance is unreadable"}
-        source_path = payload.get("source_path") if isinstance(payload, Mapping) else None
-        if not source_path:
-            return {"ok": False, "reason": "hivemind install has no pinned source path"}
-        source_candidate = Path(str(source_path)).expanduser().resolve()
-        checkout = next((candidate for candidate in (source_candidate, *source_candidate.parents) if (candidate / ".git").exists()), None)
-    if checkout is None:
-        return {"ok": False, "reason": "hivemind source is not pinned to a Git checkout"}
+        return {"ok": False, "reason": "hivemind source is not a Git checkout"}
     try:
         status = subprocess.run(
             ["git", "-C", str(checkout), "status", "--porcelain=v1"],
@@ -523,10 +507,8 @@ def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path)
         return definition
     metadata = dict(definition.metadata)
     metadata.setdefault("source", "pack")
-    # Installed revisions are commonly nested as ``pack-id/revisions/<sha>``;
-    # the directory name is then not the import/package id.  Read the
-    # manifest-owned id so the child receives the correct parent on
-    # ``PYTHONPATH`` (and never infer identity from a revision directory).
+    # Read the manifest-owned id so the child receives the correct import
+    # parent (and never infer identity from an arbitrary directory name).
     pack_id = pack_root.name
     try:
         from astrid.core.pack.loader import _load_manifest_payload
@@ -538,39 +520,6 @@ def _attach_pack_metadata(definition: "ExecutorDefinition", executor_root: Path)
         pass
     metadata.setdefault("source_pack", pack_id)
     metadata.setdefault("pack_root", str(pack_root))
-    if pack_id == "hivemind":
-        install_record = pack_root / ".astrid" / "install.json"
-        if install_record.is_file():
-            try:
-                install_payload = json.loads(install_record.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                install_payload = {}
-            if isinstance(install_payload, Mapping):
-                # Pack manifests are allowed to carry an explicit provenance
-                # field, but empty placeholders must not mask the stronger
-                # install record.  This matters for installed revisions whose
-                # executor metadata was authored before Git pinning existed.
-                source_type = install_payload.get("source_type") or "git"
-                commit_sha = install_payload.get("commit_sha") or ""
-                if not metadata.get("source_type") and source_type:
-                    metadata["source_type"] = source_type
-                if not metadata.get("commit_sha") and commit_sha:
-                    metadata["commit_sha"] = commit_sha
-        if not metadata.get("commit_sha"):
-            checkout = next((candidate for candidate in (pack_root, *pack_root.parents) if (candidate / ".git").exists()), None)
-            if checkout is not None:
-                try:
-                    revision = subprocess.run(
-                        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
-                        capture_output=True, text=True, check=True, timeout=5,
-                    ).stdout.strip()
-                except (OSError, subprocess.SubprocessError):
-                    revision = ""
-                if revision:
-                    if not metadata.get("source_type"):
-                        metadata["source_type"] = "git"
-                    if not metadata.get("commit_sha"):
-                        metadata["commit_sha"] = revision
     return replace(definition, metadata=metadata)
 
 
@@ -1700,7 +1649,7 @@ class GenericPackHost:
 
         The host is deliberately the only process that launches pack runtime
         code.  In particular, callers must not import an executor/orchestrator
-        runner and then merely set ``execution_mode``: that leaves mutable
+        runner and then rely on ambient process state: that leaves mutable
         Python state, monkeypatches, and ledger authority in the caller.  The
         child receives a JSON request, marks itself as an internal invocation,
         and writes a small process-like result beside the request.
@@ -1746,8 +1695,8 @@ class GenericPackHost:
             explicit_env={ASTRID_INTERNAL_INVOCATION: "1"},
         ))
         env[ASTRID_INTERNAL_INVOCATION] = "1"
-        # The attempt directory is the child cwd; retain this checkout (or
-        # installed package parent) on ``PYTHONPATH`` so ``python -m`` can
+        # The attempt directory is the child cwd; retain this checkout's
+        # package parent on ``PYTHONPATH`` so ``python -m`` can
         # resolve the host worker regardless of where staging lives.
         package_parent = str(Path(__file__).resolve().parents[3])
         existing_pythonpath = env.get("PYTHONPATH")
@@ -1959,7 +1908,6 @@ class GenericPackHost:
                                 "python_exec": sys.executable,
                                 "run_id": task_id,
                                 "run_root": str(root),
-                                "execution_mode": "subprocess",
                                 "invocation": "runtime",
                             },
                             attempt=root,

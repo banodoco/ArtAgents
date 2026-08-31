@@ -153,14 +153,12 @@ def discover_generation_backend_descriptors(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> tuple[GenerationBackendDescriptor, ...]:
     """Return pack-declared backend descriptors from discovered manifests."""
     descriptors: list[GenerationBackendDescriptor] = []
     for discovered_pack in discover_pack_metadata(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         discover_packs_fn=discover_packs,
     ):
         descriptors.extend(descriptors_from_pack(discovered_pack.pack))
@@ -171,14 +169,12 @@ def load_default_generation_backend_registry(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> GenerationBackendRegistry:
     """Load a registry seeded with built-ins and discovered pack extensions."""
     return GenerationBackendRegistry(
         descriptors=discover_generation_backend_descriptors(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 

@@ -182,7 +182,6 @@ and when surfaced by `test_run_ledger_conformance.py`.)*
 | **Threads-era run.json dialect = tolerated, not unified** | Threads-runner code (`astrid/core/threads/record.py`) writes `thread_id` and `output_artifacts` into the run record; the project-run schema (`astrid/core/project/schema.py`) writes `artifacts`. Both dialects coexist under `schema_version: 1`. New readers must tolerate both shapes; the threads dialect is contract-locked. |
 | **Doctor never repairs** | `astrid doctor` never marks a record failed or rewrites any state — it is read-only and reports (including liveness findings) for operators to act on. Repair tooling, if any, lives outside the doctor family. |
 | **Plugin-loaded generation verbs = coverage gap** | Only built-in SDK generation methods (`generate.image`, `generate.video`) are covered by the SDK `out=` ledger fix. Dynamically plugin-loaded generation verbs are documented as a static coverage gap. |
-| **In-process log capture is process-global and serialized** | In-process execution (`invoke_in_process_command`) uses Python's `redirect_stdout` / `redirect_stderr` context managers, which mutate process-global state. This is safe only for Astrid's serialized execution model — concurrent in-process runs in the same interpreter would produce interleaved or garbled log output. The contract does _not_ promise concurrent in-process safety. |
 | **Captured logs are line-buffered; carriage-return progress bars degrade** | Subprocess capture drains pipes via `readline()`, so carriage-return (`\r`) progress indicators (e.g. tqdm bars) are faithfully recorded but appear as repeated lines rather than an animated bar. This is a known limitation of line-oriented log capture; no ANSI-terminal-aware rewriter is applied. |
 | **Old run.json records load through the validator** | `validate_run_record` tolerates missing fields (defaults applied). Old records without `session_id`, `auto_bound`, or `invocation` load successfully with defaults (`auto_bound=false`, `invocation="cli"`, `session_id=null`). Only records with a `schema_version` other than `1` are rejected. |
 
@@ -301,14 +300,6 @@ This ensures operators see real-time output while the log is durable on disk.
 and concurrent daemon drain threads. Each thread reads lines from its pipe and writes
 them to a `TeeWriter`. The subprocess return code is collected after both drain threads join.
 This pattern is used by the executor and orchestrator subprocess paths.
-
-### In-process capture
-
-In-process execution (`invoke_in_process_command`) optionally accepts `stdout_log` /
-`stderr_log` streams. When supplied, `redirect_stdout` / `redirect_stderr` context
-managers wrap only the runtime entrypoint call — not module import or caller setup.
-This uses process-global Python redirection, so it is intended only for Astrid's
-**serialized** execution model.
 
 ### Limitations
 

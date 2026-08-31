@@ -157,15 +157,7 @@ def validate_cli_domain_boundary(root: str | Path = REPO_ROOT) -> list[str]:
 
 
 _TODO_MILESTONE_RE = re.compile(r"TODO\(m\d+[ab]?\)", re.IGNORECASE)
-_SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
-    {
-        # The in-process runtime invoker reloads pack modules fresh on each
-        # invocation via importlib.util + sys.modules pop/assign.  This is
-        # a controlled, necessary pattern to guarantee source-level freshness
-        # without subprocess isolation.
-        "astrid/core/runtime/in_process.py",
-    }
-)
+_SYS_MODULES_INJECTION_EXEMPTIONS = frozenset()
 
 _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
     {
@@ -175,7 +167,6 @@ _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
         "astrid/core/execution/executor/runner.py",
         "astrid/core/execution/orchestrator/runner.py",
         "astrid/core/pack/resolver.py",
-        "astrid/core/runtime/in_process.py",
     }
 )
 _PACK_SYSTEM_TOP_LEVEL_MODULES = frozenset(
@@ -645,16 +636,11 @@ def _is_concrete_pack_implementation_module(module: str) -> bool:
     return parts[2] not in _PACK_SYSTEM_TOP_LEVEL_MODULES
 
 
-# Modules in core/runtime/ are sanctioned to import from astrid.packs for the
-# in-process entrypoint machinery.  This is a deliberate architectural choice:
-# the runtime package bridges between framework and pack boundaries and needs
-# access to the canonical entrypoint context that guards pack entrypoints.
 # astrid/core/gateway/dispatch.py is the m1 serve composition root: the one
 # documented kernel-to-pack composition exemption (plan step 22) — it imports
 # the standard pack composition (astrid.packs.compose_standard_bridge).
 _IMPORT_LAYERING_EXEMPT_REL = frozenset(
     {
-        "astrid/core/runtime/in_process.py",
         "astrid/core/gateway/dispatch.py",
     }
 )

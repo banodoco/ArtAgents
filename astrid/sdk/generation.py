@@ -24,7 +24,6 @@ def _load_model_registry(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> Any:
     """Lazily load the generation model registry."""
     from astrid.core.model_catalog.registry import ModelRegistry
@@ -33,7 +32,6 @@ def _load_model_registry(
         **_sdk_module()._registry_load_kwargs(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 
@@ -209,7 +207,6 @@ class GenerationFacade:
         project: str | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
-        include_installed: bool = True,
         banodoco_config: Any | None = None,
         active_theme: str | Path | None = None,
         include_missing_roots: bool = False,
@@ -233,7 +230,6 @@ class GenerationFacade:
         registry = sdk_module._load_model_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         try:
             model_entry = registry.get(model)
@@ -288,7 +284,6 @@ class GenerationFacade:
             kind="executor",
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             banodoco_config=banodoco_config,
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
@@ -305,7 +300,6 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:
@@ -323,7 +317,6 @@ class GenerationFacade:
         project: str | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
-        include_installed: bool = True,
         banodoco_config: Any | None = None,
         active_theme: str | Path | None = None,
         include_missing_roots: bool = False,
@@ -341,7 +334,6 @@ class GenerationFacade:
         registry = sdk_module._load_model_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         try:
             model_entry = registry.get(model)
@@ -398,7 +390,6 @@ class GenerationFacade:
             kind="executor",
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             banodoco_config=banodoco_config,
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
@@ -415,7 +406,6 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:
@@ -433,7 +423,6 @@ class GenerationFacade:
         project: str | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
-        include_installed: bool = True,
         banodoco_config: Any | None = None,
         active_theme: str | Path | None = None,
         include_missing_roots: bool = False,
@@ -452,7 +441,6 @@ class GenerationFacade:
         registry = sdk_module._load_model_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         try:
             model_entry = registry.get(model)
@@ -509,7 +497,6 @@ class GenerationFacade:
             kind="executor",
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             banodoco_config=banodoco_config,
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
@@ -526,7 +513,6 @@ class GenerationFacade:
             check_binaries=check_binaries,
             python_exec=python_exec,
             verbose=verbose,
-            execution_mode="subprocess",
             argv=argv,
         )
         if dry_run:

@@ -387,13 +387,6 @@ class RenderExportTaskAdapter:
                         project_was_auto_resolved=True,
                         projects_root=self._projects_root,
                         invocation="render-export-task",
-                        # Every pack execution crosses the generic host's
-                        # subprocess boundary.  The render adapter itself is
-                        # already running in a task worker, but invoking the
-                        # canonical entrypoint in-process would reintroduce a
-                        # product-owned execution authority and lets renderer
-                        # imports mutate worker-global state.
-                        execution_mode="subprocess",
                     ),
                     load_default_registry(),
                 )

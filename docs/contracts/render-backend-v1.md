@@ -917,11 +917,10 @@ python3 -m astrid.core.rendering.cli replay <bundle-dir>
 The destination directory name becomes the pack id (`acme_wave`) and the
 qualified renderer id becomes `<dest>.<name>` (`acme_wave.wave`) unless
 `--id` overrides it; the pack prefix must match the directory name because
-`packs install` requires `root.name == pack id`. The renderer-authoring verbs
+pack manifests require `root.name == pack id`. The renderer-authoring verbs
 (`create`, `list`, `inspect`, `validate`, `smoke`, `replay`) live on the
 internal module CLI `python3 -m astrid.core.rendering.cli` — not on the
-eight-family gateway — and `pack install` on
-`python3 -m astrid.core.pack.cli`. `renderers create` refuses to overwrite
+eight-family gateway. `renderers create` refuses to overwrite
 existing files unless `--force` is passed, and refuses
 the first-party `rendering` pack id to avoid colliding with the built-in
 pack. `renderers list` prints every discovered renderer/planner/finalizer

@@ -189,7 +189,6 @@ def _load_default_registry_data(
     project_root_key: str,
     include_missing_roots: bool,
     extra_pack_roots_key: tuple[str, ...],
-    include_installed: bool,
 ) -> tuple[tuple[ElementDefinition, ...], ElementKindRegistry]:
     """Parse the static element corpus once; return raw definitions.
 
@@ -206,7 +205,6 @@ def _load_default_registry_data(
         for discovered in discover_pack_metadata(
             project_root=project_root,
             extra_pack_roots=tuple(Path(key) for key in extra_pack_roots_key),
-            include_installed=include_installed,
             discover_packs_fn=discover_packs,
         )
     )
@@ -251,7 +249,6 @@ def load_default_registry(
     project_root: str | Path = REPO_ROOT,
     include_missing_roots: bool = False,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> ElementRegistry:
     """Load the default element registry (corpus parse is cached).
 
@@ -263,7 +260,6 @@ def load_default_registry(
         str(Path(project_root).resolve()),
         include_missing_roots,
         tuple(str(Path(root).resolve()) for root in extra_pack_roots),
-        include_installed,
     )
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, {})  # M1: no aliases yet
@@ -293,7 +289,6 @@ def load_pack_elements(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     element_kind_registry: ElementKindRegistry | None = None,
 ) -> tuple[ElementDefinition, ...]:
     packs = tuple(
@@ -301,7 +296,6 @@ def load_pack_elements(
         for discovered in discover_pack_metadata(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             discover_packs_fn=discover_packs,
         )
     )

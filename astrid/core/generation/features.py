@@ -84,7 +84,6 @@ def load_default_generation_taxonomy_registry(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> GenerationTaxonomyRegistry:
     feature_descriptors: list[GenerationFeatureDescriptor] = []
     mode_descriptors: list[GenerationModeDescriptor] = []
@@ -92,7 +91,6 @@ def load_default_generation_taxonomy_registry(
     for discovered_pack in discover_pack_metadata(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         discover_packs_fn=discover_packs,
     ):
         feature_descriptors.extend(feature_descriptors_from_pack(discovered_pack.pack))

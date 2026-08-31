@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import importlib
-import json
 import os
-import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -12,12 +10,9 @@ from unittest import mock
 
 import pytest
 
-from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack.discovery import DiscoveredPack
 from astrid.core.pack.override import OverrideStore
-from astrid.core.pack.store import InstallRecord, InstalledPackStore
-from astrid.core.pack.validate import extract_trust_summary
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
     FinalizerRegistry,
@@ -32,7 +27,6 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "renderer_packs" /
 SOURCE_ROOT = FIXTURES / "source"
 ENV_ROOT = FIXTURES / "env"
 EXTRA_ROOT = FIXTURES / "extra"
-INSTALLED_FIXTURES = FIXTURES / "installed"
 CYCLE_ROOT = FIXTURES / "cycle"
 
 
@@ -50,7 +44,6 @@ def _load_with_source(
     *,
     extra_pack_roots: tuple[str, ...] = (),
     env_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = False,
 ):
     with (
         mock.patch.object(
@@ -67,7 +60,6 @@ def _load_with_source(
         yield load_default_registries(
             project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
 
 
@@ -150,57 +142,6 @@ def _append_renderer_aliases(
         manifest.read_text(encoding="utf-8") + "\n".join(lines) + "\n",
         encoding="utf-8",
     )
-
-
-def _stage_installed_fixture(
-    astrid_home: Path,
-    pack_id: str,
-    *,
-    record_mode: str = "valid",
-    active: bool = True,
-) -> Path:
-    fixture = INSTALLED_FIXTURES / pack_id
-    install_root = astrid_home / "packs" / pack_id
-    revision = install_root / "revisions" / pack_id
-    revision.parent.mkdir(parents=True)
-    shutil.copytree(fixture, revision)
-
-    if active:
-        (install_root / "active").symlink_to(Path("revisions") / pack_id)
-
-    record_path = revision / ".astrid" / "install.json"
-    if record_mode == "missing":
-        return revision
-    if record_mode == "corrupt":
-        record_path.parent.mkdir(parents=True)
-        record_path.write_text("{not-json", encoding="utf-8")
-        return revision
-
-    summary = extract_trust_summary(revision)
-    accepted_permissions = summary["permissions"]
-    record = InstallRecord(
-        pack_id=pack_id,
-        name=summary["name"],
-        version=str(summary["version"]),
-        schema_version=summary["schema_version"],
-        source_path=str(fixture),
-        installed_at="2026-01-01T00:00:00Z",
-        revision=pack_id,
-        install_root=str(install_root),
-        active=active,
-        manifest_digest=sha256_file(revision / "pack.yaml"),
-        trust_summary=summary,
-        source_type="local",
-        trust_tier="local",
-        last_validation_time="2026-01-01T00:00:00Z",
-        trust_acknowledged_at="2026-01-01T00:00:00Z",
-        trust_method="test",
-        trust_actor="test",
-        no_sandbox_warning_version=1,
-        permissions_accepted=accepted_permissions,
-    )
-    InstalledPackStore(astrid_home / "packs").record_install(record)
-    return revision
 
 
 def test_default_loader_returns_all_three_registry_types(tmp_path: Path) -> None:
@@ -301,7 +242,7 @@ def test_alias_cycle_is_rejected_as_structured_registry_error(tmp_path: Path) ->
         mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": ""}, clear=False),
     ):
         with pytest.raises(RendererRegistryError) as caught:
-            load_default_registries(tmp_path, include_installed=False)
+            load_default_registries(tmp_path)
 
     assert caught.value.code == "alias_cycle"
     assert caught.value.to_dict()["capability_kind"] == "renderer"
@@ -563,7 +504,7 @@ def test_environment_candidate_is_inspectable_but_not_executable(tmp_path: Path)
         ),
         mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": str(env_root)}, clear=False),
     ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
+        renderers, _, _ = load_default_registries(tmp_path)
 
     inspected = renderers.inspect("env_render.legacy")
     assert len(inspected) == 1
@@ -593,126 +534,6 @@ def test_explicit_extra_root_is_executable_and_records_trust_method(tmp_path: Pa
     assert evidence["trust_method"] == "explicit_extra_pack_root"
 
 
-def test_installed_active_revision_is_not_publicly_discovered(tmp_path: Path) -> None:
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    _stage_installed_fixture(astrid_home, "installed_render")
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
-
-    # Installed revisions are storage, not a public discovery authority.
-    assert renderers.inspect("installed_render.renderer") == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("installed_render.renderer")
-    assert caught.value.code == "unknown_capability"
-
-
-@pytest.mark.parametrize("record_mode", ["missing", "corrupt"])
-def test_installed_missing_or_corrupt_record_fails_closed(
-    tmp_path: Path,
-    record_mode: str,
-) -> None:
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    _stage_installed_fixture(
-        astrid_home,
-        "corrupt_render",
-        record_mode=record_mode,
-    )
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
-
-    # A corrupt or missing install record cannot enter the public registry at
-    # all; discovery does not scan the installed store.
-    assert renderers.inspect("corrupt_render.renderer") == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("corrupt_render.renderer")
-    assert caught.value.code == "unknown_capability"
-
-
-@pytest.mark.parametrize("bad_install_root", [None, []])
-def test_installed_type_corrupt_audit_is_not_publicly_discovered(
-    tmp_path: Path,
-    bad_install_root: object,
-) -> None:
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    revision = _stage_installed_fixture(astrid_home, "corrupt_render")
-    record_path = revision / ".astrid" / "install.json"
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    record["install_root"] = bad_install_root
-    record_path.write_text(json.dumps(record), encoding="utf-8")
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
-
-    assert renderers.inspect("corrupt_render.renderer") == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("corrupt_render.renderer")
-    assert caught.value.code == "unknown_capability"
-
-
-def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    _stage_installed_fixture(
-        astrid_home,
-        "inactive_render",
-        active=False,
-    )
-
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
-
-    assert renderers.inspect("inactive_render.renderer") == ()
-
-
 def test_ineligible_higher_precedence_candidate_cannot_shadow_trusted_lower(
     tmp_path: Path,
 ) -> None:
@@ -731,7 +552,7 @@ def test_ineligible_higher_precedence_candidate_cannot_shadow_trusted_lower(
         "astrid.core.rendering.registry.discover_pack_metadata",
         return_value=discovered,
     ):
-        renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
+        renderers, _, _ = load_default_registries(tmp_path)
 
     selected = renderers.get("sharedrender.renderer")
     assert selected.manifest.name == "Trusted Second"

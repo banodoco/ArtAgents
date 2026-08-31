@@ -108,7 +108,6 @@ class ModelRegistry:
         *,
         project_root: str | Path = REPO_ROOT,
         extra_pack_roots: tuple[str, ...] = (),
-        include_installed: bool = True,
     ) -> ModelRegistry:
         """Load the shipped ``models.yaml`` from the catalog directory."""
         yaml_path = Path(__file__).resolve().parent / "models.yaml"
@@ -140,12 +139,10 @@ class ModelRegistry:
         taxonomy_registry = load_default_generation_taxonomy_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         backend_registry = load_default_generation_backend_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         entries = validate_registry_with_backends(
             raw,

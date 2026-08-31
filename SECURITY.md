@@ -75,8 +75,7 @@ These declarations are **not enforced**. Astrid v1 does not:
 - Prevent subprocess spawning for packs that did not declare `subprocess`
 
 The declarations exist so you can make an informed trust decision before
-installing. They appear in the trust summary during install, update, and
-inspect. They persist in `.astrid/install.json` after install.
+executing a source pack. They appear in pack inspection and discovery output.
 
 ## Secrets Are Not Permissions
 
@@ -98,9 +97,9 @@ environment reads at runtime.
 
 ## Third-Party Pack Threat Model
 
-When you install a third-party pack (from a Git URL, a local directory, or
-a future registry), you are giving its code the same privileges as your
-user account. The threat model is:
+When you execute a third-party source pack (from a Git checkout or a local
+directory), you are giving its code the same privileges as your user account.
+The threat model is:
 
 - **The pack can read any file you can read**, including configuration,
   SSH keys, browser data, and project files outside the current project.
@@ -120,16 +119,11 @@ make this explicit but do not reduce it.
 
 ### What Astrid v1 Does
 
-- **Requires explicit trust acknowledgement** before installing or
-  updating a pack (interactive `trust <pack_id>` prompt or `--trust` flag).
-- **Shows permission declarations** in the trust summary so you can
+- **Shows permission declarations** during source-pack inspection so you can
   evaluate what the pack claims to do.
-- **Records trust decisions** in `.astrid/install.json` with timestamps,
-  method, and the accepted permissions at install time.
-- **Requires renewed trust on update** — updating a pack re-displays the
-  trust summary and requires fresh acknowledgement.
-- **Validates permission syntax** — unknown permission IDs, missing
-  reasons, and malformed fields are rejected at validation time.
+- **Validates permission syntax** — unknown permission IDs, missing reasons,
+  and malformed fields are rejected at validation time.
+- **Runs executable capabilities through the generic host subprocess boundary.**
 
 ### What Astrid v1 Does NOT Do
 
@@ -144,66 +138,17 @@ make this explicit but do not reduce it.
 
 ## Safe-Use Guidance
 
-### Before Installing a Pack
+### Before Executing a Pack
 
-1. **Read the trust summary.** Every install prints the pack's declared
-   permissions, entrypoints, secrets, dependencies, and v1 trust block.
+1. **Inspect the source pack.** Review its declared permissions, entrypoints,
+   secrets, and dependencies.
 2. **Check the `reason` fields.** A pack that says `network` with reason
    `"Calls OpenAI API"` is specific. `"Needed for functionality"` is not.
-3. **Prefer packs from sources you recognize.** Git installs pin a commit
-   SHA — review the source at that commit before trusting.
-4. **Start with a dry run.** `--dry-run` prints the trust summary without
-   installing anything.
-5. **Keep `--yes` and `--trust` separate.** `--yes` skips the ordinary
-   confirmation prompt. `--trust` skips the exact trust acknowledgement.
-   `--yes` without `--trust` fails with an explicit trust-required error.
-
-### After Installing a Pack
-
-1. **Inspect the pack.** `python3 -m astrid packs inspect <pack_id>`
-   shows the pack's declared permissions, entrypoints, and trust metadata.
-2. **Review `.astrid/install.json`.** The install record includes
-   `permissions_accepted`, `trust_acknowledged_at`, `trust_method`, and
-   `trust_actor` — a durable audit trail of what you accepted.
-3. **Re-evaluate on update.** Astrid requires renewed trust for updates.
-   Review the diff of permission additions, removals, and changes.
+3. **Prefer packs from sources you recognize.** Review a pinned Git checkout
+   before executing it.
 4. **Run packs in isolated environments** if you are evaluating untrusted
    code. A disposable VM, a dedicated user account, or a container are
    appropriate for packs from unknown sources.
-
-## Trust-on-Install/Update Contract
-
-Installing or updating a pack requires explicit trust acknowledgement:
-
-- **Interactive**: Type `trust <pack_id>` exactly at the prompt. This is
-  case-sensitive and requires the exact pack id. The trust summary is
-  displayed before the prompt.
-- **Non-interactive**: Pass `--trust` on the command line. `--yes` alone
-  is not sufficient — it only skips the ordinary confirmation prompt.
-  Both `--yes --trust` together skip both prompts.
-- **Git installs**: Same contract. The trust summary shows the durable Git
-  URL and pinned commit SHA (first 8 chars).
-- **Updates**: Require renewed trust. The diff between old and new
-  permissions is displayed. If permissions have not changed, the update
-  still requires acknowledgement.
-
-Trust decisions are persisted in the `InstallRecord`:
-
-```json
-{
-  "trust_acknowledged_at": "2026-06-01T13:34:00Z",
-  "trust_method": "interactive",
-  "trust_actor": "cli",
-  "no_sandbox_warning_version": 1,
-  "permissions_accepted": [
-    {"id": "network", "reason": "Calls OpenAI API", "services": ["api.openai.com"]}
-  ]
-}
-```
-
-This record is part of `.astrid/install.json` under the packs directory
-(`~/.local/share/astrid/packs/` by default). It is the durable record of
-what you trusted and when.
 
 ## Anti-Scope Boundaries
 
@@ -242,7 +187,7 @@ two channels:
 ```python
 import astrid
 
-inventory = astrid.discover(include_installed=False)
+inventory = astrid.discover()
 
 # Pack-level: full structured permission objects
 for pack_id, pack_data in inventory.to_dict()["packs"].items():

@@ -199,10 +199,9 @@ def _display_name(name: str) -> str:
 def _pack_id_from_dest(dest: Path) -> str:
     """Derive the scaffold pack id from the destination folder name.
 
-    ``astrid packs install`` (and ``load_pack_manifest``) require
-    ``root.name == pack_id`` with a CASE-SENSITIVE comparison (see
-    ``astrid/core/pack/loader.py`` and ``install_local.py``), so a scaffold
-    is only installable when the folder it is written into is named exactly
+    The pack manifest requires ``root.name == pack_id`` with a
+    CASE-SENSITIVE comparison (see ``astrid/core/pack/loader.py``), so a
+    scaffold is only valid when the folder it is written into is named exactly
     like the pack id.  The name is used VERBATIM (no case-folding): a
     destination whose name is not already a valid lowercase pack id is
     rejected.  The default ``rendering`` pack id is also rejected: the

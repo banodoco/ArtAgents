@@ -9,12 +9,6 @@ This pack provides all the components needed for a media production pipeline:
 - Trailer orchestration and assembly
 - Visual effects via Remotion components
 
-## Installation
-
-```bash
-astrid packs install examples/packs/media
-```
-
 ## Usage
 
 ```bash

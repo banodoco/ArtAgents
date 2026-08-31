@@ -358,7 +358,7 @@ then follow the golden path — generated test → `renderers validate` → trus
 sidecar — in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 The scaffold destination directory name becomes the pack id (and must match
-it for `packs install`), and the renderer id becomes `<dest>.<name>`.
+it for the read-only pack validator), and the renderer id becomes `<dest>.<name>`.
 
 ### Executor Manifest (`executor.yaml`)
 

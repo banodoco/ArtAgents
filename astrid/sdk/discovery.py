@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import importlib
-import json
 import re
-import subprocess
 from difflib import SequenceMatcher
 from collections.abc import Mapping
 from dataclasses import replace
@@ -25,11 +23,9 @@ def _registry_load_kwargs(
     *,
     project_root: str | Path | None,
     extra_pack_roots: tuple[str, ...],
-    include_installed: bool,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "extra_pack_roots": extra_pack_roots,
-        "include_installed": include_installed,
     }
     if project_root is not None:
         kwargs["project_root"] = project_root
@@ -40,7 +36,6 @@ def _load_executor_registry(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     banodoco_config: Any | None = None,
 ) -> Any:
     from astrid.core.execution.executor.registry import load_default_registry
@@ -50,7 +45,6 @@ def _load_executor_registry(
         **_registry_load_kwargs(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 
@@ -60,7 +54,6 @@ def _load_orchestrator_registry(
     executor_registry: Any | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     banodoco_config: Any | None = None,
 ) -> Any:
     from astrid.core.execution.orchestrator.registry import load_default_registry
@@ -71,7 +64,6 @@ def _load_orchestrator_registry(
         **_registry_load_kwargs(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 
@@ -80,7 +72,6 @@ def _load_element_registry(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
 ) -> Any:
@@ -92,7 +83,6 @@ def _load_element_registry(
         **_registry_load_kwargs(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 
@@ -101,7 +91,6 @@ def _load_registries(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
@@ -111,14 +100,12 @@ def _load_registries(
     executor_registry = sdk_module._load_executor_registry(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         banodoco_config=banodoco_config,
     )
     orchestrator_registry = sdk_module._load_orchestrator_registry(
         executor_registry=executor_registry,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         banodoco_config=banodoco_config,
     )
     element_registry = None
@@ -126,7 +113,6 @@ def _load_registries(
         element_registry = sdk_module._load_element_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
         )
@@ -137,7 +123,6 @@ def _discover_pack_inventory(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> tuple[Any, ...]:
     from astrid.core.pack.discovery import discover_pack_metadata
 
@@ -145,7 +130,6 @@ def _discover_pack_inventory(
         **_registry_load_kwargs(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         ),
     )
 
@@ -163,41 +147,7 @@ def _pack_record(discovered_pack: Any) -> dict[str, Any]:
         payload["trust"] = trust_summary["trust"]
     payload["source_kind"] = discovered_pack.source_kind
     payload["priority_index"] = discovered_pack.priority_index
-    root = Path(str(getattr(discovered_pack.pack, "root", ""))).resolve()
-    install_record = root / ".astrid" / "install.json"
-    install_payload: dict[str, Any] = {}
-    if install_record.is_file():
-        try:
-            candidate = json.loads(install_record.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            candidate = {}
-        if isinstance(candidate, dict):
-            install_payload = candidate
-    payload["source_type"] = install_payload.get("source_type") or ("git" if (root / ".git").exists() else discovered_pack.source_kind)
-    payload["commit_sha"] = install_payload.get("commit_sha", "")
-    if not payload["commit_sha"]:
-        checkout = next((item for item in (root, *root.parents) if (item / ".git").exists()), None)
-        if checkout is not None:
-            try:
-                payload["commit_sha"] = subprocess.run(
-                    ["git", "-C", str(checkout), "rev-parse", "HEAD"],
-                    capture_output=True, text=True, check=True, timeout=5,
-                ).stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                payload["commit_sha"] = ""
-    payload["source_digest"] = install_payload.get("source_digest", "")
-    if not payload["source_digest"]:
-        checkout = next((item for item in (root, *root.parents) if (item / ".git").exists()), None)
-        if checkout is not None and payload["commit_sha"]:
-            try:
-                tracked = subprocess.run(
-                    ["git", "-C", str(checkout), "ls-tree", "-r", "--full-tree", "HEAD"],
-                    capture_output=True, text=True, check=True, timeout=10,
-                ).stdout
-                import hashlib
-                payload["source_digest"] = hashlib.sha256(tracked.encode("utf-8")).hexdigest()
-            except (OSError, subprocess.SubprocessError):
-                payload["source_digest"] = ""
+    payload["source_type"] = discovered_pack.source_kind
     return _json_safe_mapping(payload)
 
 
@@ -596,7 +546,7 @@ def _lookup_guidance(
     if not suggestions and not exact_other:
         parts.append(
             "no close catalog match; recovery: call "
-            "discover(include_installed=False) and filter capabilities by id, "
+            "discover() and filter capabilities by id, "
             "name, or aliases; supported kinds: executor, orchestrator, element"
         )
     return "; ".join(parts)

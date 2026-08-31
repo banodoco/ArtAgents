@@ -151,14 +151,13 @@ gateway commands. Run them through the SDK:
 ```python
 import astrid.sdk as sdk
 
-result = sdk.discover(include_installed=False)   # in-tree pack inventory
+result = sdk.discover()   # source and explicitly supplied pack inventory
 cap = sdk.get_capability(
-    "editorial.transcribe", kind="executor", include_installed=False,
+    "editorial.transcribe", kind="executor",
 )
 result = sdk.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     inputs={"review": "experiments/prompt-brevity/review.json"},
     project="demo",          # every executor run belongs to exactly one project
 )
@@ -269,9 +268,9 @@ Discover capabilities through the SDK, not by grepping source:
 
 ```python
 import astrid.sdk as sdk
-result = sdk.discover(include_installed=False)   # full in-tree inventory, pack by pack
+result = sdk.discover()   # full source inventory, pack by pack
 caps = sdk.get_capability(                       # typed lookup (raises on missing/ambiguous)
-    "editorial.arrange", kind="executor", include_installed=False,
+    "editorial.arrange", kind="executor",
 )
 ```
 
@@ -393,7 +392,6 @@ import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
     kind="executor",
-    include_installed=False,
     inputs={
         "timeline": "runs/<my-run>/timeline.json",
         "assets_registry": "runs/<my-run>/assets.json",

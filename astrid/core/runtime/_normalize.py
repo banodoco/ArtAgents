@@ -1,8 +1,7 @@
 """Shared Python runtime result normalization.
 
-Used by both the orchestrator runner (``astrid.core.execution.orchestrator.runner``)
-and the in-process invoker (``astrid.core.runtime.in_process``) so that
-neither duplicates the other's classification of raw Python return values.
+Used by the orchestrator runner to normalize Python runtime results in the
+isolated worker process.
 """
 
 from __future__ import annotations
@@ -15,9 +14,7 @@ from typing import Any, Mapping
 class PythonRuntimeResult:
     """Normalized intermediate form of a Python runtime return value.
 
-    This is the contract shared between the orchestrator runner and the
-    in-process invoker.  Each consumer wraps it into its own result type
-    (``OrchestratorRunResult`` or ``InProcessResult``).
+    The orchestrator runner wraps this into its own result type.
     """
 
     returncode: int

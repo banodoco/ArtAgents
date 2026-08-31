@@ -97,7 +97,6 @@ These exemptions are recorded in `astrid/core/structure.py` under `_IMPORT_LAYER
 
 | File | Exemption Reason | Milestone |
 | --- | --- | --- |
-| `astrid/core/runtime/in_process.py` | Sanctioned bridge between framework and pack boundaries for the in-process entrypoint machinery. | Permanent architectural choice |
 
 ### 2.2 Contributor Placement Guidance
 

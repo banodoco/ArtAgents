@@ -99,7 +99,6 @@ def discover(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
@@ -109,13 +108,11 @@ def discover(
     discovered_packs = sdk_module._discover_pack_inventory(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     pack_permission_ids_by_pack_id = sdk_module._pack_permission_ids_by_pack_id(discovered_packs)
     executor_registry, orchestrator_registry, element_registry = sdk_module._load_registries(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         banodoco_config=banodoco_config,
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
@@ -199,7 +196,6 @@ def get_capability(
     element_kind: str | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     include_elements: bool = True,
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
@@ -211,7 +207,6 @@ def get_capability(
         executor_registry, orchestrator_registry, element_registry = sdk_module._load_registries(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
             banodoco_config=banodoco_config,
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
@@ -234,7 +229,6 @@ def get_capability(
     discovered_packs = sdk_module._discover_pack_inventory(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     return sdk_module._apply_pack_permission_ids(
         resolved,
@@ -1760,7 +1754,6 @@ def invoke(
     kind: Any,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
@@ -1773,7 +1766,6 @@ def invoke(
     check_binaries: bool = False,
     python_exec: str | None = None,
     verbose: bool = False,
-    execution_mode: str = "subprocess",
     argv: tuple[str, ...] = (),
     orchestrator_args: tuple[str, ...] = (),
     registry: FrozenSchemaPackRegistry | None = None,
@@ -1784,7 +1776,6 @@ def invoke(
     registries = sdk_module._load_registries(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         banodoco_config=banodoco_config,
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
@@ -1795,7 +1786,6 @@ def invoke(
         kind=kind,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         banodoco_config=banodoco_config,
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
@@ -1843,7 +1833,6 @@ def invoke(
         model_registry = sdk_module._load_model_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
         )
         from astrid.core.generation.preflight import (
             require_local_generation_readiness,

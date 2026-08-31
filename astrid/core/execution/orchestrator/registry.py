@@ -422,13 +422,11 @@ def load_default_registry(
     banodoco_config: Any | None = None,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> OrchestratorRegistry:
     active_executor_registry = executor_registry
     packs = _discover_orchestrator_packs(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="orchestrator"))
@@ -447,12 +445,10 @@ def load_pack_orchestrators(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> tuple[OrchestratorDefinition, ...]:
     packs = _discover_orchestrator_packs(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
     )
     return _load_pack_orchestrators_from_packs(packs)
 
@@ -461,12 +457,10 @@ def _discover_orchestrator_packs(
     *,
     project_root: str | Path,
     extra_pack_roots: tuple[str, ...],
-    include_installed: bool,
 ) -> tuple[Any, ...]:
     return discover_packs_ordered(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         discover_packs_fn=discover_packs,
     )
 
@@ -477,7 +471,7 @@ def _load_pack_orchestrators_from_packs(
     orchestrators: list[OrchestratorDefinition] = []
     for pack in packs:
         # Per-pack fault tolerance: one broken content manifest (e.g. an
-        # installed external pack whose orchestrator.yaml fails schema
+        # external pack whose orchestrator.yaml fails schema
         # validation) must not abort the whole discovery/invoke. The pack is
         # skipped with a warning; pack-alignment failures
         # (``PackValidationError`` from ``validate_content_id_in_pack``)

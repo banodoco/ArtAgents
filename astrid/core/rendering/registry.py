@@ -8,10 +8,8 @@ chooses to invoke a command.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, ClassVar, Generic, TypeVar
@@ -44,8 +42,6 @@ _PROGRAMMATIC_RENDERER_ALIASES: tuple[tuple[str, str], ...] = (
     ("remotion", "rendering.remotion"),
     ("ffmpeg", "rendering.ffmpeg"),
 )
-_INSTALL_WARNING_VERSION = 1
-_INSTALL_TRUST_METHODS = frozenset({"interactive", "cli_flag", "api", "test"})
 
 
 class RenderingRegistryError(RegistryError):
@@ -97,8 +93,6 @@ class ExecutionEligibility:
     trust_method: str | None = None
     required_permissions: tuple[str, ...] = ()
     declared_permissions: tuple[str, ...] = ()
-    accepted_permissions: tuple[str, ...] = ()
-    active_revision: str | None = None
 
     @property
     def executable(self) -> bool:
@@ -111,8 +105,6 @@ class ExecutionEligibility:
             "trust_method": self.trust_method,
             "required_permissions": list(self.required_permissions),
             "declared_permissions": list(self.declared_permissions),
-            "accepted_permissions": list(self.accepted_permissions),
-            "active_revision": self.active_revision,
         }
 
 
@@ -160,8 +152,6 @@ class _PackTrust:
     eligible: bool
     reason: str
     trust_method: str | None = None
-    accepted_permissions: tuple[str, ...] = ()
-    active_revision: str | None = None
 
 
 class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]], Generic[ManifestT]):
@@ -497,7 +487,6 @@ def load_default_registries(
     project_root: str | Path | None = None,
     *,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = True,
 ) -> tuple[RendererRegistry, PlannerRegistry, FinalizerRegistry]:
     """Discover static rendering manifests and build the three registries."""
 
@@ -505,7 +494,6 @@ def load_default_registries(
     discovered = discover_pack_metadata(
         project_root=root,
         extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
         discover_packs_fn=discover_packs,
     )
     pack_trust = {
@@ -655,8 +643,6 @@ def _candidate_eligibility(
         "trust_method": trust.trust_method,
         "required_permissions": required,
         "declared_permissions": declared,
-        "accepted_permissions": trust.accepted_permissions,
-        "active_revision": trust.active_revision,
     }
     if not trust.eligible:
         return ExecutionEligibility(False, trust.reason, **common)
@@ -669,16 +655,6 @@ def _candidate_eligibility(
             + ", ".join(missing_declarations),
             **common,
         )
-
-    if trust.active_revision is not None:
-        missing_acceptance = sorted(set(required) - set(trust.accepted_permissions))
-        if missing_acceptance:
-            return ExecutionEligibility(
-                False,
-                "installed pack permissions were not accepted: "
-                + ", ".join(missing_acceptance),
-                **common,
-            )
 
     return ExecutionEligibility(True, trust.reason, **common)
 
@@ -709,163 +685,6 @@ def _derive_pack_trust(discovered: DiscoveredPack) -> _PackTrust:
             "environment-discovered packs are inspectable but not executable",
         )
     return _PackTrust(False, f"unknown pack source kind {source_kind!r}")
-
-
-def _installed_pack_trust(pack: PackDefinition) -> _PackTrust:
-    root = pack.root.resolve()
-    revision_name = root.name
-    if root.parent.name != "revisions":
-        return _PackTrust(False, "installed pack revision is outside the revisions directory")
-    install_root = root.parent.parent.resolve()
-    if install_root.name != pack.id:
-        return _PackTrust(False, "installed pack root does not match its pack id")
-
-    active_link = install_root / "active"
-    if not active_link.is_symlink():
-        return _PackTrust(False, "installed pack has no active revision symlink")
-    try:
-        active_revision = active_link.resolve(strict=True)
-    except OSError:
-        return _PackTrust(False, "installed pack active revision symlink is broken")
-    if active_revision != root:
-        return _PackTrust(False, "discovered installed revision is not the active revision")
-
-    record_path = root / ".astrid" / "install.json"
-    if not record_path.is_file():
-        return _PackTrust(False, "active installed revision is missing its install record")
-    try:
-        raw_record = json.loads(record_path.read_text(encoding="utf-8"))
-        if not isinstance(raw_record, dict):
-            raise TypeError("install record must be a JSON object")
-        record = InstallRecord.from_dict(raw_record)
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        return _PackTrust(False, f"active installed revision has a corrupt install record: {exc}")
-
-    try:
-        mismatch = _install_record_mismatch(
-            pack,
-            record,
-            install_root=install_root,
-            revision_name=revision_name,
-        )
-    except Exception as exc:
-        return _PackTrust(
-            False,
-            "active installed revision has a malformed install audit: "
-            f"{type(exc).__name__}: {exc}",
-        )
-    if mismatch is not None:
-        return _PackTrust(False, mismatch)
-
-    try:
-        accepted, acceptance_error = _accepted_permission_ids(pack, record)
-    except Exception as exc:
-        return _PackTrust(
-            False,
-            "active installed revision has malformed accepted permissions: "
-            f"{type(exc).__name__}: {exc}",
-        )
-    if acceptance_error is not None:
-        return _PackTrust(False, acceptance_error)
-
-    return _PackTrust(
-        True,
-        "active installed revision has a valid trust audit and accepted permissions",
-        trust_method=record.trust_method,
-        accepted_permissions=accepted,
-        active_revision=revision_name,
-    )
-
-
-def _install_record_mismatch(
-    pack: PackDefinition,
-    record: InstallRecord,
-    *,
-    install_root: Path,
-    revision_name: str,
-) -> str | None:
-    if record.pack_id != pack.id:
-        return "install record pack id does not match the discovered pack"
-    if record.version != pack.version:
-        return "install record version does not match the discovered pack"
-    if pack.schema_version and str(record.schema_version) != pack.schema_version:
-        return "install record schema version does not match the discovered pack"
-    if record.active is not True:
-        return "install record does not mark the active revision active"
-    if record.revision != revision_name:
-        return "install record revision does not match the active revision"
-    try:
-        recorded_install_root = Path(record.install_root).expanduser().resolve()
-    except (OSError, RuntimeError, TypeError, ValueError):
-        return "install record contains an invalid install root"
-    if recorded_install_root != install_root:
-        return "install record root does not match the active installation"
-    if not record.manifest_digest:
-        return "install record is missing its pack manifest digest"
-    try:
-        current_digest = sha256_file(pack.manifest_path)
-    except OSError:
-        return "installed pack manifest cannot be hashed"
-    if record.manifest_digest != current_digest:
-        return "install record manifest digest does not match the installed pack"
-    if not _valid_audit_timestamp(record.trust_acknowledged_at):
-        return "install record is missing a valid trust acknowledgement timestamp"
-    if not _valid_audit_timestamp(record.last_validation_time):
-        return "install record is missing a valid validation timestamp"
-    if not isinstance(record.trust_method, str) or not record.trust_method.strip():
-        return "install record is missing its trust acknowledgement method"
-    if record.trust_method not in _INSTALL_TRUST_METHODS:
-        return "install record contains an unknown trust acknowledgement method"
-    if not isinstance(record.trust_actor, str) or not record.trust_actor.strip():
-        return "install record is missing its trust acknowledgement actor"
-    if record.no_sandbox_warning_version != _INSTALL_WARNING_VERSION:
-        return "install record does not contain the current no-sandbox acknowledgement"
-    if not isinstance(record.trust_summary, dict) or not record.trust_summary:
-        return "install record is missing its trust summary"
-    if record.trust_summary.get("pack_id") != pack.id:
-        return "install trust summary does not match the discovered pack"
-    trust_block = record.trust_summary.get("trust")
-    if not isinstance(trust_block, dict):
-        return "install trust summary is missing its trust disclosure"
-    if (
-        trust_block.get("sandbox") != "none"
-        or trust_block.get("runs_with_user_process_permissions") is not True
-        or trust_block.get("permission_enforcement") != "disclosure_only"
-    ):
-        return "install trust summary contains an invalid trust disclosure"
-    return None
-
-
-def _valid_audit_timestamp(value: object) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return parsed.tzinfo is not None
-
-
-def _accepted_permission_ids(
-    pack: PackDefinition,
-    record: InstallRecord,
-) -> tuple[tuple[str, ...], str | None]:
-    accepted_raw = record.permissions_accepted
-    if not isinstance(accepted_raw, list):
-        return (), "install record permissions_accepted must be an array"
-    if any(not isinstance(item, dict) for item in accepted_raw):
-        return (), "install record contains a malformed accepted permission"
-
-    expected = [permission.to_dict() for permission in pack.permissions]
-    if accepted_raw != expected:
-        return (), "install record accepted permissions do not match the installed pack"
-    if record.trust_summary.get("permissions") != accepted_raw:
-        return (), "install trust summary permissions do not match the accepted permissions"
-
-    accepted_ids = tuple(str(item["id"]) for item in accepted_raw)
-    if len(accepted_ids) != len(set(accepted_ids)):
-        return (), "install record contains duplicate accepted permissions"
-    return accepted_ids, None
 
 
 def _build_alias_resolvers(

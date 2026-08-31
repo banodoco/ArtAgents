@@ -352,24 +352,12 @@ This distinction is part of the v1 contract:
 Permissions answer "what kind of access does this pack claim to use?" Secrets
 answer "which variable names does this component claim to read?"
 
-### Trust-On-Install Contract
+### Source-Pack Inspection Contract
 
-Astrid requires explicit trust acknowledgement before installing or updating a
-pack.
-
-- Interactive installs require exact `trust <pack_id>` input
-- `--yes` is not enough by itself
-- `--trust` is the non-interactive trust acknowledgement
-- Git installs follow the same trust rules
-- Updates require renewed trust, even if declared permissions did not change
-
-Trust decisions are persisted in `.astrid/install.json`, including accepted
-permissions and acknowledgement metadata.
-
-### Trust Summary Contract
-
-`extract_trust_summary()` is the canonical source for trust summary data used by
-install, update, inspect, agent-facing views, and SDK discovery.
+Pack inspection and SDK discovery are the canonical source of pack identity,
+entrypoints, dependencies, and declared permissions. They read editable source,
+project-local, explicit extra-root, and environment pack trees; no user-level
+installed-pack store participates in public discovery.
 
 The trust summary includes:
 
@@ -398,4 +386,3 @@ that a pack behaves safely or only does what its declarations describe.
 - `astrid/core/contracts/schema.py` — shared DTO field types
 - `astrid/core/pack/schemas/v1/` — normative v1 manifest schema files
 - `astrid/core/pack/validate.py` — trust summary extraction and trust block source
-- `astrid/core/pack/install.py` — trust acknowledgement/install behavior

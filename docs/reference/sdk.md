@@ -27,19 +27,18 @@ authority.
 import astrid
 
 # Discovery
-inventory = astrid.discover(include_installed=False)
+inventory = astrid.discover()
 for cap in inventory.capabilities:
     print(cap.id, cap.capability_type)
 
 # Lookup
-cap = astrid.get_capability("editorial.arrange", kind="executor", include_installed=False)
+cap = astrid.get_capability("editorial.arrange", kind="executor")
 print(cap.schema, cap.inputs, cap.outputs)
 
 # Invocation (dry-run)
 result = astrid.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     project="demo",
     inputs={"review": "experiments/prompt-brevity/review.json"},
     dry_run=True,
@@ -49,7 +48,6 @@ print(result.ok, result.raw_result)
 # Generation
 gen_result = astrid.generate(
     "editorial.arrange",
-    include_installed=False,
     prompt="Generate a short video from these clips.",
     inputs={"clips": ["clip1.mp4", "clip2.mp4"]},
 )
@@ -66,7 +64,7 @@ print(gen_result)
 ```python
 import astrid
 
-inventory = astrid.discover(include_installed=False)
+inventory = astrid.discover()
 
 # Typed grouped access
 for executor in inventory.executors:
@@ -117,7 +115,6 @@ import astrid
 cap = astrid.get_capability(
     "editorial.arrange",
     kind="executor",
-    include_installed=False,
 )
 
 # Stable DTO fields
@@ -159,7 +156,6 @@ from pathlib import Path
 result = astrid.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     out=Path("./out/review-test"),
     project="demo",
     inputs={"review": "experiments/prompt-brevity/review.json"},
@@ -187,7 +183,6 @@ import astrid
 result = astrid.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     project="demo",
     inputs={"review": "experiments/prompt-brevity/review.json"},
 )
@@ -241,26 +236,26 @@ import astrid
 
 # Not-found
 try:
-    astrid.get_capability("missing.capability", kind="executor", include_installed=False)
+    astrid.get_capability("missing.capability", kind="executor")
 except astrid.CapabilityNotFoundError as e:
     print(f"Not found: {e}")
 
 # Ambiguous bare lookup
 try:
-    astrid.get_capability("fade", kind="element", include_installed=False)
+    astrid.get_capability("fade", kind="element")
 except astrid.CapabilityAmbiguousError as e:
     print(f"Multiple matches: {e}")
     # e carries candidate list in the message
 
 # Element invocation is rejected
 try:
-    astrid.invoke("effects/text-card", kind="element", include_installed=False)
+    astrid.invoke("effects/text-card", kind="element")
 except astrid.UnsupportedCapabilityError as e:
     print(f"Cannot invoke element: {e}")
 
 # Executor runs require a project (validation happens before any side effect)
 try:
-    astrid.invoke("iteration.experiment_review", kind="executor", include_installed=False)
+    astrid.invoke("iteration.experiment_review", kind="executor")
 except astrid.CapabilityValidationError as e:
     print(f"Project required: {e}")
 
@@ -358,7 +353,6 @@ import astrid
 result = astrid.invoke(
     "iteration.experiment_review",
     kind="executor",
-    include_installed=False,
     project="demo",
     inputs={"review": "experiments/prompt-brevity/review.json"},
 )

@@ -112,7 +112,7 @@ Agents can identify them by the `kind: external` field in the
 ```python
 import astrid.sdk as sdk
 
-caps = sdk.discover(include_installed=False, kind="executor")
+caps = sdk.discover(kind="executor")
 adapter = sdk.get_capability("runpod.provision", kind="executor")
 ```
 

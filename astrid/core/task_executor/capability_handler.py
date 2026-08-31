@@ -247,7 +247,6 @@ class CapabilityTaskHandler:
                 "check_binaries": False,
                 "python_exec": None,
                 "verbose": False,
-                "execution_mode": "subprocess",
                 "project_was_auto_resolved": True,
                 "invocation": self._invocation,
                 "projects_root": str(self._projects_root) if self._projects_root else None,

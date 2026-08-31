@@ -167,12 +167,10 @@ pinning the attribute name on an imported module. The import path of the module 
 | `from astrid.core.task import gate` | `gate_command` | `tests/test_canonical_cli.py` : 175, 206 |
 | `from astrid.core.task import gate` | `_run_inline_checks` | `tests/agentic/test_agent_probe_regression.py` : 283, 354; `tests/test_for_each_autoclose.py` : 70 |
 | `from astrid.core.task.gate import repeat` | `load_plan` | `tests/test_for_each_autoclose.py` : 153 |
-| `from astrid.core.executor import runner` | `invoke_in_process_command` | `tests/core/test_executor_runner_errors.py` : 781, 835, 1134, 1212 |
 | `from astrid.core.executor import runner` | `import_module` | `tests/core/test_executor_runner_errors.py` : 607 |
 | `from astrid.core.executor import runner` | `subprocess.run` | `tests/core/test_executor_runner_errors.py` : 728, 834 |
 | `from astrid.core.executor import runner` | `prepare_project_run` | `tests/test_task_env_contract.py` : 129 |
 | `from astrid.core.orchestrator import runner` | `subprocess.run` | `tests/core/test_orchestrator_runner_errors.py` : 237, 289 |
-| `from astrid.core.orchestrator import runner` | `invoke_in_process_command` | `tests/core/test_orchestrator_runner_errors.py` : 290, 350, 415 |
 | `from astrid.core.orchestrator import runner` | `_test_python_target` | `tests/core/test_orchestrator_runner_errors.py` : 345, 487, 503, 519, 800 |
 | `from astrid.core.orchestrator import runner` | `prepare_project_run` | `tests/test_task_env_contract.py` : 130 |
 | `from astrid.core.element import cli` | `main` | `tests/test_pipeline_dispatch_aliases.py` : 34 |
