@@ -8,7 +8,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unicodedata
@@ -173,7 +175,8 @@ def _assert_clean(components: Mapping[str, str | os.PathLike[str]], output: str 
         if paths: dirty.append((cid, paths))
     if dirty: raise ReleaseIdentityError(f"candidate component has uncommitted changes: {dirty}")
 
-def _plan_transition(cid: str, local: str, canonical: str, url: str, ref: str) -> str: return framed_hash("banodoco.local-to-canonical-repository.v1", [cid, local, canonical, url, ref])
+def _plan_transition(cid: str, local: str, canonical: str, url: str, ref: str, reviewed_source_oid: str = NONE) -> str:
+    return framed_hash("banodoco.local-to-canonical-repository.v1", [cid, local, canonical, url, ref, reviewed_source_oid])
 
 def plan_component_registry() -> list[dict[str, Any]]:
     rows = [("NEUTRAL-RUNTIME", "banodoco-workspace-runtime-oracle", "banodoco/banodoco-workspace-runtime", "https://github.com/banodoco/banodoco-workspace-runtime.git"), ("ASTRID-CLIENT", "peteromallet/Astrid", "peteromallet/Astrid", "https://github.com/peteromallet/Astrid.git")]
@@ -194,10 +197,29 @@ def _directory_inventory(root: Path) -> list[dict[str, str]]:
         data = path.read_bytes(); rows.append({"path": relative, "sha256": _sha256_bytes(data), "byte_length": len(data)})
     return rows
 
+def _filesystem_snapshot(root: Path) -> dict[str, tuple[str, str]]:
+    """Hash every input entry without following links, including Git metadata."""
+    result: dict[str, tuple[str, str]] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            result[relative] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            result[relative] = ("file", _sha256_bytes(path.read_bytes()))
+    return result
+
+def _remove_git_remotes(root: Path) -> None:
+    for remote in _git_text(root, "remote", optional=True).splitlines():
+        if remote:
+            subprocess.run(["git", "-C", str(root), "remote", "remove", remote], check=True, timeout=30)
+
 def _clean_git_checkout(source: Path, destination: Path, expected_oid: str, approved_root: Path | None = None) -> None:
     source_identity = git_identity(source); local_submodules = _submodule_sources(source, (approved_root or source.parent).resolve())
     result = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(source), str(destination)], capture_output=True, text=True, check=False, timeout=60)
     if result.returncode != 0: raise ReleaseIdentityError("B11.1 could not create a clean pinned checkout")
+    # A generator must not retain an origin it can push to or use to discover
+    # the reviewed source checkout.  Inputs are copied into the run separately.
+    _remove_git_remotes(destination)
     subprocess.run(["git", "-C", str(destination), "checkout", "--quiet", "--detach", "HEAD"], check=True, timeout=30)
     if _git_text(destination, "rev-parse", "HEAD") != expected_oid: raise ReleaseIdentityError("B11.1 clone is not pinned to integrated_oid")
     for item in local_submodules: subprocess.run(["git", "-C", str(destination), "config", f"submodule.{item['name']}.url", item["url"]], check=True, timeout=30)
@@ -205,9 +227,21 @@ def _clean_git_checkout(source: Path, destination: Path, expected_oid: str, appr
     for item in source_identity["submodules"]:
         clone_sub = destination / item["path"]
         if item["head_ref"] != NONE and clone_sub.is_dir(): subprocess.run(["git", "-C", str(clone_sub), "checkout", "--quiet", item["head_ref"]], check=True, timeout=30)
+        if clone_sub.is_dir(): _remove_git_remotes(clone_sub)
     clone_identity = git_identity(destination)
     if [{k: x[k] for k in ("path", "oid", "head_ref", "detached", "dirty_paths")} for x in clone_identity.get("submodules", [])] != [{k: x[k] for k in ("path", "oid", "head_ref", "detached", "dirty_paths")} for x in source_identity.get("submodules", [])]: raise ReleaseIdentityError("B11.1 clone recursive submodule identity differs from reviewed source")
     if _dirty_paths(destination): raise ReleaseIdentityError("B11.1 recursive checkout is not clean")
+
+def _sandbox_command(argv: list[str], *, staging: Path) -> list[str]:
+    """Run a generator in the current-Mac write boundary."""
+    if sys.platform != "darwin":
+        raise ReleaseIdentityError("B11.1 requires the current-Mac filesystem sandbox")
+    sandbox_exec = shutil.which("sandbox-exec")
+    if not sandbox_exec:
+        raise ReleaseIdentityError("B11.1 requires sandbox-exec")
+    escaped = str(staging.resolve()).replace("\\", "\\\\").replace('"', '\\"')
+    profile = "(version 1)\n(deny default)\n(allow process-exec)\n(allow process-fork)\n(allow sysctl-read)\n(allow file-read*)\n(allow file-write* (subpath \"" + escaped + "\"))\n(allow file-write* (literal \"/dev/null\"))\n"
+    return [sandbox_exec, "-p", profile, *argv]
 
 def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions: Sequence[Mapping[str, Any]], *, contract_bytes: bytes, schema_manifest_bytes: bytes, output_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Execute each declared B11.1 generator twice and attach observations.
@@ -233,14 +267,21 @@ def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions
             if not entrypoint.is_file() or entrypoint.is_symlink(): raise ReleaseIdentityError("B11.1 generator entrypoint is not a regular file")
             entrypoint_digest = _sha256_bytes(entrypoint.read_bytes()); inventories = []; receipts = []
             for ordinal in (1, 2):
+                source_snapshot = _filesystem_snapshot(source_checkout)
+                source_status = _dirty_paths(source_checkout)
                 run_root = base / gid / str(ordinal); checkout = run_root / "checkout"; _clean_git_checkout(source_checkout, checkout, by_component[cid]["integrated_oid"], Path(output_root).expanduser().resolve() if output_root else None); stage = run_root / "staging"; inputs = run_root / "inputs"; stage.mkdir(parents=True); inputs.mkdir()
                 contract_path, schema_path = inputs / "contract.json", inputs / "schema-manifest.json"; contract_path.write_bytes(contract_bytes); schema_path.write_bytes(schema_manifest_bytes)
+                input_digests = {contract_path: _sha256_bytes(contract_bytes), schema_path: _sha256_bytes(schema_manifest_bytes)}
+                checkout_snapshot = _filesystem_snapshot(checkout)
                 executable = str(definition.get("interpreter_path") or definition.get("executable") or "python3")
                 argv = [executable, str(checkout / entrypoint_path), "--contract", str(contract_path), "--schema-manifest", str(schema_path), "--output-root", str(stage)]
                 before = _dirty_paths(checkout)
-                result = subprocess.run(argv, cwd=str(checkout), capture_output=True, check=False, timeout=300, env={"PATH": os.environ.get("PATH", "")})
+                result = subprocess.run(_sandbox_command(argv, staging=stage), cwd=str(checkout), capture_output=True, check=False, timeout=300, env={"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"})
                 after = _dirty_paths(checkout)
-                if before != after: raise ReleaseIdentityError("B11.1 generator changed its checkout")
+                if _filesystem_snapshot(source_checkout) != source_snapshot or _dirty_paths(source_checkout) != source_status: raise ReleaseIdentityError("B11.1 generator mutated the reviewed source checkout")
+                if _filesystem_snapshot(checkout) != checkout_snapshot or before != after: raise ReleaseIdentityError("B11.1 generator changed its clean pinned checkout")
+                for path, digest in input_digests.items():
+                    if not path.is_file() or _sha256_bytes(path.read_bytes()) != digest: raise ReleaseIdentityError("B11.1 generator changed its contract or schema input")
                 if result.returncode != 0: raise ReleaseIdentityError(f"B11.1 generator failed: {gid}")
                 inventory = _directory_inventory(stage)
                 if not inventory: raise ReleaseIdentityError("B11.1 generator produced no output")
@@ -289,8 +330,8 @@ def join_plan_remote_targets(component_rows: Sequence[Mapping[str, Any]], *, str
         if source is None or source["repository_identity"] != target["local_repository_identity"]: raise ReleaseIdentityError("local repository identity does not match plan registry")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source["integrated_oid"]): raise ReleaseIdentityError("reviewed_source_oid must be a full Git object ID")
         _validate_url(target["canonical_url"])
-        if target["identity_transition_sha256"] != _plan_transition(target["component_id"], target["local_repository_identity"], target["repository_identity"], target["canonical_url"], target["destination_ref_or_prefix"]): raise ReleaseIdentityError("plan registry identity transition mismatch")
-        item = copy.deepcopy(target); item["reviewed_source_oid"] = source["integrated_oid"]; result.append(item)
+        if target["identity_transition_sha256"] != _plan_transition(target["component_id"], target["local_repository_identity"], target["repository_identity"], target["canonical_url"], target["destination_ref_or_prefix"], NONE): raise ReleaseIdentityError("plan registry identity transition mismatch")
+        item = copy.deepcopy(target); item["reviewed_source_oid"] = source["integrated_oid"]; item["identity_transition_sha256"] = _plan_transition(item["component_id"], item["local_repository_identity"], item["repository_identity"], item["canonical_url"], item["destination_ref_or_prefix"], item["reviewed_source_oid"]); result.append(item)
     result.append(plan_publication_row()); return result
 
 def _seed_info(seed: str, metadata: Mapping[str, Any] | None) -> tuple[str, str]:

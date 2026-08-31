@@ -16,7 +16,7 @@ import subprocess
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from .release_identity import REMOTE_TARGET_FIELDS, canonical_bytes
+from .release_identity import REMOTE_TARGET_FIELDS, canonical_bytes, framed_hash
 
 
 class RemoteTargetError(ValueError):
@@ -40,8 +40,23 @@ def _ref(target: Mapping[str, Any]) -> str:
 
 def _url(target: Mapping[str, Any]) -> None:
     parsed = urlparse(str(target.get("canonical_url", "")))
-    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.netloc != "github.com":
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.netloc != "github.com" or not parsed.path.endswith(".git"):
         raise RemoteTargetError("remote target URL must be credential-free HTTPS GitHub")
+
+
+def _validate_component_binding(target: Mapping[str, Any]) -> None:
+    """Require the locator and its transition digest to describe one target."""
+    component_id = target.get("component_id")
+    local_identity = target.get("local_repository_identity")
+    repository_identity = target.get("repository_identity")
+    url = target.get("canonical_url")
+    destination_ref = target.get("destination_ref_or_prefix")
+    if not all(isinstance(value, str) and value for value in (component_id, local_identity, repository_identity, url)):
+        raise RemoteTargetError("component locator identity fields must be non-empty strings")
+    parsed = urlparse(url)
+    url_identity = parsed.path.removeprefix("/").removesuffix(".git")
+    if url_identity != repository_identity:
+        raise RemoteTargetError("canonical URL does not match repository identity")
 
 
 def _local_oid(remote: Path, ref: str) -> str | None:
@@ -74,6 +89,13 @@ def resolve_remote_target(
     expected = target.get("reviewed_source_oid")
     if not isinstance(expected, str) or len(expected) not in {40, 64} or any(c not in "0123456789abcdef" for c in expected):
         raise RemoteTargetError("reviewed source OID must be a full object ID")
+    _validate_component_binding(target)
+    expected_transition = framed_hash(
+        "banodoco.local-to-canonical-repository.v1",
+        [target["component_id"], target["local_repository_identity"], target["repository_identity"], target["canonical_url"], ref, expected],
+    )
+    if target["identity_transition_sha256"] != expected_transition:
+        raise RemoteTargetError("remote locator identity transition binding mismatch")
     if local_bare_remote is not None:
         remote = Path(local_bare_remote).expanduser().resolve()
         if not remote.is_dir() or not (remote / "HEAD").exists():
@@ -96,6 +118,10 @@ def resolve_remote_target(
             raise RemoteTargetError("authorized remote transport returned an invalid object ID")
         if not isinstance(status, int) or status < 100 or status > 599 or not isinstance(response, str):
             raise RemoteTargetError("authorized remote transport returned an invalid response")
+        if status != 200:
+            raise RemoteTargetError(f"authorized remote transport returned HTTP {status}")
+        if actual is None:
+            raise RemoteTargetError("authorized remote transport returned no object ID")
     # NONE is a create-only discriminator: an existing different ref is a
     # race/conflict, never evidence that the target was absent.
     if actual is not None and actual != expected:
@@ -145,6 +171,8 @@ def provision_local_bare_target(target: Mapping[str, Any], *, local_bare_remote:
     receipt = dict(resolved["repository_provision_receipt_rows"][0])
     postflight = _local_oid(remote, ref)
     receipt.update({"method": method, "status": status, "request_sha256": _request_digest(method, target, idempotency_key=key), "response_sha256": _sha(str(response).encode()), "idempotency_key": key, "postflight_status": 200 if postflight == expected else 409, "postflight_response_sha256": _sha(str(postflight or "MISSING").encode())})
+    if postflight != expected:
+        raise RemoteTargetError("local bare remote postflight no longer matches expected object ID")
     resolved["repository_provision_receipt_rows"] = [receipt]
     return resolved
 

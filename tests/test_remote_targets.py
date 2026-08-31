@@ -9,10 +9,11 @@ import pytest
 
 import astrid.core.remote_targets as remote_targets
 from astrid.core.remote_targets import RemoteTargetError, provision_local_bare_target, resolve_target_set
+from astrid.core.release_identity import framed_hash
 
 
 def _target(oid: str) -> dict[str, str]:
-    return {
+    target = {
         "remote_target_id": "REMOTE-TARGET:COMPONENT:ASTRID-CLIENT",
         "target_kind": "component",
         "component_id": "ASTRID-CLIENT",
@@ -22,9 +23,14 @@ def _target(oid: str) -> dict[str, str]:
         "destination_ref_or_prefix": "refs/heads/main",
         "expected_old_oid": "NONE",
         "reviewed_source_oid": oid,
-        "identity_transition_sha256": "a" * 64,
+        "identity_transition_sha256": "",
         "repository_provision_receipt_rows": "NONE",
     }
+    target["identity_transition_sha256"] = framed_hash(
+        "banodoco.local-to-canonical-repository.v1",
+        [target["component_id"], target["local_repository_identity"], target["repository_identity"], target["canonical_url"], target["destination_ref_or_prefix"], oid],
+    )
+    return target
 
 
 def _remote_fixture(tmp_path: Path) -> tuple[Path, str, str]:
@@ -95,6 +101,33 @@ def test_authorized_transport_is_the_only_network_observation_boundary():
     result = remote_targets.resolve_remote_target(target, authorized_transport=transport)
     assert observed == [(target["canonical_url"], target["destination_ref_or_prefix"])]
     assert result["repository_provision_receipt_rows"][0]["status"] == 200
+
+
+def test_remote_locator_binding_rejects_wrong_url_or_transition_digest():
+    target = _target("a" * 40)
+    wrong_url = dict(target, canonical_url="https://github.com/other/project.git")
+    with pytest.raises(RemoteTargetError, match="URL"):
+        remote_targets.resolve_remote_target(wrong_url, authorized_transport=lambda *_: (target["reviewed_source_oid"], 200, "ok"))
+    with pytest.raises(RemoteTargetError, match="transition"):
+        remote_targets.resolve_remote_target(dict(target, identity_transition_sha256="a" * 64), authorized_transport=lambda *_: (target["reviewed_source_oid"], 200, "ok"))
+
+
+@pytest.mark.parametrize("status,actual", [(401, "a" * 40), (503, "a" * 40), (200, None)])
+def test_authorized_transport_requires_successful_bound_result(status, actual):
+    target = _target("a" * 40)
+    with pytest.raises(RemoteTargetError):
+        remote_targets.resolve_remote_target(target, authorized_transport=lambda *_: (actual, status, "response"))
+
+
+def test_provision_postflight_mismatch_fails_closed(tmp_path: Path, monkeypatch):
+    remote, oid, other = _remote_fixture(tmp_path)
+    subprocess.run(["git", "--git-dir", str(remote), "update-ref", "-d", "refs/heads/main"], check=True)
+    target = _target(oid)
+    original_probe = remote_targets._local_oid
+    probes = iter([None, None, other])
+    monkeypatch.setattr(remote_targets, "_local_oid", lambda path, ref: next(probes, original_probe(path, ref)))
+    with pytest.raises(RemoteTargetError, match="postflight"):
+        provision_local_bare_target(target, local_bare_remote=remote)
 
 
 def test_local_bare_creation_uses_compare_and_swap_under_conflicting_race(tmp_path: Path, monkeypatch):

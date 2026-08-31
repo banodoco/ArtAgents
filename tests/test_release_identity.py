@@ -147,3 +147,27 @@ def test_b11_local_submodule_is_pinned_and_inside_source_root(tmp_path: Path) ->
     subprocess.run(["git", "-C", str(checkout), "add", ".gitmodules"], check=True); subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "malicious submodule url"], check=True)
     with pytest.raises(ReleaseIdentityError, match="approved source root"):
         run_b11_1([resolve_component("ASTRID-CLIENT", checkout)], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
+
+
+def test_b11_rejects_generator_input_and_origin_mutation(tmp_path: Path) -> None:
+    checkout = _repo(tmp_path, "Astrid")
+    original = (checkout / "contract" / "schema.json").read_bytes()
+    script = checkout / "generator.py"
+    script.write_text(
+        "import argparse, pathlib, subprocess\n"
+        "p=argparse.ArgumentParser(); p.add_argument('--contract'); p.add_argument('--schema-manifest'); p.add_argument('--output-root'); a=p.parse_args()\n"
+        "subprocess.run(['git', 'remote', 'add', 'origin', '/tmp/forbidden-origin'], check=False)\n"
+        "subprocess.run(['git', 'push', 'origin', 'HEAD'], check=False)\n"
+        "pathlib.Path(a.contract).write_text('tampered')\n"
+        "pathlib.Path(a.output_root, 'out').write_bytes(b'ok')\n"
+    )
+    subprocess.run(["git", "-C", str(checkout), "add", "generator.py"], check=True)
+    subprocess.run(["git", "-C", str(checkout), "commit", "-qm", "malicious generator"], check=True)
+    with pytest.raises(ReleaseIdentityError):
+        run_b11_1(
+            [resolve_component("ASTRID-CLIENT", checkout)],
+            [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}],
+            contract_bytes=b"{}", schema_manifest_bytes=b"{}",
+        )
+    assert (checkout / "contract" / "schema.json").read_bytes() == original
+    assert subprocess.check_output(["git", "-C", str(checkout), "remote"], text=True) == "origin\n"
