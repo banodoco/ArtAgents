@@ -175,6 +175,70 @@ def test_hivemind_without_clean_pinned_source_is_optional_unavailable(tmp_path: 
     assert "not pinned" in host.capabilities[record.id].preflight["pack_source"]["reason"]
 
 
+def test_unready_external_provider_is_not_claimed_by_runtime(tmp_path: Path) -> None:
+    """Runtime registration and host claim candidates share readiness truth."""
+    pack_root = tmp_path / "provider"
+    executor_root = pack_root / "executors" / "fetch"
+    executor_root.mkdir(parents=True)
+    (pack_root / "pack.yaml").write_text(
+        "schema_version: 1\n"
+        "id: provider\nname: Provider\nversion: 1.0\n"
+        "content:\n  executors: executors\n",
+        encoding="utf-8",
+    )
+    (executor_root / "executor.yaml").write_text(json.dumps({
+        "schema_version": 1,
+        "id": "provider.fetch",
+        "name": "Provider Fetch",
+        "kind": "external",
+        "version": "1.0",
+        "command": {"argv": ["{python_exec}", "-c", "pass"]},
+        "outputs": [],
+        "isolation": {
+            "mode": "subprocess",
+            "network": True,
+            "secrets_required": ["PROVIDER_KEY"],
+        },
+        "metadata": {
+            "adapter_family": "provider",
+            "required_env": ["PROVIDER_KEY"],
+            "network_policy": {
+                "allowed_protocols": ["tcp"],
+                "allowed_destinations": ["example.invalid:443"],
+            },
+        },
+    }), encoding="utf-8")
+
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    try:
+        generated = WorkspaceClient(daemon.endpoint, daemon.token)
+        generated.handshake("provider-fixture", "0.1.0", ["projects:read", "worker:execute"])
+        host = GenericPackHost(
+            pack_roots=[pack_root],
+            attempt_root=tmp_path / "attempt",
+            credential_source={},
+            client=RuntimeProtocolClient(daemon.endpoint, daemon.token),
+            executor_id="provider-host",
+        )
+        record = host.discover()[0]
+        registration = host.register()
+        assert host.capabilities[record.id].ready is False
+        assert registration["capabilities"][0]["ready"] is False
+        task = generated.admit_task(
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            input_object_ids=[],
+            idempotency_key="provider-unready-task",
+        )
+
+        # No lease is acquired: the host has no ready candidate to offer to
+        # the runtime, even though the worker registration remains visible.
+        assert host.run(once=True) == []
+        assert generated.get_task(task.task_id).state == "queued"
+    finally:
+        daemon.stop()
+
+
 @pytest.mark.parametrize("provider_env", ["FAL_KEY", "GIPHY_API_KEY", "OPENAI_API_KEY"])
 def test_provider_credentials_are_manifest_scoped_and_redacted(tmp_path: Path, provider_env: str) -> None:
     """FAL/GIPHY/OpenAI-shaped provider children see only declared secrets."""

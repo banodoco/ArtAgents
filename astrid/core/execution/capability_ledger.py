@@ -151,8 +151,18 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
     for row in executors:
         if row["id"] in current_ids:
             row["disposition"] = "advertised"
+            row["discovery_status"] = "discovered"
+        elif row["id"].startswith(("hivemind.", "discord_local.", "seedance_local.")):
+            # These IDs remain in the historical result-contract inventory,
+            # but their source packs are optional and are not shipped in the
+            # current checkout.  Keep them visible for reconciliation without
+            # making an absent external route look executable.
+            row["disposition"] = "unavailable_external"
+            row["discovery_status"] = "not_installed"
+            row["reason"] = "optional external pack is not installed in this checkout"
         elif row["disposition"] == "historical":
             row["reason"] = row.get("reason") or "retained in historical executor snapshot; no current executor manifest"
+            row["discovery_status"] = "historical_only"
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
     coverage = {
         "source_labels": {"source": 82, "ledger": len(labels), "missing": [], "complete": len(labels) == 82},

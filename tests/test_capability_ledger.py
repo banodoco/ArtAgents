@@ -38,3 +38,24 @@ def test_host_consumes_the_reconciled_ledger_before_readiness_matrix():
     host = GenericPackHost(pack_roots=[Path("astrid/packs")])
     assert host.ledger["sources"]["counts"]["pack_labels"] == 82
     assert len(host.matrix) == 64
+
+
+def test_historical_external_executor_rows_are_explicitly_not_installed():
+    """Historical rows must not be mistaken for executable local routes."""
+    ledger = load_capability_ledger(Path("config/astrid-beta-capabilities.json"))
+    rows = ledger["sources"]["executor_inventory"]
+    absent = {row["id"]: row for row in rows if row["discovery_status"] != "discovered"}
+
+    assert set(absent) == {
+        "discord_local.command",
+        "hivemind.contribute",
+        "hivemind.get_item",
+        "hivemind.ingest_article",
+        "hivemind.ingest_workflow",
+        "hivemind.ingest_youtube",
+        "hivemind.refresh_media",
+        "hivemind.search",
+        "seedance_local.reference_video",
+    }
+    assert {row["disposition"] for row in absent.values()} == {"unavailable_external"}
+    assert {row["discovery_status"] for row in absent.values()} == {"not_installed"}

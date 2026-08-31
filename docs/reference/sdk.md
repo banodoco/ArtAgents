@@ -96,6 +96,16 @@ loading is theme-aware: pass `active_theme` to include theme-specific element
 overlays, and `include_missing_roots=True` to include element roots that have
 not been locally installed yet.
 
+The readiness ledger is a separate, host-facing projection of this inventory.
+In the current checkout it reconciles 82 pack labels, 73 historical executor
+contract rows, and 19 retained legacy rows; the local generic host discovers
+64 executable in-tree executor manifests. Historical external rows (including
+Hivemind, Discord-local, and Seedance-local) are reported as
+`unavailable_external` when their source pack is not installed, never as ready
+local capabilities. The host re-runs preflight before each runtime claim, so
+the capability IDs offered for admission are exactly the capabilities that
+are currently ready.
+
 ### Schema Inspection
 
 ```python

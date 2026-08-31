@@ -1909,9 +1909,28 @@ class GenericPackHost:
                 "runtime client lacks canonical claim-next operation; "
                 "use generated WorkspaceClient.claim_task"
             )
+        # Readiness is an admission predicate, not merely registration
+        # metadata.  Credentials, binaries, and external-pack provenance can
+        # change while a host is running, so refresh the local preflight before
+        # every claim and never ask the runtime to consider rows this process
+        # cannot execute.  The runtime repeats this check against its own
+        # capability status; keeping the candidate set aligned avoids claiming
+        # an unavailable task only to fail it after lease acquisition.
+        if not self.capabilities:
+            self.discover()
+        ready_records = self.preflight()
+        capability_ids = sorted(
+            record.id
+            for record in ready_records
+            if record.ready
+            and str(record.matrix.get("disposition", ""))
+            not in {"unsupported", "retired"}
+        )
+        if not capability_ids:
+            return None
         claim = self.client.claim_next(
             executor_id=self.executor_id,
-            capability_ids=sorted(self.capabilities),
+            capability_ids=capability_ids,
             idempotency_key=f"claim:{self.executor_id}:{time.time_ns()}",
         )
         if claim is None:

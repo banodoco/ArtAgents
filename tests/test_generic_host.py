@@ -56,6 +56,10 @@ class FakeRuntime:
     def fail(self, task_id, lease_token, error, **kwargs):
         self.failures.append((task_id, lease_token, error, kwargs))
 
+    def claim_next(self, **payload):
+        self.claim_payload = payload
+        return None
+
 
 def _write_manifest(
     root: Path,
@@ -380,6 +384,47 @@ def test_discovery_digest_and_truthful_preflight(tmp_path):
     with pytest.raises(Exception, match="deliberate re-registration"):
         host.register()
     host.register(deliberate=True)
+
+
+def test_claim_only_admits_capabilities_that_are_currently_ready(tmp_path, monkeypatch):
+    """The host candidate set must equal its current readiness predicate."""
+    monkeypatch.delenv("ASTRID_PROVIDER_KEY", raising=False)
+    root = tmp_path / "provider"
+    root.mkdir()
+    (root / "executor.yaml").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "id": "fixture.provider",
+            "name": "Fixture Provider",
+            "kind": "external",
+            "version": "1.0",
+            "command": {"argv": ["{python_exec}", "-c", "pass"]},
+            "outputs": [],
+            "isolation": {"mode": "subprocess", "network": True},
+            "metadata": {
+                "adapter_family": "provider",
+                "required_env": ["ASTRID_PROVIDER_KEY"],
+                "network_policy": {
+                    "allowed_protocols": ["tcp"],
+                    "allowed_destinations": ["example.invalid:443"],
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    runtime = FakeRuntime()
+    host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
+    host.discover()
+
+    assert host.capabilities["fixture.provider"].ready is False
+    assert host.claim_once() is None
+    assert not hasattr(runtime, "claim_payload")
+
+    # Rotation is observed on the next claim cycle, without rebuilding the
+    # host, and the now-ready capability becomes the only candidate.
+    monkeypatch.setenv("ASTRID_PROVIDER_KEY", "fixture-secret")
+    assert host.claim_once() is None
+    assert runtime.claim_payload["capability_ids"] == ["fixture.provider"]
 
 
 def test_source_and_dependency_digests_invalidate_registration(tmp_path):
