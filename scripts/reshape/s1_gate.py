@@ -44,7 +44,6 @@ SUMMARY_SCHEMA = "astrid.s1_gate.summary.v1"
 _SCRUB_ENV_PREFIXES = ("ASTRID_TASK_",)
 _SCRUB_ENV_NAMES = frozenset(
     {
-        "ASTRID_SESSION_ID",
         "ASTRID_PROJECT",
         "ASTRID_PROJECT_SLUG",
         "ASTRID_PROJECT_RUN",

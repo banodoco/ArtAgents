@@ -123,7 +123,7 @@ def _sandboxed_home_and_projects(
 
     Every test gets tmp-backed state roots so no test writes into the real
     ``~/.astrid`` or the user's projects directory. The legacy session
-    autouse seed (identity + session + ``ASTRID_SESSION_ID``) was retired
+    autouse seed (identity and session) was retired
     with the task-mode session layer.
     """
 

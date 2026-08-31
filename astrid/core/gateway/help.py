@@ -61,7 +61,7 @@ Timeline evidence:
 
 Operational families:
   python3 -m astrid doctor [--json]
-  python3 -m astrid backup [--json]  # unavailable until a runtime route exists
+  python3 -m astrid backup {create,restore,export,tombstone,recover,purge} [--json]
 
 Nested mounts (manifest-owned):
   python3 -m astrid timelines shots ...
@@ -70,7 +70,7 @@ Nested mounts (manifest-owned):
 Options:
   --json      product commands print the five-key SDK envelope
               (ok/data/error/receipt/idempotency_key); doctor emits its
-              diagnostic object (backup has no --json flag)
+              diagnostic object; backup emits its runtime result object
   -h, --help  show help
 
 Notes:
@@ -117,7 +117,7 @@ Product families:
 
 Operational families:
   doctor      [runtime] read-only runtime health diagnostics
-  backup      [runtime] backup is unavailable until a runtime route exists
+  backup      [runtime] create/restore/export/tombstone/recover/purge
 
 Nested mounts (manifest-owned):
   timelines shots       [pack: shots] project-level reusable shot list/create/show/add/remove/reorder
@@ -126,7 +126,7 @@ Nested mounts (manifest-owned):
 Options:
   --json      product commands print the five-key SDK envelope
               (ok/data/error/receipt/idempotency_key); doctor emits its
-              diagnostic object (backup has no --json flag)
+              diagnostic object; backup emits its runtime result object
   -h, --help  show help
 
 Exit codes:

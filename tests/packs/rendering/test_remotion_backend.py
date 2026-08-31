@@ -1150,7 +1150,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
                 "RENDER_HOST_ONLY": "host-value",
                 "PATH": "/usr/bin:/bin",
-                "ASTRID_SESSION_ID": "sess-123",
                 "ASTRID_TASK_RUN_ID": "task-run-9",
                 "ASTRID_ACTOR": "human:peter",
                 "ASTRID_NODE_EXECUTABLE": render_remotion.os.environ[
@@ -1179,7 +1178,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertNotIn("ASTRID_ACTOR", env)
         # Required Node and Astrid runtime variables must be preserved/propagated.
         self.assertEqual(env["PATH"], "/usr/bin:/bin")
-        self.assertEqual(env["ASTRID_SESSION_ID"], "sess-123")
         self.assertEqual(env["ASTRID_TASK_RUN_ID"], "task-run-9")
         # The Remotion-specific build-tool addition is the composition source.
         self.assertEqual(env["ASTRID_TIMELINE_COMPOSITION_SRC"], str(composition_src))

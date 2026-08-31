@@ -37,7 +37,6 @@ TASK_STEP_ID = "render"
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "ASTRID_SESSION_ID",
         "ASTRID_PROJECT_RUN",
         "ASTRID_TASK_RUN_ID",
         "ASTRID_TASK_PROJECT",

@@ -691,7 +691,7 @@ def test_product_help_documents_json_envelope_convention() -> None:
     assert "--json" in text
     assert "ok/data/error/receipt/idempotency_key" in text
     assert "doctor emits" in text
-    assert "backup has no --json flag" in text
+    assert "backup emits its runtime result object" in text
 
 
 def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> None:

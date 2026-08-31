@@ -53,7 +53,6 @@ projects = Path(args.projects_root)
 repo = Path(args.repo_root)
 assert os.environ["ASTRID_PROJECTS_ROOT"] == str(projects)
 assert os.environ["ASTRID_REPO_ROOT"] == str(repo)
-assert "ASTRID_SESSION_ID" not in os.environ
 assert "ASTRID_TASK_PROJECT" not in os.environ
 
 plan = projects / "alpha" / "runs" / "run-1" / "plan.json"
@@ -101,7 +100,6 @@ def test_migration_gate_runs_dual_root_command_and_writes_machine_report(
     _write(live_repo / "sentinel.txt", "keep\n")
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(live_projects))
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(live_repo))
-    monkeypatch.setenv("ASTRID_SESSION_ID", "S-LIVE")
     monkeypatch.setenv("ASTRID_TASK_PROJECT", "live-alpha")
 
     report = run_gate(
@@ -215,7 +213,6 @@ from pathlib import Path
 
 projects = Path(os.environ["ASTRID_PROJECTS_ROOT"])
 repo = Path(os.environ["ASTRID_REPO_ROOT"])
-assert "ASTRID_SESSION_ID" not in os.environ
 plan = projects / "alpha" / "runs" / "run-1" / "plan.json"
 if not plan.exists():
     plan.write_text('{"version":2}\\n', encoding="utf-8")
@@ -232,8 +229,6 @@ if not variant.exists():
     _write(live_repo / "sentinel.txt", "keep\n")
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(live_projects))
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(live_repo))
-    monkeypatch.setenv("ASTRID_SESSION_ID", "S-LIVE")
-
     report = run_gate(
         snapshot=snapshot,
         migration_cmd=f"{sys.executable} {script}",

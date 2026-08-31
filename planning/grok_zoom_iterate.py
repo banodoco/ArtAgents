@@ -25,7 +25,6 @@ FAL = WORKTREE / "tests/fixtures/timeline_visualize/storyboard_fal"
 sys.path.insert(0, str(WORKTREE / "tests"))
 os.environ["ASTRID_HOME"] = tempfile.mkdtemp()
 os.environ["ASTRID_PROJECTS_ROOT"] = tempfile.mkdtemp()
-os.environ.pop("ASTRID_SESSION_ID", None)
 os.environ.setdefault("ASTRID_NO_NUDGE", "1")
 
 
@@ -73,7 +72,6 @@ def build_pack(slug: str) -> Path:
 def drill(pack_root: Path, focus: str) -> Path:
     """Run the focus_context action for `focus`; return the child pack root."""
     from astrid.core import gateway
-    from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
     from contextlib import redirect_stdout, redirect_stderr
     from io import StringIO
 
@@ -84,7 +82,6 @@ def drill(pack_root: Path, focus: str) -> Path:
         if tok == "--from-view" and i + 1 < len(argv):
             argv[i + 1] = str((pack_root / argv[i + 1]).resolve())
     stdout, stderr = StringIO(), StringIO()
-    os.environ.pop(ASTRID_SESSION_ID_ENV, None)
     with redirect_stdout(stdout), redirect_stderr(stderr):
         try:
             rc = gateway.main(argv)

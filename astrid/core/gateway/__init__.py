@@ -10,7 +10,7 @@ one of the seven family handlers.
 
 The settled unbound allowlist is recorded in
 ``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: ``doctor`` and
-``backup`` are operational families that must run before any session exists,
+``backup`` are operational families that must run before any project is selected,
 and ``help``/``--version`` are documentation.
 """
 

@@ -48,8 +48,9 @@ JSON named by `BANODOCO_RUNTIME_DISCOVERY`; the token is read from
 `BANODOCO_RUNTIME_CREDENTIAL`. If any of these are unavailable, the typed
 recovery action is `banodoco-local up --profile astrid`.
 
-`doctor --json` asks the runtime for health. `backup` is currently unavailable
-until the runtime exposes its backup route. Neither command opens or repairs a
+`doctor --json` asks the runtime for health. `backup` routes create, restore,
+export, tombstone, recover, and purge through the runtime and supports
+`--json` for its machine-readable result. Neither command opens or repairs a
 checkout-local store. Do not set `ASTRID_PROJECTS_ROOT` to try to redirect
 product state; that legacy/test variable is not Stage1 authority.
 
@@ -73,7 +74,8 @@ python3 -m astrid runs list --project demo --json
 commands support `--json` as the stable machine surface: exactly one five-key
 envelope (`ok` / `data` / `error` / `receipt` / `idempotency_key`). `doctor
 --json` is the diagnostic exception; it returns the runtime health object.
-`backup` has no stable product route in Stage1. Exit codes are stable: `0`
+`backup` is an operational runtime route rather than a product-envelope
+family. Exit codes are stable: `0`
 success, `1` typed SDK/runtime error, `2` usage/parse error.
 
 ## Product families
@@ -136,7 +138,7 @@ interfaces and must not be used for live observation.
 
 ```bash
 python3 -m astrid doctor [--json]   # runtime health check
-python3 -m astrid backup             # unavailable until a runtime route exists
+python3 -m astrid backup {create,restore,export,tombstone,recover,purge} [--json]
 ```
 
 Start the separate workspace runtime with `banodoco-local up --profile astrid`.

@@ -566,7 +566,6 @@ def test_invoke_rejects_elements_and_missing_executor_project(
             kind="element",
         )
 
-    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
     with pytest.raises(astrid.CapabilityPreconditionError, match="project is required"):
         astrid.invoke(
             "editorial.arrange",
@@ -2388,7 +2387,7 @@ def test_ambiguous_execution_diagnostic_includes_available_backends(
 
 # ---------------------------------------------------------------------------
 # T18: default output routing tests — explicit out, explicit project,
-#      default project resolution, no stderr, no ASTRID_SESSION_ID mutation,
+#      default project resolution and no stderr,
 #      and continued CLI side-effect behavior
 # ---------------------------------------------------------------------------
 
@@ -2711,143 +2710,6 @@ def test_generate_video_no_stderr_output() -> None:
     )
 
 
-# --- no ASTRID_SESSION_ID mutation from facade calls -------------------------
-
-
-def _session_id_mutation_probe(method: str) -> dict[str, Any]:
-    """Run a subprocess that calls ``astrid.generate.{method}()`` and checks
-    whether ``ASTRID_SESSION_ID`` is mutated."""
-    import os as _os
-
-    model = "flux-dev" if method == "image" else "wan-2.2"
-
-    script = f"""
-import importlib, json, sys, os
-from unittest.mock import patch
-
-# Set a known session id before calling the facade
-os.environ["ASTRID_SESSION_ID"] = "S-before-facade"
-
-astrid = importlib.import_module("astrid")
-sdk = importlib.import_module("astrid.sdk")
-
-from astrid.core.generation import GENERATION_RESULT_KEY
-from astrid.core.generation.backends.base import GenerationResult
-from pathlib import Path
-tmp = Path("/tmp")
-
-def fake_invoke(capability_id, **kwargs):
-    return astrid.InvocationResult(
-        capability_id=capability_id,
-        capability_type="executor",
-        native_kind="built_in",
-        ok=True,
-        raw_result={{
-            "payload": {{
-                GENERATION_RESULT_KEY: GenerationResult(
-                    image_paths=[tmp / "out.png"],
-                    model_actual=kwargs.get("inputs", {{}}).get("model", ""),
-                    run_dir=tmp,
-                ).to_dict(),
-                "returncode": 0,
-            }}
-        }},
-    )
-
-session_before = os.environ.get("ASTRID_SESSION_ID")
-
-with patch.object(sdk, "invoke", fake_invoke):
-    getattr(astrid.generate, {method!r})(
-        model={model!r},
-        out=tmp,
-        project="demo",
-    )
-
-session_after = os.environ.get("ASTRID_SESSION_ID")
-
-print(json.dumps({{
-    "session_before": session_before,
-    "session_after": session_after,
-    "unchanged": session_before == session_after,
-}}))
-"""
-
-    worktree_root = str(Path(__file__).resolve().parent.parent)
-    env = {**_os.environ, "PYTHONPATH": worktree_root}
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return json.loads(completed.stdout)
-
-
-def test_generate_image_no_astrid_session_id_mutation() -> None:
-    """``astrid.generate.image()`` must not mutate ``ASTRID_SESSION_ID``."""
-    probe = _session_id_mutation_probe("image")
-    assert probe["unchanged"] is True, (
-        f"ASTRID_SESSION_ID changed: "
-        f"before={probe['session_before']!r}, after={probe['session_after']!r}"
-    )
-
-
-def test_generate_video_no_astrid_session_id_mutation() -> None:
-    """``astrid.generate.video()`` must not mutate ``ASTRID_SESSION_ID``."""
-    probe = _session_id_mutation_probe("video")
-    assert probe["unchanged"] is True, (
-        f"ASTRID_SESSION_ID changed: "
-        f"before={probe['session_before']!r}, after={probe['session_after']!r}"
-    )
-
-
-# --- gateway failure is explicit and side-effect free -------------------------
-
-
-def test_gateway_missing_project_does_not_set_session_id() -> None:
-    """Failure must not create or bind a session as a side effect."""
-    import os as _os
-
-    script = '''
-import os, sys
-# Force the gate path by simulating a gateway invocation
-os.environ.pop("ASTRID_SESSION_ID", None)
-
-# Import and call the gate main
-from astrid.core.gateway import main
-# Use --dry-run to prove dry runs enforce the same project requirement.
-try:
-    exit_code = main(["executors", "run", "--dry-run", "generation.nonexistent_99"])
-except SystemExit as e:
-    exit_code = e.code
-
-# Check that failure left the process unbound.
-session_id = os.environ.get("ASTRID_SESSION_ID", "__UNSET__")
-print(f"SESSION_ID={session_id}")
-print(f"EXIT_CODE={exit_code}")
-'''
-
-    worktree_root = str(Path(__file__).resolve().parent.parent)
-    env = {**_os.environ, "PYTHONPATH": worktree_root}
-    env.pop("ASTRID_SESSION_ID", None)
-
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    stdout = completed.stdout
-    assert "SESSION_ID=" in stdout, f"Missing SESSION_ID in stdout: {stdout!r}"
-    session_line = [line for line in stdout.splitlines() if line.startswith("SESSION_ID=")]
-    assert session_line
-    session_value = session_line[0].split("=", 1)[1]
-    assert session_value == "__UNSET__"
-    assert "EXIT_CODE=2" in stdout
-
-
 # Verb registry tests (T19)
 # ============================================================================
 
@@ -2945,7 +2807,6 @@ print(f"SDK_IN_SYSMOD={'astrid.sdk' in sys.modules}")
 """
     worktree_root = str(Path(__file__).resolve().parent.parent)
     env = {**_os.environ, "PYTHONPATH": worktree_root}
-    env.pop("ASTRID_SESSION_ID", None)
 
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -3083,7 +2944,6 @@ print(f"PLUGINS_LOADED={_v._plugins_loaded}")
 """
     worktree_root = str(Path(__file__).resolve().parent.parent)
     env = {**_os.environ, "PYTHONPATH": worktree_root}
-    env.pop("ASTRID_SESSION_ID", None)
 
     completed = subprocess.run(
         [sys.executable, "-c", script],

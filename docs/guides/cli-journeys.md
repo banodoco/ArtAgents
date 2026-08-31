@@ -418,6 +418,6 @@ python3 -m astrid media verify M_01ABC --project demo \
 ```
 
 When a runtime route is unavailable, the command reports the typed
-`unavailable` condition and its next action. `backup` remains unavailable in
-the Stage1 gateway until the runtime exposes a backup route; use the runtime's
-own backup tooling when it is provided.
+`unavailable` condition and its next action. Backup operations are runtime-owned
+gateway routes; use `backup create`, `backup restore`, `backup export`, or the
+realm lifecycle operations with `--json` when automation needs the result.

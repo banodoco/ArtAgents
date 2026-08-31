@@ -452,7 +452,6 @@ def test_orchestrator_out_only_requires_project(
         metadata={"requires_output_path": True},
     )
     registry = _registry(orch)
-    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
 
     with pytest.raises(OrchestratorRunnerError, match="project is required"):
         run_orchestrator(

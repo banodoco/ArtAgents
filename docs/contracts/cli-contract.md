@@ -38,7 +38,8 @@ When a product or nested-mount command accepts `--json`, stdout contains
 `\n`. No preamble, no prose, no separator. This is the sole five-key
 machine-contract path for those commands. `doctor --json` is intentionally a
 different read-only diagnostic surface (its object contains `state`, `checks`,
-`next_action`, and `ok`); `serve` and `backup` do not accept `--json`.
+`next_action`, and `ok`). The operational `backup` route accepts `--json` and
+returns its runtime result object rather than the product five-key envelope.
 Agents should follow each verb's help rather than assume every operational
 family has the product envelope.
 

@@ -17,7 +17,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIn("Astrid command gateway", help_text)
         self.assertIn("python3 -m astrid is the package entry point", help_text)
         self.assertIn("doctor emits", help_text)
-        self.assertIn("backup has no --json flag", help_text)
+        self.assertIn("backup emits its runtime result object", help_text)
         # The seven Stage1 families are all documented.
         for family in (
             "projects",

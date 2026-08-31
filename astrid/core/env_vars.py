@@ -17,15 +17,11 @@ import os
 import warnings
 
 # ---------------------------------------------------------------------------
-# Session and home
+# User and workspace configuration
 # ---------------------------------------------------------------------------
 
 ASTRID_HOME = "ASTRID_HOME"
 """Root of the per-user Astrid state directory (~/.astrid). Set by the user."""
-
-ASTRID_SESSION_ID = "ASTRID_SESSION_ID"
-"""Active session UUID. Set by ``astrid attach``; read by the gateway and all
-subcommands to resolve the current session without a filesystem walk."""
 
 ASTRID_PROJECTS_ROOT = "ASTRID_PROJECTS_ROOT"
 """Override for the projects root directory. Set by tests and CI environments."""
@@ -204,7 +200,6 @@ __all__ = [
     "ASTRID_NODE_EXECUTABLE",
     "ASTRID_REMOTION_PROJECT_DIR",
     "ASTRID_TIMELINE_SCHEMA_PYTHONPATH",
-    "ASTRID_SESSION_ID",
     "ASTRID_STATE_HOME",
     "ASTRID_STRICT_INSTRUCTION_SUBST",
     "ASTRID_TASK_ITEM_ID",

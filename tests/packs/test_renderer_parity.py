@@ -650,7 +650,6 @@ def test_real_raw_artifact_with_tampered_bytes_is_rejected(tmp_path: Path) -> No
 
 def _clear_task_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "ASTRID_SESSION_ID",
         "ASTRID_PROJECT_RUN",
         "ASTRID_TASK_RUN_ID",
         "ASTRID_TASK_PROJECT",

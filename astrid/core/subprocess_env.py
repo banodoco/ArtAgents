@@ -29,9 +29,6 @@ from astrid.core.env_vars import (
     ASTRID_PROJECTS_ROOT as PROJECTS_ROOT_ENV,
 )
 from astrid.core.env_vars import (
-    ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV,
-)
-from astrid.core.env_vars import (
     ASTRID_TASK_ITEM_ID as TASK_ITEM_ID_ENV,
 )
 from astrid.core.env_vars import (
@@ -78,7 +75,6 @@ _ASTRID_PROPAGATED_ENV = frozenset(
     {
         ASTRID_HOME_ENV,
         TIMELINE_SCHEMA_PYTHONPATH_ENV,
-        ASTRID_SESSION_ID_ENV,
         PROJECTS_ROOT_ENV,
         PROJECT_RUN_ENV,
         PROJECT_SLUG_ENV,

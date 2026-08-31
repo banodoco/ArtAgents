@@ -56,8 +56,8 @@ attempting that handoff.
 The seven top-level gateway families are `projects`, `timelines`, `media`,
 `tasks`, `runs`, `doctor`, and `backup`; `timelines shots` and `media
 references` are nested mounts. `doctor`
-and `backup` use runtime routes and report a typed `unavailable` result until
-the runtime exposes the requested operation.
+and `backup` use runtime routes. Backup supports create/restore/export and realm
+lifecycle operations, with `--json` for a machine-readable result.
 
 Runtime health, project identity, media objects, timeline versions, task/run
 state, receipts, and events are authoritative only in the workspace runtime.

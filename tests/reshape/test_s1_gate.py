@@ -90,7 +90,6 @@ def _env_probe_test(tmp_path: Path) -> Path:
         "    home = os.environ[\"ASTRID_HOME\"]\n"
         "    assert Path(root).is_dir()\n"
         "    assert Path(home).is_dir()\n"
-        "    assert \"ASTRID_SESSION_ID\" not in os.environ\n"
         "    from astrid.core.project.guidance import selected_project\n"
         "    assert selected_project(None) == (None, 'missing')\n",
     )
