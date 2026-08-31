@@ -741,6 +741,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
             out=staging_root,
             project="demo",
             inputs=inputs,
+            projects_root=projects_root,
             project_was_auto_resolved=True,
             run_root=staging_root,
         ),

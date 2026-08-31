@@ -123,6 +123,7 @@ def test_direct_project_runner_requires_kernel_staging(
                 out=None,
                 project="demo",
                 inputs=inputs,
+                projects_root=projects_root,
             ),
             load_default_registry(),
         )
@@ -144,6 +145,7 @@ def test_kernel_admitted_runner_uses_staging_without_filesystem_ledger(
             out=staging,
             project="demo",
             inputs=inputs,
+            projects_root=projects_root,
             project_was_auto_resolved=True,
         ),
         load_default_registry(),
@@ -180,6 +182,7 @@ def test_attached_runner_does_not_create_a_secondary_filesystem_ledger(
             out=staging,
             project="demo",
             inputs=inputs,
+            projects_root=projects_root,
             project_was_auto_resolved=True,
         ),
         load_default_registry(),
@@ -212,6 +215,7 @@ def test_auto_resolved_project_retains_kernel_selected_staging(
             out=staging,
             project=None,
             inputs=inputs,
+            projects_root=projects_root,
         ),
         load_default_registry(),
     )
@@ -248,6 +252,7 @@ def test_facade_without_project_fails_before_creating_ledger(
                 out=out_arg,
                 project=None,
                 inputs=inputs,
+                projects_root=projects_root,
             ),
             load_default_registry(),
         )

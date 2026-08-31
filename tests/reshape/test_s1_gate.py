@@ -127,8 +127,8 @@ def test_gate_never_selects_the_broad_suite() -> None:
 
 def test_manifest_and_registry_lanes_share_the_registry_file() -> None:
     by_name = {lane.name: lane for lane in LANES}
-    assert by_name["manifest"].selectors == ("tests/v10/test_registry.py",)
-    assert by_name["registry"].selectors == ("tests/v10/test_registry.py",)
+    assert by_name["manifest"].selectors == ("tests/v10/test_domain_cli_surface.py",)
+    assert by_name["registry"].selectors == ("tests/v10/test_domain_cli_surface.py",)
 
 
 def test_bridge_and_provider_lanes_use_runtime_boundary_contracts() -> None:
@@ -143,7 +143,7 @@ def test_bridge_and_provider_lanes_use_runtime_boundary_contracts() -> None:
 
 def test_catalog_and_migration_lanes_share_the_migration_file() -> None:
     by_name = {lane.name: lane for lane in LANES}
-    expected = ("tests/v10/test_catalog_migrations.py",)
+    expected = ("tests/reshape/test_migration_gate.py",)
     assert by_name["catalog"].selectors == expected
     assert by_name["migration"].selectors == expected
 
@@ -327,7 +327,7 @@ def _fake_summary(*, ok: bool, exit_code: int) -> GateSummary:
         lanes={
             "manifest": LaneResult(
                 name="manifest",
-                selectors=("tests/v10/test_registry.py",),
+                selectors=("tests/v10/test_domain_cli_surface.py",),
                 passed=39,
                 failed=0,
                 skipped=0,

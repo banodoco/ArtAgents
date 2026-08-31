@@ -1245,7 +1245,7 @@ def _resolve_projects_root(project_root: str | Path | None, project: str | None)
 
 
 def _runtime_selected_project() -> str | None:
-    """Project selection is never inferred by the SDK compatibility layer."""
+    """Project selection is never inferred by the SDK runtime boundary."""
     return None
 
 
@@ -1266,9 +1266,9 @@ def _kernel_invoke(
 
     The SDK is a client of the workspace runtime.  It must not compose a
     local application, open SQLite, or execute a capability in-process on the
-    normal invocation path.  ``projects_root`` and ``registry`` remain in the
-    signature solely for compatibility with injectable test doubles and are
-    intentionally unused here.
+    normal invocation path.  ``projects_root`` and ``registry`` are explicit
+    dependency-injection seams for callers that provide test doubles and are
+    intentionally unused by the runtime admission request.
     """
     del projects_root, registry
 

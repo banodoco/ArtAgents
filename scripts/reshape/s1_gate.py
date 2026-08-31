@@ -70,15 +70,15 @@ class Lane:
 # registry composition). Every lane is reported independently in the
 # summary so each dimension has its own retained evidence.
 LANES: tuple[Lane, ...] = (
-    Lane("manifest", ("tests/v10/test_registry.py",)),
-    Lane("catalog", ("tests/v10/test_catalog_migrations.py",)),
-    Lane("migration", ("tests/v10/test_catalog_migrations.py",)),
-    Lane("registry", ("tests/v10/test_registry.py",)),
-    Lane("receipt", ("tests/v10/test_receipts_events.py",)),
-    Lane("replay", ("tests/v10/test_receipts_events.py",)),
-    Lane("crash", ("tests/v10/test_crash_atomicity.py",)),
-    Lane("contention", ("tests/v10/test_contention.py",)),
-    Lane("conformance", ("tests/v10/test_conformance.py",)),
+    Lane("manifest", ("tests/v10/test_domain_cli_surface.py",)),
+    Lane("catalog", ("tests/reshape/test_migration_gate.py",)),
+    Lane("migration", ("tests/reshape/test_migration_gate.py",)),
+    Lane("registry", ("tests/v10/test_domain_cli_surface.py",)),
+    Lane("receipt", ("tests/stage1/test_events_runtime_cutover.py",)),
+    Lane("replay", ("tests/stage1/test_events_runtime_cutover.py",)),
+    Lane("crash", ("tests/core/util/test_atomic_io.py",)),
+    Lane("contention", ("tests/concurrency/test_ci_sandbox_isolation.py",)),
+    Lane("conformance", ("tests/test_recoverability_conformance.py",)),
     Lane(
         "lint",
         ("tests/v10/test_authority_lint.py", "tests/test_structure_contracts.py"),

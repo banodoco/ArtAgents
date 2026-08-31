@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("banodoco_timeline_schema")
 
-from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
+from astrid.core.io.media_import import sha256_file_bytes
 from astrid.core.rendering import remotion_runtime
 from astrid.core.rendering.remotion_runtime import (
     NODE_EXECUTABLE_ENV,
@@ -67,10 +67,12 @@ def _timeline_config() -> dict:
 
 def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespace:
     digest = sha256_file_bytes(FIXTURE_VIDEO)
-    managed = managed_media_path(root, digest)
-    managed.parent.mkdir(parents=True, exist_ok=True)
-    if not managed.exists():
-        managed.write_bytes(FIXTURE_VIDEO.read_bytes())
+    # The worker receives an explicit host handoff.  This is deliberately
+    # staged under the invocation's materialized root; no product locator or
+    # local managed-media authority is consulted by the adapter.
+    materialized = root / "staging" / "managed-objects" / "media-source.mp4"
+    materialized.parent.mkdir(parents=True, exist_ok=True)
+    materialized.write_bytes(FIXTURE_VIDEO.read_bytes())
     return SimpleNamespace(
         id="render-task-1",
         created_at=TS,
@@ -81,6 +83,7 @@ def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespac
                 "timeline_ref": "timeline-1",
                 "expected_version": 1,
                 "output_filename": "requested-render.mp4",
+                "materialized_objects": {"media-source": str(materialized)},
             },
             "timeline_snapshot": {
                 "timeline_id": "timeline-id",
@@ -184,7 +187,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
     digest = task.spec["timeline_snapshot"]["registry"]["assets"]["source"][
         "content_sha256"
     ].removeprefix("sha256:")
-    managed = managed_media_path(tmp_path, digest)
+    managed = tmp_path / "staging" / "managed-objects" / "media-source.mp4"
     captured: dict[str, Any] = {}
 
     def fake_run_executor(request, _registry):
@@ -601,7 +604,7 @@ def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
 @pytest.mark.parametrize(
     "change, expected",
     [
-        ("missing_asset", "managed media .* missing"),
+        ("missing_asset", "runtime object .* no host materialization"),
         ("missing_renderer", "server-owned"),
     ],
 )

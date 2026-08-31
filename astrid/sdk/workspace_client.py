@@ -139,8 +139,8 @@ class WorkspaceClient:
         return plain(value)
 
     # The following methods are intentionally explicit.  They form the
-    # product adapter's typed vocabulary and keep generated operation names and
-    # compatibility aliases in one place.
+    # product adapter's typed vocabulary and keep generated operation names in
+    # one explicit mapping.
     def health(self) -> Any:
         return self._call_generated("health")
 

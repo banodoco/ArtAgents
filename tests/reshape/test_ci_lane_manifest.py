@@ -11,9 +11,7 @@ CI_SCRIPT = REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh"
 def test_ci_lane_manifest_targets_current_release_tests() -> None:
     source = CI_SCRIPT.read_text(encoding="utf-8")
     expected = (
-        "tests/core/test_executor_runner_errors.py::test_external_executor_env_includes_definition_env",
-        "tests/core/test_executor_runner_errors.py::test_external_executor_env_inherits_os_environ",
-        "tests/core/test_executor_runner_errors.py::test_external_executor_does_not_inherit_undeclared_host_env",
+        "tests/stage1/test_zero_shim_execution_pack_deletion.py",
         "tests/core/test_orchestrator_runner_errors.py::test_command_orchestrator_preserves_declared_passthrough_env",
         "tests/core/test_orchestrator_runner_errors.py::test_command_orchestrator_does_not_spread_undeclared_host_env",
         "tests/packs/test_renderer_parity.py",
