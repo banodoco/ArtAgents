@@ -229,7 +229,7 @@ python3 -m astrid tasks create --project demo \
 python3 -m astrid tasks list --project demo --json
 
 # show — one task's full immutable read model
-python3 -m astrid tasks show T_01ABC --json
+python3 -m astrid tasks show --project demo T_01ABC --json
 
 # cancel — one nonterminal task (no executor fence is exposed)
 python3 -m astrid tasks cancel --project demo T_01ABC --json
@@ -238,15 +238,15 @@ python3 -m astrid tasks cancel --project demo T_01ABC --json
 python3 -m astrid tasks retry --project demo T_01ABC --json
 
 # events — the task's ordered core.task stream events
-python3 -m astrid tasks events T_01ABC --json
+python3 -m astrid tasks events --project demo T_01ABC --json
 ```
 
 `tasks retry` retries a single task. Batch retry over a run group is the
-`runs retry-failed` surface (next section), not a `tasks` flag.
+`runs retry` surface (next section), not a `tasks` flag.
 
 ---
 
-## 5. `runs` — list / show / cancel / retry-failed / events
+## 5. `runs` — list / show / cancel / retry / events
 
 ```bash
 # list — project-scoped (started_at, then id)
@@ -263,9 +263,9 @@ python3 -m astrid runs show --project demo RUN_01ABC --evidence --json
 # cancel — drive every queued, blocked, or running child to terminal cancelled
 python3 -m astrid runs cancel --project demo RUN_01ABC --json
 
-# retry-failed — batch retry (see semantics below)
-python3 -m astrid runs retry-failed --project demo RUN_01ABC --json
-python3 -m astrid runs retry-failed --project demo RUN_01ABC \
+# retry — batch retry (see semantics below)
+python3 -m astrid runs retry --project demo RUN_01ABC --json
+python3 -m astrid runs retry --project demo RUN_01ABC \
   --task T_01ABC --task T_02DEF --json
 
 # events — the run's ordered core.run stream events
@@ -274,7 +274,7 @@ python3 -m astrid runs events --project demo RUN_01ABC --json
 
 ### Batch retry semantics (frozen)
 
-`runs retry-failed` has exactly two modes, and the decision is frozen:
+`runs retry` has exactly two modes, and the decision is frozen:
 
 - **All-failed-children (default).** With no `--task` flag, the command
   retries every eligible failed/expired child of the run
@@ -283,11 +283,11 @@ python3 -m astrid runs events --project demo RUN_01ABC --json
   exact ordinal subset (`selected_task_ids=[T_01ABC, T_02DEF, …]`).
 
 There is no `--run` flag on `tasks retry`; the batch retry surface is
-`runs retry-failed`, and this is the frozen policy.
+`runs retry`, and this is the frozen policy.
 
 ---
 
-## 6. `timelines` — create / list / show / save / archive / unarchive / history / diff / visualize / render
+## 6. `timelines` — create / list / show / save / archive / recover / history / diff / visualize / render
 
 ```bash
 # create — one client.timelines.create call (slug immutable)

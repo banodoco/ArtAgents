@@ -81,7 +81,7 @@ success, `1` typed SDK/runtime error, `2` usage/parse error.
 | Family | Verbs | Notes |
 | --- | --- | --- |
 | `projects` | `create`, `list`, `show`, `update` | Project selection is runtime-scoped; a sole runtime project may be selected implicitly, while multiple projects require `--project`. |
-| `timelines` | `create`, `list`, `show`, `save`, `archive`, `unarchive`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `unarchive` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
+| `timelines` | `create`, `list`, `show`, `save`, `archive`, `recover`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `recover` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
 | `media` | `import`, `list`, `show`, `verify` | Media is ingested and addressed as runtime-owned objects; reference-in-place repair is not a Stage1 user operation. |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
 | `runs` | `list`, `show`, `cancel`, `retry`, `events` | `retry` retries the selected run's eligible failed/expired children (all by default or an explicit `--task` subset) |
@@ -94,7 +94,7 @@ and multiple projects require an explicit reference.
 Nested mounts (reachable only beneath their parent family, never top-level):
 
 ```bash
-python3 -m astrid media references ...      # create/update/archive/unarchive/associate/link/set-primary/list/show
+python3 -m astrid media references ...      # create/update/archive/recover/associate/link/set-primary/list/show
 python3 -m astrid timelines shots ...       # project-level reusable list/create/show/add/remove/reorder
 ```
 
@@ -104,9 +104,9 @@ project-local reference name:
 
 ```bash
 python3 -m astrid timelines list --project demo --include-archived --json
-python3 -m astrid timelines unarchive primary --project demo --json
+python3 -m astrid timelines recover primary --project demo --json
 python3 -m astrid media references list --project demo --include-archived --json
-python3 -m astrid media references unarchive "Character Name" --project demo --json
+python3 -m astrid media references recover "Character Name" --project demo --json
 ```
 
 Routes not exposed by the connected runtime return a typed `unavailable`
@@ -190,7 +190,7 @@ Rendering has two deliberately explicit contracts. `rendering.render` with
 `timeline` consumes a project-owned exported or pipeline JSON file; a value
 like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
 a canonical runtime slug/UUID/ULID and optionally enforces `expected_version`;
-use `astrid timelines render <ref>` for the product CLI. Managed visualization
+use `astrid timelines render <ref> --project <project>` for the product CLI. Managed visualization
 likewise resolves the canonical runtime timeline and pins its actual stream
 head. Visualization resolves only runtime-owned timeline references and frozen
 materializations; raw timeline paths and event-log files are not product

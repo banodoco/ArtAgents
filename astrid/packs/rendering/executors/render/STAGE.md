@@ -29,7 +29,7 @@ meaning. `timeline_ref` names a managed kernel slug, UUID, or ULID and may be
 paired with `expected_version`. The managed mode resolves and pins the stream
 head before admission, materializes immutable private renderer inputs, and
 stamps the canonical ID, version, tail hash, and content hashes in provenance.
-The product CLI exposes that mode as `astrid timelines render <ref>`.
+The product CLI exposes that mode as `astrid timelines render <ref> --project <project>`.
 
 ## Quick-start
 

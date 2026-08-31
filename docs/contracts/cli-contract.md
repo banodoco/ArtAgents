@@ -97,7 +97,7 @@ The gateway families and their verbs:
 - **`projects`** — `create`, `list`, `show`, `update`, `select`, `current`.  `select`
   persists a non-authoritative default-project preference (file-side only; no
   receipt, no DB mutation).
-- **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `unarchive`,
+- **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `recover`,
   `history`, `diff`, `visualize`, `render`.  `save` is a whole-document
   compare-and-swap; a stale `--expected-version` is the typed
   `stale_version` and changes nothing. `visualize` emits a run-owned evidence
@@ -112,8 +112,8 @@ The gateway families and their verbs:
   `audio_for`).
 - **`tasks`** — `create`, `list`, `show`, `cancel`, `retry`, `events`.
   `create` admits one immutable task (`--capability` + JSON `--spec`).
-- **`runs`** — `list`, `show`, `cancel`, `retry-failed`, `events`.
-  `retry-failed` is the batch-retry surface (all-failed-children by default,
+- **`runs`** — `list`, `show`, `cancel`, `retry`, `events`.
+  `retry` is the batch-retry surface (all-failed-children by default,
   explicit repeatable `--task` subset otherwise).
 - **`doctor`** — read-only health check (`schema_versions`, managed and
   runtime-managed media-byte integrity, SQLite quick-check, FK status, and

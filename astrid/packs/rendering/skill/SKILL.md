@@ -143,7 +143,7 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 - Use `rendering.render` with `timeline` to produce the final video from an
   explicit exported or pipeline-produced timeline JSON file and, only when
   needed, an asset registry. Use its mutually exclusive `timeline_ref` input
-  (or `astrid timelines render <ref>`) for a canonical kernel slug/UUID/ULID;
+  (or `astrid timelines render <ref> --project <project>`) for a canonical kernel slug/UUID/ULID;
   add `expected_version` when the observed stream head must not change.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
