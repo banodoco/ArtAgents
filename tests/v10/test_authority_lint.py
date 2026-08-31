@@ -6,7 +6,7 @@ documented exemption is proven by a fixture that must stay clean:
 
 - **imports**: kernel-to-pack imports (every ``astrid/core`` file except the
   single composition exemption), pack-to-pack imports between the m1 schema
-  packs, and the documented legacy rendering/builtin prefixes that stay
+  packs, and the documented legacy rendering prefix that stays
   legal in the kernel;
 - **writer authority**: ``DatabaseWriter(`` / writable ``sqlite3.connect``
   outside the kernel store fails; ``mode=ro`` probes and the conformance
@@ -438,17 +438,15 @@ def test_pack_import_of_kernel_currency_and_own_pack_stays_clean(
     assert errors == [], errors
 
 
-def test_legacy_rendering_and_builtin_pack_imports_stay_legal_in_kernel(
+def test_legacy_rendering_pack_imports_stay_legal_in_kernel(
     tmp_path: Path,
 ) -> None:
-    """The m1-m6 legacy capability packs remain in-tree; kernel modules may
-    keep importing the documented rendering/builtin prefixes."""
+    """The rendering capability pack remains an allowed kernel import."""
     _bootstrap(tmp_path)
     _write(
         tmp_path,
         "astrid/core/legacy_user.py",
         "from astrid.packs.rendering.something import render\n"
-        "from astrid.packs.builtin.helpers import util\n",
     )
     errors = lint_import_boundaries(tmp_path)
     assert errors == [], errors

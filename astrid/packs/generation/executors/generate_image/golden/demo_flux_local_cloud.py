@@ -24,7 +24,7 @@ from tempfile import TemporaryDirectory
 # ---------------------------------------------------------------------------
 
 _THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parents[4]  # astrid/packs/builtin/generate_image/golden → repo
+_REPO_ROOT = _THIS_DIR.parents[4]  # astrid/packs/generation/generate_image/golden → repo
 
 
 def _resolve_image_ref() -> str:

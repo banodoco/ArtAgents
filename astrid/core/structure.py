@@ -589,12 +589,10 @@ def _resolve_import_from_module(node: ast.ImportFrom, *, module_name: str) -> st
     return ".".join(parts)
 
 
-# The m1-m6 legacy rendering/builtin capability packs remain in-tree (plan
-# step 22.3): kernel CLI/gateway modules legitimately import them, and the
-# legacy packs form their own pre-existing import graph. The m1 boundary is
-# about the new schema packs (timeline/shots/references) and any other pack
-# module — never the documented legacy prefixes.
-_LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.", "astrid.packs.builtin.")
+# The rendering capability pack remains in-tree (plan step 22.3): kernel
+# CLI/gateway modules legitimately import it. The retired builtin shell is
+# deliberately absent from this allowlist and cannot re-enter the source graph.
+_LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.",)
 
 
 def _is_forbidden_core_import(module: str) -> bool:

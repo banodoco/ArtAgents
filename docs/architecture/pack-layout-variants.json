@@ -31,22 +31,6 @@
   },
   "packs": [
     {
-      "id": "builtin",
-      "variant": "orchestrator_pack",
-      "has_pack_yaml": true,
-      "executor_count": 0,
-      "orchestrator_count": 1,
-      "element_count": 0,
-      "has_skill": false,
-      "has_agents_md": false,
-      "has_init_py": false,
-      "notes": "Hidden compatibility shell (M2 classified). visibility:hidden, status:deprecated. Declares 15+ pack-level aliases mapping legacy builtin.* capability ids to canonical homes. Contains fixtures/ and golden/. agent_probe.py relocated to orchestrators/agent_probe/run.py in M2. Not moved under _shells/ in M2 to preserve stable pack ID and alias contract.",
-      "extra_contents": [
-        "fixtures/",
-        "golden/"
-      ]
-    },
-    {
       "id": "comfy_wrap",
       "variant": "executor_pack",
       "has_pack_yaml": true,
@@ -281,8 +265,7 @@
       "youtube"
     ],
     "orchestrator_pack": [
-      "text_analysis",
-      "builtin"
+      "text_analysis"
     ],
     "mixed_executor_orchestrator": [
       "foley",
@@ -294,7 +277,7 @@
       "rendering"
     ],
     "mixed_full": [],
-    "total_shipped_packs": 19
+    "total_shipped_packs": 18
   },
   "documented_exceptions": {
     "description": "Every declared layout exception that keeps a pack from being purely canonical. None remain after the M2 cleanup.",

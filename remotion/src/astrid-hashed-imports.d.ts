@@ -13,11 +13,6 @@ declare module '@pack-local-elements-effects/*' {
   export default component;
 }
 
-declare module '@pack-builtin-elements-effects/*' {
-  const component: import('@banodoco/timeline-composition/theme-api').EffectComponent;
-  export default component;
-}
-
 declare module '@pack-rendering-elements-effects/*' {
   const component: import('@banodoco/timeline-composition/theme-api').EffectComponent;
   export default component;
@@ -38,11 +33,6 @@ declare module '@pack-local-elements-animations/*' {
   export default component;
 }
 
-declare module '@pack-builtin-elements-animations/*' {
-  const component: import('@banodoco/timeline-composition/theme-api').AnimationComponent;
-  export default component;
-}
-
 declare module '@pack-rendering-elements-animations/*' {
   const component: import('@banodoco/timeline-composition/theme-api').AnimationComponent;
   export default component;
@@ -59,11 +49,6 @@ declare module '@theme-transitions/*' {
 }
 
 declare module '@pack-local-elements-transitions/*' {
-  const component: import('@banodoco/timeline-composition/theme-api').TransitionComponent;
-  export default component;
-}
-
-declare module '@pack-builtin-elements-transitions/*' {
   const component: import('@banodoco/timeline-composition/theme-api').TransitionComponent;
   export default component;
 }

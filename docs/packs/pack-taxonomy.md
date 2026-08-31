@@ -41,8 +41,8 @@ and origin `builtin` means "the editorial pack ships with Astrid."
 
 Controls whether the pack is installed by default or must be opted into.
 
-- `core` — Always present. Cannot be uninstalled. (Currently: `builtin`,
-  `iteration`, `media`.) The `_core` skill directory is not a pack — it is a
+- `core` — Always present. Cannot be uninstalled. (Currently: the shipped
+  capability packs.) The `_core` skill directory is not a pack — it is a
   skill-only shell with no `pack.yaml` (see §Shells and Hidden Packs).
 - `default` — Installed by default but can be removed. Most scaffolded packs.
 - `optional` — Must be explicitly installed.
@@ -71,15 +71,14 @@ Current shipped domains:
 | `integration` | `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
 | `development` | `iteration`, `training` — author-test-iterate tooling and model training |
 | `infrastructure` | `runpod` — GPU provisioning and execution |
-| `system` | `builtin` (compatibility shell, hidden) — legacy namespace shell that preserves backward-compatible pack-level aliases; `_core` is a skill-only shell (no `pack.yaml`, no capabilities) classified under §Shells and Hidden Packs |
+| `system` | `_core` is a skill-only shell (no `pack.yaml`, no capabilities) classified under §Shells and Hidden Packs |
 | `general` | scaffolded packs, local scratch pack |
 
 **`hype` is not a domain.** The `video_editing.hype` orchestrator lives inside the
 `video_editing` pack (domain `media`). An orchestrator id like `video_editing.hype`
 identifies a *capability*, not a pack taxonomy category. If you find yourself
 wanting a `hype` domain, stop — what you really want is a capability filter
-(`astrid.sdk.discover()` can filter capabilities by id or keyword). The legacy id
-`builtin.hype` is preserved as a deprecated pack-level alias.
+(`astrid.sdk.discover()` can filter capabilities by id or keyword).
 
 ### `stability`
 
@@ -116,8 +115,7 @@ These terms are easy to confuse. Here is the definitive distinction:
 
 **Capability** — Something a pack can *do*. An executor, orchestrator, or
 element. Identified by a qualified id like `video_editing.hype` or
-`media.clip_extract`. The legacy id `builtin.hype` is preserved as a
-deprecated alias.
+`media.clip_extract`.
 
 **Category** — Free-form text in `metadata.category`. Not a taxonomy axis.
 The `--category` CLI flag filters on `metadata.category` only. If you want
@@ -136,8 +134,8 @@ Every pack payload includes both top-level taxonomy fields and a nested
 
 ```json
 {
-  "id": "builtin",
-  "domain": "system",
+  "id": "rendering",
+  "domain": "media",
   "origin": "builtin",
   "install_tier": "core",
   "pack_type": "capability",
@@ -147,7 +145,7 @@ Every pack payload includes both top-level taxonomy fields and a nested
     "origin": "builtin",
     "install_tier": "core",
     "pack_type": "capability",
-    "domain": "system",
+    "domain": "media",
     "stability": "stable",
     "support": "core"
   }
@@ -161,13 +159,13 @@ domain-grouped views:
 
 ```json
 {
-  "packs": [{ "id": "builtin", "domain": "system", ... }, ...],
+  "packs": [{ "id": "rendering", "domain": "media", ... }, ...],
   "groups": [
     {
       "group_by": "domain",
-      "value": "system",
-      "taxonomy": { "domain": "system" },
-      "packs": [{ "id": "builtin", ... }]
+      "value": "media",
+      "taxonomy": { "domain": "media" },
+      "packs": [{ "id": "rendering", ... }]
     }
   ]
 }
@@ -181,21 +179,21 @@ Plain-text `list` and `status` group output by domain:
 taxonomy: domain=development
 iteration       Astrid Iteration        1.0.0   origin=builtin  tier=core       type=capability  stability=stable       support=core
 
-taxonomy: domain=system
-builtin Astrid Built-in        1.0.0   origin=builtin  tier=core       type=capability  stability=stable       support=core
+taxonomy: domain=media
+rendering       Astrid Rendering       1.0.0   origin=builtin  tier=core       type=capability  stability=stable       support=core
 ```
 
 `python3 -m astrid.core.pack.cli inspect` adds a dedicated taxonomy block:
 
 ```text
-id: builtin
-name: Astrid Built-in
+id: rendering
+name: Astrid Rendering
 ...
 taxonomy:
   origin: builtin
   install_tier: core
   pack_type: capability
-  domain: system
+  domain: media
   stability: stable
   support: core
 ```
@@ -251,7 +249,7 @@ python3 -m astrid.core.pack.cli list --show-hidden
 python3 -m astrid.core.pack.cli status --show-hidden
 
 # Inspect always works for any pack (hidden or visible)
-python3 -m astrid.core.pack.cli inspect builtin
+python3 -m astrid.core.pack.cli inspect rendering
 ```
 
 ### Example Packs vs. Runtime Packs
@@ -263,9 +261,7 @@ Not every pack directory in the repository is a runtime-discovered pack:
   `editorial`, `video_editing`, `foley`, `training`, `youtube`, `fal`,
   `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `comfy_wrap`,
   `stream_content`, plus the dynamically-created `local` scratch
-  pack. The legacy `builtin` pack is a hidden compatibility shell that preserves the
-  `builtin` namespace for backward compatibility (see §Shells and Hidden Packs). The
-  `_core` directory is a skill-only shell — it contains only `skill/SKILL.md`
+  pack. The `_core` directory is a skill-only shell — it contains only `skill/SKILL.md`
   and is not a pack (no `pack.yaml`).
 
 - **`examples/packs/`** — Teaching packs. These are committed reference examples
@@ -313,34 +309,6 @@ and is not discovered by `packs list` or `packs status`.
 
 M2 treats `_core` as a **permanent visible exception** — it is not moved
 under `_shells/` because the coupled paths above depend on its location.
-
-#### `builtin` — Compatibility Shell
-
-`astrid/packs/builtin/` is a **hidden compatibility shell** (`visibility:
-hidden`, `status: deprecated`, `capabilities: []`). It serves three purposes
-in M2:
-
-1. **Compatibility namespace** — The pack id `builtin` preserves the legacy
-   namespace so that old `builtin.*` references remain resolvable. The actual
-   `builtin.*` → canonical aliases (e.g., `builtin.transcribe` →
-   `editorial.transcribe`) are declared in the canonical packs' own
-   `pack.yaml` files under their `aliases:` blocks — not in
-   `builtin/pack.yaml`. The canonical packs that carry these aliases include
-   `editorial`, `foley`, `generation`, `fal`, `youtube`, `rendering`,
-   `training`, `understanding`, `video_editing`, `vibecomfy`, `runpod`, and
-   `moirae`.
-
-2. **Agent probe** — `orchestrators/agent_probe/` is a legacy DSL
-   orchestrator shim (`@orchestrator("builtin.agent_probe")`) used by
-   regression test files. It remains in `builtin/` under a documented
-   exception deferred to M2; migration out of `builtin/` is a follow-up task.
-
-3. **Fixtures and golden data** — `fixtures/smoke/` and
-   `golden/smoke.events.jsonl` are test infrastructure artifacts.
-
-The `builtin` pack is **not** moved under `_shells/` in M2. Its
-classification as a visible compatibility shell preserves the pack id
-`builtin` and the test references to `builtin.agent_probe`.
 
 #### `stream_content`, `comfy_wrap` — Real Shipped Packs
 

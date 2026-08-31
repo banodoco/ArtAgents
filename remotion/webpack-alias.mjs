@@ -6,7 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ACTIVE_THEME_DIR = path.resolve(__dirname, '_active_theme');
 const ASTRID_DIR = path.resolve(__dirname, '..');
-const BUILTIN_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/builtin/elements');
 const RENDERING_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/rendering/elements');
 const LOCAL_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/local/elements');
 
@@ -53,17 +52,14 @@ const primitiveAliases = {
   '@theme-elements-effects': path.resolve(ACTIVE_THEME_DIR, 'elements/effects'),
   '@theme-effects': path.resolve(ACTIVE_THEME_DIR, 'effects'),
   '@pack-local-elements-effects': path.resolve(LOCAL_PACK_ELEMENTS_DIR, 'effects'),
-  '@pack-builtin-elements-effects': path.resolve(BUILTIN_PACK_ELEMENTS_DIR, 'effects'),
   '@pack-rendering-elements-effects': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'effects'),
   '@theme-elements-animations': path.resolve(ACTIVE_THEME_DIR, 'elements/animations'),
   '@theme-animations': path.resolve(ACTIVE_THEME_DIR, 'animations'),
   '@pack-local-elements-animations': path.resolve(LOCAL_PACK_ELEMENTS_DIR, 'animations'),
-  '@pack-builtin-elements-animations': path.resolve(BUILTIN_PACK_ELEMENTS_DIR, 'animations'),
   '@pack-rendering-elements-animations': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'animations'),
   '@theme-elements-transitions': path.resolve(ACTIVE_THEME_DIR, 'elements/transitions'),
   '@theme-transitions': path.resolve(ACTIVE_THEME_DIR, 'transitions'),
   '@pack-local-elements-transitions': path.resolve(LOCAL_PACK_ELEMENTS_DIR, 'transitions'),
-  '@pack-builtin-elements-transitions': path.resolve(BUILTIN_PACK_ELEMENTS_DIR, 'transitions'),
   '@pack-rendering-elements-transitions': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'transitions'),
   '@workspace-animations': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'animations'),
   '@workspace-effects': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'effects'),

@@ -18,10 +18,11 @@ result = sdk.invoke(
 ```
 
 Astrid is not session-gated and has no `setup` command: product commands run
-directly against the local SQLite kernel (`python3 -m astrid doctor --json`
-first, then the `projects`/`timelines`/`media`/`tasks`/`runs` families), and
-pack capabilities run through the SDK (`astrid.sdk.discover` /
-`get_capability` / `invoke`).
+through the workspace runtime (`python3 -m astrid doctor --json` first, then
+the `projects`/`timelines`/`media`/`tasks`/`runs` families), and pack
+capabilities run through the SDK (`astrid.sdk.discover` / `get_capability` /
+`invoke`). The runtime owns durable state; tool authors must use these public
+surfaces rather than opening a database or writing a parallel state store.
 
 Do not chain pipeline internals by hand unless you are debugging one specific
 stage. Source-analysis executors intentionally pass file artifacts such as
@@ -176,10 +177,10 @@ conventions.
 
 The authoritative layout for every pack is its `pack.yaml` manifest. The
 `content` roots declared there — `executors`, `orchestrators`, `elements` —
-are what the runtime and validation use. Folder scanning is a fallback for
-legacy packs without a `schema_version`; new packs must declare their layout
-explicitly. See [creating-packs.md](../packs/creating-packs.md) for the full pack
-authoring workflow and manifest schemas.
+are what the runtime and validation use. New packs must declare their layout
+explicitly; do not rely on implicit folder discovery. See
+[creating-packs.md](../packs/creating-packs.md) for the full pack authoring
+workflow and manifest schemas.
 
 Executor folders use:
 

@@ -171,7 +171,7 @@ def _build_fake_run_sync(output_dir: Path):
 # ---------------------------------------------------------------------------
 
 _THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _THIS_DIR.parents[4]  # astrid/packs/builtin/generate_video/golden → repo
+_REPO_ROOT = _THIS_DIR.parents[4]  # astrid/packs/generation/generate_video/golden → repo
 
 
 def _resolve_image_ref() -> str:

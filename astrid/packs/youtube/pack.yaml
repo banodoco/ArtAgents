@@ -40,9 +40,3 @@ agent:
   - youtube.upload
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: builtin.youtube_audio
-  canonical_id: youtube.youtube_audio
-  deprecated: true
-  deprecation_message: Moved to youtube.youtube_audio

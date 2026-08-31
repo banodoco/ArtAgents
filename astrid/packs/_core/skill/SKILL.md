@@ -321,7 +321,7 @@ and `vibecomfy.run` (executor only, not an orchestrator).
 
 Element source priority: active theme →
 `astrid/packs/local/elements/<kind>/<id>` (gitignored scratch pack) →
-`astrid/packs/builtin/elements/<kind>/<id>`. Forking copies the source element
+`astrid/packs/rendering/elements/<kind>/<id>`. Forking copies the source element
 into `astrid/packs/local/`, auto-creating `astrid/packs/local/pack.yaml` and
 rewriting the element's `pack_id` to `local`.
 

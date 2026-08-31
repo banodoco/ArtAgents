@@ -1,6 +1,6 @@
 """Conformance tests for astrid/core/env_vars.py.
 
-(a) Every constant in env_vars.py has value == name, except ASTRID_AUTHOR_TEST_LEGACY.
+(a) Every constant in env_vars.py has value == name.
 (b) No constant name from env_vars.py is assigned anywhere else in astrid/
     (excluding the allowlisted directories: packs/, threads/, audit/).
 (c) No bare os.environ.get("ASTRID_*") / os.environ["ASTRID_*"] string in
@@ -23,9 +23,6 @@ ASTRID_ROOT = Path(__file__).parent.parent / "astrid"
 CORE_ROOT = ASTRID_ROOT / "core"
 
 _ALLOWLISTED_DIRS = {"packs", "threads", "audit"}
-
-_LEGACY_EXCEPTION = "ASTRID_AUTHOR_TEST_LEGACY"
-
 
 def _all_constants() -> dict[str, str]:
     """Return {name: value} for all string constants in env_vars.py."""
@@ -63,25 +60,12 @@ class TestNameEqualsValue:
         constants = _all_constants()
         violations = []
         for name, value in constants.items():
-            if name == _LEGACY_EXCEPTION:
-                continue  # documented exception
             if name != value:
                 violations.append(f"  {name!r} = {value!r}  (name != value)")
         assert not violations, (
             f"env_vars.py constants must satisfy name == value. Violations:\n"
             + "\n".join(violations)
         )
-
-    def test_legacy_exception_is_documented(self):
-        """ASTRID_AUTHOR_TEST_LEGACY must exist and its value must differ from its name."""
-        constants = _all_constants()
-        assert _LEGACY_EXCEPTION in constants, (
-            f"{_LEGACY_EXCEPTION} must be defined in env_vars.py as the documented exception"
-        )
-        assert constants[_LEGACY_EXCEPTION] != _LEGACY_EXCEPTION, (
-            f"{_LEGACY_EXCEPTION} value should differ from its name (it's the backward-compat alias)"
-        )
-
 
 # ---------------------------------------------------------------------------
 # (b) exactly one definition site per constant name

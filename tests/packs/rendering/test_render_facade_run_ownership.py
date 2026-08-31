@@ -43,11 +43,6 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ASTRID_TASK_STEP_ID",
         "ASTRID_TASK_ITEM_ID",
         "ASTRID_TASK_ITERATION",
-        "ASTRID_THREADS_OFF",
-        "ASTRID_THREAD_INHERITED",
-        "ASTRID_THREAD_ID",
-        "ASTRID_RUN_ID",
-        "ASTRID_PARENT_RUN_ID",
     ):
         monkeypatch.delenv(name, raising=False)
 

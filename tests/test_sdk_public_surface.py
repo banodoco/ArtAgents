@@ -216,7 +216,6 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
     assert inventory.generation_modes
     json.dumps(inventory.to_dict())
 
-    assert any(pack["id"] == "builtin" for pack in inventory.packs)
     assert all("source_kind" in pack for pack in inventory.packs)
     assert all("trust" in pack for pack in inventory.packs)
     assert any(backend["id"] == "local" for backend in inventory.generation_backends)
@@ -393,7 +392,7 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
         sdk,
         "_build_discovery_metadata",
         lambda discovered_packs, *, element_registry: (
-            ({"id": "builtin", "source_kind": "source", "priority_index": 0},),
+            (),
             ({"id": "local"},),
             ({"canonical_kind": "effects"},),
             ({"id": "prompt"},),
@@ -450,7 +449,7 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
         "video_editing.hype",
         "effects/text-card",
     )
-    assert inventory.packs == ({"id": "builtin", "source_kind": "source", "priority_index": 0},)
+    assert inventory.packs == ()
     assert inventory.generation_backends == ({"id": "local"},)
     assert inventory.element_kinds == ({"canonical_kind": "effects"},)
     assert inventory.generation_features == ({"id": "prompt"},)
@@ -1283,24 +1282,11 @@ def test_capability_to_dict_preserves_safety_permissions_as_strings() -> None:
             )
 
 
-def test_discover_empty_permissions_pack_has_empty_lists_and_trust() -> None:
-    """A pack that declares no permissions must still have empty
-    ``permissions``/``permission_ids`` lists and the trust block."""
+def test_discover_has_no_retired_builtin_shell_pack() -> None:
+    """The compatibility-only builtin shell is not a discoverable pack."""
     astrid = _import_public_module()
     inventory = astrid.discover()
-
-    # The builtin (deprecated) meta-pack should have empty permissions
-    builtin_pack = next(
-        (pack for pack in inventory.packs if pack["id"] == "builtin"), None
-    )
-    if builtin_pack is not None:
-        assert builtin_pack["permissions"] == []
-        assert builtin_pack["permission_ids"] == []
-        assert builtin_pack["trust"] == {
-            "sandbox": "none",
-            "runs_with_user_process_permissions": True,
-            "permission_enforcement": "disclosure_only",
-        }
+    assert all(pack["id"] != "builtin" for pack in inventory.packs)
 
 
 def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(

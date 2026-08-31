@@ -202,9 +202,22 @@ class RemoteMedia(_RemoteFamily):
         rows = paged_rows(self._client.list_project_objects, str(project), limit=50)
         if rows is None:
             return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
-        if not any(isinstance(item, dict) and str(ref) in {str(item.get("digest")), str(item.get("object_id"))} for item in rows):
+        match = next(
+            (
+                item
+                for item in rows
+                if isinstance(item, dict)
+                and str(ref) in {str(item.get("digest")), str(item.get("object_id"))}
+            ),
+            None,
+        )
+        if match is None:
             return DomainResult.failure(ErrorObject("not_found", "media object is not in the selected project", {"project": str(project)}))
-        return self._typed("get_object", ref)
+        # ``get_object`` is the byte-download endpoint. ``media show`` is a
+        # metadata read and must remain JSON-safe; returning the download
+        # response would put raw bytes in the stable product envelope and make
+        # ``--json`` fail during canonicalization.
+        return DomainResult.success(match)
     def verify(self, project, ref, *, realm="managed_local", idempotency_key=None):
         realm_error = self._managed_realm_error(realm, idempotency_key=idempotency_key)
         if realm_error is not None:

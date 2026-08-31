@@ -43,29 +43,3 @@ agent:
 content:
   executors: executors
   orchestrators: orchestrators
-aliases:
-- kind: executor
-  alias: builtin.pool_build
-  canonical_id: training.pool_build
-  deprecated: true
-  deprecation_message: Moved to training.pool_build
-- kind: executor
-  alias: builtin.pool_merge
-  canonical_id: training.pool_merge
-  deprecated: true
-  deprecation_message: Moved to training.pool_merge
-- kind: executor
-  alias: builtin.search_loras
-  canonical_id: training.search_loras
-  deprecated: true
-  deprecation_message: Moved to training.search_loras
-- kind: orchestrator
-  alias: builtin.training_run
-  canonical_id: training.training_run
-  deprecated: true
-  deprecation_message: Moved to training.training_run
-- kind: orchestrator
-  alias: builtin.dataset_build
-  canonical_id: training.dataset_build
-  deprecated: true
-  deprecation_message: Moved to training.dataset_build

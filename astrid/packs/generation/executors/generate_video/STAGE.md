@@ -174,7 +174,7 @@ rejected at argparse.
 
 ## Golden demo
 
-`astrid/packs/builtin/generate_video/golden/demo_wan_ltx_local_cloud.py`
+`astrid/packs/generation/executors/generate_video/golden/demo_wan_ltx_local_cloud.py`
 exercises every wired cell with mocked `HttpClient` transport and mocked
 `vibecomfy` runtime — no external services required.
 

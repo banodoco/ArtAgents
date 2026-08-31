@@ -47,7 +47,6 @@ _REMOVED_MARKER_IMPORT_PATHS = (
 # manifest is a "shipped pack".  The set of ids must not regress.
 _SHIPPED_PACK_IDS = frozenset({
     "blender",
-    "builtin",
     "comfy_wrap",
     "editorial",
     "fal",

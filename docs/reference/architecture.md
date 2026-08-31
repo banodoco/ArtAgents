@@ -43,7 +43,7 @@ top-level Astrid skill first, then open only the specific folder-level
 `STAGE.md` needed for the selected registry item. Do not package every
 executor and orchestrator stage into one merged runtime prompt.
 
-Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, `blender`, `discord_local`, and `seedance_local`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` holds user-edited element forks. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
+Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, `blender`, `discord_local`, and `seedance_local`. The retired `builtin` shell and its pack-level aliases are not part of the supported source graph. Adapter-specific external aliases remain only where their owning pack explicitly declares them. A gitignored `local` pack at `astrid/packs/local/` holds user-edited element forks. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker`. Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
 
 Executor and orchestrator ids are always qualified — `<pack>.<name>` (for example `video_editing.cut`, `vibecomfy.run`). Bare lookups such as `cut` are rejected at the schema and CLI boundaries. Element ids stay bare and are scoped by `kind`, so `animation/fade` and `transition/fade` coexist without collision.
 
@@ -84,7 +84,7 @@ Every runnable tool is a built-in or external executor exposed from exactly one 
 
 | Executor group | Canonical location | Notes |
 | --- | --- | --- |
-| Hype pipeline stages | `astrid/packs/{editorial,video_editing,rendering,understanding,foley}/*` | `STEP_ORDER` stages used by `video_editing.hype` (legacy alias: `builtin.hype`). |
+| Hype pipeline stages | `astrid/packs/{editorial,video_editing,rendering,understanding,foley}/*` | `STEP_ORDER` stages used by `video_editing.hype`. |
 | Understanding tools | `astrid/packs/understanding/{audio_understand,visual_understand,video_understand,understand}` | Concrete media understanding tools, plus a thin `understand` dispatcher executor that selects modality via `--mode`. |
 | Standalone/service tools | `astrid/packs/{training,editorial,generation,rendering}/*` | Standalone executor capabilities across domain packs. `generate_image` is the multi-backend (local + cloud) image executor in `generation`; `generate_image_openai` is the OpenAI DALL-E executor, also in `generation`. |
 | External tools | `astrid/packs/{moirae,vibecomfy,fal,runpod,youtube}/*` | `moirae.moirae`, `vibecomfy.run`, `vibecomfy.validate`, `fal.fal_foley`, `runpod.*`, `youtube.*`. Each adapter pack wraps a third-party substrate. Legacy `external.*` ids are deprecated pack-level aliases. |
@@ -98,14 +98,14 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | Module or path | Classification | Notes |
 | --- | --- | --- |
 | `astrid/core/element/schema.py` | Element support | `element.yaml` schema (`id`, singular `kind`, `pack_id`, `metadata`, `schema`, `defaults`, `dependencies`) and dependency dataclasses. |
-| `astrid/core/element/registry.py` | Element support | Pack-driven resolution: active theme → `pack:local` (priority 10) → `pack:builtin` (priority 30). Fork copies into the local pack and rewrites `pack_id`. |
+| `astrid/core/element/registry.py` | Element support | Pack-driven resolution: active theme → `pack:local` (priority 10) → canonical pack sources. Fork copies into the local pack and rewrites `pack_id`. |
 | `astrid/packs/rendering/elements/{effects,animations,transitions}` | Element support | Default elements shipped in the rendering pack; `kind`-scoped folders so `animations/fade` and `transitions/fade` coexist. |
 | `astrid/packs/local/elements/<kind>/<id>` | Element support | Gitignored scratch pack where forked element copies land (auto-creates `astrid/packs/local/pack.yaml`). |
 | `astrid/core/element/catalog.py` | Element support | Effect, animation, and transition catalog support used by render validation. |
 | `scripts/gen_effect_registry.py` | Element support | Generates Remotion registries from the element registry; emits `@pack-<pack>-elements-<kind>/...` imports. |
 | `scripts/gen_capability_index.py` | Capability discovery | Regenerates the capability index block in `astrid/packs/_core/skill/SKILL.md` from executor, orchestrator, and element manifests. |
 | `astrid/timeline.py` | Shared library and element validator | Timeline schema and effect/animation/transition validation. |
-| `remotion/*` | Element runtime support | TypeScript renderer consuming generated element registries via `@pack-builtin-elements-*` and `@pack-local-elements-*` aliases. |
+| `remotion/*` | Element runtime support | TypeScript renderer consuming generated element registries via canonical pack and `@pack-local-elements-*` aliases. |
 
 ## Shared Libraries
 
@@ -134,7 +134,7 @@ the `validate_repo_structure()` machinery are documented in
 verbs, the `executors run` / `orchestrators run` invocation surface, and the
 old filesystem task-run store no longer exist; the eight-family CLI and the
 SDK are the whole surface. The `astrid/core/task/` runtime and the
-`text_analysis.summarize` and `builtin.agent_probe` orchestrators were
+`text_analysis.summarize` and the retired `agent_probe` orchestrator were
 removed with it. Kernel task execution now lives in
 `astrid/core/task_executor/` (the injected `TaskHandler` boundary for
 pack-owned task-mode adapters).

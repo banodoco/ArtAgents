@@ -3,9 +3,6 @@
 Invariant: for every constant defined here, constant_name == constant_value,
 so that the registry is self-documenting and grep-safe.
 
-Exception: ASTRID_AUTHOR_TEST_LEGACY — a backward-compat alias whose value
-does not equal its own constant name (keeps the legacy key for fallback). Documented below.
-
 Consumer modules should import from here rather than defining their own string
 literals. Allowlisted operational modules may define their own private process
 variables; product/runtime identity variables remain catalogued here.
@@ -14,7 +11,6 @@ variables; product/runtime identity variables remain catalogued here.
 from __future__ import annotations
 
 import os
-import warnings
 
 # ---------------------------------------------------------------------------
 # User and workspace configuration
@@ -143,36 +139,9 @@ ASTRID_AUDIT_DISABLED = "ASTRID_AUDIT_DISABLED"
 ASTRID_AUDIT_RUN_DIR = "ASTRID_AUDIT_RUN_DIR"
 """Directory for the current audit run. Set and read by audit/context.py."""
 
-# ---------------------------------------------------------------------------
-# Backward-compat alias
-# ---------------------------------------------------------------------------
-
-ASTRID_AUTHOR_TEST_LEGACY = "ASTRID...TEST"
-"""Backward-compat alias: constant name differs from its value intentionally.
-Holds the legacy env-var key ``ASTRID...TEST``. ``get_author_test_env()``
-checks the canonical key first, then falls back here with a deprecation
-warning. Use ASTRID_AUTHOR_TEST for all new code."""
-
-
 def get_author_test_env() -> str | None:
-    """Return the author-test flag value, checking both the canonical and legacy key.
-
-    Prefers ASTRID_AUTHOR_TEST; falls back to ASTRID_AUTHOR_TEST_LEGACY with a
-    deprecation warning. Returns None when neither is set.
-    """
-    value = os.environ.get(ASTRID_AUTHOR_TEST)
-    if value is not None:
-        return value
-    legacy_value = os.environ.get(ASTRID_AUTHOR_TEST_LEGACY)
-    if legacy_value is not None:
-        warnings.warn(
-            f"Reading author-test mode from legacy key {ASTRID_AUTHOR_TEST_LEGACY!r}; "
-            f"set {ASTRID_AUTHOR_TEST!r} instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return legacy_value
-    return None
+    """Return the canonical author-test flag value, or ``None`` when unset."""
+    return os.environ.get(ASTRID_AUTHOR_TEST)
 
 
 __all__ = [
@@ -180,7 +149,6 @@ __all__ = [
     "ASTRID_AUDIT_DISABLED",
     "ASTRID_AUDIT_RUN_DIR",
     "ASTRID_AUTHOR_TEST",
-    "ASTRID_AUTHOR_TEST_LEGACY",
     "ASTRID_BANODOCO_CATALOG_URL",
     "ASTRID_GATEWAY_RESOLVED_PROJECT",
     "ASTRID_HOME",

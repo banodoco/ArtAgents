@@ -143,12 +143,10 @@ _PRODUCT_PATH_FILES = (
     "astrid/application.py",  # application composition
 )
 
-# The m1-m6 legacy rendering/builtin capability packs remain in-tree
-# (plan step 22.3): kernel CLI/gateway modules legitimately import them.
-# The m1 schema-pack boundary is about the new repository architecture —
-# the kernel must never import the schema packs (timeline/shots/references)
-# or any other pack module.
-_LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.", "astrid.packs.builtin.")
+# The rendering capability pack remains in-tree (plan step 22.3): kernel
+# CLI/gateway modules legitimately import it. The retired builtin shell is
+# deliberately absent from this allowlist and cannot re-enter the source graph.
+_LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.",)
 
 # The kernel conformance kit constructs scratch DatabaseWriters on its own
 # temp databases to prove crash atomicity of the kernel store; that is
@@ -241,11 +239,9 @@ def _imported_modules(source: str) -> set[str]:
 def _is_legacy_pack_module(module: str) -> bool:
     """Whether *module* lives in a pre-existing m1-m6 capability pack.
 
-    The legacy rendering/builtin capability packs remain in-tree (plan step
-    22.3); kernel CLI/gateway modules legitimately import them, and the
-    legacy packs form their own pre-existing import graph. The m1 boundary
-    is about the new schema packs (timeline/shots/references) and any other
-    pack module — never the documented legacy prefixes.
+    The rendering capability pack remains in-tree (plan step 22.3): kernel
+    CLI/gateway modules legitimately import it. The retired builtin shell is
+    not an allowed product import.
     """
     return any(
         module == prefix.rstrip(".") or module.startswith(prefix)
@@ -321,7 +317,7 @@ def lint_import_boundaries(root: Path) -> list[str]:
 
     Kernel-to-pack: nothing under ``astrid/core/`` may import a pack module
     except the one composition exemption (``dispatch.py``) and the
-    documented legacy rendering/builtin prefixes. Pack-to-pack: the m1
+    documented legacy rendering prefix. Pack-to-pack: the m1
     schema packs (those shipping a ``schema-pack.yaml``) may not import any
     other pack; the pre-existing legacy packs keep their own graph.
     """

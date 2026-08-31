@@ -107,10 +107,10 @@ interpolation only — everything else belongs in the escape hatch.
 See:
 - `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
   and escape-hatch documentation
-- `astrid/packs/builtin/generate_video/STAGE.md` — the generate_video
+- `astrid/packs/generation/executors/generate_video/STAGE.md` — the generate_video
   executor documentation with wired-cells table, CLI examples, and golden
   demo reference
-- `astrid/packs/builtin/generate_video/golden/demo_wan_ltx_local_cloud.py` —
+- `astrid/packs/generation/executors/generate_video/golden/demo_wan_ltx_local_cloud.py` —
   golden demo exercising all wired cells with mocked backends
 - `docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
 - `docs/generation/00-features.md` — canonical feature list

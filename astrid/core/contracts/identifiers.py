@@ -14,7 +14,6 @@ from astrid.core.foundation.project_paths import ProjectPathError
 from astrid.core.ids import (
     generate_group_id,
     generate_run_id,
-    generate_thread_id,
     is_ulid,
     require_ulid,
 )
@@ -47,7 +46,6 @@ __all__ = [
     "IdentifierValidationError",
     "generate_group_id",
     "generate_run_id",
-    "generate_thread_id",
     "is_ulid",
     "require_ulid",
     "validate_timeline_slug",

@@ -5,14 +5,13 @@ import path from 'node:path';
 const projectDir = process.cwd();
 const activeThemeDir = path.resolve(projectDir, '_active_theme');
 const astridDir = path.resolve(projectDir, '..');
-const builtinPackElementsDir = path.resolve(astridDir, 'astrid/packs/builtin/elements');
 const renderingPackElementsDir = path.resolve(astridDir, 'astrid/packs/rendering/elements');
 const localPackElementsDir = path.resolve(astridDir, 'astrid/packs/local/elements');
 
 // SDK invocations may explicitly add external pack roots.  The generated
 // element registry uses one alias per owning pack; keep those aliases scoped
 // to this render process so external components can be bundled without
-// changing the durable local/builtin pack layout.
+// changing the durable local pack layout.
 const extraPackAliases: Record<string, string> = {};
 for (const rawRoot of (process.env.ASTRID_PACKS_PATH ?? '').split(path.delimiter)) {
   if (!rawRoot) continue;
@@ -59,17 +58,14 @@ Config.overrideWebpackConfig((currentConfiguration) => ({
       '@theme-elements-effects': path.resolve(activeThemeDir, 'elements/effects'),
       '@theme-effects': path.resolve(activeThemeDir, 'effects'),
       '@pack-local-elements-effects': path.resolve(localPackElementsDir, 'effects'),
-      '@pack-builtin-elements-effects': path.resolve(builtinPackElementsDir, 'effects'),
       '@pack-rendering-elements-effects': path.resolve(renderingPackElementsDir, 'effects'),
       '@theme-elements-animations': path.resolve(activeThemeDir, 'elements/animations'),
       '@theme-animations': path.resolve(activeThemeDir, 'animations'),
       '@pack-local-elements-animations': path.resolve(localPackElementsDir, 'animations'),
-      '@pack-builtin-elements-animations': path.resolve(builtinPackElementsDir, 'animations'),
       '@pack-rendering-elements-animations': path.resolve(renderingPackElementsDir, 'animations'),
       '@theme-elements-transitions': path.resolve(activeThemeDir, 'elements/transitions'),
       '@theme-transitions': path.resolve(activeThemeDir, 'transitions'),
       '@pack-local-elements-transitions': path.resolve(localPackElementsDir, 'transitions'),
-      '@pack-builtin-elements-transitions': path.resolve(builtinPackElementsDir, 'transitions'),
       '@pack-rendering-elements-transitions': path.resolve(renderingPackElementsDir, 'transitions'),
       '@workspace-animations': path.resolve(renderingPackElementsDir, 'animations'),
       '@workspace-effects': path.resolve(renderingPackElementsDir, 'effects'),

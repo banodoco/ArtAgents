@@ -88,3 +88,13 @@ def test_environment_reference_renderer_table_has_header() -> None:
     assert "session.identity" not in (
         root / "docs/guides/ci-lanes.md"
     ).read_text()
+
+
+def test_retired_thread_api_and_builtin_shell_are_absent() -> None:
+    root = Path(__file__).resolve().parents[2]
+    from astrid.core import ids
+    from astrid.core import contracts
+
+    assert not hasattr(ids, "generate_thread_id")
+    assert not hasattr(contracts, "generate_thread_id")
+    assert not (root / "astrid/packs/builtin").exists()

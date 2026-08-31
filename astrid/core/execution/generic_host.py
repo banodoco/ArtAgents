@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 from urllib.parse import urlsplit
 
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH
 from astrid.core.execution.capability_ledger import load_capability_ledger
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.execution.process_group import (
@@ -808,7 +808,7 @@ class GenericPackHost:
         # ASTRID_PACKS_PATH is an explicit discovery input, never a fallback
         # directory. Keep it in the same admitted root set so env-only packs
         # receive identical discovery, digest, and child import treatment.
-        for raw_root in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep):
+        for raw_root in os.environ.get(ASTRID_PACKS_PATH, "").split(os.pathsep):
             if raw_root:
                 configured_roots.append(Path(raw_root).expanduser().resolve())
         self.pack_roots = tuple(dict.fromkeys(configured_roots))
@@ -1872,7 +1872,7 @@ class GenericPackHost:
                         raise HostError("admitted Python import root is outside the source fence")
                     import_roots.append(str(import_root))
         env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys((package_parent, *import_roots)))
-        env["ASTRID_PACKS_PATH"] = os.pathsep.join(str(root) for root in self.pack_roots)
+        env[ASTRID_PACKS_PATH] = os.pathsep.join(str(root) for root in self.pack_roots)
         broker_endpoint = str((child_env or {}).get("ASTRID_BROKER_PROXY") or "")
         process = popen_owned_group(
             _network_sandbox_argv([sys.executable, "-m", "astrid.core.execution.generic_host_worker", str(request_path)], attempt_path, broker_endpoint),

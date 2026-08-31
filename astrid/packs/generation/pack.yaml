@@ -27,24 +27,3 @@ agent:
   normal_entrypoints: [generation.generate_image, generation.generate_video, generation.generate_image_openai, generation.generate_audio]
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: builtin.generate_image
-  canonical_id: generation.generate_image
-  deprecated: true
-  deprecation_message: Moved to generation.generate_image
-- kind: executor
-  alias: builtin.generate_image_openai
-  canonical_id: generation.generate_image_openai
-  deprecated: true
-  deprecation_message: Moved to generation.generate_image_openai
-- kind: executor
-  alias: builtin.generate_video
-  canonical_id: generation.generate_video
-  deprecated: true
-  deprecation_message: Moved to generation.generate_video
-- kind: executor
-  alias: builtin.generate_audio
-  canonical_id: generation.generate_audio
-  deprecated: true
-  deprecation_message: Moved to generation.generate_audio

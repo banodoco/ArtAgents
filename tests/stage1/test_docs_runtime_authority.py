@@ -13,6 +13,7 @@ LIVE_DOCS = (
     ROOT / "docs" / "reference" / "env-vars.md",
     ROOT / "docs" / "reference" / "sdk.md",
     ROOT / "docs" / "guides" / "cli-journeys.md",
+    ROOT / "docs" / "guides" / "creating-tools.md",
     ROOT / "astrid" / "packs" / "_core" / "skill" / "SKILL.md",
 )
 

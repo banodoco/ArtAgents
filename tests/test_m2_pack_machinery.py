@@ -336,7 +336,6 @@ class PacksDataTreeTest(unittest.TestCase):
             "stream_content",
             "comfy_wrap",
             "_core",
-            "builtin",
         ):
             pack_dir = self._PACKS_ROOT / pack_id
             with self.subTest(pack_id=pack_id):
@@ -363,8 +362,8 @@ class PacksDataTreeTest(unittest.TestCase):
             )
 
     def test_shell_packs_exist(self) -> None:
-        """_core and builtin are top-level visible shell/compatibility packs."""
-        for pack_id in ("_core", "builtin"):
+        """_core is the only top-level shell pack."""
+        for pack_id in ("_core",):
             pack_dir = self._PACKS_ROOT / pack_id
             with self.subTest(pack_id=pack_id):
                 self.assertTrue(
