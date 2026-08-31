@@ -34,7 +34,6 @@ from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.io.cas import executor_definition_digest
-from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
@@ -273,8 +272,6 @@ def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None 
 
 def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
     _validate_scoped_configs_at_dispatch(executor)
-    if executor.id == "youtube.upload":
-        return _run_upload_youtube(request, executor)
     values = _request_values(request, executor)
     _validate_declared_input_choices(executor, values)
     _validate_required_inputs(
@@ -377,46 +374,6 @@ def resolve_declared_output_paths(
         if output_path_str:
             resolved[output.name] = output_path_str
     return resolved
-
-
-def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
-    inputs = dict(request.inputs)
-    if request.dry_run:
-        return ExecutorRunResult(
-            executor_id=executor.id,
-            kind="built_in",
-            dry_run=True,
-            payload={"would_run": "youtube.upload", "inputs": inputs},
-            run_id=request.run_id,
-            run_root=request.run_root,
-            executor_version=executor_definition_digest(executor),
-        )
-
-    publish_youtube_video = resolve_callable_from_metadata(
-        executor.metadata,
-        owner_id=executor.id,
-        module_key="callable_module",
-        callable_key="callable_name",
-    )
-
-    result = publish_youtube_video(
-        video_url=_required_input(inputs, "video_url"),
-        title=_required_input(inputs, "title"),
-        description=_required_input(inputs, "description"),
-        tags=_optional_input(inputs, "tags") or _optional_input(inputs, "tag"),
-        privacy_status=str(_optional_input(inputs, "privacy_status") or "private"),
-        playlist_id=_optional_input(inputs, "playlist_id"),
-        made_for_kids=bool(_optional_input(inputs, "made_for_kids") or False),
-    )
-    return ExecutorRunResult(
-        executor_id=executor.id,
-        kind="built_in",
-        payload=result,
-        run_id=request.run_id,
-        run_root=request.run_root,
-        executor_version=executor_definition_digest(executor),
-        outputs=_resolve_declared_outputs(executor, request),
-    )
 
 
 @dataclass(frozen=True)
@@ -1317,20 +1274,6 @@ def _iter_input_values(value: Any) -> tuple[Any, ...]:
     if isinstance(value, tuple):
         return value
     return (value,)
-
-
-def _required_input(inputs: Mapping[str, Any], key: str) -> str:
-    value = inputs.get(key)
-    if value in (None, ""):
-        raise ExecutorRunnerError(f"{key} is required")
-    return str(value)
-
-
-def _optional_input(inputs: Mapping[str, Any], key: str) -> Any:
-    value = inputs.get(key)
-    if value in (None, ""):
-        return None
-    return value
 
 
 __all__ = [

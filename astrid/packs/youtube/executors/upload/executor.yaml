@@ -3,6 +3,13 @@
   "cache": {
     "mode": "none"
   },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.youtube.executors.upload.run"
+    ]
+  },
   "description": "Upload a finished video to YouTube via the shared banodoco-social Zapier integration.",
   "id": "youtube.upload",
   "inputs": [
