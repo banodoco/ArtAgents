@@ -120,6 +120,10 @@ class AstridClient:
             ) from exc
         credential_value = credential if credential is not None else os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "")
         if not credential_value:
+            # `up --json` deliberately hands off a file path, not the secret.
+            # Let the explicit client boundary read that owner-only file.
+            credential_value = str(result.get("credential_file", ""))
+        if not credential_value:
             raise ServiceUnavailableError(
                 "runtime credential is required; run `banodoco-local up --profile astrid`",
                 details={"next_action": "banodoco-local up --profile astrid"},
@@ -133,6 +137,17 @@ class AstridClient:
             client_version=client_version,
             protocol_version=protocol_version,
         )
+
+    def invoke_result(self, capability_id: str, *, kind: str, **kwargs: Any) -> Any:
+        """Invoke through this explicit runtime-bound client as a result.
+
+        The module-level helper owns the typed preflight/result conversion;
+        this method supplies the already-authenticated client so admission
+        cannot silently compose a second local authority.
+        """
+        from astrid.sdk.invocation import invoke_result
+
+        return invoke_result(capability_id, kind=kind, _client=self, **kwargs)
 
     def __enter__(self) -> Self:
         return self

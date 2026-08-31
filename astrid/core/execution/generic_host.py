@@ -1236,11 +1236,23 @@ class GenericPackHost:
         below ``attempt/managed-objects``.  Renderers receive a derived private
         registry whose ``file`` values point at those attempt-local copies.
         """
-        values = dict(spec.get("inputs", {})) if isinstance(spec.get("inputs", {}), Mapping) else {}
+        # Runtime admission wraps the immutable capability input document in
+        # the task envelope alongside input_object_ids/schema metadata.  The
+        # nested document is the one canonical managed-input shape shared by
+        # task admission and this host; accept the direct form too for the
+        # focused host contract tests.
+        admitted = spec.get("spec")
+        input_spec = (
+            admitted
+            if isinstance(admitted, Mapping)
+            and any(key in spec for key in ("input_object_ids", "schema_version", "capability_digest"))
+            else spec
+        )
+        values = dict(input_spec.get("inputs", {})) if isinstance(input_spec.get("inputs", {}), Mapping) else {}
         # Timeline visualization tasks carry their canonical registry inside
         # the immutable snapshot rather than as a separate input file. Expose
         # it to the same host-only materialization path used by render tasks.
-        snapshot = spec.get("timeline_snapshot")
+        snapshot = input_spec.get("timeline_snapshot")
         snapshot_registry = snapshot.get("registry") if isinstance(snapshot, Mapping) else None
         if "assets_registry" not in values and isinstance(snapshot_registry, Mapping):
             snapshot_registry_path = Path(attempt).resolve() / "inputs" / "snapshot-assets.json"
@@ -1249,7 +1261,8 @@ class GenericPackHost:
             values["assets_registry"] = str(snapshot_registry_path)
         if "materialized_root" in values or "materialized_objects" in values:
             raise HostError("materialized media handoff is host-owned and cannot be caller supplied")
-        for item in spec.get("input_digests", ()) if isinstance(spec.get("input_digests", ()), list) else ():
+        input_digests = input_spec.get("input_digests", ())
+        for item in input_digests if isinstance(input_digests, list) else ():
             if isinstance(item, Mapping) and item.get("name") and item.get("digest"):
                 values.setdefault(str(item["name"]), {"digest": str(item["digest"])})
         for name in values:

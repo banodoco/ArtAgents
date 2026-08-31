@@ -122,7 +122,10 @@ class WorkspaceClient:
             if is_dataclass(item):
                 return {key: plain(child) for key, child in asdict(item).items()}
             if isinstance(item, tuple):
-                return tuple(plain(child) for child in item)
+                # Transport values are part of the JSON product surface;
+                # never leave tuples in a DomainResult payload where the
+                # canonical encoder would reject them.
+                return [plain(child) for child in item]
             if isinstance(item, list):
                 return [plain(child) for child in item]
             if isinstance(item, dict):

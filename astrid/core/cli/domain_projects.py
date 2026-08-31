@@ -114,7 +114,9 @@ def _cmd_select(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_current(parsed: argparse.Namespace) -> int:
-    result = parsed.client.projects.current(cwd=parsed.cwd)
+    # Runtime project selection is actor-scoped, not a filesystem preference;
+    # do not pass the old local-cwd hint into the remote client contract.
+    result = parsed.client.projects.current()
     return print_result(result, as_json=parsed.json)
 
 
