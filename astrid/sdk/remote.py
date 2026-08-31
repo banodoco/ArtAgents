@@ -17,7 +17,7 @@ class _RemoteFamily:
         self._client = client
 
     def _typed(self, operation: str, *args: Any, key: str | None = None, **kwargs: Any) -> DomainResult[Any]:
-        reads = {"get_project", "list_projects", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "list_project_shots", "get_reference", "list_project_references", "get_object", "head_object", "list_project_objects", "list_media_relations", "get_task", "list_project_tasks", "get_run", "list_project_runs", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents"}
+        reads = {"get_project", "list_projects", "current_project", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "list_project_shots", "get_reference", "list_project_references", "get_object", "head_object", "list_project_objects", "list_media_relations", "get_task", "list_project_tasks", "get_run", "list_project_runs", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents"}
         if key is None and operation not in reads:
             key = uuid.uuid4().hex
         try:
@@ -42,8 +42,13 @@ class RemoteProjects(_RemoteFamily):
     def update(self, ref, *, name=None, settings=None, expected_version=None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
         return self._typed("update_project", ref, key=key, idempotency_key=key, name=name, metadata=settings, expected_version=expected_version)
-    def select(self, ref, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "project selection is not supported by the workspace contract", {}))
-    def current(self, **kwargs): return DomainResult.failure(ErrorObject("unavailable", "project selection is not supported by the workspace contract", {}))
+    def select(self, ref, *, scope="workspace", cwd=None, idempotency_key=None, **kwargs):
+        del cwd, kwargs
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("select_project", key=key, project=ref, scope=scope, idempotency_key=key)
+    def current(self, *, cwd=None, **kwargs):
+        del cwd, kwargs
+        return self._typed("current_project")
 
 
 class RemoteTimelines(_RemoteFamily):
@@ -372,21 +377,13 @@ class RemoteAstridClient:
         self.tasks, self.runs, self.references = RemoteTasks(transport), RemoteRuns(transport), RemoteReferences(transport)
         self.shots, self.generations = RemoteShots(transport), RemoteGenerations(transport)
     def selected_project_ref(self, **kwargs):
-        """Resolve the sole runtime project for selection-free public routes.
-
-        The runtime contract intentionally has no local preference store.  A
-        route may infer a project only when the runtime exposes exactly one;
-        multiple projects remain an explicit-selection error.
-        """
+        """Resolve the actor-scoped selection stored by the neutral runtime."""
         del kwargs
         try:
-            result = self.projects.list()
-            data = result.data
-            if isinstance(data, dict):
-                data = data.get("items", [])
-            if not result.ok or not isinstance(data, list) or len(data) != 1:
+            result = self.projects.current()
+            if not result.ok or not isinstance(result.data, dict):
                 return None
-            row = data[0]
+            row = result.data.get("project")
             if not isinstance(row, dict):
                 row = vars(row) if hasattr(row, "__dict__") else {}
             return str(row.get("project_id") or row.get("id") or row.get("slug") or "") or None

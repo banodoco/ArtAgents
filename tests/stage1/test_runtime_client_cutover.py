@@ -45,6 +45,37 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         daemon.stop()
 
 
+def test_projects_selection_and_unready_admission_are_typed_on_real_daemon(tmp_path, monkeypatch):
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
+    monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
+    try:
+        with AstridClient.open() as client:
+            project = client.projects.create(slug="selected", name="Selected", idempotency_key="selected").data
+            selected = client.projects.select(project["project_id"], scope="workspace")
+            assert selected.ok and selected.data["project"]["project_id"] == project["project_id"]
+            current = client.projects.current()
+            assert current.ok and current.data["scope"] == "workspace"
+            assert client.selected_project_ref() == project["project_id"]
+
+            import hashlib
+
+            digest = "sha256:" + hashlib.sha256(b"acceptance.gpu").hexdigest()
+            daemon.service.register_capability({
+                "capability_id": "acceptance.gpu",
+                "definition_digest": digest,
+                "status": "unavailable",
+                "unavailable_reason": "gpu_not_configured",
+            })
+            before = daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            blocked = client.tasks.create(project=project["project_id"], capability="acceptance.gpu", spec={}, idempotency_key="blocked-gpu")
+            assert not blocked.ok and blocked.error.code == "unavailable"
+            assert blocked.error.details["next_action"] == "wait for capability readiness and retry"
+            assert daemon.service.store.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before
+    finally:
+        daemon.stop()
+
+
 def test_documented_project_cli_mutations_return_committed_receipts(tmp_path, monkeypatch, capsys):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)

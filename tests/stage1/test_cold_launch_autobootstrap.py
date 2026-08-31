@@ -80,6 +80,35 @@ def test_configured_manifest_does_not_require_editable_source_inference(monkeypa
     assert result["status"] == "reconnected"
 
 
+def test_persisted_source_profile_relaunches_without_environment(monkeypatch, tmp_path):
+    runtime = _runtime_checkout(tmp_path)
+    source = tmp_path / "astrid-source"
+    source.mkdir()
+    home = tmp_path / "home"
+    catalog = home / "Library" / "Application Support" / "Banodoco" / "runtime" / "catalog.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({"source_profiles": {"astrid": {
+        "profile": "astrid", "runtime_checkout": str(runtime), "source_checkout": str(source),
+    }}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("BANODOCO_RUNTIME_CHECKOUT", raising=False)
+    monkeypatch.delenv("BANODOCO_LOCAL_RUNTIME_CHECKOUT", raising=False)
+    monkeypatch.delenv("BANODOCO_LOCAL_SOURCE_MANIFEST", raising=False)
+    monkeypatch.delenv("BANODOCO_ASTRID_SOURCE_CHECKOUT", raising=False)
+    monkeypatch.delenv("ASTRID_SOURCE_CHECKOUT", raising=False)
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        manifest = Path(command[command.index("--source-manifest") + 1])
+        seen["manifest"] = json.loads(manifest.read_text(encoding="utf-8"))
+        return subprocess.CompletedProcess(command, 0, '{"status":"reconnected","realm_id":"realm-1"}', "")
+
+    monkeypatch.setattr(autobootstrap.subprocess, "run", fake_run)
+    assert autobootstrap.ensure_runtime()["status"] == "reconnected"
+    assert seen["manifest"]["runtime_checkout"] == str(runtime.resolve())
+    assert seen["manifest"]["source_checkout"] == str(source.resolve())
+
+
 def test_sdk_open_bootstraps_once_then_retries(monkeypatch):
     attempts = iter(
         [

@@ -231,6 +231,12 @@ class WorkspaceClient:
         items, cursor = self._call_generated("list_projects")
         return {"items": [asdict(item) if is_dataclass(item) else item for item in items], "next_cursor": cursor}
 
+    def select_project(self, project: str, *, scope: str = "workspace", idempotency_key: str | None = None) -> Any:
+        return self._call_generated("select_project", project, scope=scope, idempotency_key=idempotency_key)
+
+    def current_project(self) -> Any:
+        return self._call_generated("current_project")
+
     def get_project(self, project_id: str) -> Any:
         return self._call_generated("get_project", project_id)
 

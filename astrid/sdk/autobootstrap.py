@@ -70,6 +70,21 @@ def _source_checkout() -> Path:
         if value:
             return Path(value).expanduser().resolve()
 
+    # Once the neutral launcher has bootstrapped an editable source profile,
+    # that profile is the durable discovery record.  Reuse it on a product
+    # relaunch even when the original shell no longer exports source paths.
+    # This deliberately reads only the named ``astrid`` profile; sibling
+    # checkouts are never guessed.
+    home = Path(os.environ.get("BANODOCO_LOCAL_HOME") or os.environ.get("HOME", "~")).expanduser()
+    catalog_path = home / "Library" / "Application Support" / "Banodoco" / "runtime" / "catalog.json"
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        catalog = None
+    profile = catalog.get("source_profiles", {}).get(PROFILE) if isinstance(catalog, Mapping) else None
+    if isinstance(profile, Mapping) and profile.get("source_checkout"):
+        return Path(str(profile["source_checkout"])).expanduser().resolve()
+
     # Editable Astrid checkouts have this module at <checkout>/astrid/sdk.  An
     # installed wheel cannot infer its source checkout and must use the
     # explicit environment setting above.
@@ -87,6 +102,16 @@ def _runtime_checkout(manifest: Path | None) -> Path:
         raw = _manifest_value(manifest).get("runtime_checkout")
         if raw:
             checkout = Path(str(raw)).expanduser().resolve()
+    if checkout is None:
+        home = Path(os.environ.get("BANODOCO_LOCAL_HOME") or os.environ.get("HOME", "~")).expanduser()
+        catalog_path = home / "Library" / "Application Support" / "Banodoco" / "runtime" / "catalog.json"
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            catalog = None
+        profile = catalog.get("source_profiles", {}).get(PROFILE) if isinstance(catalog, Mapping) else None
+        if isinstance(profile, Mapping) and profile.get("runtime_checkout"):
+            checkout = Path(str(profile["runtime_checkout"])).expanduser().resolve()
     if checkout is None:
         raise AutoBootstrapError(
             "neutral runtime checkout is not configured; set BANODOCO_RUNTIME_CHECKOUT"
