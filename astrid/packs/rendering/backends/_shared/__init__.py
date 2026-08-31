@@ -54,32 +54,27 @@ def _serialize_timeline(
 
 
 def _resolve_theme_path(theme_path: Path) -> Path:
+    """Resolve an already-materialized theme path without workspace fallback.
+
+    Renderer settings are invocation inputs.  A missing path must remain a
+    missing path: silently interpreting it as a checkout theme slug can make
+    a render use a different theme than the caller supplied.
+    """
+
     if theme_path.name == "theme.json":
         return theme_path
     if theme_path.exists() and theme_path.is_dir():
         return theme_path / "theme.json"
-    if theme_path.exists():
-        return theme_path
-    return WORKSPACE_ROOT / "themes" / str(theme_path) / "theme.json"
+    return theme_path
 
 
 def _theme_for_props(theme_path: Path) -> dict[str, Any]:
     resolved = _resolve_theme_path(theme_path)
-    if not resolved.exists():
-        return {
-            "id": "banodoco-default",
-            "visual": {
-                "color": {"fg": "#ffffff", "bg": "#000000", "accent": "#ffffff"},
-                "type": {
-                    "families": {"heading": "Georgia, serif", "body": "Georgia, serif"},
-                    "size": {"base": 64, "small": 36, "large": 96},
-                    "weight": {"normal": 400, "bold": 700},
-                    "lineHeight": 1.1,
-                },
-                "motion": {"fadeMs": 250},
-                "canvas": {"width": 1920, "height": 1080, "fps": 30},
-            },
-        }
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"theme file not found or invalid: {resolved}; "
+            "expected an existing runtime-materialized theme.json file"
+        )
     theme_data = load_theme(resolved)
     return {"id": theme_data["id"], "visual": theme_data["visual"]}
 

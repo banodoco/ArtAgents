@@ -126,16 +126,11 @@ different qualified renderer explicitly.
 
 ## Remotion asset materialization
 
-The shared render-host asset layer resolves local paths relative to the asset
-registry, enforces project containment where a project is known, and stages
-local/cached files into one invocation-owned directory. A project-scoped
-render may also reference a canonical `managed_local` media locator under
-`$ASTRID_PROJECTS_ROOT/.astrid/media`, but only when the exact locator is
-present in the active project's kernel media rows and its bytes still match the
-recorded content hash. Arbitrary sibling-project and unmanaged-root paths are
-rejected during renderer support, before rendering starts. Remote URLs with
-byte range support stream directly; other URLs are cached, optionally
-hash-checked, and staged.
+The shared render host accepts only invocation-owned, runtime-materialized
+files. Every referenced media or theme file must already be present in the
+attempt's materialization directory and must match its declared content hash
+before rendering starts. Renderers do not resolve checkout-relative paths,
+project-local locators, sibling roots, remote URLs, or caches.
 
 The Remotion backend serves only that staging directory on `127.0.0.1` through
 an `InvocationAssetServer` with HTTP Range support. The ephemeral server sends

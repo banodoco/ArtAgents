@@ -36,7 +36,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class _FcntlLock:
-    """Small ``filelock``-compatible fallback used by the asset cache too."""
+    """Small ``filelock``-compatible fallback for publication locking."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)

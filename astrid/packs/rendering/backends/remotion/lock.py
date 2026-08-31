@@ -40,7 +40,7 @@ _LOCAL_LOCK_PATH: ContextVar[str | None] = ContextVar(
 
 
 class _FcntlLock:
-    """Small ``filelock``-compatible fallback mirroring the asset cache."""
+    """Small ``filelock``-compatible fallback for the Remotion render lock."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)

@@ -561,6 +561,13 @@ def test_hype_merged_render_props_match_golden() -> None:
     assert assembled == expected
 
 
+def test_explicit_missing_theme_path_does_not_fall_back_to_workspace_theme(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(FileNotFoundError, match="theme file not found or invalid"):
+        remotion._theme_for_props(tmp_path / "missing-theme")
+
+
 def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
     tmp_path: Path,
 ) -> None:

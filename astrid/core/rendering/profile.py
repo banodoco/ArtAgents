@@ -14,7 +14,6 @@ from astrid.core.timeline import Timeline, resolve_timeline_theme
 
 from .contracts import AudioOwnership, RenderProfile
 
-
 _DEFAULT_CANVAS = {"width": 1920, "height": 1080, "fps": 30}
 _DEFAULT_THEME = "banodoco-default"
 
@@ -90,10 +89,12 @@ def _resolve_merged_theme(
     root = resolve_themes_root(themes_root)
     if theme is not None:
         candidate = Path(theme).expanduser()
-        if candidate.exists() or candidate.name == "theme.json":
-            return _deep_merge_theme(_read_theme_path(candidate), override_mapping)
-        config = dict(timeline)
-        config["theme"] = str(theme)
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"theme file not found or invalid: {candidate}; "
+                "expected an existing runtime-materialized theme.json file"
+            )
+        return _deep_merge_theme(_read_theme_path(candidate), override_mapping)
     else:
         config = dict(timeline)
         config.setdefault("theme", _DEFAULT_THEME)

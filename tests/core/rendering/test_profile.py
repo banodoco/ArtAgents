@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from astrid.core.rendering.contracts import AudioOwnership
 from astrid.core.rendering.profile import resolve_render_profile
 
@@ -158,3 +160,24 @@ def test_explicit_theme_mapping_is_merged_with_full_timeline_override() -> None:
     assert (profile.width, profile.height) == (800, 800)
     assert profile.fps_rational == (24000, 1001)
     assert profile.time_base == (1, 24000)
+
+
+def test_omitted_theme_uses_the_intentional_default_canvas() -> None:
+    profile = resolve_render_profile(
+        {"tracks": [], "clips": []},
+        themes_root=Path("/definitely/missing/themes-root"),
+    )
+
+    assert (profile.width, profile.height) == (1920, 1080)
+    assert profile.fps_rational == (30, 1)
+
+
+def test_explicit_missing_theme_path_fails_closed(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-theme.json"
+
+    with pytest.raises(FileNotFoundError, match="theme file not found or invalid"):
+        resolve_render_profile(
+            {"tracks": [], "clips": []},
+            theme=missing,
+            themes_root=tmp_path,
+        )
