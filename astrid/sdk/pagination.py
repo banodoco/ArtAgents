@@ -42,13 +42,6 @@ def paged_rows(reader: Any, *args: Any, cursor: str | None = None,
         call_kwargs.update(cursor=current, limit=limit)
         try:
             value = reader(*args, **call_kwargs)
-        except TypeError:
-            if current is not None or kwargs:
-                return None
-            try:
-                value = reader(*args)
-            except Exception:
-                return None
         except Exception:
             return None
         if hasattr(value, "ok") and hasattr(value, "data"):

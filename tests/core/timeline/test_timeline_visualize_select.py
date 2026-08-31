@@ -20,7 +20,7 @@ class _Runtime:
     def __init__(self, rows: list[dict]) -> None:
         self.rows = rows
 
-    def list_projects(self):
+    def list_projects(self, *, cursor=None, limit=50):
         return [[
                 {
                     "project_id": PROJECT_ID,
@@ -29,7 +29,7 @@ class _Runtime:
                 }
             ], None]
 
-    def list_timelines(self, project_id: str):
+    def list_timelines(self, project_id: str, *, cursor=None, limit=50):
         assert project_id == PROJECT_ID
         return [self.rows, None]
 
@@ -86,7 +86,7 @@ def test_runtime_selection_excludes_archived_rows() -> None:
 
 def test_runtime_selection_requires_generated_page_pairs() -> None:
     class BareListRuntime(_Runtime):
-        def list_projects(self):
+        def list_projects(self, *, cursor=None, limit=50):
             return [{"project_id": PROJECT_ID, "slug": "demo"}]
 
     selected, diagnostics = select_kernel_timelines(

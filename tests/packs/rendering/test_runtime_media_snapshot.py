@@ -16,7 +16,7 @@ class _PagedRuntime:
         self.pages = pages
         self.calls: list[tuple[str, str | None, int]] = []
 
-    def list_projects(self) -> list[Any]:
+    def list_projects(self, *, cursor: str | None = None, limit: int = 50) -> list[Any]:
         return [[{"slug": "demo", "project_id": "project-1"}], None]
 
     def list_project_objects(
@@ -166,7 +166,7 @@ from types import ModuleType
 module = ModuleType("astrid.sdk.workspace_client")
 class Client:
     def __init__(self, *_args): pass
-    def list_projects(self): return [[{"slug": "demo", "project_id": "project-1"}], None]
+    def list_projects(self, *, cursor=None, limit=50): return [[{"slug": "demo", "project_id": "project-1"}], None]
     def list_project_objects(self, project_id, *, cursor=None, limit=50):
         return [[], None]
 module.WorkspaceClient = Client

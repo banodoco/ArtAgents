@@ -12,10 +12,10 @@ from astrid.packs.rendering.executors.timeline_visualize import frozen, select
 
 
 class _Runtime:
-    def list_projects(self):
+    def list_projects(self, *, cursor=None, limit=50):
         return [[{"project_id": "project-1", "slug": "demo", "metadata": {}}], None]
 
-    def list_timelines(self, project_id):
+    def list_timelines(self, project_id, *, cursor=None, limit=50):
         assert project_id == "project-1"
         return [[
                 {
@@ -54,7 +54,7 @@ def test_managed_visualization_readers_have_no_local_store_authority():
 
 def test_frozen_run_info_uses_generated_runtime_client(monkeypatch):
     class Runtime:
-        def list_projects(self):
+        def list_projects(self, *, cursor=None, limit=50):
             return [[{"project_id": "project-1", "slug": "demo"}], None]
 
         def get_run(self, run_id):
@@ -73,7 +73,7 @@ def test_frozen_run_info_uses_generated_runtime_client(monkeypatch):
 
 def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
     class Runtime:
-        def list_projects(self):
+        def list_projects(self, *, cursor=None, limit=50):
             return [[{"project_id": "project-current", "slug": "demo"}], None]
 
         def get_run(self, run_id):
@@ -86,7 +86,7 @@ def test_frozen_run_info_rejects_a_run_from_another_project(monkeypatch):
 
 def test_frozen_run_info_requires_generated_project_page_pair(monkeypatch):
     class Runtime:
-        def list_projects(self):
+        def list_projects(self, *, cursor=None, limit=50):
             return [{"project_id": "project-1", "slug": "demo"}]
 
         def get_run(self, run_id):
@@ -107,7 +107,7 @@ def test_frozen_run_info_requires_generated_project_page_pair(monkeypatch):
 ])
 def test_settled_outputs_rejects_noncanonical_event_pages(events):
     class Runtime:
-        def list_run_events(self, _run_id):
+        def list_run_events(self, _run_id, *, cursor=None, limit=50):
             return events
 
     assert frozen._runtime_settled_outputs(Runtime(), "run-1", {}) is None
@@ -120,7 +120,7 @@ def test_settled_outputs_accepts_terminal_canonical_event_page():
     }
 
     class Runtime:
-        def list_run_events(self, _run_id):
+        def list_run_events(self, _run_id, *, cursor=None, limit=50):
             return [[event], None]
 
     assert frozen._runtime_settled_outputs(Runtime(), "run-1", {}) == [

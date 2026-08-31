@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import ast
+import inspect
+
 from astrid.sdk.remote import RemoteAstridClient, RemoteProjects, RemoteTasks
+from astrid.sdk import pagination
 from astrid.sdk.workspace_client import WorkspaceClient, WorkspaceClientError, paged_rows
 
 
@@ -16,6 +20,40 @@ def test_paged_rows_traverses_all_pages_with_canonical_arguments() -> None:
 
     assert paged_rows(reader, limit=1) == [{"id": 1}, {"id": 2}]
     assert calls == [(None, 1), ("next-1", 1)]
+
+
+def test_paged_rows_fails_closed_without_retrying_a_legacy_reader() -> None:
+    calls = 0
+
+    def legacy_reader(**kwargs):
+        nonlocal calls
+        calls += 1
+        raise TypeError("legacy reader rejected cursor/limit")
+
+    assert paged_rows(legacy_reader) is None
+    assert calls == 1, "a reader that rejects cursor/limit must not be retried"
+
+
+def test_paged_rows_contains_no_legacy_typeerror_retry_path() -> None:
+    source = inspect.getsource(pagination.paged_rows)
+    tree = ast.parse(source)
+    assert not any(
+        isinstance(handler.type, ast.Name) and handler.type.id == "TypeError"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Try)
+        for handler in node.handlers
+    )
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "reader"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Starred)
+        and isinstance(node.args[0].value, ast.Name)
+        and node.args[0].value.id == "args"
+        and not node.keywords
+        for node in ast.walk(tree)
+    )
 
 
 def test_paged_rows_rejects_missing_or_malformed_page_pairs() -> None:
