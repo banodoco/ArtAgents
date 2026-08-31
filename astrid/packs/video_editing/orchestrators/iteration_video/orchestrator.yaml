@@ -13,13 +13,13 @@
   "id": "video_editing.iteration_video",
   "inputs": [
     {
-      "description": "Internal lineage id or @active. This is iteration lineage only, not session binding.",
+      "description": "Historical lineage id (runtime-owned run provenance is preferred; not session binding).",
       "name": "thread",
       "required": false,
       "type": "string"
     },
     {
-      "description": "Optional target run id. Defaults to the newest run in the thread.",
+      "description": "Optional target run id. Defaults to the newest runtime-owned run matching the lineage id.",
       "name": "target_run_id",
       "required": false,
       "type": "string"
@@ -29,12 +29,14 @@
     "iteration",
     "video",
     "render",
-    "thread",
+    "runtime",
     "pipeline",
     "hype"
   ],
   "kind": "built_in",
   "metadata": {
+    "authority": "runtime",
+    "retired_authority": "astrid.core.threads and .astrid.variants.json",
     "inspect_entrypoint": "main inspect",
     "runtime_entrypoint": "run_orchestrator",
     "runtime_file": "run.py",

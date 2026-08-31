@@ -15,7 +15,7 @@ TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
 
-def test_iteration_video_renders_attached_and_records_six_output_variant_group(
+def test_iteration_video_renders_attached_without_local_variant_authority(
     tmp_path: Path, monkeypatch
 ) -> None:
     repo = tmp_path
@@ -95,23 +95,8 @@ def test_iteration_video_renders_attached_and_records_six_output_variant_group(
     assert not (out_dir / "run.json").exists()
     run_records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
     assert run_records == []
-    sidecar = _read_json(out_dir / ".astrid.variants.json")
-    variant_artifacts = [artifact for artifact in sidecar["artifacts"] if artifact.get("role") == "variant"]
-    assert sorted(Path(item["path"]).name for item in variant_artifacts) == [
-        "iteration.manifest.json",
-        "iteration.mp4",
-        "iteration.mp4.provenance.json",
-        "iteration.quality.json",
-        "iteration.report.html",
-        "iteration.timeline.json",
-    ]
-    assert {item["group"] for item in variant_artifacts} == {f"iteration-video:{TARGET_RUN_ID}"}
-    assert all(item["variant_meta"]["target_run_id"] == TARGET_RUN_ID for item in variant_artifacts)
-
-    groups = _read_json(repo / ".astrid" / "threads" / THREAD_ID / "groups.json")
-    group = groups["groups"][f"iteration-video:{TARGET_RUN_ID}"]
-    assert len(group["artifacts"]) == 6
-    assert {item["run_id"] for item in group["artifacts"]} == {TARGET_RUN_ID}
+    assert not (out_dir / ".astrid.variants.json").exists()
+    assert not (repo / ".astrid" / "threads" / THREAD_ID / "groups.json").exists()
 
 
 def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_content(tmp_path: Path, monkeypatch) -> None:

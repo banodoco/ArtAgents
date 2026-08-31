@@ -128,7 +128,7 @@ def discover_timelines_for_project(
     any file under the project directory.
     """
     from astrid.core.foundation.project_paths import resolve_projects_root, validate_project_slug
-    from astrid.core.threads.ids import is_ulid
+    from astrid.core.ids import is_ulid
 
     slug = validate_project_slug(project_slug)
     projects_root = resolve_projects_root(root)

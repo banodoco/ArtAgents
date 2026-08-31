@@ -18,10 +18,9 @@ from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
-from astrid.core.threads.ids import is_ulid
-from astrid.core.threads.index import ThreadIndexStore
-from astrid.core.threads.schema import SCHEMA_VERSION
-from astrid.core.threads.variants import update_groups_for_run, write_sidecar
+from astrid.core.ids import is_ulid
+
+SCHEMA_VERSION = 1
 from astrid.packs.iteration.executors.assemble import run as assemble
 from astrid.packs.iteration.executors.prepare import run as prepare
 
@@ -134,12 +133,6 @@ def run_iteration_video(
         project_slug=project_slug,
         parent_run_id=parent_run_id,
         step_id=render_step_id,
-    )
-    write_iteration_group_sidecar(
-        out_path=out_path,
-        repo_root=repo_root,
-        thread_id=target["thread_id"],
-        target_run_id=target["target_run_id"],
     )
     return {
         "thread_id": target["thread_id"],
@@ -264,22 +257,32 @@ def format_inspection(report: Mapping[str, Any], *, no_content: bool = False) ->
 
 
 def resolve_target_run_id(repo_root: Path, *, thread_ref: str, target_run_id: str | None = None) -> dict[str, str]:
-    index = ThreadIndexStore(repo_root).read()
-    thread_id = index.get("active_thread_id") if thread_ref in {"", "@active", None} else thread_ref
-    if not isinstance(thread_id, str) or not is_ulid(thread_id):
+    all_records = prepare.load_run_records(repo_root)
+    thread_id = None if thread_ref in {"", "@active", None} else thread_ref
+    if thread_id is not None and not is_ulid(thread_id):
         raise IterationVideoError("thread must be a thread id or @active")
-    thread = index.get("threads", {}).get(thread_id)
-    if not isinstance(thread, Mapping):
-        raise IterationVideoError(f"unknown thread: {thread_id}")
     if target_run_id is not None:
         if not is_ulid(target_run_id):
             raise IterationVideoError("target run id must be a 26-character Crockford ULID")
-        return {"thread_id": thread_id, "thread_label": str(thread.get("label") or ""), "target_run_id": target_run_id}
-    all_records = prepare.load_run_records(repo_root)
-    for run_id in reversed(thread.get("run_ids", []) or []):
-        if isinstance(run_id, str) and run_id in all_records:
-            return {"thread_id": thread_id, "thread_label": str(thread.get("label") or ""), "target_run_id": run_id}
-    raise IterationVideoError(f"thread has no recorded runs: {thread_id}")
+        record = all_records.get(target_run_id)
+        return {
+            "thread_id": str(record.get("thread_id") if isinstance(record, Mapping) else thread_id or ""),
+            "thread_label": "",
+            "target_run_id": target_run_id,
+        }
+    candidates = [
+        run_id for run_id, record in all_records.items()
+        if thread_id is None or str(record.get("thread_id") or "") == thread_id
+    ]
+    if not candidates:
+        raise IterationVideoError(f"no runtime runs found for thread: {thread_id or '@active'}")
+    selected = sorted(candidates)[-1]
+    record = all_records[selected]
+    return {
+        "thread_id": str(record.get("thread_id") or thread_id or ""),
+        "thread_label": "",
+        "target_run_id": selected,
+    }
 
 
 def renderer_decisions(nodes: list[prepare.RunNode]) -> list[dict[str, Any]]:
@@ -312,41 +315,6 @@ def inspect_cache(repo_root: Path, nodes: list[prepare.RunNode], *, summarizer_m
         else:
             misses += 1
     return {"hits": hits, "misses": misses}
-
-
-def write_iteration_group_sidecar(*, out_path: Path, repo_root: Path, thread_id: str, target_run_id: str) -> None:
-    manifest = _read_json(out_path / "iteration.manifest.json")
-    assembly = manifest.get("assembly") if isinstance(manifest.get("assembly"), Mapping) else {}
-    group = f"iteration-video:{target_run_id}"
-    fallback_diagnostics = list(assembly.get("fallback_diagnostics", []) or []) if isinstance(assembly, Mapping) else []
-    artifacts = []
-    for index, (filename, kind) in enumerate(OUTPUT_FILES, start=1):
-        artifacts.append(
-            {
-                "path": str(out_path / filename),
-                "kind": kind,
-                "role": "variant",
-                "group": group,
-                "group_index": index,
-                "label": filename,
-                "variant" + "_meta": {
-                    "schema_version": SCHEMA_VERSION,
-                    "thread_id": thread_id,
-                    "target_run_id": target_run_id,
-                    "fallback_diagnostics": fallback_diagnostics,
-                    "ancestry": {"target_run_id": target_run_id},
-                },
-            }
-        )
-    write_sidecar(out_path, artifacts)
-    update_groups_for_run(
-        repo_root,
-        {
-            "thread_id": thread_id,
-            "run_id": target_run_id,
-            "output_artifacts": artifacts,
-        },
-    )
 
 
 def main(argv: list[str] | None = None) -> int:

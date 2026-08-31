@@ -29,6 +29,10 @@ ULID_LENGTH = 26
 """Character length of a canonical kernel ULID (130 bits, 26 base32 digits)."""
 
 _ULID_RE = re.compile(r"^[0123456789abcdefghjkmnpqrstvwxyz]{26}$")
+# Timeline files predating the kernel used the uppercase spelling.  Readers
+# may still encounter those historical directory names, but all new kernel
+# identifiers are emitted in the lowercase spelling above.
+_LEGACY_ULID_RE = re.compile(r"^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$")
 _ULID_RANDOM_BITS = 80
 _ULID_RANDOM_MASK = (1 << _ULID_RANDOM_BITS) - 1
 _ULID_LOCK = threading.Lock()
@@ -72,8 +76,36 @@ def is_lowercase_ulid(value: object) -> bool:
     return isinstance(value, str) and _ULID_RE.fullmatch(value) is not None
 
 
+def generate_ulid() -> str:
+    """Compatibility name for the kernel ULID generator.
+
+    New code should prefer :func:`generate_lowercase_ulid`; this alias keeps
+    timeline-domain callers independent of the retired thread package.
+    """
+    # Timeline-domain files historically used uppercase IDs; preserve that
+    # storage spelling while the runtime-facing generator stays lowercase.
+    return generate_lowercase_ulid().upper()
+
+
+def is_ulid(value: object) -> bool:
+    """Accept current lowercase and historical uppercase ULID directory ids."""
+    return isinstance(value, str) and (
+        _ULID_RE.fullmatch(value) is not None
+        or _LEGACY_ULID_RE.fullmatch(value) is not None
+    )
+
+
+def require_ulid(value: object, field: str = "id") -> str:
+    if not is_ulid(value):
+        raise ValueError(f"{field} must be a 26-character Crockford ULID")
+    return str(value)
+
+
 __all__ = [
     "ULID_LENGTH",
     "generate_lowercase_ulid",
     "is_lowercase_ulid",
+    "generate_ulid",
+    "is_ulid",
+    "require_ulid",
 ]

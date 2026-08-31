@@ -20,7 +20,7 @@ from astrid.core import modalities, timeline
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.managed_binding import is_managed_mode
-from astrid.core.threads.schema import SCHEMA_VERSION
+SCHEMA_VERSION = 1
 
 QUALITY_FLOOR = 0.6
 DEFAULT_CLIP_SECONDS = 4.0

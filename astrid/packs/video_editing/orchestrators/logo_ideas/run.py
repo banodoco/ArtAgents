@@ -8,16 +8,13 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.logo_ideas')
 import argparse
-import hashlib
 import json
 import math
-import os
 import re
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.http import (
     HttpClient,
@@ -503,81 +500,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "candidates": results,
     }
     write_json(layout["root"] / "logo-manifest.json", manifest)
-    run_id = os.environ.get("ASTRID_RUN_ID", "").strip()
-    if grid_mode:
-        artifacts = _variant_artifacts_for_grid(grid_generated, results, run_id=run_id)
-    else:
-        artifacts = _variant_artifacts_for_logo_ideas(results, run_id=run_id)
-    write_variant_sidecar(layout["root"], artifacts)
-
     print(f"wrote_logo_manifest={layout['root'] / 'logo-manifest.json'}")
     if grid.get("path"):
         print(f"wrote_grid={grid['path']}")
     return 0
-
-
-def _variant_artifacts_for_grid(
-    grid_generated: dict[str, Any],
-    results: list[dict[str, Any]],
-    *,
-    run_id: str,
-) -> list[dict[str, Any]]:
-    path = grid_generated.get("path")
-    if not path:
-        return []
-    group = hashlib.sha256(f"{run_id}:logo_ideas_grid".encode("utf-8")).hexdigest()[:16]
-    return [
-        {
-            "path": path,
-            "role": "variant",
-            "group": group,
-            "group_index": 1,
-            "duration": None,
-            "variant_meta": {
-                "candidate_id": "grid",
-                "name": "Logo grid",
-                "rationale": "Single GPT image-2 render of all concepts as one grid.",
-                "prompt": grid_generated.get("grid_prompt"),
-                "generated": {k: v for k, v in grid_generated.items() if k != "grid_prompt"},
-                "concepts": [
-                    {
-                        "candidate_id": c.get("candidate_id"),
-                        "name": c.get("name"),
-                        "rationale": c.get("rationale"),
-                        "prompt": c.get("prompt"),
-                    }
-                    for c in results
-                ],
-            },
-        }
-    ]
-
-
-def _variant_artifacts_for_logo_ideas(results: list[dict[str, Any]], *, run_id: str) -> list[dict[str, Any]]:
-    group = hashlib.sha256(f"{run_id}:logo_ideas".encode("utf-8")).hexdigest()[:16]
-    artifacts = []
-    for index, item in enumerate(results, start=1):
-        generated = item.get("generated") or {}
-        path = generated.get("path")
-        if not path:
-            continue
-        artifacts.append(
-            {
-                "path": path,
-                "role": "variant",
-                "group": group,
-                "group_index": index,
-                "duration": None,
-                "variant_meta": {
-                    "candidate_id": item.get("candidate_id"),
-                    "name": item.get("name"),
-                    "rationale": item.get("rationale"),
-                    "prompt": item.get("prompt"),
-                    "generated": generated,
-                },
-            }
-        )
-    return artifacts
 
 
 if __name__ == "__main__":

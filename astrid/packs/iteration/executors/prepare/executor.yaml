@@ -20,10 +20,10 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Collect thread provenance, compute quality, summarize candidate runs, and emit iteration prepare artifacts.",
+  "description": "Collect runtime-owned run provenance, compute quality, summarize candidate runs, and emit iteration prepare artifacts.",
   "graph": {
     "consumes": [
-      "thread_runs",
+      "runtime_runs",
       "provenance"
     ],
     "provides": [
@@ -53,7 +53,7 @@
     "iteration",
     "video",
     "prepare",
-    "thread",
+    "runtime",
     "quality",
     "provenance"
   ],
@@ -81,6 +81,6 @@
       "type": "file"
     }
   ],
-  "short_description": "Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts.",
+  "short_description": "Collect runtime-owned provenance, quality scores, and candidate runs into iteration prepare artifacts.",
   "version": "1.0"
 }

@@ -73,10 +73,10 @@ def test_dogfood_fixture_inspect_report_and_fallback_without_render_or_summarize
     assert report["cost_estimate"]["estimated_cost"] == 0.036
     assert "Estimated cost: ~$0.036" in text
     assert "content: suppressed" in text
-    assert "astrid_logo_v3" in text
+    assert "unlabeled" in text
 
 
-def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_path: Path, monkeypatch) -> None:
+def test_dogfood_fixture_render_handoff_outputs_report_without_sidecar_authority(tmp_path: Path, monkeypatch) -> None:
     repo = _install_fixture(tmp_path)
     out_dir = repo / "runs" / "astrid_logo_v3_iteration"
     render_inputs: dict[str, Path] = {}
@@ -125,12 +125,7 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
     assert manifest["assembly"]["direction_label"] == "fixture"
     assert "renderer-fallback" in (out_dir / "iteration.report.html").read_text(encoding="utf-8")
 
-    sidecar = _read_json(out_dir / ".astrid.variants.json")
-    artifacts = sidecar["artifacts"]
-    assert len(artifacts) == 6
-    assert {item["group"] for item in artifacts} == {f"iteration-video:{TARGET_RUN_ID}"}
-    assert {item["variant_meta"]["target_run_id"] for item in artifacts} == {TARGET_RUN_ID}
-    assert all(item["variant_meta"]["fallback_diagnostics"] for item in artifacts)
+    assert not (out_dir / ".astrid.variants.json").exists()
 
     orchestrator = _read_json(Path("astrid/packs/video_editing/orchestrators/iteration_video/orchestrator.yaml"))
     assert orchestrator["child_executors"] == ["iteration.prepare", "iteration.assemble", "rendering.render"]

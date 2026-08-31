@@ -121,7 +121,7 @@ def create_branch_timeline(
             already exists.
         ProjectionError: When chain verification or projection fails.
     """
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
 
     from .paths import (
         find_timeline_by_event_stream_id,

@@ -440,7 +440,7 @@ def _create_pull_destination(
     timeline_id = remote_source_timeline_id if remote_source_timeline_id else str(uuid4())
 
     # Generate a ULID for the timeline directory
-    from astrid.core.threads.ids import generate_ulid
+    from astrid.core.ids import generate_ulid
     ulid = generate_ulid()
 
     tdir = timeline_dir(project_slug, ulid, root=root)

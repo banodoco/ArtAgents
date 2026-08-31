@@ -10,6 +10,7 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_mai
 guard_canonical_entrypoint('iteration.prepare')
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import subprocess
@@ -23,11 +24,12 @@ from typing import Any, Mapping
 from astrid.core import modalities
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.threads.ids import is_ulid
-from astrid.core.threads.index import ThreadIndexStore
-from astrid.core.threads.record import sha256_file
-from astrid.core.threads.schema import SCHEMA_VERSION
-from astrid.core.threads.variants import selection_history
+from astrid.core.ids import is_ulid
+
+# Iteration artifacts retain their historical schema number for compatibility,
+# but their production execution no longer imports or consults the retired
+# thread/variant store.  Runtime task/run records are the only live input.
+SCHEMA_VERSION = 1
 
 UNDERSTAND_EXECUTOR_ID = "understanding.understand"
 DEFAULT_MAX_ITERATIONS = 200
@@ -177,9 +179,7 @@ def load_run_records(repo_root: Path) -> dict[str, dict[str, Any]]:
 def collect_graph(repo_root: Path, all_records: Mapping[str, dict[str, Any]], target_run_id: str) -> list[RunNode]:
     target = all_records[target_run_id]
     thread_id = str(target.get("thread_id") or "")
-    thread_run_ids = _thread_run_ids(repo_root, thread_id)
     output_by_sha = _output_sha_index(all_records)
-    selection_orders = _selection_orders(repo_root, thread_id)
     nodes: dict[str, RunNode] = {}
     queue: list[tuple[str, int]] = [(target_run_id, 0)]
 
@@ -192,7 +192,10 @@ def collect_graph(repo_root: Path, all_records: Mapping[str, dict[str, Any]], ta
         if existing is not None and existing.depth >= depth:
             continue
         parent_edges, unresolved = _parent_edges_for_record(record, all_records, output_by_sha)
-        label = "in_thread" if record.get("thread_id") == thread_id or run_id in thread_run_ids else "pulled_by_ancestry"
+        # A runtime run may carry the historical thread_id as immutable input
+        # provenance.  There is intentionally no sidecar index lookup here;
+        # ancestry is derived from the run's explicit parent edges.
+        label = "in_thread" if record.get("thread_id") == thread_id else "pulled_by_ancestry"
         nodes[run_id] = RunNode(
             run_id=run_id,
             record=record,
@@ -200,7 +203,7 @@ def collect_graph(repo_root: Path, all_records: Mapping[str, dict[str, Any]], ta
             label=label,
             parent_edges=parent_edges,
             unresolved_parent_run_ids=unresolved,
-            selection_order=selection_orders.get(run_id, 999_999),
+            selection_order=999_999,
         )
         for edge in parent_edges:
             parent_id = edge.get("run_id")
@@ -489,30 +492,6 @@ def _dedupe_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
-def _thread_run_ids(repo_root: Path, thread_id: str) -> set[str]:
-    try:
-        index = ThreadIndexStore(repo_root).read()
-    except Exception:
-        return set()
-    thread = index.get("threads", {}).get(thread_id, {})
-    return {str(run_id) for run_id in thread.get("run_ids", []) or []}
-
-
-def _selection_orders(repo_root: Path, thread_id: str) -> dict[str, int]:
-    if not is_ulid(thread_id):
-        return {}
-    orders: dict[str, int] = {}
-    try:
-        history = selection_history(repo_root, thread_id)
-    except Exception:
-        return orders
-    for order, record in enumerate(history):
-        for selected in record.get("selected", []) or []:
-            if isinstance(selected, Mapping) and isinstance(selected.get("run_id"), str):
-                orders.setdefault(str(selected["run_id"]), order)
-    return orders
-
-
 def _output_sha_index(records: Mapping[str, dict[str, Any]]) -> dict[str, list[str]]:
     by_sha: dict[str, list[str]] = {}
     for run_id, record in records.items():
@@ -586,7 +565,7 @@ def _repo_rel(path: Path, repo_root: Path) -> str:
     try:
         return path.expanduser().resolve().relative_to(repo_root.expanduser().resolve()).as_posix()
     except ValueError:
-        return f"sha256:{sha256_file(path)}"
+        return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
 if __name__ == "__main__":

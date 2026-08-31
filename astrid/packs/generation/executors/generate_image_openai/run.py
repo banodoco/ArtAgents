@@ -13,7 +13,6 @@ from astrid.core.pack.entrypoint import (
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse
 import base64
-import hashlib
 import json
 import os
 import re
@@ -30,7 +29,6 @@ from astrid.core._shared.result_manifest import complete_output_metadata
 from astrid.core.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.atomic_io import write_json_atomic
-from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 from astrid.core.util.credentials_scope import CredentialsScope
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -315,9 +313,7 @@ def generate(args: argparse.Namespace) -> int:
     out_dir = args.out_dir
     default_format = _normalize_format(args.output_format)
     manifest_jobs: list[dict[str, Any]] = []
-    variant_artifacts: list[dict[str, Any]] = []
     audit = AuditContext.from_env()
-    run_id = os.environ.get("ASTRID_RUN_ID", "").strip()
 
     for index, job in enumerate(jobs, start=1):
         prompt = str(job["prompt"]).strip()
@@ -346,16 +342,6 @@ def generate(args: argparse.Namespace) -> int:
             response = _call_image_api(payload, api_key, args.timeout)
             print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s")
             written = _write_images(response, paths, args.force)
-            variant_artifacts.extend(
-                _variant_artifacts_for_generated_images(
-                    run_id=run_id,
-                    prompt_index=index,
-                    prompt=prompt,
-                    payload=payload,
-                    response=response,
-                    paths=written,
-                )
-            )
             if audit is not None:
                 prompt_id = audit.register_prompt_ref(
                     prompt=prompt,
@@ -421,50 +407,11 @@ def generate(args: argparse.Namespace) -> int:
                 metadata={"jobs": len(manifest_jobs)},
             )
         print(f"Wrote {args.manifest}")
-    if not args.dry_run:
-        write_variant_sidecar(out_dir, variant_artifacts)
-
     if args.preset and not args.dry_run and not args.no_open:
         preset = PRESETS.get(args.preset)
         if preset and preset.get("open_result"):
             _open_first_rendered(out_dir)
     return 0
-
-
-def _variant_artifacts_for_generated_images(
-    *,
-    run_id: str,
-    prompt_index: int,
-    prompt: str,
-    payload: dict[str, Any],
-    response: dict[str, Any],
-    paths: list[str],
-) -> list[dict[str, Any]]:
-    if not paths:
-        return []
-    group = hashlib.sha256(f"{run_id}:{prompt_index}".encode("utf-8")).hexdigest()[:16]
-    artifacts = []
-    for output_index, path in enumerate(paths, start=1):
-        artifacts.append(
-            {
-                "path": path,
-                "role": "variant",
-                "group": group,
-                "group_index": output_index,
-                "duration": None,
-                "variant_meta": {
-                    "prompt": prompt,
-                    "prompt_index": prompt_index,
-                    "output_index": output_index,
-                    "model": payload.get("model"),
-                    "size": payload.get("size"),
-                    "quality": payload.get("quality"),
-                    "output_format": payload.get("output_format"),
-                    "created": response.get("created"),
-                },
-            }
-        )
-    return artifacts
 
 
 def build_parser() -> argparse.ArgumentParser:
