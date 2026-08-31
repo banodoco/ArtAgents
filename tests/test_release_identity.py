@@ -16,6 +16,7 @@ from astrid.core.release_identity import (
     build_prelive_manifest,
     run_b11_1,
     resolve_component,
+    main,
 )
 
 
@@ -114,3 +115,19 @@ def test_b11_runs_declared_generator_twice(tmp_path: Path) -> None:
     observed = run_b11_1([row], [{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
     assert observed[0]["generator_observation_rows"][0]["first_run_receipt_sha256"]
     assert observed[0]["generator_observation_rows"][0]["output_digests"] == [__import__("hashlib").sha256(b"\x00\xff").hexdigest()]
+    receipt = create_pre_live_identity({"ASTRID-CLIENT": checkout}, seed_outputs=_seeds(), generator_definitions=[{"generator_id": "GEN", "component_id": "ASTRID-CLIENT", "checkout": str(checkout), "entrypoint_path": "generator.py"}], contract_bytes=b"{}", schema_manifest_bytes=b"{}")
+    assert verify_receipt(receipt) == receipt["identity"]
+
+def test_installed_cli_consumes_exact_seed_directory_manifest(tmp_path: Path) -> None:
+    checkout = _repo(tmp_path, "Astrid")
+    seed_dir = tmp_path / "seed-bytes"; seed_dir.mkdir()
+    manifest = {}
+    from astrid.core.release_identity import PRELIVE_SEEDS
+    for index, seed in enumerate(PRELIVE_SEEDS):
+        name = f"{index:02d}.bin"; (seed_dir / name).write_bytes(seed.encode()); manifest[seed] = {"path": name, "media_type": "application/octet-stream", "producer_id": "FIXTURE-PRODUCER"}
+    manifest_path = tmp_path / "seeds.json"; manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    output = tmp_path / "cli-pre.json"
+    assert main(["pre-live", "--component", f"ASTRID-CLIENT={checkout}", "--seed-dir", str(seed_dir), "--seed-manifest", str(manifest_path), "--output", str(output)]) == 0
+    receipt = load_receipt(output)
+    assert receipt["pre_live_seed_payloads"][0]["media_type"] == "application/octet-stream"
+    assert receipt["pre_live_seed_payloads"][0]["producer_id"] == "FIXTURE-PRODUCER"

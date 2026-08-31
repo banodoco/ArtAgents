@@ -29,6 +29,7 @@ PRELIVE_EXCLUDED_IDS = ("PRELIVE-MANIFEST", "RCPT-PRELIVE-MANIFEST", "PRELIVE-RO
 PRELIVE_SEEDS = tuple(sorted(set(PRELIVE_SEED_SOURCE)))
 EVIDENCE_ARTIFACT_FIELDS = ("schema_version", "artifact_id", "artifact_kind", "producer_id", "governance_binding", "input_bindings", "canonical_content_base64", "byte_length", "content_sha256", "media_type", "detail_schema_id")
 GENERATOR_ROW_FIELDS = ("schema_version", "row_kind", "generator_id", "component_id", "entrypoint_component_id", "entrypoint_path", "entrypoint_sha256", "interpreter_tool_id", "argv_formula_id", "sandbox_policy_id", "generator_definition_sha256", "input_schema_ids", "input_digests", "declared_output_roots", "tool_ids", "output_paths", "output_digests", "tool_rows", "run_ordinal", "argv_carrier", "argv_sha256", "clean_checkout_id", "changed_paths", "undeclared_changed_paths", "started_at", "finished_at", "exit_code", "stop_class", "first_run_receipt_sha256", "second_run_receipt_sha256", "run_receipt_evidence_rows", "provenance_input_bindings", "producer_id")
+GENERATOR_RECEIPT_FIELDS = ("schema_version", "artifact_kind", "generator_id", "run_ordinal", "argv", "argv_sha256", "output_rows", "exit_code")
 RECEIPT_ROOT_ENVIRONMENTS = ("ASTRID_RELEASE_RECEIPT_ROOT", "BANODOCO_RELEASE_RECEIPT_ROOT", "RELEASE_RECEIPT_ROOT")
 
 class ReleaseIdentityError(ValueError):
@@ -178,10 +179,12 @@ def _directory_inventory(root: Path) -> list[dict[str, str]]:
     return rows
 
 def _clean_git_checkout(source: Path, destination: Path, expected_oid: str) -> None:
-    result = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(source), str(destination)], capture_output=True, text=True, check=False, timeout=60)
+    result = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "--recurse-submodules", str(source), str(destination)], capture_output=True, text=True, check=False, timeout=60)
     if result.returncode != 0: raise ReleaseIdentityError("B11.1 could not create a clean pinned checkout")
     subprocess.run(["git", "-C", str(destination), "checkout", "--quiet", "--detach", "HEAD"], check=True, timeout=30)
     if _git_text(destination, "rev-parse", "HEAD") != expected_oid: raise ReleaseIdentityError("B11.1 clone is not pinned to integrated_oid")
+    if git_identity(destination).get("submodules") != git_identity(source).get("submodules"): raise ReleaseIdentityError("B11.1 clone recursive submodule identity differs from reviewed source")
+    if _dirty_paths(destination): raise ReleaseIdentityError("B11.1 recursive checkout is not clean")
 
 def run_b11_1(component_rows: Sequence[Mapping[str, Any]], generator_definitions: Sequence[Mapping[str, Any]], *, contract_bytes: bytes, schema_manifest_bytes: bytes, output_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
     """Execute each declared B11.1 generator twice and attach observations.
@@ -267,6 +270,13 @@ def join_plan_remote_targets(component_rows: Sequence[Mapping[str, Any]], *, str
         item = copy.deepcopy(target); item["reviewed_source_oid"] = source["integrated_oid"]; result.append(item)
     result.append(plan_publication_row()); return result
 
+def _seed_info(seed: str, metadata: Mapping[str, Any] | None) -> tuple[str, str]:
+    item = ((metadata or {}).get("seed_artifacts", {}) or {}).get(seed, {})
+    if not isinstance(item, Mapping): item = {}
+    producer, media = item.get("producer_id", "CMD-PRELIVE-MANIFEST"), item.get("media_type", "application/json")
+    if not isinstance(producer, str) or not isinstance(media, str) or not producer or not media: raise ReleaseIdentityError("seed media/producer definitions must be non-empty strings")
+    return producer, media
+
 def build_prelive_manifest(seed_outputs: Mapping[str, bytes | bytearray | Mapping[str, Any] | Sequence[Any]] | None = None, *, metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if seed_outputs == {}: raise ReleaseIdentityError("PRELIVE-MANIFEST is missing required seed bytes")
     if seed_outputs is None: raise ReleaseIdentityError("PRELIVE-MANIFEST requires actual seed bytes")
@@ -276,18 +286,18 @@ def build_prelive_manifest(seed_outputs: Mapping[str, bytes | bytearray | Mappin
         value = outputs[seed]
         if not isinstance(value, (bytes, bytearray)): raise ReleaseIdentityError("PRELIVE seed outputs must be complete bytes")
         data = bytes(value); digest = _sha256_bytes(data)
-        evidence.append({"path": f"evidence/sha256/{digest[:2]}/{digest}", "sha256": digest, "producer_id": "CMD-PRELIVE-MANIFEST", "token_ids": [seed], "epochs": _nfc(epochs), "media_type": "application/json"})
+        producer, media = _seed_info(seed, metadata); evidence.append({"path": f"evidence/sha256/{digest[:2]}/{digest}", "sha256": digest, "producer_id": producer, "token_ids": [seed], "epochs": _nfc(epochs), "media_type": media})
     evidence.sort(key=lambda r: (r["path"], r["sha256"], r["producer_id"])); manifest = {"schema_version": PRELIVE_MANIFEST_SCHEMA, "governance_binding": "LOCAL-STAGE1-RELEASE", "seed_ids": seeds, "evidence_rows": evidence, "excluded_ids": list(PRELIVE_EXCLUDED_IDS), "epochs": _nfc(epochs)}; manifest["manifest_sha256"] = framed_hash("banodoco.pre-live-manifest.v1", manifest)
     if set(manifest) != set(PRELIVE_MANIFEST_FIELDS): raise ReleaseIdentityError("pre-live manifest schema drift")
     return manifest
 
-def _seed_payload_wrappers(seed_outputs: Mapping[str, bytes | bytearray]) -> list[dict[str, Any]]:
+def _seed_payload_wrappers(seed_outputs: Mapping[str, bytes | bytearray], metadata: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     if set(seed_outputs) != set(PRELIVE_SEEDS): raise ReleaseIdentityError("PRELIVE seed payload set is not exactly 47 seeds")
     wrappers = []
     for seed in PRELIVE_SEEDS:
         value = seed_outputs[seed]
         if not isinstance(value, (bytes, bytearray)): raise ReleaseIdentityError("PRELIVE seed outputs must be complete bytes")
-        content = bytes(value); wrappers.append(_artifact_wrapper(f"PRELIVE-SEED:{seed}", "CMD-PRELIVE-MANIFEST", content))
+        content = bytes(value); producer, media = _seed_info(seed, metadata); wrappers.append(_artifact_wrapper(f"PRELIVE-SEED:{seed}", producer, content, media_type=media, detail_schema_id="pre-live-seed-v1"))
     return wrappers
 
 def _receipt_digest(receipt: Mapping[str, Any]) -> str: return framed_hash("banodoco.release-receipt.v1", {k: v for k, v in receipt.items() if k not in {"receipt_sha256", "identity"}})
@@ -302,6 +312,18 @@ def _decode_artifact(item: Mapping[str, Any], *, artifact_id: str | None = None,
     except (ValueError, TypeError): raise ReleaseIdentityError("evidence-artifact base64 is invalid")
     if item.get("byte_length") != len(content) or item.get("content_sha256") != _sha256_bytes(content): raise ReleaseIdentityError("evidence-artifact content digest mismatch")
     return content
+
+def _decode_generator_receipt(wrapper: Mapping[str, Any], observation: Mapping[str, Any]) -> bytes:
+    raw = _decode_artifact(wrapper, producer_id="PROD-CMD-PACKET:B11.1")
+    try: receipt = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError): raise ReleaseIdentityError("generator receipt is not canonical JSON")
+    if canonical_bytes(receipt) != raw or set(receipt) != set(GENERATOR_RECEIPT_FIELDS) or receipt.get("schema_version") != 1 or receipt.get("artifact_kind") != "generator-run-receipt" or receipt.get("generator_id") != observation.get("generator_id"): raise ReleaseIdentityError("generator-run-receipt-v1 schema mismatch")
+    if wrapper.get("detail_schema_id") != "generator-run-receipt-v1" or wrapper.get("artifact_id") != f"GENERATOR-RUN:{receipt['generator_id']}:{receipt['run_ordinal']}": raise ReleaseIdentityError("generator receipt artifact binding mismatch")
+    argv = receipt.get("argv")
+    if not isinstance(argv, list) or receipt.get("argv_sha256") != framed_hash("banodoco.generator-run-argv.v1", argv) or any(Path(str(x)).is_absolute() or ".." in Path(str(x)).parts for x in argv): raise ReleaseIdentityError("generator receipt argv is not portable")
+    if not isinstance(receipt.get("output_rows"), list) or any(set(row) != {"path", "sha256", "byte_length"} or Path(str(row.get("path"))).is_absolute() or ".." in Path(str(row.get("path"))).parts or not re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256"))) or not isinstance(row.get("byte_length"), int) or row.get("byte_length") < 0 for row in receipt["output_rows"]): raise ReleaseIdentityError("generator receipt output inventory schema mismatch")
+    if receipt.get("exit_code") != 0: raise ReleaseIdentityError("generator receipt exit code is not successful")
+    return raw
 
 def _validate_git_identity_bytes(content: bytes, row: Mapping[str, Any]) -> None:
     try: identity = json.loads(content.decode("utf-8"))
@@ -319,7 +341,7 @@ def create_pre_live_identity(components: Mapping[str, str | os.PathLike[str]], *
         rows = run_b11_1(rows, generator_definitions, contract_bytes=contract_bytes, schema_manifest_bytes=schema_manifest_bytes)
     metadata = dict(metadata or {}); planned = set(components) == {"ASTRID-CLIENT", "NEUTRAL-RUNTIME"}
     if seed_outputs is None: raise ReleaseIdentityError("PRELIVE-MANIFEST requires actual bytes for all 47 seeds")
-    manifest = build_prelive_manifest(seed_outputs, metadata=metadata); seed_wrappers = _seed_payload_wrappers(seed_outputs); evidence = []
+    manifest = build_prelive_manifest(seed_outputs, metadata=metadata); seed_wrappers = _seed_payload_wrappers(seed_outputs, metadata=metadata); evidence = []
     for row in rows:
         data = canonical_bytes(row); digest = _sha256_bytes(data); evidence.append({"path": f"evidence/sha256/{digest[:2]}/{digest}", "sha256": digest, "producer_id": "CMD-IDENTITY:pre-live-root", "token_ids": [row["component_id"]], "epochs": metadata.get("epochs", {}), "media_type": "application/json"})
     evidence.sort(key=lambda r: (r["path"], r["sha256"], r["producer_id"])); root_payload = {"component_rows": rows, "evidence_rows": evidence, "manifest_sha256": manifest["manifest_sha256"]}; identity = framed_hash("banodoco.pre-live-evidence-root.v1", root_payload)
@@ -352,7 +374,7 @@ def create_candidate_core_identity(pre_live: Mapping[str, Any] | str | os.PathLi
     if set(old) != set(new): raise ReleaseIdentityError("candidate component set is not a total bijection")
     for cid in sorted(old):
         if canonical_bytes(old[cid]) != canonical_bytes(new[cid]): raise ReleaseIdentityError(f"candidate component field mismatch after pre-live capture: {cid}")
-    meta = dict(metadata or {}); manifest = source["pre_live_manifest"]; core = {"schema_version": 1, "governance_binding": meta.get("governance_binding", "LOCAL-STAGE1-RELEASE"), "component_manifest_sha256": framed_hash("banodoco.component-manifest.v1", rows), "contract_id": meta.get("contract_id", framed_hash("banodoco.contract.v1", [r["contract_sha256"] for r in rows])), "runtime_build_id": meta.get("runtime_build_id", framed_hash("banodoco.runtime-build.v1", [r["integrated_oid"] for r in rows])), "source_manifest_id": meta.get("source_manifest_id", framed_hash("banodoco.source-manifest.v1", [r["subtree_sha256"] for r in rows])), "migration_manifest_id": meta.get("migration_manifest_id", NONE), "selected_realm_id": meta.get("selected_realm_id", NONE), "trusted_disposition_sha256": meta.get("trusted_disposition_sha256", NONE), "pre_live_evidence_root": source["identity"], "contract_epoch": meta.get("contract_epoch", NONE), "runtime_epoch": meta.get("runtime_epoch", NONE), "source_epoch": meta.get("source_epoch", NONE), "migration_epoch": meta.get("migration_epoch", NONE), "activation_epoch": meta.get("activation_epoch", NONE), "release_epoch": NONE, "component_rows": rows}; receipt = {"schema_version": SCHEMA_VERSION, "kind": "candidate-core", "operation_id": "CMD-IDENTITY:candidate-core", "identity": framed_hash("banodoco.candidate-core.v1", core), "candidate_core": core, "pre_live_root": source["identity"], "pre_live_component_rows": copy.deepcopy(source["component_rows"]), "pre_live_manifest": copy.deepcopy(manifest), "pre_live_manifest_sha256": manifest["manifest_sha256"], "metadata": _nfc(meta)}; receipt["receipt_sha256"] = _receipt_digest(receipt); _write_receipt(receipt, output); return receipt
+    meta = dict(metadata or {}); manifest = source["pre_live_manifest"]; core = {"schema_version": 1, "governance_binding": meta.get("governance_binding", "LOCAL-STAGE1-RELEASE"), "component_manifest_sha256": framed_hash("banodoco.component-manifest.v1", rows), "contract_id": meta.get("contract_id", framed_hash("banodoco.contract.v1", [r["contract_sha256"] for r in rows])), "runtime_build_id": meta.get("runtime_build_id", framed_hash("banodoco.runtime-build.v1", [r["integrated_oid"] for r in rows])), "source_manifest_id": meta.get("source_manifest_id", framed_hash("banodoco.source-manifest.v1", [r["subtree_sha256"] for r in rows])), "migration_manifest_id": meta.get("migration_manifest_id", NONE), "selected_realm_id": meta.get("selected_realm_id", NONE), "trusted_disposition_sha256": meta.get("trusted_disposition_sha256", NONE), "pre_live_evidence_root": source["identity"], "contract_epoch": meta.get("contract_epoch", NONE), "runtime_epoch": meta.get("runtime_epoch", NONE), "source_epoch": meta.get("source_epoch", NONE), "migration_epoch": meta.get("migration_epoch", NONE), "activation_epoch": meta.get("activation_epoch", NONE), "release_epoch": NONE, "component_rows": rows}; receipt = {"schema_version": SCHEMA_VERSION, "kind": "candidate-core", "operation_id": "CMD-IDENTITY:candidate-core", "identity": framed_hash("banodoco.candidate-core.v1", core), "candidate_core": core, "pre_live_root": source["identity"], "pre_live_component_rows": copy.deepcopy(source["component_rows"]), "pre_live_evidence_rows": copy.deepcopy(source["evidence_rows"]), "pre_live_manifest": copy.deepcopy(manifest), "pre_live_manifest_sha256": manifest["manifest_sha256"], "metadata": _nfc(meta)}; receipt["receipt_sha256"] = _receipt_digest(receipt); _write_receipt(receipt, output); return receipt
 
 def _configured_receipt_root() -> Path | None:
     for name in RECEIPT_ROOT_ENVIRONMENTS:
@@ -387,15 +409,16 @@ def verify_receipt(receipt: Mapping[str, Any]) -> str:
         evidence = manifest.get("evidence_rows")
         if not isinstance(evidence, list) or len(evidence) != 47: raise ReleaseIdentityError("PRELIVE-MANIFEST evidence cardinality mismatch")
         for row in evidence:
-            if set(row) != {"path", "sha256", "producer_id", "token_ids", "epochs", "media_type"} or row.get("producer_id") != "CMD-PRELIVE-MANIFEST" or row.get("media_type") != "application/json" or not isinstance(row.get("token_ids"), list) or len(row["token_ids"]) != 1 or row["token_ids"][0] not in PRELIVE_SEEDS or row.get("path") != f"evidence/sha256/{row.get('sha256','')[:2]}/{row.get('sha256','')}" or not re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256"))): raise ReleaseIdentityError("PRELIVE-MANIFEST evidence row mismatch")
+            if set(row) != {"path", "sha256", "producer_id", "token_ids", "epochs", "media_type"} or not isinstance(row.get("token_ids"), list) or len(row["token_ids"]) != 1 or row["token_ids"][0] not in PRELIVE_SEEDS or row.get("path") != f"evidence/sha256/{row.get('sha256','')[:2]}/{row.get('sha256','')}" or not re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256"))) or not isinstance(row.get("producer_id"), str) or not isinstance(row.get("media_type"), str): raise ReleaseIdentityError("PRELIVE-MANIFEST evidence row mismatch")
         if {row["token_ids"][0] for row in evidence} != set(PRELIVE_SEEDS): raise ReleaseIdentityError("PRELIVE-MANIFEST evidence is not a bijection")
         payloads = receipt.get("pre_live_seed_payloads")
         if not isinstance(payloads, list) or len(payloads) != 47 or {p.get("artifact_id", "").removeprefix("PRELIVE-SEED:") for p in payloads if isinstance(p, Mapping)} != set(PRELIVE_SEEDS): raise ReleaseIdentityError("PRELIVE seed payload wrappers are incomplete")
         for payload in payloads:
             seed = payload.get("artifact_id", "").removeprefix("PRELIVE-SEED:")
-            content = _decode_artifact(payload, artifact_id=f"PRELIVE-SEED:{seed}", producer_id="CMD-PRELIVE-MANIFEST", media_type="application/json")
             matching = next((row for row in evidence if row["token_ids"] == [seed]), None)
-            if matching is None or matching["sha256"] != payload["content_sha256"]: raise ReleaseIdentityError("PRELIVE seed wrapper is not bound to manifest evidence")
+            if matching is None: raise ReleaseIdentityError("PRELIVE seed wrapper is not bound to manifest evidence")
+            content = _decode_artifact(payload, artifact_id=f"PRELIVE-SEED:{seed}", producer_id=matching["producer_id"], media_type=matching["media_type"])
+            if matching["sha256"] != payload["content_sha256"]: raise ReleaseIdentityError("PRELIVE seed wrapper is not bound to manifest evidence")
         identity_evidence = receipt.get("component_identity_evidence")
         rows_for_identity = receipt.get("component_rows", [])
         if not isinstance(identity_evidence, list) or len(identity_evidence) != len(rows_for_identity): raise ReleaseIdentityError("component identity evidence is incomplete")
@@ -414,8 +437,10 @@ def verify_receipt(receipt: Mapping[str, Any]) -> str:
                 if set(observation) != set(GENERATOR_ROW_FIELDS): raise ReleaseIdentityError("generator observation schema mismatch")
                 wrappers = observation.get("run_receipt_evidence_rows")
                 if not isinstance(wrappers, list) or len(wrappers) != 2: raise ReleaseIdentityError("generator receipt evidence is incomplete")
-                for wrapper in wrappers:
-                    _decode_artifact(wrapper, producer_id="PROD-CMD-PACKET:B11.1")
+                for index, wrapper in enumerate(wrappers):
+                    raw = _decode_generator_receipt(wrapper, observation)
+                    expected_sha = observation["first_run_receipt_sha256"] if index == 0 else observation["second_run_receipt_sha256"]
+                    if _sha256_bytes(raw) != expected_sha: raise ReleaseIdentityError("generator receipt wrapper is not bound to its observation row")
         if manifest.get("manifest_sha256") != framed_hash("banodoco.pre-live-manifest.v1", {k: manifest[k] for k in manifest if k != "manifest_sha256"}): raise ReleaseIdentityError("pre-live manifest digest mismatch")
         rows = _component_set(receipt.get("component_rows", [])); expected = framed_hash("banodoco.pre-live-evidence-root.v1", {"component_rows": [rows[k] for k in sorted(rows)], "evidence_rows": receipt.get("evidence_rows"), "manifest_sha256": manifest["manifest_sha256"]})
         planned_ids = {"ASTRID-CLIENT", "NEUTRAL-RUNTIME"}
@@ -429,11 +454,14 @@ def verify_receipt(receipt: Mapping[str, Any]) -> str:
     elif receipt.get("kind") == "candidate-core":
         core = receipt.get("candidate_core")
         if not isinstance(core, Mapping) or set(core) != set(CANDIDATE_CORE_FIELDS): raise ReleaseIdentityError("candidate-core-object-v1 has unexpected or missing fields")
+        if receipt.get("pre_live_root") != core.get("pre_live_evidence_root"): raise ReleaseIdentityError("candidate pre-live root does not match candidate core evidence root")
         manifest = receipt.get("pre_live_manifest")
         if not isinstance(manifest, Mapping) or set(manifest) != set(PRELIVE_MANIFEST_FIELDS) or manifest.get("manifest_sha256") != receipt.get("pre_live_manifest_sha256") or manifest.get("manifest_sha256") != framed_hash("banodoco.pre-live-manifest.v1", {k: manifest[k] for k in manifest if k != "manifest_sha256"}): raise ReleaseIdentityError("candidate core is not bound to the verified PRELIVE manifest")
         prior_rows = _component_set(receipt.get("pre_live_component_rows", [])); core_rows = _component_set(core.get("component_rows", []))
         if set(prior_rows) != set(core_rows) or any(canonical_bytes(prior_rows[c]) != canonical_bytes(core_rows[c]) for c in prior_rows): raise ReleaseIdentityError("candidate core component set is not a total field-equal bijection")
         if core.get("component_manifest_sha256") != framed_hash("banodoco.component-manifest.v1", core["component_rows"]): raise ReleaseIdentityError("candidate core component manifest binding mismatch")
+        reconstructed_root = framed_hash("banodoco.pre-live-evidence-root.v1", {"component_rows": [prior_rows[c] for c in sorted(prior_rows)], "evidence_rows": receipt.get("pre_live_evidence_rows"), "manifest_sha256": manifest["manifest_sha256"]})
+        if reconstructed_root != receipt.get("pre_live_root"): raise ReleaseIdentityError("candidate pre-live root is not a verified PRELIVE root")
         expected = framed_hash("banodoco.candidate-core.v1", core)
     else: raise ReleaseIdentityError("unknown release receipt kind")
     if expected != receipt.get("identity"): raise ReleaseIdentityError("release identity mismatch")
@@ -485,10 +513,36 @@ def _component_args(values: Sequence[str]) -> dict[str, str]:
     if not result: raise ReleaseIdentityError("at least one --component is required")
     return result
 
+def _load_seed_inputs(seed_dir: str | os.PathLike[str], manifest_path: str | os.PathLike[str]) -> tuple[dict[str, bytes], dict[str, Any]]:
+    root = Path(seed_dir).expanduser().resolve()
+    if not root.is_dir(): raise ReleaseIdentityError("--seed-dir must be an existing directory")
+    try: descriptor = json.loads(Path(manifest_path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc: raise ReleaseIdentityError("--seed-manifest must be readable canonical JSON") from exc
+    entries = descriptor.get("seeds") if isinstance(descriptor, Mapping) and "seeds" in descriptor else descriptor
+    if isinstance(entries, list): entries = {item.get("seed_id"): item for item in entries if isinstance(item, Mapping)}
+    if not isinstance(entries, Mapping) or set(entries) != set(PRELIVE_SEEDS): raise ReleaseIdentityError("seed manifest must enumerate exactly all 47 seed IDs")
+    outputs: dict[str, bytes] = {}; definitions: dict[str, Any] = {}
+    for seed in PRELIVE_SEEDS:
+        item = entries[seed]
+        if isinstance(item, str): item = {"path": item}
+        if not isinstance(item, Mapping) or not isinstance(item.get("path"), str): raise ReleaseIdentityError(f"seed manifest entry is invalid: {seed}")
+        rel = Path(item["path"])
+        if rel.is_absolute() or ".." in rel.parts: raise ReleaseIdentityError(f"seed path is not relative and contained: {seed}")
+        raw_target = root / rel
+        if raw_target.is_symlink(): raise ReleaseIdentityError(f"seed payload path may not be a symlink: {seed}")
+        target = raw_target.resolve()
+        try: target.relative_to(root)
+        except ValueError as exc: raise ReleaseIdentityError(f"seed path escapes --seed-dir: {seed}") from exc
+        if not target.is_file() or target.is_symlink(): raise ReleaseIdentityError(f"seed payload is missing or not a regular file: {seed}")
+        outputs[seed] = target.read_bytes(); producer, media = item.get("producer_id", "CMD-PRELIVE-MANIFEST"), item.get("media_type", "application/json")
+        if not isinstance(producer, str) or not isinstance(media, str) or not producer or not media: raise ReleaseIdentityError(f"seed media/producer definition is invalid: {seed}")
+        definitions[seed] = {"producer_id": producer, "media_type": media}
+    return outputs, {"seed_artifacts": definitions}
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(prog="astrid-release-identity"); sub = parser.add_subparsers(dest="operation", required=True); pre = sub.add_parser("pre-live"); pre.add_argument("--component", action="append", default=[]); pre.add_argument("--output"); pre.add_argument("--seed-dir", required=True); pre.add_argument("--seed-manifest", required=True); candidate = sub.add_parser("candidate-core"); candidate.add_argument("--pre-live", required=True); candidate.add_argument("--component", action="append", default=[]); candidate.add_argument("--output"); verify = sub.add_parser("verify"); verify.add_argument("receipt"); args = parser.parse_args(argv)
     try:
-        if args.operation == "pre-live": result = create_pre_live_identity(_component_args(args.component), output=args.output)
+        if args.operation == "pre-live": seed_outputs, seed_metadata = _load_seed_inputs(args.seed_dir, args.seed_manifest); result = create_pre_live_identity(_component_args(args.component), output=args.output, seed_outputs=seed_outputs, metadata=seed_metadata)
         elif args.operation == "candidate-core": result = create_candidate_core_identity(args.pre_live, _component_args(args.component), output=args.output)
         else: result = {"ok": True, "identity": load_receipt(args.receipt)["identity"]}
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2)); return 0
