@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from pathlib import Path
 
 import pytest
@@ -87,6 +89,31 @@ def test_provider_route_grant_expires_and_missing_grant_fails_closed() -> None:
             token, task_id="task-1", capability_id="provider.fetch", capability_digest="cap",
             routes=[], broker_binding="binding",
         )
+
+
+def test_provider_route_grant_concurrent_consumers_have_one_winner() -> None:
+    authority = ProviderRouteGrantAuthority(secret=b"host-only-secret")
+    token = authority.issue(
+        task_id="task-1", capability_id="provider.fetch", capability_digest="cap",
+        routes=["https://provider.example:443"], broker_binding="binding",
+    )
+    ready = Barrier(2)
+
+    def consume() -> str:
+        ready.wait(timeout=3)
+        try:
+            authority.consume(
+                token, task_id="task-1", capability_id="provider.fetch", capability_digest="cap",
+                routes=["https://provider.example:443"], broker_binding="binding",
+            )
+            return "accepted"
+        except ProviderRouteGrantError as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: consume(), range(2)))
+    assert sorted(result for result in results if result == "accepted") == ["accepted"]
+    assert sum("already been consumed" in result for result in results) == 1
 
 
 def _pack(tmp_path: Path, *, protocols: list[str]) -> Path:

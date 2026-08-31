@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -43,6 +44,7 @@ class ProviderRouteGrantAuthority:
         self._secret = bytes(secret or secrets.token_bytes(32))
         self._clock = clock
         self._grants: dict[str, _Grant] = {}
+        self._lock = threading.Lock()
 
     @staticmethod
     def binding(*, capability_id: str, capability_digest: str, broker: object) -> str:
@@ -77,7 +79,8 @@ class ProviderRouteGrantAuthority:
             broker_binding=str(broker_binding),
             expires_at=float(self._clock()) + ttl,
         )
-        self._grants[token_id] = claims
+        with self._lock:
+            self._grants[token_id] = claims
         mac = hmac.new(self._secret, f"{self.version}\0{token_id}".encode(), hashlib.sha256).hexdigest()
         return f"{self.version}.{token_id}.{mac}"
 
@@ -100,23 +103,27 @@ class ProviderRouteGrantAuthority:
         expected = hmac.new(self._secret, f"{self.version}\0{token_id}".encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             raise ProviderRouteGrantError("provider route grant authentication failed")
-        grant = self._grants.get(token_id)
-        if grant is None:
-            raise ProviderRouteGrantError("provider route grant is unknown")
-        if grant.consumed:
-            raise ProviderRouteGrantError("provider route grant has already been consumed")
-        if float(self._clock()) >= grant.expires_at:
-            raise ProviderRouteGrantError("provider route grant has expired")
-        if (
-            grant.task_id != str(task_id)
-            or grant.capability_id != str(capability_id)
-            or grant.capability_digest != str(capability_digest)
-            or grant.routes != _routes(routes)
-            or grant.broker_binding != str(broker_binding)
-        ):
-            raise ProviderRouteGrantError("provider route grant binding does not match the admitted task")
-        grant.consumed = True
-        return grant
+        # The replay check and transition are one critical section.  This is
+        # intentionally held through expiry/binding validation: no concurrent
+        # host thread may observe an unconsumed grant after this point.
+        with self._lock:
+            grant = self._grants.get(token_id)
+            if grant is None:
+                raise ProviderRouteGrantError("provider route grant is unknown")
+            if grant.consumed:
+                raise ProviderRouteGrantError("provider route grant has already been consumed")
+            if float(self._clock()) >= grant.expires_at:
+                raise ProviderRouteGrantError("provider route grant has expired")
+            if (
+                grant.task_id != str(task_id)
+                or grant.capability_id != str(capability_id)
+                or grant.capability_digest != str(capability_digest)
+                or grant.routes != _routes(routes)
+                or grant.broker_binding != str(broker_binding)
+            ):
+                raise ProviderRouteGrantError("provider route grant binding does not match the admitted task")
+            grant.consumed = True
+            return grant
 
 
 __all__ = ["ProviderRouteGrantAuthority", "ProviderRouteGrantError"]
