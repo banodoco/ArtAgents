@@ -57,7 +57,6 @@ def discover(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         banodoco_config=banodoco_config,
-        active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         include_elements=True,
     )
@@ -151,7 +150,6 @@ def get_capability(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
             banodoco_config=banodoco_config,
-            active_theme=active_theme,
             include_missing_roots=include_missing_roots,
             include_elements=include_elements or kind == "element" or kind is None,
         )
@@ -1381,7 +1379,6 @@ def invoke(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         banodoco_config=banodoco_config,
-        active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         include_elements=include_elements,
     )
@@ -1391,7 +1388,6 @@ def invoke(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         banodoco_config=banodoco_config,
-        active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         _registries=registries,
     )

@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -16,10 +14,8 @@ from astrid.core.element.registry import (
 )
 from astrid.core.element.schema import ElementKind
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 
 TOOLS_DIR = REPO_ROOT
-THEMES_ROOT = resolve_themes_root()
 
 
 def effects_root() -> Path:
@@ -42,26 +38,11 @@ def _validate_kind(kind: str) -> ElementKind:
     return _registry().element_kind_registry.normalize(kind)
 
 
-@lru_cache(maxsize=None)
-def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
-    return resolve_theme_dir(theme)
-
-
-def resolve_active_theme(
-    project_slug: str | None = None, *, root: str | Path | None = None
-) -> Path | None:
-    raw = os.environ.get(ACTIVE_THEME_ENV)
-    if raw:
-        return resolve_theme_dir(raw)
-    # Project theme selection is runtime metadata.  The catalog remains a
-    # pure source-checkout/theme lookup and never reads project.json.
-    return None
-
-
 def _registry(theme: str | Path | None = None, *, project_slug: str | None = None) -> ElementRegistry:
-    theme_dir = _resolve_theme_dir(theme) if theme is not None else resolve_active_theme(project_slug)
+    # Timeline theme slugs are authoring metadata.  They cannot select
+    # executable element definitions; only discovered Astrid packs do that.
+    del theme
     return _cached_registry(
-        _path_cache_key(theme_dir),
         project_slug,
         _path_cache_key(TOOLS_DIR),
     )
@@ -75,40 +56,16 @@ def _path_cache_key(path: str | Path | None) -> str | None:
 
 @lru_cache(maxsize=None)
 def _cached_registry(
-    theme_dir_key: str | None,
     project_slug: str | None,
     project_root_key: str | None,
 ) -> ElementRegistry:
-    theme_dir = Path(theme_dir_key) if theme_dir_key is not None else None
     project_root = Path(project_root_key) if project_root_key is not None else TOOLS_DIR
-    return load_default_registry(active_theme=theme_dir, project_root=project_root)
+    return load_default_registry(project_root=project_root)
 
 
 def _clear_registry_cache() -> None:
     _cached_registry.cache_clear()
-    _resolve_theme_dir.cache_clear()
     clear_default_registry_cache()
-
-
-def _warn_conflicts(registry: ElementRegistry, *, kind: ElementKind) -> None:
-    singular = registry.element_kind_registry.singular(kind)
-    for conflict in registry.conflicts():
-        if conflict.kind != kind:
-            continue
-        if conflict.winner.source == "active_theme":
-            for shadowed in conflict.shadowed:
-                if shadowed.source in {"overrides", "managed", "bundled"}:
-                    print(
-                        f"WARN theme '{_theme_name_for_element(conflict.winner)}' overrides workspace {singular} '{conflict.id}'",
-                        file=sys.stderr,
-                    )
-                    break
-
-
-def _theme_name_for_element(element: Any) -> str:
-    if element.root.parent.parent.name == "elements":
-        return element.root.parent.parent.parent.name
-    return element.root.parent.parent.name
 
 
 def list_element_ids(
@@ -119,7 +76,6 @@ def list_element_ids(
 ) -> list[str]:
     registry = _registry(theme, project_slug=project_slug)
     normalized_kind = registry.element_kind_registry.normalize(kind)
-    _warn_conflicts(registry, kind=normalized_kind)
     return [element.id for element in registry.list(kind=normalized_kind)]
 
 

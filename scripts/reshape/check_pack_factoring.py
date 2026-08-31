@@ -463,7 +463,6 @@ def _artifact_environment(*roots: Path) -> dict[str, str]:
     for name in (
         "ASTRID_REPO_ROOT",
         "ASTRID_PACKS_PATH",
-        "ASTRID_THEMES_ROOT",
         "OPENAI_API_KEY",
     ):
         environment.pop(name, None)

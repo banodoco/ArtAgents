@@ -1,7 +1,6 @@
 """Element registry and source precedence."""
 
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,7 +25,6 @@ from astrid.core.pack.alias_resolver import (
 )
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.registry import CapabilityRegistry
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 
 from .schema import (
     ElementDefinition,
@@ -185,7 +183,6 @@ class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
 
 @lru_cache(maxsize=None)
 def _load_default_registry_data(
-    active_theme_key: str | None,
     project_root_key: str,
     include_missing_roots: bool,
     extra_pack_roots_key: tuple[str, ...],
@@ -215,10 +212,7 @@ def _load_default_registry_data(
             element_kind_registry=element_kind_registry,
         )
     )
-    for source in default_sources(
-        active_theme=Path(active_theme_key) if active_theme_key is not None else None,
-        project_root=project_root,
-    ):
+    for source in default_sources(project_root=project_root):
         if not source.root.exists():
             if include_missing_roots:
                 source.root.mkdir(parents=True, exist_ok=True)
@@ -245,7 +239,6 @@ def clear_default_registry_cache() -> None:
 
 def load_default_registry(
     *,
-    active_theme: str | Path | None = None,
     project_root: str | Path = REPO_ROOT,
     include_missing_roots: bool = False,
     extra_pack_roots: tuple[str, ...] = (),
@@ -256,7 +249,6 @@ def load_default_registry(
     elements without polluting the shared corpus cache.
     """
     elements, element_kind_registry = _load_default_registry_data(
-        str(Path(active_theme).resolve()) if active_theme is not None else None,
         str(Path(project_root).resolve()),
         include_missing_roots,
         tuple(str(Path(root).resolve()) for root in extra_pack_roots),
@@ -272,17 +264,16 @@ def load_default_registry(
     return registry
 
 
-def default_sources(*, active_theme: str | Path | None = None, project_root: str | Path = REPO_ROOT) -> tuple[ElementSource, ...]:
-    theme_dir = _resolve_theme_dir(active_theme)
-    sources: list[ElementSource] = []
-    if theme_dir is not None:
-        sources.extend(
-            [
-                ElementSource("active_theme", theme_dir / "elements", 0, True),
-                ElementSource("active_theme", theme_dir, 0, True),
-            ]
-        )
-    return tuple(sources)
+def default_sources(*, project_root: str | Path = REPO_ROOT) -> tuple[ElementSource, ...]:
+    """Return no filesystem Styledoc sources.
+
+    Executable element definitions belong to discovered packs.  A runtime
+    theme document is visual data and cannot add or override element code.
+    ``project_root`` is retained for callers that construct the source list.
+    """
+
+    del project_root
+    return ()
 
 
 def load_pack_elements(
@@ -339,7 +330,6 @@ def load_source_elements(
                 print(f"WARN skipping {child}: {exc}", file=sys.stderr)
     return tuple(elements)
 
-
 def _element_kind_registry_for_packs(
     packs: Iterable[PackDefinition],
 ) -> ElementKindRegistry:
@@ -394,8 +384,3 @@ def _load_pack_elements_from_packs(
             )
             continue
     return tuple(elements)
-
-
-def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
-    raw = os.environ.get(ACTIVE_THEME_ENV) if theme is None else theme
-    return resolve_theme_dir(raw)

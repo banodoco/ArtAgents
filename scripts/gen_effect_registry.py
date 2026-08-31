@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Remotion effect registry from workspace and active-theme plugins."""
+"""Generate the Remotion element registry from discovered Astrid packs."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from astrid.core.element.registry import ElementRegistry, load_default_registry 
 from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES, ElementDefinition  # noqa: E402
 
 WORKSPACE_ROOT = TOOLS_DIR.parent
-THEMES_ROOT = WORKSPACE_ROOT / "themes"
 # The default is the in-tree app.  Render workers override this for an
 # isolated/provisioned Remotion project so generated shims stay owned by that
 # project and concurrent workers cannot overwrite one another.
@@ -54,8 +53,6 @@ SHIM_OUTPUTS = {
     "transitions": REMOTION_SRC / "transitions.generated.ts",
 }
 SHIM_EXTENSIONS = (".ts", ".js", ".d.ts", ".js.map", ".d.ts.map")
-ACTIVE_THEME_LINK = TOOLS_DIR / "remotion" / "_active_theme"
-ACTIVE_THEME_POINTER = TOOLS_DIR / "remotion" / "_active_theme.txt"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 ElementKind = Literal["effects", "animations", "transitions"]
@@ -79,21 +76,6 @@ EffectRecord = PluginRecord
 
 def _component_name(plugin_id: str) -> str:
     return "".join(part.capitalize() for part in plugin_id.split("-"))
-
-
-def _resolve_theme_dir(theme: str | None) -> Path | None:
-    if theme is None:
-        return None
-    candidate = Path(theme)
-    if candidate.name == "theme.json":
-        return candidate.parent.resolve()
-    if candidate.exists():
-        return (candidate if candidate.is_dir() else candidate.parent).resolve()
-    return (THEMES_ROOT / theme).resolve()
-
-
-def _theme_id(theme_dir: Path | None) -> str | None:
-    return theme_dir.name if theme_dir is not None else None
 
 
 def _validate_kind(kind: str) -> None:
@@ -128,20 +110,12 @@ def _workspace_root(kind: ElementKind) -> Path:
 
 def discover_plugins(
     kind: ElementKind,
-    theme_dir: Path | None = None,
     *,
     include_local: bool = True,
 ) -> dict[str, PluginRecord]:
     _validate_kind(kind)
-    registry = _element_registry(theme_dir)
+    registry = _element_registry()
     plugins: dict[str, PluginRecord] = {}
-    singular = _singular(kind)
-    for conflict in registry.conflicts():
-        if conflict.kind == kind and conflict.winner.source == "active_theme":
-            print(
-                f"WARN theme '{_theme_id(theme_dir) or _theme_id_from_element(conflict.winner) or 'unknown'}' overrides workspace {singular} '{conflict.id}'",
-                file=sys.stderr,
-            )
     if include_local:
         elements = registry.list(kind=kind)
     else:
@@ -155,32 +129,29 @@ def discover_plugins(
             if definitions
         )
     for element in elements:
-        plugins[element.id] = _plugin_from_element(element, theme_dir=theme_dir)
+        plugins[element.id] = _plugin_from_element(element)
     return plugins
 
 
 def discover_effects(
-    theme_dir: Path | None = None,
     *,
     include_local: bool = True,
 ) -> dict[str, EffectRecord]:
-    return discover_plugins("effects", theme_dir, include_local=include_local)
+    return discover_plugins("effects", include_local=include_local)
 
 
 def discover_animations(
-    theme_dir: Path | None = None,
     *,
     include_local: bool = True,
 ) -> dict[str, PluginRecord]:
-    return discover_plugins("animations", theme_dir, include_local=include_local)
+    return discover_plugins("animations", include_local=include_local)
 
 
 def discover_transitions(
-    theme_dir: Path | None = None,
     *,
     include_local: bool = True,
 ) -> dict[str, PluginRecord]:
-    return discover_plugins("transitions", theme_dir, include_local=include_local)
+    return discover_plugins("transitions", include_local=include_local)
 
 
 def _import_path(plugin: PluginRecord) -> str:
@@ -188,11 +159,11 @@ def _import_path(plugin: PluginRecord) -> str:
     return f"@{scope}-{plugin.kind}/{plugin.plugin_id}/component?astrid={plugin.fingerprint[:12]}"
 
 
-def _element_registry(theme_dir: Path | None) -> ElementRegistry:
-    return load_default_registry(active_theme=theme_dir, project_root=TOOLS_DIR)
+def _element_registry() -> ElementRegistry:
+    return load_default_registry(project_root=TOOLS_DIR)
 
 
-def _plugin_from_element(element: ElementDefinition, *, theme_dir: Path | None) -> PluginRecord:
+def _plugin_from_element(element: ElementDefinition) -> PluginRecord:
     return PluginRecord(
         plugin_id=element.id,
         kind=element.kind,
@@ -201,7 +172,7 @@ def _plugin_from_element(element: ElementDefinition, *, theme_dir: Path | None) 
         meta=element.metadata,
         defaults=element.defaults,
         fingerprint=_fingerprint_element(element),
-        import_scope=_import_scope_for_element(element, theme_dir=theme_dir),
+        import_scope=_import_scope_for_element(element),
     )
 
 
@@ -252,13 +223,7 @@ def _fingerprint_key(role: str, path: Path) -> str:
     return f"{role}:{path.as_posix()}"
 
 
-def _import_scope_for_element(element: ElementDefinition, *, theme_dir: Path | None) -> str:
-    if element.source == "active_theme":
-        if theme_dir is not None:
-            theme_elements = theme_dir / "elements" / element.kind / element.id
-            if element.root == theme_elements.resolve():
-                return "theme-elements"
-        return "theme"
+def _import_scope_for_element(element: ElementDefinition) -> str:
     if element.source == "overrides":
         return "override-elements"
     if element.source == "managed":
@@ -266,14 +231,6 @@ def _import_scope_for_element(element: ElementDefinition, *, theme_dir: Path | N
     if element.source.startswith("pack:"):
         return f"pack-{element.source.split(':', 1)[1]}-elements"
     return "managed-elements"
-
-
-def _theme_id_from_element(element: ElementDefinition) -> str | None:
-    if element.source != "active_theme":
-        return None
-    if element.root.parent.parent.name == "elements":
-        return element.root.parent.parent.parent.name
-    return element.root.parent.parent.name
 
 
 def _clip_type_aliases(effects: dict[str, EffectRecord]) -> dict[str, str]:
@@ -299,27 +256,6 @@ def _ts_json(value: Any) -> str:
 
 def _ts_property_key(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", value) else _ts_string(value)
-
-
-def _write_active_theme_pointer(theme_dir: Path | None) -> None:
-    if theme_dir is None:
-        if ACTIVE_THEME_LINK.is_symlink() or ACTIVE_THEME_LINK.is_file():
-            ACTIVE_THEME_LINK.unlink()
-        if ACTIVE_THEME_POINTER.exists():
-            ACTIVE_THEME_POINTER.unlink()
-        return
-
-    if os.name == "nt":
-        ACTIVE_THEME_POINTER.write_text(str(theme_dir.resolve()) + "\n", encoding="utf-8")
-        return
-
-    if ACTIVE_THEME_POINTER.exists():
-        ACTIVE_THEME_POINTER.unlink()
-    if ACTIVE_THEME_LINK.is_symlink() or ACTIVE_THEME_LINK.is_file():
-        ACTIVE_THEME_LINK.unlink()
-    elif ACTIVE_THEME_LINK.exists():
-        raise RuntimeError(f"{ACTIVE_THEME_LINK} exists and is not a symlink")
-    ACTIVE_THEME_LINK.symlink_to(theme_dir.resolve(), target_is_directory=True)
 
 
 def _shim_module_text(kind: ElementKind, *, extension: str) -> str:
@@ -368,12 +304,11 @@ def _write_generated_registry(path: Path, content: str) -> bool:
 
 def compute_generated_registry_state(
     *,
-    theme_dir: Path | None = None,
     include_local: bool = True,
 ) -> dict[str, Any]:
     """Return a deterministic fingerprint of the generated registry sources."""
     generated = {
-        kind: generate_element_registry(kind, theme_dir=theme_dir, include_local=include_local)
+        kind: generate_element_registry(kind, include_local=include_local)
         for kind in sorted(OUTPUTS)
     }
     digest = hashlib.sha256()
@@ -389,28 +324,26 @@ def compute_generated_registry_state(
     return {
         "version": REGISTRY_STATE_VERSION,
         "hash": digest.hexdigest(),
-        "theme": _theme_id(theme_dir),
         "content_hashes": content_hashes,
     }
 
 
-def generate(*, theme_dir: Path | None = None, include_local: bool = True) -> str:
-    return generate_element_registry("effects", theme_dir=theme_dir, include_local=include_local)
+def generate(*, include_local: bool = True) -> str:
+    return generate_element_registry("effects", include_local=include_local)
 
 
 def generate_element_registry(
     kind: ElementKind,
     *,
-    theme_dir: Path | None = None,
     include_local: bool = True,
 ) -> str:
     _validate_kind(kind)
     if kind == "effects":
-        return _generate_effect_registry(theme_dir=theme_dir, include_local=include_local)
+        return _generate_effect_registry(include_local=include_local)
 
     component_type = "AnimationComponent" if kind == "animations" else "TransitionComponent"
     meta_type = "AnimationMeta" if kind == "animations" else "Record<string, unknown>"
-    plugins = discover_plugins(kind, theme_dir, include_local=include_local)
+    plugins = discover_plugins(kind, include_local=include_local)
     plugin_ids = sorted(plugins)
     imports = [
         f"import {_component_name(plugin_id)} from '{_import_path(plugins[plugin_id])}';"
@@ -433,7 +366,6 @@ def generate_element_registry(
         for plugin_id in plugin_ids
     ]
     ids = ", ".join(_ts_string(plugin_id) for plugin_id in plugin_ids)
-    active_theme = f"{json.dumps(_theme_id(theme_dir))} as const" if theme_dir is not None else "null"
     ids_name = _ids_name(kind)
     type_name = _type_name(kind)
     registry_name = _registry_name(kind)
@@ -447,7 +379,6 @@ def generate_element_registry(
         else f"import type {{{component_type}}} from './effects-types';",
         *imports,
         "",
-        f"export const ACTIVE_THEME_ID = {active_theme};",
         f"export const {ids_name} = [{ids}] as const;",
         f"export type {type_name} = typeof {ids_name}[number];",
         f"export const {registry_name}: Record<{type_name}, {component_type}> = {{",
@@ -469,10 +400,9 @@ def generate_element_registry(
 
 def _generate_effect_registry(
     *,
-    theme_dir: Path | None = None,
     include_local: bool = True,
 ) -> str:
-    effects = discover_effects(theme_dir, include_local=include_local)
+    effects = discover_effects(include_local=include_local)
     effect_ids = sorted(effects)
     imports = [
         f"import {_component_name(effect_id)} from '{_import_path(effects[effect_id])}';"
@@ -492,13 +422,11 @@ def _generate_effect_registry(
         f"  {_ts_property_key(alias)}: {_ts_string(effect_id)},"
         for alias, effect_id in aliases.items()
     ]
-    active_theme = f"{json.dumps(_theme_id(theme_dir))} as const" if theme_dir is not None else "null"
     blocks = [
         "// DO NOT EDIT - generated by tools/scripts/gen_effect_registry.py",
         "import type {EffectComponent} from './effects-types';",
         *imports,
         "",
-        f"export const ACTIVE_THEME_ID = {active_theme};",
         f"export const EFFECT_IDS = [{ids}] as const;",
         "export type EffectId = typeof EFFECT_IDS[number];",
         "export const EFFECT_REGISTRY: Record<EffectId, EffectComponent> = {",
@@ -517,7 +445,6 @@ def _generate_effect_registry(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate Remotion effect registry.")
-    parser.add_argument("--theme", help="Theme id, theme directory, or path to theme.json.")
     parser.add_argument(
         "--bundled-only",
         action="store_true",
@@ -530,13 +457,10 @@ def _main_unlocked(argv: list[str] | None = None) -> int:
     """Write registry artifacts while the caller owns the Remotion lock."""
 
     args = build_parser().parse_args(argv)
-    theme_dir = _resolve_theme_dir(args.theme)
-    _write_active_theme_pointer(theme_dir)
     failed_outputs: list[Path] = []
     for kind, output in OUTPUTS.items():
         content = generate_element_registry(
             kind,
-            theme_dir=theme_dir,
             include_local=not args.bundled_only,
         )
         if not _write_generated_registry(output, content):

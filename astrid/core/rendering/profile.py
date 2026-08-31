@@ -9,13 +9,12 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from astrid.core.theme import resolve_themes_root
-from astrid.core.timeline import Timeline, resolve_timeline_theme
+from astrid.core.theme import builtin_theme, load_runtime_theme
+from astrid.core.timeline import Timeline
 
 from .contracts import AudioOwnership, RenderProfile
 
 _DEFAULT_CANVAS = {"width": 1920, "height": 1080, "fps": 30}
-_DEFAULT_THEME = "banodoco-default"
 
 
 def _load_mapping(value: Any, *, label: str) -> dict[str, Any]:
@@ -48,7 +47,7 @@ def _asset_mapping(value: Any) -> dict[str, Any] | None:
 
 
 def _deep_merge_theme(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
-    """Mirror the timeline theme merge used by ``resolve_timeline_theme``."""
+    """Merge runtime theme data with timeline visual overrides."""
 
     result: dict[str, Any] = dict(base)
     for key, value in overlay.items():
@@ -69,43 +68,24 @@ def _deep_merge_theme(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> di
     return result
 
 
-def _read_theme_path(path: Path) -> dict[str, Any]:
-    theme_path = path / "theme.json" if path.is_dir() else path
-    return _load_mapping(theme_path, label="theme")
-
-
 def _resolve_merged_theme(
     timeline: Mapping[str, Any],
     *,
     theme: Mapping[str, Any] | str | Path | None,
-    themes_root: str | Path | None,
 ) -> dict[str, Any]:
+    # Runtime render truth is either the pinned document supplied by the host
+    # or this built-in value.
     overrides = timeline.get("theme_overrides")
     override_mapping = overrides if isinstance(overrides, Mapping) else {}
 
     if isinstance(theme, Mapping):
         return _deep_merge_theme(theme, override_mapping)
 
-    root = resolve_themes_root(themes_root)
     if theme is not None:
-        candidate = Path(theme).expanduser()
-        if not candidate.exists():
-            raise FileNotFoundError(
-                f"theme file not found or invalid: {candidate}; "
-                "expected an existing runtime-materialized theme.json file"
-            )
-        return _deep_merge_theme(_read_theme_path(candidate), override_mapping)
-    else:
-        config = dict(timeline)
-        config.setdefault("theme", _DEFAULT_THEME)
-
-    try:
-        return resolve_timeline_theme(config, root)
-    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
-        # Remotion falls back to DEFAULT_CANVAS when neither a theme nor a
-        # complete override can provide a canvas.  Keeping the empty merged
-        # theme here lets the exact getCanvas precedence below do the same.
-        return _deep_merge_theme({}, override_mapping)
+        if isinstance(theme, (str, Path)):
+            return _deep_merge_theme(load_runtime_theme(theme), override_mapping)
+        raise TypeError("theme must be a validated mapping or runtime-materialized theme.json")
+    return _deep_merge_theme(builtin_theme(), override_mapping)
 
 
 def _remotion_canvas(
@@ -243,7 +223,6 @@ def resolve_render_profile(
     assets: Mapping[str, Any] | str | Path | None = None,
     *,
     theme: Mapping[str, Any] | str | Path | None = None,
-    themes_root: str | Path | None = None,
     audio_ownership: AudioOwnership | str | None = None,
     duration_tolerance: int = 1,
 ) -> RenderProfile:
@@ -259,7 +238,6 @@ def resolve_render_profile(
     merged_theme = _resolve_merged_theme(
         timeline_data,
         theme=theme,
-        themes_root=themes_root,
     )
     canvas = _remotion_canvas(timeline_data, merged_theme)
     width = _positive_dimension(canvas.get("width"), default=1920, label="width")

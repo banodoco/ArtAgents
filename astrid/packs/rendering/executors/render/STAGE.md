@@ -75,7 +75,7 @@ result = sdk.invoke(
     inputs={
         "timeline": "./out/hype.timeline.json",
         "assets_registry": "./out/hype.assets.json",
-        "theme": "./themes/my-theme",
+        "theme": "/attempt/managed-objects/theme.json",
         "backend": "rendering.remotion",
     },
 )
@@ -150,10 +150,11 @@ referenced by retryable tasks before removing unreferenced versions.
 
 ## Theme support
 
-The selected Remotion backend resolves the timeline's theme slug against the workspace themes
-directory (`themes/`), merges any per-run `theme_overrides` from the timeline,
-and passes the merged `{id, visual}` dict to Remotion as props. A fallback
-`banodoco-default` theme is used when no theme is specified.
+The host may pin one schema-validated, runtime-materialized `theme.json`
+document. The selected backend merges its visual data with per-run
+`theme_overrides` and passes `{id, visual}` to Remotion as props. When no
+document is pinned, the intentional in-process `banodoco-default` style is
+used; no workspace theme directory or environment-selected theme is read.
 
 ## Local effect assets
 

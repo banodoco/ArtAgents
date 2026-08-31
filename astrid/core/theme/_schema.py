@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -166,6 +167,25 @@ THEME_SCHEMA: dict[str, Any] = {
     },
 }
 
+# The renderer always has one deliberately small, in-process style.  This is
+# not a theme-folder fallback: it is the schema-valid default used when a run
+# does not pin a runtime theme document.  Keeping it beside the validator
+# makes the default available in installed Astrid environments too.
+BUILTIN_DEFAULT_THEME: dict[str, Any] = {
+    "id": "banodoco-default",
+    "visual": {
+        "color": {"fg": "#FAFAFA", "bg": "#050814", "accent": "#67E8F9"},
+        "type": {
+            "families": {"heading": "Arial", "body": "Arial", "mono": "monospace"},
+            "size": {"base": 32, "small": 22, "large": 84},
+            "weight": {"normal": 400, "bold": 600},
+            "lineHeight": 1.2,
+        },
+        "motion": {"fadeMs": 450},
+        "canvas": {"width": 1920, "height": 1080, "fps": 30},
+    },
+}
+
 
 def _format_jsonschema_error(error: jsonschema.ValidationError) -> str:
     path = "".join(f"[{part!r}]" if isinstance(part, int) else f".{part}" for part in error.path)
@@ -205,17 +225,43 @@ def load_theme(path: str | Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ThemeValidationError(f"Invalid JSON in theme file {theme_path}: {exc}") from exc
 
+    return validate_theme_document(data)
+
+
+def builtin_theme() -> dict[str, Any]:
+    """Return a fresh, schema-valid copy of Astrid's intentional default."""
+
+    return copy.deepcopy(BUILTIN_DEFAULT_THEME)
+
+
+def validate_theme_document(data: Any) -> dict[str, Any]:
+    """Validate an already materialized theme document and return a copy."""
+
     if not isinstance(data, dict):
         raise ThemeValidationError("theme must be a JSON object")
-
     _check_generation_file_items(data)
-
     validator = jsonschema.Draft7Validator(THEME_SCHEMA)
     errors = sorted(validator.iter_errors(data), key=lambda error: list(error.path))
     if errors:
         raise ThemeValidationError(_format_jsonschema_error(errors[0]))
+    return copy.deepcopy(data)
 
-    return data
+
+def load_runtime_theme(path: str | Path) -> dict[str, Any]:
+    """Load one explicitly pinned, runtime-materialized ``theme.json``.
+
+    Render workers must never turn a slug or directory into a checkout lookup.
+    The runtime contract therefore accepts only an absolute file path whose
+    basename is ``theme.json``.
+    """
+
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() or candidate.name != "theme.json" or not candidate.is_file():
+        raise ThemeValidationError(
+            f"theme file not found or invalid: {candidate}; "
+            "expected an existing runtime-materialized theme.json file"
+        )
+    return load_theme(candidate)
 
 
 def theme_root(theme_path: str | Path) -> Path:

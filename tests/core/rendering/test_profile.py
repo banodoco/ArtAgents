@@ -7,18 +7,17 @@ import pytest
 
 from astrid.core.rendering.contracts import AudioOwnership
 from astrid.core.rendering.profile import resolve_render_profile
+from astrid.core.theme import ThemeValidationError, builtin_theme
 
 
 def _write_theme(root: Path, slug: str, *, width: int, height: int, fps: object) -> None:
     theme_dir = root / slug
     theme_dir.mkdir(parents=True)
+    theme = builtin_theme()
+    theme["id"] = slug
+    theme["visual"]["canvas"] = {"width": width, "height": height, "fps": fps}
     (theme_dir / "theme.json").write_text(
-        json.dumps(
-            {
-                "id": slug,
-                "visual": {"canvas": {"width": width, "height": height, "fps": fps}},
-            }
-        ),
+        json.dumps(theme),
         encoding="utf-8",
     )
 
@@ -32,7 +31,7 @@ def _timeline(**updates: object) -> dict[str, object]:
 def test_profile_uses_theme_canvas_when_timeline_has_no_override(tmp_path: Path) -> None:
     _write_theme(tmp_path, "cinema", width=1280, height=720, fps=24)
 
-    profile = resolve_render_profile(_timeline(), themes_root=tmp_path)
+    profile = resolve_render_profile(_timeline(), theme=tmp_path / "cinema" / "theme.json")
 
     assert (profile.width, profile.height) == (1280, 720)
     assert profile.fps_rational == (24, 1)
@@ -50,7 +49,7 @@ def test_profile_mirrors_remotion_partial_override_precedence(tmp_path: Path) ->
         theme_overrides={"visual": {"canvas": {"fps": 25}}},
     )
 
-    profile = resolve_render_profile(timeline, themes_root=tmp_path)
+    profile = resolve_render_profile(timeline, theme=tmp_path / "cinema" / "theme.json")
 
     # Root.tsx selects the entire override canvas before the merged theme, so
     # missing override dimensions use Remotion's defaults rather than 1024x576.
@@ -165,7 +164,6 @@ def test_explicit_theme_mapping_is_merged_with_full_timeline_override() -> None:
 def test_omitted_theme_uses_the_intentional_default_canvas() -> None:
     profile = resolve_render_profile(
         {"tracks": [], "clips": []},
-        themes_root=Path("/definitely/missing/themes-root"),
     )
 
     assert (profile.width, profile.height) == (1920, 1080)
@@ -173,11 +171,10 @@ def test_omitted_theme_uses_the_intentional_default_canvas() -> None:
 
 
 def test_explicit_missing_theme_path_fails_closed(tmp_path: Path) -> None:
-    missing = tmp_path / "missing-theme.json"
+    missing = tmp_path / "theme.json"
 
-    with pytest.raises(FileNotFoundError, match="theme file not found or invalid"):
+    with pytest.raises(ThemeValidationError, match="theme file not found or invalid"):
         resolve_render_profile(
             {"tracks": [], "clips": []},
             theme=missing,
-            themes_root=tmp_path,
         )

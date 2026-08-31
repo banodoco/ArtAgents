@@ -28,10 +28,9 @@ from astrid.core.contracts.exec_error import (
     error_from_missing_binaries,
     error_from_returncode,
 )
-from astrid.core.contracts.project_theme import ProjectStyleSnapshot
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.foundation.hash import executor_definition_digest
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.project.guidance import (
@@ -121,7 +120,6 @@ class ExecutorRunRequest:
     executor_id: str
     out: Path | str | None
     project: str | None = None
-    project_style: ProjectStyleSnapshot | Mapping[str, Any] | None = None
     inputs: Mapping[str, Any] = field(default_factory=dict)
     outputs: Mapping[str, Any] = field(default_factory=dict)
     brief: Path | str | None = None
@@ -385,8 +383,7 @@ def check_executor_binaries(executor: ExecutorDefinition) -> tuple[str, ...]:
 
 
 def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefinition | None = None) -> argparse.Namespace:
-    from astrid.core.theme import resolve_theme_dir, resolve_themes_root
-    from astrid.core.theme.scope import resolve_style_scope
+    from astrid.core.theme import load_runtime_theme
 
     values = _request_values(request, executor)
     effective_out = request.out if request.out not in (None, "") else request.run_root
@@ -405,26 +402,14 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
     env_file = _optional_path(values.get("env_file"))
     theme_raw = values.get("theme")
     theme_explicit = theme_raw is not None
-    theme_val = values.get('theme')
-    active_theme_scope = resolve_style_scope(ScopeRequest(
-        explicit={'theme': theme_val} if theme_val is not None else None,
-        project_slug=request.project,
-        env=dict(os.environ),
-        project_style=request.project_style,
-    ))
-    active_theme = active_theme_scope.theme_dir
     if theme_explicit:
-        theme_dir = resolve_theme_dir(theme_raw)
-        if theme_dir is None:
-            theme = (resolve_themes_root() / "banodoco-default" / "theme.json").resolve()
-        else:
-            candidate = Path(theme_raw).expanduser()
-            if candidate.name == "theme.json" or (candidate.exists() and candidate.is_file()):
-                theme = candidate.resolve()
-            else:
-                theme = (theme_dir / "theme.json").resolve()
+        candidate = Path(theme_raw).expanduser()
+        load_runtime_theme(candidate)
+        theme = candidate.resolve()
     else:
-        theme = active_theme
+        # No theme folder or ambient scope participates in dispatch.  The
+        # renderer's intentional built-in style is selected downstream.
+        theme = None
     brief_slug = str(values.get("brief_slug") or _default_brief_slug(brief, out))
     brief_out = (out / "briefs" / brief_slug).resolve()
     skip = _as_string_list(values.get("skip"))
@@ -847,7 +832,6 @@ def _validate_scoped_configs_at_dispatch(executor: ExecutorDefinition) -> None:
     """
     if not executor.scoped_configs:
         return
-    import astrid.core.theme.scope  # noqa: F401 — side-effect: registers 'style'
     import astrid.core.util.credentials_scope  # noqa: F401 — side-effect: registers 'credentials.*'
     for key in executor.scoped_configs:
         if not SCOPE_REGISTRY.is_registered(key):
@@ -912,32 +896,21 @@ def _emit_scoped_config_env(
 ) -> dict[str, str]:
     """Resolve declared scoped_configs and return their subprocess env contributions.
 
-    This is the SINGLE source of HYPE_ACTIVE_THEME emission for executor subprocesses.
-    Concrete scope modules are guaranteed imported by _validate_scoped_configs_at_dispatch.
+    Style/theme is an explicit task input, never a scoped environment value.
+    Credentials remain the only scoped configuration emitted here.
     """
     if not executor.scoped_configs:
         return {}
-    import astrid.core.theme.scope  # noqa: F401 — ensure registration if called standalone
     import astrid.core.util.credentials_scope  # noqa: F401
     values = _request_values(request, executor)
-    explicit: dict[str, Any] = {}
-    theme_val = values.get("theme")
-    if theme_val is not None:
-        explicit["theme"] = theme_val
     scope_request = ScopeRequest(
         project_slug=request.project,
         env=dict(os.environ),
-        explicit=explicit or None,
-        project_style=request.project_style,
+        explicit=None,
     )
     env: dict[str, str] = {}
     for key in executor.scoped_configs:
-        if key == "style":
-            from astrid.core.theme.scope import StyleScope
-            result = SCOPE_REGISTRY.resolve("style", scope_request)
-            if isinstance(result, StyleScope) and result.theme_dir is not None:
-                env[HYPE_ACTIVE_THEME] = str(result.theme_dir)  # scoped-config emit
-        elif key.startswith("credentials."):
+        if key.startswith("credentials."):
             from astrid.core.util.credentials_scope import _PROVIDER_ENV, CredentialsScope
             result = SCOPE_REGISTRY.resolve(key, scope_request)
             if isinstance(result, CredentialsScope):

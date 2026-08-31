@@ -57,12 +57,6 @@ ASTRID_PROJECT_SLUG = "ASTRID_PROJECT_SLUG"
 entrypoints use this to enforce that managed timeline and experiment inputs
 live inside the same project."""
 
-ASTRID_THEMES_ROOT = "ASTRID_THEMES_ROOT"
-"""Override for the repository/theme asset root. Read by theme resolution helpers."""
-
-HYPE_ACTIVE_THEME = "HYPE_ACTIVE_THEME"
-"""Absolute active theme directory propagated into hype/theme-aware subprocesses."""
-
 # ---------------------------------------------------------------------------
 # Task run context (propagated into subprocess env by build_child_subprocess_env)
 # ---------------------------------------------------------------------------
@@ -207,7 +201,5 @@ __all__ = [
     "ASTRID_TASK_PROJECT",
     "ASTRID_TASK_RUN_ID",
     "ASTRID_TASK_STEP_ID",
-    "ASTRID_THEMES_ROOT",
     "get_author_test_env",
-    "HYPE_ACTIVE_THEME",
 ]

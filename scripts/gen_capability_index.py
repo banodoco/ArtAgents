@@ -65,7 +65,7 @@ def _orchestrator_rows() -> list[tuple[str, str]]:
 
 
 def _element_rows() -> list[tuple[str, str]]:
-    registry = load_elements(active_theme=None, project_root=ASTRID_REPO_ROOT)
+    registry = load_elements(project_root=ASTRID_REPO_ROOT)
     return [
         (
             f"{element.kind}/{element.id}",

@@ -26,7 +26,7 @@ from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.contracts import RenderProfile
 from astrid.core.rendering.profile import resolve_render_profile
-from astrid.core.theme import load_theme
+from astrid.core.theme import builtin_theme, load_runtime_theme
 
 
 def _input_path(raw_path: str, workspace: Path) -> Path:
@@ -54,18 +54,15 @@ def _serialize_timeline(
 
 
 def _resolve_theme_path(theme_path: Path) -> Path:
-    """Resolve an already-materialized theme path without workspace fallback.
+    """Require the one explicit runtime-materialized theme document."""
 
-    Renderer settings are invocation inputs.  A missing path must remain a
-    missing path: silently interpreting it as a checkout theme slug can make
-    a render use a different theme than the caller supplied.
-    """
-
-    if theme_path.name == "theme.json":
-        return theme_path
-    if theme_path.exists() and theme_path.is_dir():
-        return theme_path / "theme.json"
-    return theme_path
+    candidate = Path(theme_path).expanduser()
+    if not candidate.is_absolute() or candidate.name != "theme.json" or not candidate.is_file():
+        raise FileNotFoundError(
+            f"theme file not found or invalid: {candidate}; "
+            "expected an existing runtime-materialized theme.json file"
+        )
+    return candidate
 
 
 def _theme_for_props(theme_path: Path) -> dict[str, Any]:
@@ -75,37 +72,45 @@ def _theme_for_props(theme_path: Path) -> dict[str, Any]:
             f"theme file not found or invalid: {resolved}; "
             "expected an existing runtime-materialized theme.json file"
         )
-    theme_data = load_theme(resolved)
+    theme_data = load_runtime_theme(resolved)
     return {"id": theme_data["id"], "visual": theme_data["visual"]}
 
 
 def _theme_slug_for_render_default(theme_path: Path) -> str:
-    resolved = _resolve_theme_path(theme_path)
-    if resolved.name == "theme.json":
-        return resolved.parent.name
-    return resolved.stem or "banodoco-default"
+    return str(_theme_for_props(theme_path)["id"])
 
 
 def _resolved_theme_for_render(
     timeline_path: Path,
-    fallback_theme_path: Path,
+    runtime_theme_path: Path | None,
 ) -> dict[str, Any]:
-    """Return the timeline theme with its per-run overrides merged."""
+    """Return runtime-pinned theme truth with authored overrides merged.
+
+    The timeline's historical theme slug is metadata only.  It is never used
+    to search a checkout or filesystem theme directory during a render.
+    """
 
     loaded = timeline.Timeline.load(timeline_path)
-    render_view = loaded.for_render(
-        default_theme=_theme_slug_for_render_default(fallback_theme_path)
-    )
     timeline_config = loaded.to_config()
-    timeline_config.setdefault("theme", render_view.theme)
-    repo_themes_root = REPO_ROOT / "themes"
-    themes_root = repo_themes_root if repo_themes_root.exists() else WORKSPACE_ROOT / "themes"
-    try:
-        merged = timeline.resolve_timeline_theme(timeline_config, themes_root)
-    except (FileNotFoundError, ValueError):
-        merged = None
-    if not isinstance(merged, dict) or "visual" not in merged:
-        return _theme_for_props(fallback_theme_path)
+    merged = (
+        _theme_for_props(runtime_theme_path)
+        if runtime_theme_path is not None
+        else builtin_theme()
+    )
+    overrides = timeline_config.get("theme_overrides")
+    if isinstance(overrides, Mapping):
+        visual = merged.get("visual")
+        override_visual = overrides.get("visual")
+        if isinstance(visual, Mapping) and isinstance(override_visual, Mapping):
+            merged["visual"] = dict(visual)
+            for key, value in override_visual.items():
+                if isinstance(merged["visual"].get(key), Mapping) and isinstance(value, Mapping):
+                    merged["visual"][key] = {
+                        **merged["visual"][key],
+                        **value,
+                    }
+                else:
+                    merged["visual"][key] = value
     return {
         "id": merged.get("id") or merged.get("visual", {}).get("id") or "theme",
         "visual": merged["visual"],
@@ -235,13 +240,11 @@ def _canonical_profile(
     assets_data: Mapping[str, Any],
     theme_path: Path | None,
 ) -> RenderProfile:
-    fallback_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
-    active_theme = _resolved_theme_for_render(timeline_path, fallback_theme)
+    active_theme = _resolved_theme_for_render(timeline_path, theme_path)
     return resolve_render_profile(
         timeline_path,
         assets_data,
         theme=active_theme,
-        themes_root=REPO_ROOT / "themes",
     )
 
 

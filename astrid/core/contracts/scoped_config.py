@@ -1,9 +1,8 @@
 """Scoped-config primitive (tier-1, stdlib-only).
 
 Defines the kernel scope types and a module-level registry singleton.
-Concrete scope resolvers (``StyleScope``, ``CredentialsScope``) live at
-tier-3 in their data-owning modules and register themselves against
-``SCOPE_REGISTRY`` at import time.
+Concrete scope resolvers (for example ``CredentialsScope``) live at tier-3 in
+their data-owning modules and register themselves against ``SCOPE_REGISTRY``.
 
 Key design points (per S3 RFC):
 - ``ScopeKey`` is a plain ``str`` alias so there is no coupling to any
@@ -25,8 +24,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .project_theme import ProjectStyleSnapshot, ProjectThemeBinding
-
 # ---------------------------------------------------------------------------
 # Scope key alias
 # ---------------------------------------------------------------------------
@@ -44,7 +41,7 @@ ScopeKey = str
 class ScopedConfig:
     """Marker base class for typed scope results.
 
-    Concrete scope result types (``StyleConfig``, ``CredentialsScope``,
+    Concrete scope result types (``CredentialsScope``,
     etc.) subclass this so that downstream code can use ``isinstance``
     to tell scope results from plain dataclasses.
 
@@ -84,7 +81,6 @@ class ScopeRequest:
     project_slug: str | None = None
     env: Mapping[str, str] | None = None
     explicit: Mapping[ScopeKey, Any] | None = None
-    project_style: ProjectStyleSnapshot | ProjectThemeBinding | Mapping[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

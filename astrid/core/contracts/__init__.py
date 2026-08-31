@@ -27,8 +27,6 @@ from .identifiers import (
     validate_timeline_ulid,
 )
 from .project_theme import (
-    ProjectStyleSnapshot,
-    ProjectThemeBinding,
     validate_project_identifier,
     validate_theme_identifier,
 )
@@ -98,8 +96,6 @@ __all__ = [
     "generate_thread_id",
     "is_ulid",
     "require_ulid",
-    "ProjectStyleSnapshot",
-    "ProjectThemeBinding",
     "validate_project_identifier",
     "validate_theme_identifier",
     "validate_timeline_slug",

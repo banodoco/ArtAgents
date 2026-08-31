@@ -94,12 +94,10 @@ def _validate_render_element_clip_types(
 
     from astrid.core.element import catalog as element_catalog
 
-    theme = config.get("theme")
-    active_theme = theme if isinstance(theme, str) and theme else None
-    effect_ids = set(element_catalog.list_effect_ids(theme=active_theme))
+    effect_ids = set(element_catalog.list_effect_ids())
     aliases = {"text"} if "text-card" in effect_ids else set()
     for effect_id in effect_ids:
-        metadata = element_catalog.read_effect_meta(effect_id, theme=active_theme)
+        metadata = element_catalog.read_effect_meta(effect_id)
         raw_aliases = metadata.get("clipTypeAliases")
         if isinstance(raw_aliases, list):
             aliases.update(alias for alias in raw_aliases if isinstance(alias, str) and alias)

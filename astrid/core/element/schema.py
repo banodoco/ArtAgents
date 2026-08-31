@@ -103,7 +103,7 @@ def to_capability_handle(definition: ElementDefinition) -> CapabilityHandle:
     * ``name`` — ``metadata.name`` or ``metadata.label`` or ``definition.id``
     * ``version`` — ``metadata.version`` (default ``""``)
     * ``provenance.source`` — ``definition.source`` preserved as-is
-      (``"pack:builtin"``, ``"active_theme"``, etc.)
+      (for example ``"pack:builtin"`` or ``"pack:local"``)
     * ``safety.network`` — ``False`` (elements have no network isolation)
     """
     metadata = definition.metadata

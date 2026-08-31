@@ -72,13 +72,11 @@ def _load_element_registry(
     *,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
-    active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
 ) -> Any:
     from astrid.core.element.registry import load_default_registry
 
     return load_default_registry(
-        active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         **_registry_load_kwargs(
             project_root=project_root,
@@ -92,7 +90,6 @@ def _load_registries(
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     banodoco_config: Any | None = None,
-    active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
     include_elements: bool = False,
 ) -> tuple[Any, Any, Any | None]:
@@ -113,7 +110,6 @@ def _load_registries(
         element_registry = sdk_module._load_element_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
-            active_theme=active_theme,
             include_missing_roots=include_missing_roots,
         )
     return executor_registry, orchestrator_registry, element_registry

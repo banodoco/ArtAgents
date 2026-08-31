@@ -62,36 +62,12 @@ def test_no_direct_os_environ_theme_writers():
     )
 
 
-def test_runner_is_the_canonical_theme_writer():
-    """The runner (executor/runner.py) emits HYPE_ACTIVE_THEME via scoped-config.
-
-    The runner's ``_emit_scoped_config_env`` is the canonical writer.  We assert
-    that at least one writer exists in runner.py (the scoped-config emit) and
-    that no OTHER file contains a direct os.environ write.
-    """
+def test_no_production_theme_env_writer():
+    """Theme truth is an input document, never a subprocess environment value."""
     # Find all dict-based writers
     all_lines = _run_grep(_ENV_DICT_WRITE, str(ASTRID_DIR))
 
-    runner_writers = [l for l in all_lines if "executor/runner.py" in l]
-    assert len(runner_writers) >= 1, (
-        f"Runner must have at least one HYPE_ACTIVE_THEME writer; "
-        f"found 0 in:\n" + "\n".join(all_lines)
-    )
-
-    # The runner's scoped-config emit must be present (line ~953)
-    scoped_emit = [l for l in runner_writers if "scoped-config emit" in l]
-    assert len(scoped_emit) == 1, (
-        f"Expected exactly 1 scoped-config emit comment in runner, "
-        f"found {len(scoped_emit)}:\n" + "\n".join(runner_writers)
-    )
-
-    # No other file may use os.environ directly for this env var
-    os_lines = _run_grep(_OS_ENVIRON_WRITE, str(ASTRID_DIR))
-    assert len(os_lines) == 0, (
-        f"Found {len(os_lines)} direct os.environ writer(s):\n"
-        + "\n".join(os_lines)
-    )
-
+    assert not all_lines
 
 def test_project_run_env_no_implicit_theme():
     """project_run_env with no project_slug returns only PROJECT_RUN_ENV."""

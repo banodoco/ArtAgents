@@ -77,7 +77,6 @@ from astrid.packs.rendering.backends._shared import (
     _reject_unknown_config,
     _remotion_mux_profile,
     _render_provenance_payload,
-    _resolve_theme_path,
     _resolved_theme_for_render,
     _serialize_timeline,
     _timeline_alpha,
@@ -107,7 +106,6 @@ def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
 
 _active_theme_for_provenance = _shared._active_theme_for_provenance
 _theme_for_props = _shared._theme_for_props
-_theme_slug_for_render_default = _shared._theme_slug_for_render_default
 
 
 BACKEND_ID = "rendering.remotion"
@@ -122,7 +120,7 @@ _BUILTIN_MEDIA_CLIP_TYPES = frozenset({"media", "video", "image", "audio"})
 DEFAULT_COMPOSITION_ID = "TimelineComposition"
 _REGISTRY_STATE_PATH = ".astrid-registry-state.json"
 _CONFIG_KEYS = frozenset(
-    {"project_dir", "composition_id", "composition", "theme_path", "theme", "min_free_gb"}
+    {"project_dir", "composition_id", "composition", "theme_path", "min_free_gb"}
 )
 
 
@@ -230,33 +228,11 @@ def _registry_outputs_exist(project_dir: Path) -> bool:
     return all(path.exists() for path in _registry_output_paths(project_dir))
 
 
-def _active_theme_pointer_current(theme_path: Path | None) -> bool:
-    if gen_effect_registry is None:
-        return True
-    link = gen_effect_registry.ACTIVE_THEME_LINK
-    pointer = gen_effect_registry.ACTIVE_THEME_POINTER
-    if theme_path is None:
-        return not link.exists() and not pointer.exists()
-
-    theme_dir = _resolve_theme_path(theme_path).parent.resolve()
-    if os.name == "nt":
-        try:
-            return pointer.read_text(encoding="utf-8").strip() == str(theme_dir)
-        except OSError:
-            return False
-    if not link.is_symlink():
-        return False
-    try:
-        return link.resolve() == theme_dir
-    except OSError:
-        return False
-
-
 def _effective_registry_state(theme_path: Path | None) -> dict[str, Any]:
     if gen_effect_registry is None:
         return {"version": 1, "hash": "server-provisioned"}
-    theme_file = _resolve_theme_path(theme_path) if theme_path is not None else None
-    return gen_effect_registry.compute_generated_registry_state(theme_dir=theme_file)
+    del theme_path
+    return gen_effect_registry.compute_generated_registry_state()
 
 
 def _read_registry_state(project_dir: Path) -> dict[str, Any] | None:
@@ -304,14 +280,11 @@ def _regenerate_element_registries_locked(
         cached_state is not None
         and cached_state.get("hash") == state.get("hash")
         and _registry_outputs_exist(project_dir)
-        and _active_theme_pointer_current(theme_path)
     ):
         return
 
     generator = REPO_ROOT / "scripts" / "gen_effect_registry.py"
     cmd = [sys.executable, str(generator)]
-    if theme_path is not None:
-        cmd.extend(["--theme", str(_resolve_theme_path(theme_path))])
     env: dict[str, str] = {}
     composition_src = _timeline_composition_src(project_dir)
     if composition_src is not None:
@@ -356,9 +329,11 @@ def _effect_registry_for_assets(
     *,
     registry: Any | None = None,
 ) -> tuple[dict[str, ElementDefinition], dict[str, str]]:
-    active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
+    # Element discovery is pack-owned.  A style document only contributes
+    # visual/generation props and cannot alter the executable registry.
+    del theme_path
     if registry is None:
-        registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+        registry = load_default_registry(project_root=REPO_ROOT)
     effects = {element.id: element for element in registry.list(kind="effects")}
     aliases: dict[str, str] = {}
     if "text-card" in effects:
@@ -401,8 +376,8 @@ def _resolve_timeline_element_references(
     render.
     """
     if registry is None:
-        active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
-        registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+        del theme_path
+        registry = load_default_registry(project_root=REPO_ROOT)
     clips = timeline_data.get("clips")
     if not isinstance(clips, list):
         return {"animations": [], "transitions": []}
@@ -491,8 +466,7 @@ def _stage_effect_assets_for_timeline(
     # inventory changes between support probing and execution; loading the
     # registry twice here also made the combined render path needlessly
     # discover every local pack twice.
-    active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
-    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    registry = load_default_registry(project_root=REPO_ROOT)
     effects, aliases = _effect_registry_for_assets(theme_path, registry=registry)
     resolved_elements = _resolve_timeline_element_references(
         timeline_data,
@@ -727,10 +701,9 @@ def _execute_remotion_locked(
                         f"Permission denied (1100): local HTTP asset server blocked: {exc}"
                     ) from exc
             resolved_registry = materializer.resolved_registry(asset_server)
-            resolved_theme = theme_path or (
-                WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json"
-            )
-            theme_for_props = _resolved_theme_for_render(timeline_path, resolved_theme)
+            # ``theme_path`` is either the host's absolute materialized
+            # document or None, which selects the intentional built-in style.
+            theme_for_props = _resolved_theme_for_render(timeline_path, theme_path)
             merged_props = {
                 "timeline": _serialize_timeline(
                     timeline_path,
@@ -931,18 +904,6 @@ def render(
     return output
 
 
-def _theme_setting_path(raw_path: str, workspace: Path) -> Path:
-    """Preserve legacy theme slugs while localizing actual request paths."""
-
-    candidate = Path(raw_path).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve()
-    localized = workspace / candidate
-    if localized.exists() or len(candidate.parts) > 1 or candidate.suffix:
-        return localized.resolve()
-    return candidate
-
-
 def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSettings:
     config = dict(request.backend_config.get(BACKEND_ID, {}))
     _reject_unknown_config(config, _CONFIG_KEYS, BACKEND_ID)
@@ -959,11 +920,17 @@ def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSe
     if not isinstance(composition_value, str) or not composition_value.strip():
         raise TypeError("composition_id must be a non-empty string")
 
-    theme_value = config.get("theme_path", config.get("theme"))
+    theme_value = config.get("theme_path")
     if theme_value is None:
         theme_path = None
     elif isinstance(theme_value, (str, os.PathLike)):
-        theme_path = _theme_setting_path(os.fspath(theme_value), workspace)
+        candidate = Path(os.fspath(theme_value)).expanduser()
+        if not candidate.is_absolute() or candidate.name != "theme.json" or not candidate.is_file():
+            raise FileNotFoundError(
+                f"theme file not found or invalid: {candidate}; "
+                "expected an existing runtime-materialized theme.json file"
+            )
+        theme_path = candidate.resolve()
     else:
         raise TypeError("theme_path must be a path string or null")
 

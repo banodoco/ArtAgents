@@ -96,7 +96,7 @@ def _validate_effect_params(effect_id: str, params: Any, path: str, theme: str |
         import jsonschema
     except ImportError:
         return
-    schema = effects_catalog.read_effect_schema(effect_id, theme=theme)
+    schema = effects_catalog.read_effect_schema(effect_id)
     jsonschema.validate(_schema_params_for_animation_refs(schema, params), schema)
 
 
@@ -276,13 +276,11 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
                 raise ValueError(
                     f"clips[{index}].text.content must be a string for clipType 'text'"
                 )
-        # Active theme slug from the timeline lets canonical element resolution pick up
-        # theme-scoped clipTypes (e.g. 2rp's section-hook). Open-string
-        # clipTypes that are not registered elements remain opaque.
-        active_theme = theme if isinstance(theme, str) else None
+        # The authored theme label is not an element-registry selector.
+        # Open-string clipTypes that are not registered elements remain opaque.
         from astrid.core.timeline.validators._type_resolve import is_visual_clip_element
-        if is_visual_clip_element(clip_type, active_theme):
-            _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params", theme=active_theme)
+        if is_visual_clip_element(clip_type, None):
+            _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params", theme=None)
         if "pool_id" in clip and not isinstance(clip["pool_id"], str):
             raise ValueError(f"clips[{index}].pool_id must be a string")
         if "clip_order" in clip:

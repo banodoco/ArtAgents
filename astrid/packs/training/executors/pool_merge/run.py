@@ -33,15 +33,15 @@ def _skeleton() -> dict[str, Any]:
     }
 
 
-def _entry_for_effect(effect_id: str, *, theme: str | Path | None = None) -> dict[str, Any]:
+def _entry_for_effect(effect_id: str) -> dict[str, Any]:
     return {
         "id": _stable_pool_id(effect_id),
         "kind": "generative",
         "category": "visual",
         "effect_id": effect_id,
-        "param_schema": effects_catalog.read_effect_schema(effect_id, theme=theme),
-        "defaults": effects_catalog.read_effect_defaults(effect_id, theme=theme),
-        "meta": effects_catalog.read_effect_meta(effect_id, theme=theme),
+        "param_schema": effects_catalog.read_effect_schema(effect_id),
+        "defaults": effects_catalog.read_effect_defaults(effect_id),
+        "meta": effects_catalog.read_effect_meta(effect_id),
         "duration": None,
         "scores": {},
         "excluded": False,
@@ -49,9 +49,10 @@ def _entry_for_effect(effect_id: str, *, theme: str | Path | None = None) -> dic
 
 
 def merge_pool(pool: dict[str, Any], *, theme: str | Path | None = None) -> dict[str, Any]:
-    effect_ids = effects_catalog.list_effect_ids(theme=theme)
+    del theme
+    effect_ids = effects_catalog.list_effect_ids()
     effect_id_set = set(effect_ids)
-    upserts = {_stable_pool_id(effect_id): _entry_for_effect(effect_id, theme=theme) for effect_id in effect_ids}
+    upserts = {_stable_pool_id(effect_id): _entry_for_effect(effect_id) for effect_id in effect_ids}
     entries: list[dict[str, Any]] = []
     replaced: set[str] = set()
     kept_stale_theme_entries = False

@@ -16,10 +16,9 @@ def _source(relative: str) -> str:
 
 def test_project_theme_and_timeline_edges_are_absent_from_static_sources() -> None:
     project_schema = ast.parse(_source("astrid/core/project/schema.py"))
-    theme_scope = ast.parse(_source("astrid/core/theme/scope.py"))
     imports = [
         node.module or ""
-        for tree in (project_schema, theme_scope)
+        for tree in (project_schema,)
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom)
     ]
@@ -40,16 +39,6 @@ assert not any(name.startswith('astrid.core.store') for name in sys.modules)
         [sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True
     )
     assert completed.returncode == 0, completed.stderr
-
-
-def test_project_style_resolution_uses_injected_snapshot() -> None:
-    from astrid.core.contracts.project_theme import ProjectStyleSnapshot
-    from astrid.core.contracts.scoped_config import ScopeRequest
-    from astrid.core.theme.scope import resolve_style_scope
-
-    snapshot = ProjectStyleSnapshot(project_slug="demo", theme_id="project-theme")
-    resolved = resolve_style_scope(ScopeRequest(project_slug="demo", project_style=snapshot))
-    assert resolved.theme_dir == (ROOT / "themes" / "project-theme").resolve()
 
 
 def test_timeline_identifiers_are_neutral_and_still_validate() -> None:

@@ -44,9 +44,6 @@ from astrid.core.env_vars import (
     ASTRID_TASK_STEP_ID as TASK_STEP_ID_ENV,
 )
 from astrid.core.env_vars import (
-    ASTRID_THEMES_ROOT as THEMES_ROOT_ENV,
-)
-from astrid.core.env_vars import (
     ASTRID_TIMELINE_SCHEMA_PYTHONPATH as TIMELINE_SCHEMA_PYTHONPATH_ENV,
 )
 
@@ -85,7 +82,6 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         TASK_STEP_ID_ENV,
         TASK_ITEM_ID_ENV,
         TASK_ITERATION_ENV,
-        THEMES_ROOT_ENV,
         PACKS_PATH_ENV,
         ASTRID_NODE_EXECUTABLE,
         ASTRID_REMOTION_PROJECT_DIR,
@@ -198,6 +194,5 @@ __all__ = [
     "TASK_PROJECT_ENV",
     "TASK_RUN_ID_ENV",
     "TASK_STEP_ID_ENV",
-    "THEMES_ROOT_ENV",
     "build_child_subprocess_env",
 ]

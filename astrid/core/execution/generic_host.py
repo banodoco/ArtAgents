@@ -1275,7 +1275,7 @@ class GenericPackHost:
         materialized_objects: dict[str, str] = {}
         fetched_objects: dict[tuple[str, str], Path] = {}
 
-        def fetch_object(reference: str, digest: str, name: str) -> Path:
+        def fetch_object(reference: str, digest: str, name: str, *, filename: str | None = None) -> Path:
             if self.client is None or not hasattr(self.client, "get_object"):
                 raise HostError(f"runtime client is required to materialize managed input {name}")
             normalized = str(digest).removeprefix("sha256:")
@@ -1293,7 +1293,11 @@ class GenericPackHost:
             payload = bytes(data)
             if hashlib.sha256(payload).hexdigest() != normalized:
                 raise HostError(f"input object hash mismatch for {name}")
-            destination = managed_root / f"{len(list(managed_root.iterdir())):04d}-{hashlib.sha256(reference.encode()).hexdigest()[:16]}"
+            destination = managed_root / (
+                filename
+                if filename is not None
+                else f"{len(list(managed_root.iterdir())):04d}-{hashlib.sha256(reference.encode()).hexdigest()[:16]}"
+            )
             destination.write_bytes(payload)
             fetched_objects[cache_key] = destination
             return destination
@@ -1307,7 +1311,18 @@ class GenericPackHost:
         for name, value in list(values.items()):
             digest = value.get("digest") if isinstance(value, Mapping) else (value if isinstance(value, str) and len(value) == 64 else None)
             if digest and self.client is not None and hasattr(self.client, "get_object"):
-                input_name = Path(str(name))
+                if str(name) == "theme":
+                    destination = fetch_object(
+                        str(value.get("object_id") or "theme"),
+                        str(digest),
+                        "theme",
+                        filename="theme.json",
+                    )
+                    values[name] = str(destination)
+                    materialized_objects["theme"] = str(destination)
+                    materialized_objects[str(digest).removeprefix("sha256:")] = str(destination)
+                    continue
+                input_name = Path("theme.json") if str(name) == "theme" else Path(str(name))
                 input_root = (attempt / "inputs").resolve()
                 path = (input_root / input_name).resolve()
                 if not path.is_relative_to(input_root):

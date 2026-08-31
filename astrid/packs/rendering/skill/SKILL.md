@@ -73,11 +73,12 @@ generated visuals, or other clips that do not reference media entries.
 
 ## Theme support
 
-The Remotion backend resolves the timeline's theme slug against the workspace
-themes directory (`themes/`), merges any per-run `theme_overrides` from
-the timeline, and passes the merged `{id, visual}` dict to Remotion as
-props. A fallback `banodoco-default` theme is used when no theme is
-specified.
+The host may pin one schema-validated, runtime-materialized `theme.json`
+document. The backend merges its visual data with per-run `theme_overrides`
+and passes `{id, visual}` to Remotion as props. When no document is pinned,
+the renderer uses its intentional in-process `banodoco-default` style; it
+never searches a workspace theme directory or reads an environment-selected
+theme.
 
 ## Executors
 
@@ -233,7 +234,7 @@ result = sdk.invoke(
     inputs={
         "timeline": "./out/hype.timeline.json",
         "assets_registry": "./out/hype.assets.json",
-        "theme": "./themes/my-theme",
+        "theme": "/attempt/managed-objects/theme.json",
         "backend": "rendering.remotion",
     },
     out="./out",

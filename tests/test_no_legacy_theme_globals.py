@@ -104,8 +104,8 @@ def test_spike_directory_does_not_exist() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_runner_is_the_canonical_theme_writer() -> None:
-    """The runner's ``_emit_scoped_config_env`` is the single theme env writer."""
+def test_no_theme_environment_writer() -> None:
+    """Theme truth is an input document, never a subprocess environment value."""
     try:
         subprocess.run(["rg", "--version"], capture_output=True, check=True)
         cmd = [
@@ -127,12 +127,7 @@ def test_runner_is_the_canonical_theme_writer() -> None:
     )
     lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
 
-    # The runner's scoped-config emit is the ONE canonical writer.
-    runner_lines = [l for l in lines if "executor/runner.py" in l]
-    assert len(runner_lines) >= 1, (
-        "Runner must contain at least one HYPE_ACTIVE_THEME emit; "
-        f"found {len(runner_lines)}"
-    )
+    assert not lines
 
     non_runner_lines = [l for l in lines if "executor/runner.py" not in l]
     assert len(non_runner_lines) == 0, (

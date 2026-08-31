@@ -13,21 +13,24 @@ from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 from astrid.core.execution.generic_host import GenericPackHost
 from astrid.core.rendering.contracts import SCHEMA_VERSION, RenderRequest
+from astrid.core.theme import builtin_theme
 from astrid.core.timeline.resolution import AssetIntegrity, classify_asset
 from astrid.packs.rendering.executors.timeline_visualize.assets import verify_now
 from astrid.packs.rendering.executors.timeline_visualize.thumbnails import sample_filmstrip
 
 
 class _Runtime:
-    def __init__(self, payload: bytes) -> None:
-        self.payload = payload
-        self.digest = hashlib.sha256(payload).hexdigest()
+    def __init__(self, payload: bytes | dict[str, bytes]) -> None:
+        self.payloads = (
+            payload if isinstance(payload, dict) else {hashlib.sha256(payload).hexdigest(): payload}
+        )
+        self.payload = next(iter(self.payloads.values()))
+        self.digest = hashlib.sha256(self.payload).hexdigest()
         self.fetches: list[str] = []
 
     def get_object(self, digest: str) -> bytes:
         self.fetches.append(digest)
-        assert digest == self.digest
-        return self.payload
+        return self.payloads[digest]
 
 
 def _media_timeline() -> dict:
@@ -248,7 +251,9 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
         "props = json.loads(props_path.read_text())\n"
         "timeline = props.get('timeline')\n"
         "registry = props.get('assets', {}).get('assets')\n"
+        "theme = props.get('theme')\n"
         "assert isinstance(timeline, dict) and isinstance(registry, dict)\n"
+        "assert theme.get('id') == 'banodoco-default' and theme['visual']['canvas']['fps'] == 24\n"
         "clips = [clip for clip in timeline.get('clips', []) if isinstance(clip, dict) and clip.get('clipType') == 'media']\n"
         "assert len(clips) == 1 and clips[0].get('asset') == 'source'\n"
         "entry = registry.get('source')\n"
@@ -273,6 +278,8 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     )
     payload = source.read_bytes()
     digest = hashlib.sha256(payload).hexdigest()
+    theme_payload = json.dumps(builtin_theme(), sort_keys=True).encode("utf-8")
+    theme_digest = hashlib.sha256(theme_payload).hexdigest()
     registry = tmp_path / "assets.json"
     registry.write_text(json.dumps({"assets": {"source": {
         "media_id": "media-remotion", "content_sha256": digest, "type": "video/mp4",
@@ -283,12 +290,20 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     timeline_path = project_root / "timeline.json"
     timeline_path.write_text(json.dumps(_media_timeline()), encoding="utf-8")
     attempt = tmp_path / "attempt"
-    runtime_client = _Runtime(payload)
+    runtime_client = _Runtime({digest: payload, theme_digest: theme_payload})
     host = GenericPackHost(
         pack_roots=[Path(__file__).parents[2] / "astrid" / "packs" / "rendering" / "executors" / "render"],
         client=runtime_client, attempt_root=attempt,
     )
-    values = host._materialize_inputs({"inputs": {"assets_registry": str(registry)}}, attempt)
+    values = host._materialize_inputs(
+        {
+            "inputs": {
+                "assets_registry": str(registry),
+                "theme": {"object_id": "theme-default", "digest": theme_digest},
+            }
+        },
+        attempt,
+    )
     assets_path = project_root / "assets.json"
     shutil.copy2(values["assets_registry"], assets_path)
     result = run_executor(
@@ -297,6 +312,7 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
             inputs={"timeline": str(timeline_path), "timeline_ref": "timeline-remotion",
                     "assets_registry": str(assets_path), "selector": "rendering.remotion",
                     "output_name": "result.mp4", "keep_previous_renders": True,
+                    "theme": values["theme"],
                     "backend_config": {"rendering.remotion": {"project_dir": str(runtime)}},
                     "materialized_root": values["materialized_root"],
                     "materialized_objects": values["materialized_objects"]},
@@ -308,7 +324,7 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     assert result.ok, result.payload
     output = attempt / "result.mp4"
     assert output.is_file() and output.read_bytes()[4:8] == b"ftyp"
-    assert runtime_client.fetches == [digest]
+    assert sorted(runtime_client.fetches) == sorted([theme_digest, digest])
     # A valid-but-unrelated MP4 must not satisfy this proof.  The bounded
     # process re-encodes the handed-off red source, so its decoded first frame
     # must match the source frame exactly.

@@ -36,7 +36,6 @@ def main(argv: list[str] | None = None) -> int:
         project_root = _project_root_from_args(args)
         override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
-            active_theme=args.theme,
             project_root=project_root,
             extra_pack_roots=tuple(args.pack_root),
         )
@@ -52,7 +51,6 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python3 -m astrid elements",
         description="List, inspect, and validate Astrid render elements.",
     )
-    parser.add_argument("--theme", help="Active theme id, theme directory, or path to theme.json.")
     parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery. Defaults to current working directory.")
     parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover elements from; may be repeated.")
     subparsers = parser.add_subparsers(dest="command", required=True)

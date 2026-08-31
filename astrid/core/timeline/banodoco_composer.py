@@ -262,59 +262,6 @@ def merge_generation(
     return merged
 
 
-def _deep_merge_theme(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Merge overlay onto base for theme blocks.
-
-    Top-level theme keys (visual, generation, voice, audio, pacing) are merged at one
-    level deep. Nested dicts inside (e.g. visual.canvas) are merged key-by-key. Lists
-    such as generation.references and generation.assets are replaced wholesale.
-    """
-    result: dict[str, Any] = {key: value for key, value in base.items()}
-    for key, value in overlay.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
-            merged_block: dict[str, Any] = dict(result[key])
-            for sub_key, sub_value in value.items():
-                if (
-                    sub_key in merged_block
-                    and isinstance(merged_block[sub_key], dict)
-                    and isinstance(sub_value, dict)
-                ):
-                    inner = dict(merged_block[sub_key])
-                    inner.update(sub_value)
-                    merged_block[sub_key] = inner
-                else:
-                    merged_block[sub_key] = sub_value
-            result[key] = merged_block
-        else:
-            result[key] = value
-    return result
-
-
-def resolve_timeline_theme(timeline: "TimelineConfig", themes_root: Path) -> dict[str, Any]:
-    """Return the merged theme view: theme.json + timeline.theme_overrides.
-
-    `timeline['theme']` is a slug resolved against `<themes_root>/<slug>/theme.json`.
-    Overrides are deep-merged onto the loaded theme; list-valued fields (references,
-    assets) are replaced wholesale by the override.
-    """
-    slug = timeline.get("theme") if isinstance(timeline, dict) else None
-    if not isinstance(slug, str) or not slug:
-        raise ValueError("Timeline.theme must be a non-empty slug")
-    theme_path = Path(themes_root) / slug / "theme.json"
-    if not theme_path.is_file():
-        raise FileNotFoundError(f"Theme {slug!r} not found at {theme_path}")
-    base = json.loads(theme_path.read_text(encoding="utf-8"))
-    if not isinstance(base, dict):
-        raise ValueError(f"Theme file {theme_path} must contain a JSON object")
-    overrides = timeline.get("theme_overrides") if isinstance(timeline, dict) else None
-    if isinstance(overrides, dict) and overrides:
-        return _deep_merge_theme(base, overrides)
-    return base
-
 def load_timeline(path: Path) -> TimelineConfig:
     return Timeline.load(path).to_config()
 

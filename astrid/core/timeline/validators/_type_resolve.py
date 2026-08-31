@@ -24,7 +24,7 @@ def resolve_clip_to_artifact_type(
     """Resolve a bare clip_type string to its canonical artifact_type id.
 
     Scans element kinds effects → animations → transitions in order (SD2).
-    For each kind, calls ``list_element_ids(kind, theme=theme)`` from the
+    For each kind, calls ``list_element_ids(kind)`` from the
     existing catalog, then fetches the ``ElementDefinition`` from
     *element_registry* and reads the first annotated output's
     ``artifact_type``.
@@ -38,7 +38,7 @@ def resolve_clip_to_artifact_type(
 
     for kind in _ELEMENT_KIND_SCAN_ORDER:
         try:
-            ids = _catalog.list_element_ids(kind, theme=theme)
+            ids = _catalog.list_element_ids(kind)
         except Exception:  # noqa: BLE001 - an optional pack must not break opaque fallthrough
             continue
         if clip_type not in ids:
