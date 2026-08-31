@@ -19,6 +19,7 @@ from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.execution.executor.argv import executor_argv
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.rendering.attached import invoke_attached_render
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.timeline import load_arrangement, load_pool
@@ -31,7 +32,6 @@ from astrid.packs.editorial.executors.editor_review.run import (
     _validate_review_payload_shape,
     arrangement_summary,
 )
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,12 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--brief", type=Path, help="Brief text file required when --apply is set.")
     parser.add_argument("--brief-dir", type=Path, help="Brief output directory required when --apply is set.")
     parser.add_argument("--run-dir", type=Path, help="Source run directory required when --apply is set.")
-    parser.add_argument("--video", type=str, help="Primary source video for cut.py.")
+    parser.add_argument("--video", type=str, help="Runtime-materialized primary source video for cut.py.")
     parser.add_argument("--asset", action="append", default=[], help="Additional source asset in KEY=PATH form.")
     parser.add_argument("--primary-asset", help="Primary asset key for cut.py.")
     parser.add_argument("--shots", type=Path, help="Optional shots.json path for cut.py.")
     parser.add_argument("--python-exec", default=sys.executable, help="Python interpreter for --apply subprocesses.")
-    parser.add_argument("--keep-downloads", action="store_true", help="Keep URL downloads in the asset cache after --apply (default: delete files this run minted). Env override: HYPE_KEEP_DOWNLOADS=1.")
     return parser
 
 
@@ -92,7 +91,7 @@ def _step_argv(name: str, python_exec: str) -> list[str]:
     return executor_argv(name, python_exec)
 
 
-def _parse_asset_entry(parser: argparse.ArgumentParser, raw: str) -> tuple[str, Path | str]:
+def _parse_asset_entry(parser: argparse.ArgumentParser, raw: str) -> tuple[str, Path]:
     if "=" not in raw:
         parser.error(f"invalid --asset value {raw!r}; expected KEY=PATH")
     key, path_text = raw.split("=", 1)
@@ -102,15 +101,14 @@ def _parse_asset_entry(parser: argparse.ArgumentParser, raw: str) -> tuple[str, 
         parser.error(f"invalid --asset value {raw!r}; expected KEY=PATH")
     if key == "main":
         parser.error("asset key 'main' is reserved; pass the primary video via --video")
-    if asset_cache.is_url(path_text):
-        return key, path_text
-    path = Path(path_text).expanduser().resolve()
-    if not path.is_file():
-        parser.error(f"asset path not found for {key!r}: {path}")
-    return key, path
+    try:
+        return key, require_runtime_materialized_file(path_text, label=f"asset {key!r}")
+    except ValueError as exc:
+        parser.error(str(exc))
+        raise AssertionError("argparse.error did not exit")
 
 
-def _asset_args(asset_pairs: list[tuple[str, Path | str]]) -> list[str]:
+def _asset_args(asset_pairs: list[tuple[str, Path]]) -> list[str]:
     args: list[str] = []
     for key, path in asset_pairs:
         args.extend(["--asset", f"{key}={path}"])
@@ -152,11 +150,11 @@ def _validate_apply_args(parser: argparse.ArgumentParser, args: argparse.Namespa
         if not path.is_file():
             parser.error(f"--run-dir is missing {name}: {path}")
 
-    if args.video is not None and asset_cache.is_url(args.video):
-        pass
-    elif args.video is not None:
-        args.video = Path(args.video)
-        args.video = _require_file(parser, args.video, "--video")
+    if args.video is not None:
+        try:
+            args.video = require_runtime_materialized_file(args.video, label="--video")
+        except ValueError as exc:
+            parser.error(str(exc))
     args.asset_pairs = [_parse_asset_entry(parser, item) for item in args.asset]
     if args.video is None and not args.asset_pairs:
         parser.error("--apply requires either --video or at least one --asset KEY=PATH")
@@ -320,10 +318,7 @@ def main(argv: Sequence[str] | None = None, *, client: ClaudeClient | None = Non
     # -------------------------------------------------------------------------
 
     if args.apply:
-        keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
-        session_enabled = not (bool(getattr(args, "keep_downloads", False)) or keep_env)
-        with asset_cache.ephemeral_session(enabled=session_enabled):
-            _apply_pipeline(args)
+        _apply_pipeline(args)
     return out_path
 
 

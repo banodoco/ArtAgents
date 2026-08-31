@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.audit import register_outputs
 from astrid.core.util.llm_clients import GeminiClient, build_gemini_client
 from astrid.core.util.time import _utc_now, utc_now_seconds
@@ -255,9 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _run() -> int:
         parser = build_parser()
         args = parser.parse_args(argv)
-        from astrid.packs.training.executors.asset_cache import run as asset_cache
-
-        args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+        args.video = require_runtime_materialized_file(args.video, label="--video")
         scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
         triage = json.loads(args.triage.read_text(encoding="utf-8"))
         out_dir = args.out.resolve()

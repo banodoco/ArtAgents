@@ -98,7 +98,6 @@ EXPECTED_PACKS = {
             "builtin.pool_build": "training.pool_build",
             "builtin.pool_merge": "training.pool_merge",
             "builtin.search_loras": "training.search_loras",
-            "builtin.asset_cache": "training.asset_cache",
             "builtin.training_run": "training.training_run",
             "builtin.dataset_build": "training.dataset_build",
         },

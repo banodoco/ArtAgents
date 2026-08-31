@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.media import ffprobe_duration_seconds
@@ -269,9 +270,7 @@ def transcribe_to_outputs(audio_path: Path, out_dir: Path, cache_dir: Path, clie
     return write_transcripts(out_dir, segments, audit), summary, metadata_path
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from astrid.packs.training.executors.asset_cache import run as asset_cache
-
-    args.audio = Path(asset_cache.resolve_input(args.audio, want="path"))
+    args.audio = require_runtime_materialized_file(args.audio, label="--audio")
     audio_path = args.audio.resolve()
     if not audio_path.is_file():
         raise SystemExit(f"Audio file not found: {audio_path}")

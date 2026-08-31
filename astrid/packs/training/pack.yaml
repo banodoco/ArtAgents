@@ -34,7 +34,6 @@ capabilities:
 - build_clip_pool
 - merge_clip_pool
 - search_loras
-- manage_asset_cache
 agent:
   purpose: Choose this pack to assemble a video training dataset (acquire, split, caption, review) or to run a LoRA training job that provisions GPUs, executes the trainer remotely, pulls checkpoints, and registers artifacts.
   do_not_use_for: Not for raw GPU provisioning or one-off remote script execution on its own; use the runpod pack for bare pod lifecycle control.
@@ -60,11 +59,6 @@ aliases:
   canonical_id: training.search_loras
   deprecated: true
   deprecation_message: Moved to training.search_loras
-- kind: executor
-  alias: builtin.asset_cache
-  canonical_id: training.asset_cache
-  deprecated: true
-  deprecation_message: Moved to training.asset_cache
 - kind: orchestrator
   alias: builtin.training_run
   canonical_id: training.training_run

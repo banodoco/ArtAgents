@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.audit import register_outputs
 from astrid.packs.editorial.hype import enriched_arrangement
 
@@ -108,9 +109,7 @@ def compute(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from astrid.packs.training.executors.asset_cache import run as asset_cache
-
-    args.source_path = Path(asset_cache.resolve_input(args.source_path, want="path"))
+    args.source_path = require_runtime_materialized_file(args.source_path, label="source path")
     source_path = args.source_path.resolve()
     out_path = args.out.resolve()
     if not source_path.is_file():

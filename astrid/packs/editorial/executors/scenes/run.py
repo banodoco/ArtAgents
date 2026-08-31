@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.audit import register_outputs
 from astrid.core.media import ffprobe_duration_seconds
 
@@ -128,9 +129,7 @@ def write_outputs(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    from astrid.packs.training.executors.asset_cache import run as asset_cache
-
-    args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+    args.video = require_runtime_materialized_file(args.video, label="--video")
 
     video_path = args.video.resolve()
     if not video_path.is_file():

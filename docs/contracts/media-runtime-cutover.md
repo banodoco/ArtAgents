@@ -5,7 +5,7 @@ Live Astrid media is identified by a neutral-runtime, project-scoped
 and verifies those bytes, then passes an attempt-local materialization to a
 renderer.
 
-URL references, `file`/`path`/`locator` values, path fingerprints, URL caches,
+URL references, `file`/`path`/`locator` values, path fingerprints, persistent URL caches,
 CAS-locator rebasing, and `external_local` realms are not live inputs. They are
 accepted only by the explicitly offline `tools.astrid_migrate` boundary. A
 renderer must fail closed before opening any such locator, and may stage only

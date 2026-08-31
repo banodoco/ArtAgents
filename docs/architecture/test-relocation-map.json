@@ -74,13 +74,6 @@
       "rationale": "Arrangement schema; could fit tests/core/ or tests/packs/."
     },
     {
-      "file": "test_asset_cache.py",
-      "lines": 276,
-      "target": "tests/core/",
-      "confidence": "medium",
-      "rationale": "Asset cache tests; likely core infrastructure."
-    },
-    {
       "file": "test_audio_render.py",
       "lines": 167,
       "target": "tests/packs/",

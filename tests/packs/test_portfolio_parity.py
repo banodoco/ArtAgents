@@ -53,7 +53,7 @@ PORTFOLIO_PACK_IDS = [
 # manifest, so the runner reaches ``_run_external_executor``.
 REPRESENTATIVE_EXECUTORS: dict[str, str] = {
     "rendering": "rendering.render",
-    "training": "training.asset_cache",
+    "training": "training.search_loras",
     "iteration": "iteration.assemble",
     "youtube": "youtube.youtube_audio",
     "vibecomfy": "vibecomfy.validate",

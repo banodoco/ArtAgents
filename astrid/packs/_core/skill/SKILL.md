@@ -551,7 +551,6 @@ orchestrator, or element manifests.
 | `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
 | `stream_content.clip_candidates` | Score transcript windows as publishable stream clip candidates. |
 | `stream_content.segment_map` | Fuse OCR, transcript density, and scene cuts into a complete stream timeline. |
-| `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `training.pool_build` | Build the candidate clip pool from triaged source-video scenes. |
 | `training.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. |
 | `training.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |

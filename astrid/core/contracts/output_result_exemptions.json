@@ -140,10 +140,6 @@
       "reasons": ["no-artifact"],
       "note": "Writes segment-map JSON but does not yet emit a universal result manifest."
     },
-    "training.asset_cache": {
-      "reasons": ["no-artifact"],
-      "note": "Manages repo-local hype asset cache with no stable output artifact."
-    },
     "training.search_loras": {
       "reasons": ["paid"],
       "note": "Searches Hugging Face Hub for LoRA adapters requiring HF_TOKEN/HUGGING_FACE_HUB_TOKEN."

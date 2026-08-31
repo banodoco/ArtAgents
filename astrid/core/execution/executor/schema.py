@@ -114,7 +114,6 @@ KNOWN_RUNTIME_PLACEHOLDERS = {
     "drift",
     "env_file",
     "extra_args",
-    "keep_downloads",
     "no_prefetch",
     "out",
     "primary_asset",

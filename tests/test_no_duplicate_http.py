@@ -65,7 +65,6 @@ ALLOWLIST_URLLIB = {
     "astrid/packs/rendering/executors/render/run.py",
     "astrid/packs/training/executors/search_loras/run.py",
     "astrid/packs/rendering/executors/sprite_sheet/run.py",
-    "astrid/packs/training/executors/asset_cache/run.py",
     # seinfeld/script_pipeline was generalized into builtin/script_pipeline (builtin-training epic)
     "astrid/packs/editorial/executors/script_pipeline/run.py",
     # blender.render: downloads mesh assets from remote URLs (urlretrieve) and

@@ -2,9 +2,7 @@ import contextlib
 import io
 import json
 import shutil
-import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -169,11 +167,7 @@ class SceneDescribeTest(unittest.TestCase):
             "motion_tags": ["walk"],
             "mood_tags": ["bright"],
         })
-        fake_asset_cache = types.ModuleType("astrid.packs.understanding.executors.asset_cache")
-        fake_asset_cache.run = types.SimpleNamespace(resolve_input=lambda value, want: value)
-
         with (
-            mock.patch.dict(sys.modules, {"astrid.packs.understanding.executors.asset_cache": fake_asset_cache}),
             mock.patch.object(scene_describe, "build_gemini_client", return_value=stub_client),
             mock.patch.object(scene_describe, "extract_scene_clip", side_effect=fake_extract),
         ):
@@ -229,11 +223,7 @@ class SceneDescribeTest(unittest.TestCase):
         triage.write_text(json.dumps({"entries": []}), encoding="utf-8")
         video.write_bytes(b"video")
         stderr = io.StringIO()
-        fake_asset_cache = types.ModuleType("astrid.packs.understanding.executors.asset_cache")
-        fake_asset_cache.run = types.SimpleNamespace(resolve_input=lambda value, want: value)
-
         with (
-            mock.patch.dict(sys.modules, {"astrid.packs.understanding.executors.asset_cache": fake_asset_cache}),
             mock.patch.object(scene_describe, "build_gemini_client", return_value=object()),
             contextlib.redirect_stderr(stderr),
         ):

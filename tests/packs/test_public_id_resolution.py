@@ -30,7 +30,7 @@ PRESERVED_EXECUTOR_IDS = [
     "vibecomfy.validate",
     # One canonical 2-segment id per remaining pack — sanity checks that the
     # regex relaxation did not regress the common case either.
-    "training.asset_cache",
+    "training.pool_build",
     "iteration.assemble",
     "youtube.upload",
 ]

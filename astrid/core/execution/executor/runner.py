@@ -43,6 +43,7 @@ from astrid.core.project.runtime import (
     _project_subprocess_env,
     reject_project_with_out,
 )
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
@@ -60,12 +61,6 @@ from .schema import (
 
 class ExecutorRunnerError(ExecutorValidationError):
     """Raised when a executor cannot be prepared or executed."""
-
-
-#: Module path of the asset cache helper re-exported by every pipeline driver as
-#: ``<pipeline_module>.asset_cache``. Imported directly (a sibling pack executor,
-#: not the orchestrator tier) by request-free helpers that only need ``is_url``.
-_ASSET_CACHE_MODULE = "astrid.packs.training.executors.asset_cache.run"
 
 
 @lru_cache(maxsize=None)
@@ -92,11 +87,6 @@ def _pipeline_module(runtime_module: str):
             os.environ.pop(ASTRID_INTERNAL_INVOCATION, None)
         else:
             os.environ[ASTRID_INTERNAL_INVOCATION] = previous
-
-
-@lru_cache(maxsize=1)
-def _asset_cache_module():
-    return import_module(_ASSET_CACHE_MODULE)
 
 
 def _pipeline_module_for_executor(executor: ExecutorDefinition):
@@ -461,7 +451,6 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
         render=bool(values.get("render", False)),
         verbose=bool(values.get("verbose", request.verbose)),
         no_prefetch=bool(values.get("no_prefetch", False)),
-        keep_downloads=bool(values.get("keep_downloads", False)),
         cache_dir=_optional_path(values.get("cache_dir")),
         drift=str(values.get("drift") or "strict"),
         from_step=values.get("from_step"),
@@ -1213,13 +1202,13 @@ def _optional_path(value: Any) -> Path | None:
     return Path(str(value)).expanduser().resolve()
 
 
-def _optional_asset_path(value: Any) -> Path | str | None:
+def _optional_asset_path(value: Any) -> Path | None:
     if value is None or value == "":
         return None
-    text = str(value)
-    if _asset_cache_module().is_url(text):
-        return text
-    return Path(text).expanduser().resolve()
+    try:
+        return require_runtime_materialized_file(value)
+    except ValueError as exc:
+        raise ExecutorRunnerError(str(exc)) from exc
 
 
 def _optional_float(value: Any) -> float | None:
@@ -1238,8 +1227,8 @@ def _as_string_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _parse_asset_pairs(values: list[str]) -> list[tuple[str, Path | str]]:
-    pairs: list[tuple[str, Path | str]] = []
+def _parse_asset_pairs(values: list[str]) -> list[tuple[str, Path]]:
+    pairs: list[tuple[str, Path]] = []
     for raw in values:
         if "=" not in raw:
             raise ExecutorRunnerError(f"invalid asset value {raw!r}; expected KEY=PATH")
@@ -1248,10 +1237,10 @@ def _parse_asset_pairs(values: list[str]) -> list[tuple[str, Path | str]]:
         path_text = path_text.strip()
         if not key or not path_text:
             raise ExecutorRunnerError(f"invalid asset value {raw!r}; expected KEY=PATH")
-        if _asset_cache_module().is_url(path_text):
-            pairs.append((key, path_text))
-        else:
-            pairs.append((key, Path(path_text).expanduser().resolve()))
+        try:
+            pairs.append((key, require_runtime_materialized_file(path_text, label=f"asset {key!r}")))
+        except ValueError as exc:
+            raise ExecutorRunnerError(str(exc)) from exc
     return pairs
 
 

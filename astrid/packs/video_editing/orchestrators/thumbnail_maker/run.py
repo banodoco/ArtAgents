@@ -19,9 +19,9 @@ from typing import Any, Callable, Sequence
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.runtime import reject_project_with_out
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
     build_plan_v2,
     emit_plan_json,
@@ -162,7 +162,7 @@ def plan_evidence_needs(query: str) -> dict[str, Any]:
 def resolve_video_for_analysis(video: str, *, dry_run: bool) -> dict[str, Any]:
     original = str(video)
     try:
-        resolved = asset_cache.resolve_input(original, want="path")
+        resolved = require_runtime_materialized_file(original, label="--video")
     except Exception as exc:
         if not dry_run:
             raise
@@ -226,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_cmd.add_argument("--count", type=int, default=DEFAULT_COUNT)
     generate_cmd.add_argument("--size", default=DEFAULT_SIZE, type=normalized_size)
 
-    parser.add_argument("--video", help="Source video path or URL.", default=argparse.SUPPRESS)
+    parser.add_argument("--video", help="Runtime-materialized source video file.", default=argparse.SUPPRESS)
     parser.add_argument("--query", default="auto", help="Thumbnail direction or search query.")
     parser.add_argument("--out", type=Path, help="Output directory.", default=argparse.SUPPRESS)
     parser.add_argument("--size", default=DEFAULT_SIZE, type=normalized_size)
@@ -262,8 +262,8 @@ def resolve_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.out = Path(out).expanduser().resolve()
 
     video = getattr(args, "video", None)
-    if video is not None and not asset_cache.is_url(video):
-        args.video = Path(video).expanduser().resolve()
+    if video is not None:
+        args.video = str(require_runtime_materialized_file(video, label="--video"))
 
     return args
 

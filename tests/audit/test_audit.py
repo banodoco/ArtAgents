@@ -117,8 +117,6 @@ def test_ambient_register_outputs_inherits_parent_ids(monkeypatch, tmp_path: Pat
 
 def test_shots_writes_universal_result_manifest(tmp_path: Path) -> None:
     """editorial.shots writes manifest.json with kind=shots, scenes input, and shots.json."""
-    import sys
-    from types import SimpleNamespace
     from unittest.mock import patch
 
     out_dir = tmp_path / "out"
@@ -135,32 +133,21 @@ def test_shots_writes_universal_result_manifest(tmp_path: Path) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("fake jpg", encoding="utf-8")
 
-    # Inject a fake asset_cache module so the ``from ..asset_cache import run``
-    # inside main() succeeds.  The import grabs the ``run`` attribute, which
-    # needs a ``resolve_input`` callable.
-    _fake_ac = SimpleNamespace()
-    _fake_ac.resolve_input = staticmethod(lambda video_arg, want: str(video_path))
-    _fake_ac.run = _fake_ac  # ``from ..asset_cache import run`` binds this
-    sys.modules["astrid.packs.editorial.executors.asset_cache"] = _fake_ac  # type: ignore[assignment]
+    with patch(
+        "astrid.packs.editorial.executors.shots.run.extract_frame",
+        side_effect=fake_extract_frame,
+    ):
+        from astrid.packs.editorial.executors.shots.run import main
 
-    try:
-        with patch(
-            "astrid.packs.editorial.executors.shots.run.extract_frame",
-            side_effect=fake_extract_frame,
-        ):
-            from astrid.packs.editorial.executors.shots.run import main
-
-            ret = main(
-                [
-                    "--video", str(video_path),
-                    "--scenes", str(scenes_path),
-                    "--out", str(out_dir),
-                    "--per-scene", "1",
-                ]
-            )
-            assert ret == 0
-    finally:
-        sys.modules.pop("astrid.packs.editorial.executors.asset_cache", None)
+        ret = main(
+            [
+                "--video", str(video_path),
+                "--scenes", str(scenes_path),
+                "--out", str(out_dir),
+                "--per-scene", "1",
+            ]
+        )
+        assert ret == 0
 
     # Verify shots.json is preserved with original shape
     shots_data = json.loads((out_dir / "shots.json").read_text(encoding="utf-8"))
@@ -188,8 +175,6 @@ def test_shots_writes_universal_result_manifest(tmp_path: Path) -> None:
 
 def test_transcribe_writes_universal_result_manifest(tmp_path: Path, monkeypatch) -> None:
     """editorial.transcribe writes manifest.json with kind=transcript, audio input, and transcript files."""
-    import sys
-    from types import SimpleNamespace
     from unittest.mock import patch
 
     out_dir = tmp_path / "out"
@@ -224,31 +209,22 @@ def test_transcribe_writes_universal_result_manifest(tmp_path: Path, monkeypatch
         "segments_filtered": 0,
     }
 
-    # Inject a fake asset_cache module (same pattern as shots test)
-    _fake_ac = SimpleNamespace()
-    _fake_ac.resolve_input = staticmethod(lambda audio_arg, want: str(audio_path))
-    _fake_ac.run = _fake_ac
-    sys.modules["astrid.packs.editorial.executors.asset_cache"] = _fake_ac  # type: ignore[assignment]
-
     # Avoid live OpenAI key lookup
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key")
 
-    try:
-        with patch(
-            "astrid.packs.editorial.executors.transcribe.run.transcribe_to_outputs",
-            return_value=(fake_paths, fake_summary, metadata_path),
-        ):
-            from astrid.packs.editorial.executors.transcribe.run import main
+    with patch(
+        "astrid.packs.editorial.executors.transcribe.run.transcribe_to_outputs",
+        return_value=(fake_paths, fake_summary, metadata_path),
+    ):
+        from astrid.packs.editorial.executors.transcribe.run import main
 
-            ret = main(
-                [
-                    "--audio", str(audio_path),
-                    "--out", str(out_dir),
-                ]
-            )
-            assert ret == 0
-    finally:
-        sys.modules.pop("astrid.packs.editorial.executors.asset_cache", None)
+        ret = main(
+            [
+                "--audio", str(audio_path),
+                "--out", str(out_dir),
+            ]
+        )
+        assert ret == 0
 
     # Verify transcript files are preserved with original shapes
     assert json_path.is_file()

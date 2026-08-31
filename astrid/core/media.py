@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from urllib.parse import urlparse
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -89,6 +90,33 @@ class MediaProbe:
 
 class MediaProbeError(RuntimeError):
     """Raised when a fail-closed media probe cannot produce metadata."""
+
+
+def require_runtime_materialized_file(
+    value: str | Path,
+    *,
+    label: str = "media input",
+) -> Path:
+    """Validate the only file form accepted by live media executors.
+
+    The neutral runtime owns URL resolution and materializes verified bytes
+    before invoking a pack.  Pack code therefore receives an absolute,
+    existing regular file and must never download, cache, or resolve a URL.
+    """
+
+    text = str(value).strip()
+    if not text or urlparse(text).scheme:
+        raise ValueError(f"{label} must be an absolute runtime-materialized file, not a URL")
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"{label} must be an absolute runtime-materialized file: {text!r}")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} runtime materialization is unavailable: {path}") from exc
+    if not resolved.is_file():
+        raise ValueError(f"{label} must be an existing runtime-materialized file: {resolved}")
+    return resolved
 
 
 def _positive_rational(value: Any) -> tuple[int, int] | None:
