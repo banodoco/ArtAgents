@@ -51,6 +51,40 @@ def test_snapshot_state_writes_stable_multi_root_tarball(tmp_path: Path) -> None
     assert "repo/src/not-rollback-state.py" not in names
 
 
+def test_snapshot_state_excludes_nested_retired_thread_state_but_keeps_json(tmp_path: Path) -> None:
+    projects_root = tmp_path / "projects-root"
+    repo_root = tmp_path / "repo-root"
+    out_dir = tmp_path / "outside-snapshots"
+
+    _write(projects_root / "alpha" / "current_run.json")
+    _write(projects_root / "alpha" / "notes" / "threading.json", "keep\n")
+    _write(projects_root / "alpha" / "notes" / "threading.threading.json", "keep\n")
+    _write(projects_root / "alpha" / ".astrid" / "threads.json", "retired\n")
+    _write(projects_root / "alpha" / "state" / "thread_groups.json", "retired\n")
+    _write(projects_root / "alpha" / "nested" / "threads" / "secret.json", "retired\n")
+    _write(projects_root / "alpha" / "runs" / "run-1" / "attempt.thread.json", "retired\n")
+    _write(repo_root / "runs" / "out-1" / ".astrid.variants.json")
+    _write(repo_root / "retired" / "threads" / ".astrid.variants.json", "retired\n")
+
+    tarball = create_snapshot(
+        projects_root=projects_root,
+        repo_root=repo_root,
+        out_dir=out_dir,
+        timestamp="20260524-010204",
+    )
+
+    with tarfile.open(tarball, "r:gz") as tar:
+        names = set(tar.getnames())
+
+    assert "projects/alpha/notes/threading.json" in names
+    assert "projects/alpha/notes/threading.threading.json" in names
+    assert "projects/alpha/.astrid/threads.json" not in names
+    assert "projects/alpha/state/thread_groups.json" not in names
+    assert "projects/alpha/nested/threads" not in names
+    assert "projects/alpha/runs/run-1/attempt.thread.json" not in names
+    assert "repo/retired/threads/.astrid.variants.json" not in names
+
+
 def test_snapshot_state_rejects_out_dir_inside_repo(tmp_path: Path) -> None:
     projects_root = tmp_path / "projects-root"
     repo_root = tmp_path / "repo-root"

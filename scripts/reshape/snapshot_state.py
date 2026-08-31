@@ -30,6 +30,30 @@ _SKIP_DIR_NAMES = {
     "venv",
 }
 
+# These names belonged to the retired thread/variant file authorities. Keep
+# the allowlist explicit: names such as ``threading.json`` remain ordinary
+# user files and must not disappear from a portable snapshot.
+_RETIRED_THREAD_PARTS = {
+    "thread",
+    "threads",
+    "thread.json",
+    "threads.json",
+    "thread_state",
+    "threads_state",
+    "thread-state",
+    "threads-state",
+    "thread_state.json",
+    "threads_state.json",
+    "thread-state.json",
+    "threads-state.json",
+    "thread_groups",
+    "thread_groups.json",
+    "thread_index",
+    "thread_index.json",
+    "thread_ids",
+    "thread_ids.json",
+}
+
 
 def _resolve_existing_dir(path: Path, label: str) -> Path:
     resolved = path.expanduser().resolve()
@@ -58,19 +82,39 @@ def _timestamp() -> str:
 def _iter_tree(root: Path) -> Iterable[Path]:
     yield root
     for current, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIR_NAMES)
+        dirs[:] = sorted(
+            d
+            for d in dirs
+            if d not in _SKIP_DIR_NAMES and d.casefold() not in _RETIRED_THREAD_PARTS
+        )
         current_path = Path(current)
         for dirname in dirs:
             yield current_path / dirname
         for filename in sorted(files):
-            yield current_path / filename
+            path = current_path / filename
+            if _is_retired_thread_path(path, root):
+                continue
+            yield path
+
+
+def _is_retired_thread_path(path: Path, root: Path) -> bool:
+    """Return whether *path* is retired thread state, not ordinary content."""
+    parts = tuple(part.casefold() for part in path.relative_to(root).parts)
+    if any(part in _RETIRED_THREAD_PARTS for part in parts):
+        return True
+    # Sprint-1's ThreadIndexStore wrote run-local ``<name>.thread.json``
+    # sidecars. This exact marker does not catch unrelated ``.threading`` or
+    # ``threading.json`` files.
+    return path.name.casefold().endswith(".thread.json")
 
 
 def _iter_variant_sidecars(repo_root: Path) -> Iterable[Path]:
     for current, dirs, files in os.walk(repo_root):
         dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIR_NAMES)
         if ".astrid.variants.json" in files:
-            yield Path(current) / ".astrid.variants.json"
+            path = Path(current) / ".astrid.variants.json"
+            if not _is_retired_thread_path(path, repo_root):
+                yield path
 
 
 def _repo_subset_paths(repo_root: Path) -> list[Path]:
