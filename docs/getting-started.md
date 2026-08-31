@@ -5,22 +5,31 @@ agentic UXes — pipelines where agents and humans collaborate to make art.
 
 ## Prerequisites
 
-Astrid requires Python 3.11+ and a running Banodoco workspace runtime. The
-runtime is a separate local service that owns durable workspace state; the
-Astrid checkout is a client and pack source, not the state store.
+Astrid requires Python 3.11+ and an editable Banodoco workspace-runtime
+checkout. The runtime is a separate local service that owns durable workspace
+state; the Astrid checkout is a client and pack source, not the state store.
 
-Install Astrid from the checkout, then start the runtime (the `banodoco-local`
-launcher is provided by the Banodoco local-runtime distribution):
+Install Astrid from the checkout and point the client at the neutral runtime
+checkout. The first product command starts or reconnects that runtime through
+the neutral launcher; no database service or `astrid serve` process is needed:
 
 ```bash
 pip install -e .
-banodoco-local up --profile astrid
+export BANODOCO_RUNTIME_CHECKOUT=/path/to/banodoco-workspace-runtime
 python3 -m astrid --help
+python3 -m astrid projects list --json
 ```
+
+An existing neutral source manifest can be used instead with
+`BANODOCO_LOCAL_SOURCE_MANIFEST`. The manifest records both editable
+checkouts and is retained under the runtime support directory after a
+successful first launch so later `banodoco-local restart`/reconnect commands
+use the same composition. The equivalent explicit operator command remains
+`banodoco-local up --profile astrid`.
 
 ## Your First Command
 
-From any shell with the runtime running, check health:
+From any shell with the runtime configured, check health:
 
 ```bash
 python3 -m astrid doctor --json
@@ -33,10 +42,16 @@ python3 -m astrid projects list --json
 python3 -m astrid projects show demo --json
 ```
 
-If the runtime is not discoverable, set `BANODOCO_RUNTIME_ENDPOINT` and
-`BANODOCO_RUNTIME_CREDENTIAL`, or set `BANODOCO_RUNTIME_DISCOVERY` to the
-runtime's discovery JSON. Never point Astrid at a local SQLite/CAS directory;
-the runtime owns those details.
+If a direct runtime endpoint is deliberately supplied, set
+`BANODOCO_RUNTIME_ENDPOINT` and `BANODOCO_RUNTIME_CREDENTIAL`, or set
+`BANODOCO_RUNTIME_DISCOVERY` to the runtime's discovery JSON. Never point
+Astrid at a local SQLite/CAS directory; the runtime owns those details.
+
+`astrid doctor` remains a read-only diagnostic and does not create support
+state. Product commands and SDK `AstridClient.open()` perform the bounded
+neutral launch/reconnect handoff automatically. Set
+`BANODOCO_ASTRID_AUTO_BOOTSTRAP=0` to inspect an unavailable runtime without
+attempting that handoff.
 
 The seven top-level gateway families are `projects`, `timelines`, `media`,
 `tasks`, `runs`, `doctor`, and `backup`; `timelines shots` and `media

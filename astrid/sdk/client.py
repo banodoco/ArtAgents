@@ -8,6 +8,7 @@ local application. Runtime discovery and credentials are resolved by
 
 from __future__ import annotations
 
+import os
 from typing import Any, Self
 
 __all__ = ["AstridClient"]
@@ -20,8 +21,15 @@ class AstridClient:
         self._remote = remote
 
     @classmethod
-    def open(cls) -> Self:
-        """Discover and connect to the selected workspace runtime."""
+    def open(cls, *, auto_bootstrap: bool = True) -> Self:
+        """Discover, ensure, and connect to the selected workspace runtime.
+
+        Product commands and SDK callers get the normal beta behavior: when
+        the endpoint is absent or unhealthy, the configured neutral
+        ``banodoco-local`` launcher is invoked and the connection is retried.
+        Operational read-only routes such as ``doctor`` can pass
+        ``auto_bootstrap=False`` to preserve their side-effect-free contract.
+        """
         from astrid.sdk.exceptions import ServiceUnavailableError
         from astrid.sdk.remote import RemoteAstridClient
         from astrid.sdk.workspace_client import (
@@ -30,17 +38,48 @@ class AstridClient:
             resolve_runtime_connection,
         )
 
-        try:
-            endpoint, token = resolve_runtime_connection()
-            return cls(remote=RemoteAstridClient(WorkspaceClient(endpoint, token)))
-        except WorkspaceClientError as exc:
-            raise ServiceUnavailableError(
+        def unavailable(exc: Exception) -> ServiceUnavailableError:
+            return ServiceUnavailableError(
                 "runtime unavailable; run `banodoco-local up --profile astrid`",
                 details={
                     "next_action": "banodoco-local up --profile astrid",
-                    "reason": exc.code,
+                    "reason": getattr(exc, "code", "unavailable"),
                 },
-            ) from exc
+            )
+
+        def connect(endpoint: str, token: str) -> Any:
+            workspace = WorkspaceClient(endpoint, token)
+            workspace.health()
+            workspace.handshake(
+                "astrid-sdk",
+                "0.1.0",
+                [
+                    "projects:read",
+                    "projects:write",
+                    "objects:read",
+                    "objects:write",
+                    "tasks:read",
+                    "tasks:write",
+                ],
+            )
+            return workspace
+
+        try:
+            endpoint, token = resolve_runtime_connection()
+            workspace = connect(endpoint, token)
+            return cls(remote=RemoteAstridClient(workspace))
+        except WorkspaceClientError as exc:
+            if not auto_bootstrap or os.environ.get("BANODOCO_ASTRID_AUTO_BOOTSTRAP", "1").strip().lower() in {"0", "false", "no", "off"}:
+                raise unavailable(exc) from exc
+            try:
+                from astrid.sdk.autobootstrap import ensure_runtime
+
+                ensure_runtime()
+                endpoint, token = resolve_runtime_connection()
+                workspace = connect(endpoint, token)
+                return cls(remote=RemoteAstridClient(workspace))
+            except Exception as retry_exc:
+                raise unavailable(retry_exc) from retry_exc
 
     def close(self) -> None:
         self._remote.close()

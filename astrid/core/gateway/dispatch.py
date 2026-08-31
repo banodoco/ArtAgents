@@ -72,7 +72,7 @@ def _dispatch_doctor(args: list[str]) -> int:
     from astrid.sdk.workspace_client import WorkspaceClientError
 
     try:
-        with AstridClient.open() as client:
+        with AstridClient.open(auto_bootstrap=False) as client:
             report = client.doctor()
     except (ServiceUnavailableError, WorkspaceClientError) as exc:
         payload = {
@@ -148,7 +148,7 @@ def _dispatch_backup(args: list[str]) -> int:
         from astrid.sdk.exceptions import ServiceUnavailableError
         from astrid.sdk.workspace_client import WorkspaceClientError
 
-        with AstridClient.open() as client:
+        with AstridClient.open(auto_bootstrap=False) as client:
             if parsed.operation == "create":
                 destination = parsed.destination or parsed.out
                 if not destination: parser.error("backup create requires DESTINATION or --out")

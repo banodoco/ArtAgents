@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -19,6 +20,10 @@ class WorkspaceClientError(RuntimeError):
         super().__init__(message)
         self.status, self.code, self.message = status, code, message
         self.details = dict(details or {})
+
+
+def _support_home() -> Path:
+    return Path(os.environ.get("BANODOCO_LOCAL_HOME") or os.environ.get("HOME", "~")).expanduser()
 
 
 def _read_credential(path: Path) -> str:
@@ -42,7 +47,7 @@ def resolve_runtime_connection() -> tuple[str, str]:
     endpoint = os.environ.get("BANODOCO_RUNTIME_ENDPOINT", "").strip()
     discovery_path = os.environ.get("BANODOCO_RUNTIME_DISCOVERY", "").strip()
     if not discovery_path:
-        home = Path(os.environ.get("HOME", "~")).expanduser()
+        home = _support_home()
         discovery_path = str(home / "Library" / "Application Support" / "Banodoco" / "runtime" / "discovery.json")
     if not endpoint:
         try:
@@ -52,11 +57,39 @@ def resolve_runtime_connection() -> tuple[str, str]:
             endpoint = ""
     credential_path = os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "").strip()
     if not credential_path:
-        home = Path(os.environ.get("HOME", "~")).expanduser()
+        home = _support_home()
         credential_path = str(home / "Library" / "Application Support" / "Banodoco" / "credentials" / "astrid.json")
     if not endpoint:
         raise WorkspaceClientError(0, "unavailable", "runtime is unavailable; run `banodoco-local up --profile astrid`")
     return endpoint.rstrip("/"), _read_credential(Path(credential_path))
+
+
+def _runtime_checkout() -> Path | None:
+    """Resolve the generated-client checkout without importing runtime code."""
+    for name in ("BANODOCO_RUNTIME_CHECKOUT", "BANODOCO_LOCAL_RUNTIME_CHECKOUT"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return Path(value).expanduser().resolve()
+
+    home = _support_home()
+    catalog_path = home / "Library" / "Application Support" / "Banodoco" / "runtime" / "catalog.json"
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    source = (catalog.get("source_profiles") or {}).get("astrid") if isinstance(catalog, Mapping) else None
+    checkout = source.get("runtime_checkout") if isinstance(source, Mapping) else None
+    return Path(str(checkout)).expanduser().resolve() if checkout else None
+
+
+def _ensure_generated_client_path() -> None:
+    """Make an editable runtime's generated Python client importable."""
+    checkout = _runtime_checkout()
+    if checkout is None:
+        return
+    client_root = checkout / "packages" / "python"
+    if client_root.is_dir() and str(client_root) not in sys.path:
+        sys.path.insert(0, str(client_root))
 
 
 class WorkspaceClient:
@@ -69,6 +102,7 @@ class WorkspaceClient:
     """
 
     def __init__(self, endpoint: str, token: str):
+        _ensure_generated_client_path()
         try:
             from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
         except ImportError as exc:

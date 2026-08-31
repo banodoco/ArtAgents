@@ -5,10 +5,13 @@ schema inspection, generation, and runtime-backed invocation. Import the
 top-level package — the supported SDK surface is available from `import
 astrid`.
 
-Stage1 runtime boundary: start `banodoco-local up --profile astrid`. Product
-clients resolve `BANODOCO_RUNTIME_ENDPOINT` (or
-`BANODOCO_RUNTIME_DISCOVERY`) and `BANODOCO_RUNTIME_CREDENTIAL`, then use the
-generated workspace client. The runtime is the sole authority for projects,
+Stage1 runtime boundary: product clients resolve the configured editable
+runtime source (`BANODOCO_RUNTIME_CHECKOUT` or
+`BANODOCO_LOCAL_SOURCE_MANIFEST`), invoke `banodoco-local up --profile astrid`
+on first use or reconnect, and then use the generated workspace client.
+`BANODOCO_RUNTIME_ENDPOINT` (or `BANODOCO_RUNTIME_DISCOVERY`) plus
+`BANODOCO_RUNTIME_CREDENTIAL` may be supplied for an already-running runtime.
+The runtime is the sole authority for projects,
 media, timelines, tasks, runs, receipts, and events. `AstridClient` does not
 open a checkout-local database/CAS or execute a pack in-process as the live
 authority.

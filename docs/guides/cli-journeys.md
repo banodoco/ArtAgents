@@ -13,16 +13,19 @@ Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6
 
 ## Runtime preamble
 
-Start the separate local workspace runtime before issuing product commands:
+Configure the separate editable local workspace runtime before issuing product
+commands. The first product command starts or reconnects it automatically:
 
 ```bash
-banodoco-local up --profile astrid
+export BANODOCO_RUNTIME_CHECKOUT=/path/to/banodoco-workspace-runtime
+python3 -m astrid projects list --json
 ```
 
-If discovery does not find it, configure `BANODOCO_RUNTIME_ENDPOINT`,
+If a direct endpoint is used, configure `BANODOCO_RUNTIME_ENDPOINT`,
 `BANODOCO_RUNTIME_DISCOVERY`, and `BANODOCO_RUNTIME_CREDENTIAL`. Run commands
 from the repository root; project, object, receipt, and event state remains in
-the runtime.
+the runtime. `astrid doctor` is read-only and does not trigger first-run
+bootstrap.
 
 ```bash
 # 1. Confirm the CLI is reachable (prints the product census).
@@ -39,8 +42,9 @@ python3 -m astrid timelines save --help
 
 Notes:
 
-- **Runtime required for product commands.** Product families below cross the
-  generated workspace client. There is no public `astrid serve` command.
+- **Neutral runtime handoff for product commands.** Product families below
+  cross the generated workspace client, and the configured neutral launcher
+  starts/reconnects it on first use. There is no public `astrid serve` command.
 - **One verb = one SDK call.** Every handler parses arguments, makes exactly
   one SDK service call, and renders the result. There is no SQL or domain
   logic in the CLI layer.
