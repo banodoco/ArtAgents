@@ -39,11 +39,6 @@ from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.rendering.remotion_runtime import (
-    TIMELINE_SCHEMA_PYTHONPATH_ENV,
-    RemotionRuntimeTools,
-    resolve_remotion_runtime_tools,
-)
 from astrid.core.rendering import assets as _rendering_assets
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.assets import (
@@ -64,6 +59,11 @@ from astrid.core.rendering.errors import (
     raise_unsupported_error,
 )
 from astrid.core.rendering.publication import publish_render_result
+from astrid.core.rendering.remotion_runtime import (
+    TIMELINE_SCHEMA_PYTHONPATH_ENV,
+    RemotionRuntimeTools,
+    resolve_remotion_runtime_tools,
+)
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.packs.rendering.backends import _shared as _shared
 from astrid.packs.rendering.backends._shared import (
@@ -841,6 +841,8 @@ def render(
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
     previous_outputs: Sequence[Path] = (),
+    materialized_root: Path | None = None,
+    materialized_objects: Mapping[str, str] | None = None,
 ) -> Path:
     """Render privately, then publish the legacy video/provenance pair."""
 
@@ -869,6 +871,8 @@ def render(
             theme_path=theme_path,
             min_free_gb=min_free_gb,
             staging_parent=out_path.parent,
+            materialized_root=materialized_root,
+            materialized_objects=materialized_objects,
         )
         provenance = _render_provenance_payload(
             out_path,

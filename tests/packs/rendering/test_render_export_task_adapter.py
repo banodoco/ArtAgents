@@ -27,8 +27,6 @@ from astrid.core.rendering.remotion_runtime import (
     remotion_runtime_status,
     resolve_remotion_runtime_tools,
 )
-from astrid.sdk import workspace_client
-from astrid.sdk.workspace_client import WorkspaceClient
 from astrid.packs.rendering.backends.remotion import run as remotion_run
 from astrid.packs.rendering.executors.render import task_adapter as task_adapter_module
 from astrid.packs.rendering.executors.render.task_adapter import (
@@ -37,6 +35,8 @@ from astrid.packs.rendering.executors.render.task_adapter import (
     RenderExportTaskAdapter,
     execute_render_export_task,
 )
+from astrid.sdk import workspace_client
+from astrid.sdk.workspace_client import WorkspaceClient
 
 FIXTURE_VIDEO = Path(__file__).resolve().parents[2] / "fixtures" / "reshape" / "hype_regression" / "broll.mp4"
 TS = "2026-08-25T00:00:00.000000+00:00"
@@ -94,7 +94,6 @@ def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespac
                         "source": {
                             "media_id": "media-source",
                             "content_sha256": f"sha256:{digest}",
-                            "file": "clips/source.mp4",
                             "type": "video/mp4",
                         }
                     }
@@ -119,7 +118,8 @@ def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -
         (tmp_path / "staging" / "render-inputs" / "assets.json").read_text()
     )
     staged_asset = staged_registry["assets"]["source"]
-    assert "media_id" not in staged_asset
+    assert staged_asset["media_id"] == "media-source"
+    assert f"sha256:{staged_asset['content_sha256']}" == task.spec["timeline_snapshot"]["registry"]["assets"]["source"]["content_sha256"]
     assert Path(staged_asset["file"]).is_relative_to(
         (tmp_path / "staging" / "render-inputs" / "assets").resolve()
     )
@@ -620,7 +620,6 @@ def test_render_export_adapter_fails_closed_on_missing_asset_or_renderer(
             "source": {
                 "media_id": "missing-media",
                 "content_sha256": "sha256:" + "0" * 64,
-                "file": "clips/source.mp4",
                 "type": "video/mp4",
             }
         }

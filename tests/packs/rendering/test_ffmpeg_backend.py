@@ -10,22 +10,20 @@ import yaml
 
 from astrid.core.media import MediaProbe
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
+    RendererManifest,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    RendererManifest,
-    SCHEMA_VERSION,
     SupportReport,
     VideoArtifact,
 )
 from astrid.core.rendering.transport import CommandTransport
-from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
-from astrid.packs.rendering.backends.ffmpeg import command
+from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour, command
 from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg
 from astrid.packs.rendering.executors.render import audio_reactive_colour as legacy_audio_reactive
 from astrid.packs.rendering.executors.render import run as facade
-
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -439,7 +437,7 @@ def test_raw_render_adapter_writes_render_result_json(tmp_path: Path) -> None:
     assert parsed.audio_ownership is AudioOwnership.RENDERED
 
 
-def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
+def test_facade_selector_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
@@ -451,16 +449,16 @@ def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
             timeline_path,
             assets_path,
             out_path,
-            engine="ffmpeg",
+            selector="rendering.ffmpeg",
         )
 
     assert output == sentinel
     fake_service.render.assert_called_once()
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "ffmpeg"
+    assert kwargs["selector"] == "rendering.ffmpeg"
 
 
-def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> None:
+def test_facade_selector_remotion_keeps_explicit_renderer_policy(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
@@ -475,12 +473,12 @@ def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> Non
             timeline_path,
             assets_path,
             out_path,
-            engine="remotion",
+            selector="rendering.remotion",
         )
 
     assert output == sentinel
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
 
 
 def test_audio_reactive_compatibility_path_is_same_module() -> None:

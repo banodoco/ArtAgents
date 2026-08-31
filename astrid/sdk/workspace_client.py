@@ -76,48 +76,40 @@ class WorkspaceClient:
     def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""
         try:
+            # Resolve exactly one method on demand.  The generated contract is
+            # versioned independently of Astrid: a partial client used for a
+            # narrow operation (for example ``settle_attempt``) must not fail
+            # while constructing a map that eagerly looks up unrelated newer
+            # operations such as ``health``.
             operations = {
-                "health": self._generated.health, "handshake": self._generated.handshake,
-                "doctor": self._generated.doctor, "create_backup": self._generated.create_backup,
-                "restore_backup": self._generated.restore_backup, "export_realm": self._generated.export_realm,
-                "tombstone_realm": self._generated.tombstone_realm, "recover_realm": self._generated.recover_realm,
-                "purge_realm": self._generated.purge_realm, "create_project": self._generated.create_project,
-                "get_project": self._generated.get_project, "update_project": self._generated.update_project,
-                "list_projects": self._generated.list_projects, "select_project": self._generated.select_project,
-                "current_project": self._generated.current_project, "create_timeline": self._generated.create_timeline,
-                "create_timeline_document": self._generated.create_timeline_document,
-                "update_timeline_document": self._generated.update_timeline_document,
-                "list_timelines": self._generated.list_timelines, "get_timeline": self._generated.get_timeline,
-                "list_timeline_history": self._generated.list_timeline_history, "diff_timeline": self._generated.diff_timeline,
-                "archive_timeline": self._generated.archive_timeline, "recover_timeline": self._generated.recover_timeline,
-                "list_project_shots": self._generated.list_project_shots, "create_project_shot": self._generated.create_project_shot,
-                "get_project_shot": self._generated.get_project_shot, "update_project_shot": self._generated.update_project_shot,
-                "archive_project_shot": self._generated.archive_project_shot, "recover_project_shot": self._generated.recover_project_shot,
-                "add_shot_item": self._generated.add_shot_item, "remove_shot_item": self._generated.remove_shot_item,
-                "reorder_shot_items": self._generated.reorder_shot_items,
-                "list_project_references": self._generated.list_project_references, "create_project_reference": self._generated.create_project_reference,
-                "get_project_reference": self._generated.get_project_reference, "update_project_reference": self._generated.update_project_reference,
-                "archive_project_reference": self._generated.archive_project_reference, "recover_project_reference": self._generated.recover_project_reference,
-                "associate_reference": self._generated.associate_reference, "set_primary_reference": self._generated.set_primary_reference,
-                "link_references": self._generated.link_references, "create_document": self._generated.create_document,
-                "list_documents": self._generated.list_documents, "get_document": self._generated.get_document,
-                "update_document": self._generated.update_document, "ingest_object": self._generated.ingest_object,
-                "ingest_project_object": self._generated.ingest_project_object, "list_project_objects": self._generated.list_project_objects,
-                "create_media_relation": self._generated.create_media_relation, "list_media_relations": self._generated.list_media_relations,
-                "get_object": self._generated.get_object, "head_object": self._generated.head_object,
-                "admit_task": self._generated.admit_task, "get_task": self._generated.get_task,
-                "list_project_tasks": self._generated.list_project_tasks, "cancel_task": self._generated.cancel_task,
-                "retry_task": self._generated.retry_task, "cancel_run": self._generated.cancel_run,
-                "retry_run": self._generated.retry_run, "get_run": self._generated.get_run,
-                "list_project_runs": self._generated.list_project_runs, "list_events": self._generated.list_events,
-                "list_run_events": self._generated.list_run_events, "list_generations": self._generated.list_generations,
-                "get_generation": self._generated.get_generation, "list_variants": self._generated.list_variants,
-                "create_generation": self._generated.create_generation, "create_variant": self._generated.create_variant,
-                "list_capabilities": self._generated.list_capabilities, "register_capability": self._generated.register_capability,
-                "claim_task": self._generated.claim_task, "register_executor": self._generated.register_executor,
-                "settle_attempt": self._generated.settle_attempt,
-            }[operation]
-            value = operations(*args, **kwargs)
+                "health", "handshake", "doctor", "create_backup", "restore_backup",
+                "export_realm", "tombstone_realm", "recover_realm", "purge_realm",
+                "create_project", "get_project", "update_project", "list_projects",
+                "select_project", "current_project", "create_timeline",
+                "create_timeline_document", "update_timeline_document", "list_timelines",
+                "get_timeline", "list_timeline_history", "diff_timeline", "archive_timeline",
+                "recover_timeline", "list_project_shots", "create_project_shot",
+                "get_project_shot", "update_project_shot", "archive_project_shot",
+                "recover_project_shot", "add_shot_item", "remove_shot_item",
+                "reorder_shot_items", "list_project_references", "create_project_reference",
+                "get_project_reference", "update_project_reference", "archive_project_reference",
+                "recover_project_reference", "associate_reference", "set_primary_reference",
+                "link_references", "create_document", "list_documents", "get_document",
+                "update_document", "ingest_object", "ingest_project_object",
+                "list_project_objects", "create_media_relation", "list_media_relations",
+                "get_object", "head_object", "admit_task", "get_task", "list_project_tasks",
+                "cancel_task", "retry_task", "cancel_run", "retry_run", "get_run",
+                "list_project_runs", "list_events", "list_run_events", "list_generations",
+                "get_generation", "list_variants", "create_generation", "create_variant",
+                "list_capabilities", "register_capability", "claim_task", "register_executor",
+                "settle_attempt",
+            }
+            if operation not in operations:
+                raise ValueError(f"unknown generated workspace operation: {operation!r}")
+            generated = getattr(self._generated, operation)
+            if not callable(generated):
+                raise AttributeError(f"generated workspace operation is not callable: {operation!r}")
+            value = generated(*args, **kwargs)
         except Exception as exc:  # generated ApiError has stable fields
             fields = exc.__dict__ if hasattr(exc, "__dict__") else {}
             raise WorkspaceClientError(

@@ -16,8 +16,8 @@ import yaml
 
 from astrid.core import timeline
 from astrid.core.element.schema import ElementAsset, ElementDefinition
-from astrid.core.rendering import remotion_runtime
 from astrid.core.pack.discovery import discover_pack_metadata
+from astrid.core.rendering import remotion_runtime
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     AudioOwnership,
@@ -430,8 +430,17 @@ def test_render_binds_asset_cors_to_selected_remotion_port(tmp_path: Path) -> No
     timeline_path, assets_path = _write_inputs(tmp_path)
     source = tmp_path / "asset.png"
     source.write_bytes(b"asset bytes")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
     timeline.save_registry(
-        {"assets": {"asset": {"file": str(source), "type": "image/png"}}},
+        {
+            "assets": {
+                "asset": {
+                    "media_id": "media-asset",
+                    "content_sha256": digest,
+                    "type": "image/png",
+                }
+            }
+        },
         assets_path,
     )
     project = _write_project(tmp_path)
@@ -463,7 +472,14 @@ def test_render_binds_asset_cors_to_selected_remotion_port(tmp_path: Path) -> No
         mock.patch.object(remotion, "InvocationAssetServer", TrackingAssetServer),
         mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
     ):
-        remotion.render(timeline_path, assets_path, output_path, project_dir=project)
+        remotion.render(
+            timeline_path,
+            assets_path,
+            output_path,
+            project_dir=project,
+            materialized_root=tmp_path,
+            materialized_objects={"media-asset": str(source)},
+        )
 
     assert seen_origins == ["http://localhost:3001"]
     assert len(seen_commands) == 1
@@ -560,13 +576,13 @@ def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
             timeline_path,
             assets_path,
             output_path,
-            engine="remotion",
+            selector="rendering.remotion",
         )
 
     assert result == sentinel
     fake_service.render.assert_called_once()
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
 
 
 def test_audio_ownership_enum_remains_protocol_value() -> None:

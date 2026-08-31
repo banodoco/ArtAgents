@@ -197,6 +197,12 @@ def _stage_managed_registry(
         entry.update(
             {
                 "file": str(destination),
+                # Preserve the runtime identity on the derived registry.  The
+                # renderer consumes the private file, while support probing
+                # still needs the object/digest pair to verify that this file
+                # came from the host handoff rather than a caller locator.
+                "media_id": media_id,
+                "content_sha256": expected,
             }
         )
         rewritten[asset_key] = entry
@@ -307,6 +313,18 @@ class RenderExportTaskAdapter:
             raise RenderExportRefused(
                 "render_export requires the host materialized_objects handoff"
             )
+        timeline_ref = params.get("timeline_ref")
+        if not isinstance(timeline_ref, str) or not timeline_ref.strip():
+            raise RenderExportRefused(
+                "render_export requires the canonical timeline_ref"
+            )
+        expected_version = params.get("expected_version")
+        if expected_version is not None and (
+            isinstance(expected_version, bool) or not isinstance(expected_version, int)
+        ):
+            raise RenderExportRefused(
+                "render_export expected_version must be an integer"
+            )
         materialized_root = (staging_dir / "managed-objects").resolve()
         if not materialized_root.is_dir():
             raise RenderExportRefused(
@@ -361,11 +379,30 @@ class RenderExportTaskAdapter:
             selector = REMOTION_SELECTOR if requires_remotion else FFMPEG_SELECTOR
             renderer_inputs: dict[str, Any] = {
                 "timeline": str(owned_timeline_path),
+                # The canonical executor manifest requires the immutable
+                # runtime identity even though this task adapter has already
+                # received the pinned snapshot.  Keep the identity on the
+                # executor request so admission and provenance cannot silently
+                # fall back to file-only mode.
+                "timeline_ref": timeline_ref,
                 "assets_registry": str(owned_assets_path),
                 "output_name": output_name,
                 "selector": selector,
                 "keep_previous_renders": True,
+                # Carry the host-owned handoff through the canonical executor
+                # request.  The derived registry's file fields are valid only
+                # when the renderer can verify them against this exact
+                # attempt root; without it support probing would (correctly)
+                # reject the private paths as retired caller locators.
+                # The renderer receives a second, writable copy under the
+                # project-owned input directory.  Its derived registry paths
+                # must therefore be checked against that copy's root (the
+                # original host root remains immutable evidence).
+                "materialized_root": str(owned_inputs_dir),
+                "materialized_objects": dict(raw_materialized),
             }
+            if expected_version is not None:
+                renderer_inputs["expected_version"] = expected_version
             render_env = nullcontext()
             if requires_remotion:
                 assert remotion_status is not None and remotion_status.project_dir is not None

@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
 SCHEMA_ROOT = ROOT.parent / "reigh-app" / "vendor" / "timeline-schema" / "python"
@@ -50,26 +49,6 @@ from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolC
 def _make_media(root: Path) -> tuple[Path, Path]:
     media = root / "media"
     media.mkdir()
-    (media / "assets.json").write_text(
-        json.dumps(
-            {
-                "assets": {
-                    "black": {
-                        "file": "black.mp4",
-                        "type": "video/mp4",
-                        "duration": 2.0,
-                        "resolution": "160x90",
-                        "fps": 10,
-                    },
-                    "silence": {
-                        "file": "silence.m4a",
-                        "type": "audio/mp4",
-                        "duration": 2.0,
-                    },
-                }
-            }
-        )
-    )
     subprocess.run(
         [
             "ffmpeg",
@@ -112,6 +91,31 @@ def _make_media(root: Path) -> tuple[Path, Path]:
         ],
         check=True,
         capture_output=True,
+    )
+    black = (media / "black.mp4").read_bytes()
+    silence = (media / "silence.m4a").read_bytes()
+    (media / "assets.json").write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "black": {
+                        "media_id": "runtime-black",
+                        "content_sha256": hashlib.sha256(black).hexdigest(),
+                        "type": "video/mp4",
+                        "duration": 2.0,
+                        "resolution": "160x90",
+                        "fps": 10,
+                    },
+                    "silence": {
+                        "media_id": "runtime-silence",
+                        "content_sha256": hashlib.sha256(silence).hexdigest(),
+                        "type": "audio/mp4",
+                        "duration": 2.0,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
     )
     timeline = {
         "theme": "banodoco-default",
@@ -191,6 +195,23 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
             "0.1.0",
             ["projects:read", "worker:execute"],
         )
+        # The host owns the only path handoff. Import both sources into the
+        # runtime, then replace the fixture's stable placeholders with the
+        # returned runtime identities/digests before the task is admitted.
+        registry = json.loads(assets_path.read_text(encoding="utf-8"))
+        for key, filename in (("black", "black.mp4"), ("silence", "silence.m4a")):
+            imported = generated.ingest_object(
+                (workspace / "media" / filename).read_bytes(),
+                media_type=registry["assets"][key]["type"],
+                idempotency_key=f"generic-remotion-{key}",
+                filename=filename,
+            )
+            object_id = imported.get("object_id") if isinstance(imported, dict) else getattr(imported, "object_id", None)
+            digest = imported.get("digest") if isinstance(imported, dict) else getattr(imported, "digest", None)
+            assert isinstance(object_id, str) and isinstance(digest, str)
+            registry["assets"][key]["media_id"] = object_id
+            registry["assets"][key]["content_sha256"] = digest.removeprefix("sha256:")
+        assets_path.write_text(json.dumps(registry), encoding="utf-8")
         pack = workspace / "astrid" / "packs" / "rendering" / "executors" / "render"
         host = GenericPackHost(
             pack_roots=[pack],
@@ -208,8 +229,9 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         spec = {
             "inputs": {
                 "timeline": str(timeline_path),
+                "timeline_ref": "timeline-generic-remotion",
                 "assets_registry": str(assets_path),
-                "backend": "rendering.remotion",
+                "selector": "rendering.remotion",
                 "backend_config": json.dumps(
                     {
                         "rendering.remotion": {
