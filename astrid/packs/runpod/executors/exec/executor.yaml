@@ -153,7 +153,7 @@
     "requirements_source": "requirements.txt",
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.runpod.executors.exec.run",
-    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["api.runpod.io:443","rest.runpod.io:443","graphql.runpod.io:443","runpod.io:443"],"allow_redirects":false}},
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["api.runpod.io:443","rest.runpod.io:443","graphql.runpod.io:443","runpod.io:443"],"allow_redirects":false,"broker":{"host_managed":true,"kind":"broker","enforced":true,"observable":true,"route":"declared-http-routes","wrapper":"astrid-generic-host"},"descendant_enforcement":{"kind":"broker","validated":true,"observable":true,"route":"declared-http-routes","wrapper":"astrid-generic-host"}}},
   "name": "RunPod Exec",
   "short_description": "Execute a script on an existing RunPod pod and download artifacts.",
   "version": "0.1.0"

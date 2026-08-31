@@ -129,7 +129,7 @@
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.training.executors.search_loras.run",
-    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["huggingface.co:443","cdn-lfs.huggingface.co:443"],"allow_redirects":false}},
+    "network_policy": {"allowed_protocols":["dns","tcp"],"allowed_destinations":["huggingface.co:443","cdn-lfs.huggingface.co:443"],"allow_redirects":false,"broker":{"host_managed":true,"kind":"broker","enforced":true,"observable":true,"route":"declared-http-routes","wrapper":"astrid-generic-host"},"descendant_enforcement":{"kind":"broker","validated":true,"observable":true,"route":"declared-http-routes","wrapper":"astrid-generic-host"}}},
   "name": "Search LoRAs",
   "outputs": [
     {
