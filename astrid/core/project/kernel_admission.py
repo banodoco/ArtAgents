@@ -43,17 +43,13 @@ def admit_orchestrator_project_run(
     project: str,
     tool_id: str,
     argv: list[str],
-    projects_root: str | Path | None = None,
-    _client: Any | None = None,
+    client: Any | None = None,
 ) -> KernelAdmissionContext:
     """Admit an orchestrator task through the workspace runtime.
 
-    ``projects_root`` is retained as a source-compatible, intentionally
-    ignored argument.  It must never select a local database or project tree.
     ``run_root`` is an ephemeral pack workspace for derived plan/step output;
     the runtime response supplies the durable run and task identifiers.
     """
-    del projects_root
     if not isinstance(project, str) or not project.strip():
         raise ProjectRuntimeError("project is required for runtime admission")
     if not isinstance(tool_id, str) or not tool_id.strip():
@@ -70,18 +66,12 @@ def admit_orchestrator_project_run(
         )
     ).hexdigest()
 
-    if _client is None:
-        from astrid.sdk.client import AstridClient
+    if client is None:
+        raise ProjectRuntimeError(
+            "explicit generated runtime client is required for task admission"
+        )
 
-        with AstridClient.open() as owned_client:
-            return admit_orchestrator_project_run(
-                project=project,
-                tool_id=tool_id,
-                argv=argv,
-                _client=owned_client,
-            )
-
-    tasks = getattr(_client, "tasks", None)
+    tasks = getattr(client, "tasks", None)
     create = getattr(tasks, "create", None)
     if not callable(create):
         raise ProjectRuntimeError("workspace runtime client does not expose task admission")

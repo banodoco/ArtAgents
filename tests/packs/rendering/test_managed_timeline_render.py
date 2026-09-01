@@ -204,12 +204,11 @@ def test_stale_and_archived_timelines_are_rejected() -> None:
 
 def test_managed_preflight_requires_runtime_ref_and_rejects_file_mode(tmp_path: Path) -> None:
     with pytest.raises(CapabilityValidationError, match="requires timeline_ref"):
-        _prepare_managed_render_inputs({}, project="demo", project_root=tmp_path)
+        _prepare_managed_render_inputs({}, project="demo")
     with pytest.raises(CapabilityValidationError, match="mutually exclusive"):
         _prepare_managed_render_inputs(
             {"timeline": "export.json", "timeline_ref": "main"},
             project="demo",
-            project_root=tmp_path,
         )
 
 
@@ -243,13 +242,13 @@ def _profile() -> dict[str, object]:
 def test_render_profile_shape_type_and_canvas_mismatch_are_actionable(tmp_path: Path) -> None:
     runtime = _Runtime()
     with pytest.raises(CapabilityValidationError, match="flat RenderProfile v1"):
-        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": {"video": {}}}, project="demo", project_root=tmp_path, _client=runtime)
+        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": {"video": {}}}, project="demo", _client=runtime)
     bad_type = _profile(); bad_type["width"] = "1920"
     with pytest.raises(CapabilityValidationError, match="width must be an integer"):
-        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": bad_type}, project="demo", project_root=tmp_path, _client=runtime)
+        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": bad_type}, project="demo", _client=runtime)
     bad_canvas = _profile(); bad_canvas.update(width=320, height=180, fps_rational=[24, 1])
     with pytest.raises(CapabilityValidationError, match="authoritative theme canvas"):
-        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": bad_canvas}, project="demo", project_root=tmp_path, _client=runtime)
+        _prepare_managed_render_inputs({"timeline_ref": "main", "profile": bad_canvas}, project="demo", _client=runtime)
 
 
 def test_registered_shot_expands_and_unknown_shot_rejects(tmp_path: Path) -> None:
@@ -264,14 +263,17 @@ def test_registered_shot_expands_and_unknown_shot_rejects(tmp_path: Path) -> Non
         "params": {"shot_id": "shot-1", "timeline_document_id": "child"},
     }]}
     prepared, authority = _prepare_managed_render_inputs(
-        {"timeline_ref": "main"}, project="demo", project_root=tmp_path, _client=runtime
+        {"timeline_ref": "main"}, project="demo", _client=runtime
     )
-    assert all(item.get("clipType") != "shot" for item in json.loads(Path(prepared["timeline"]).read_text())["clips"])
+    assert all(
+        item.get("clipType") != "shot"
+        for item in prepared["timeline_snapshot"]["config"]["clips"]
+    )
     assert authority and authority["expansion"]["children"][0]["timeline_id"] == "child-1"
 
     runtime.shot_rows.clear()
     with pytest.raises(CapabilityValidationError, match="unregistered shot"):
-        _prepare_managed_render_inputs({"timeline_ref": "main"}, project="demo", project_root=tmp_path, _client=runtime)
+        _prepare_managed_render_inputs({"timeline_ref": "main"}, project="demo", _client=runtime)
 
 
 def test_unknown_effect_structured_schema_and_opaque_params_contracts() -> None:
@@ -303,7 +305,7 @@ def test_alpha_mov_compatibility_requires_matching_profile(tmp_path: Path) -> No
     runtime.timeline["config"] = {"metadata": {"astrid_layer": {"alpha": True}}, "tracks": [], "clips": []}
     with pytest.raises(CapabilityValidationError, match="incompatible explicit render profile"):
         profile = _profile(); profile["container"] = "mov"
-        _prepare_managed_render_inputs({"timeline_ref": "main", "output_name": "alpha.mov", "profile": profile}, project="demo", project_root=tmp_path, _client=runtime)
+        _prepare_managed_render_inputs({"timeline_ref": "main", "output_name": "alpha.mov", "profile": profile}, project="demo", _client=runtime)
     profile = _profile(); profile.update(container="mov", video_codec="prores", pixel_format="yuva444p12le", audio_codec="pcm_s16le")
-    prepared, _authority = _prepare_managed_render_inputs({"timeline_ref": "main", "output_name": "alpha.mov", "profile": profile}, project="demo", project_root=tmp_path, _client=runtime)
+    prepared, _authority = _prepare_managed_render_inputs({"timeline_ref": "main", "output_name": "alpha.mov", "profile": profile}, project="demo", _client=runtime)
     assert prepared["profile"] == profile

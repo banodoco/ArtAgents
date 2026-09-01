@@ -184,6 +184,7 @@ class GenerationFacade:
         execution: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
+        client: Any | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
         banodoco_config: Any | None = None,
@@ -261,6 +262,7 @@ class GenerationFacade:
         result = self._invoke(
             "generation.generate_image",
             kind="executor",
+            client=client,
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
             banodoco_config=banodoco_config,
@@ -293,6 +295,7 @@ class GenerationFacade:
         execution: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
+        client: Any | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
         banodoco_config: Any | None = None,
@@ -366,6 +369,7 @@ class GenerationFacade:
         result = self._invoke(
             "generation.generate_video",
             kind="executor",
+            client=client,
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
             banodoco_config=banodoco_config,
@@ -398,6 +402,7 @@ class GenerationFacade:
         execution: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
+        client: Any | None = None,
         project_root: str | Path | None = None,
         extra_pack_roots: tuple[str, ...] = (),
         banodoco_config: Any | None = None,
@@ -472,6 +477,7 @@ class GenerationFacade:
         result = self._invoke(
             "generation.generate_audio",
             kind="executor",
+            client=client,
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
             banodoco_config=banodoco_config,

@@ -502,15 +502,19 @@ def resolve_managed_render_snapshot(
 
 
 def materialize_managed_render_snapshot(
-    projects_root: Path,
+    attempt_root: Path,
     snapshot: ManagedRenderSnapshot,
 ) -> tuple[Path, Path, dict[str, Any]]:
-    """Write deterministic private renderer inputs for one pinned snapshot."""
+    """Write deterministic renderer inputs beneath one assigned attempt.
+
+    This helper is intentionally a pure attempt-artifact writer.  It never
+    derives a path from a project slug or a project root; the generic host
+    supplies the already-created attempt directory.
+    """
 
     authority = snapshot.authority()
     snapshot_key = _digest(authority)
-    project_root = Path(projects_root).resolve() / snapshot.project_slug
-    destination = project_root / ".astrid" / "render-snapshots" / snapshot_key
+    destination = Path(attempt_root).resolve() / "managed-render" / snapshot_key
     destination.mkdir(parents=True, exist_ok=True)
     timeline_path = destination / "timeline.json"
     registry_path = destination / "assets.json"

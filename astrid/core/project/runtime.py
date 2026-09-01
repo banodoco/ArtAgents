@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.env_vars import ASTRID_PROJECT_SLUG, ASTRID_PROJECTS_ROOT
-from astrid.core.foundation import project_paths as paths
+from astrid.core.env_vars import ASTRID_PROJECT_SLUG
 
 PROJECT_RUN_ENV = "ASTRID_PROJECT_RUN"
 
@@ -29,51 +28,22 @@ def reject_project_with_out(project: str | None, out: str | Path | None) -> None
         )
 
 
-def project_run_env(
-    project_slug: str | None = None, *, root: str | Path | None = None
-) -> dict[str, str]:
-    """Return only environment hints for a runtime-bound child process."""
+def project_run_env(project_slug: str | None = None) -> dict[str, str]:
+    """Return runtime identity hints, never a project-tree locator.
+
+    The workspace runtime owns project storage.  Child processes receive only
+    the admitted project identity; all files they may consume are materialized
+    beneath the current attempt by the host.
+    """
 
     env = {PROJECT_RUN_ENV: "1"}
     if project_slug:
         env[ASTRID_PROJECT_SLUG] = project_slug
-    if root:
-        env[ASTRID_PROJECTS_ROOT] = str(Path(root).expanduser().resolve())
     return env
 
 
 def _project_subprocess_env(request: Any) -> dict[str, str]:
-    return project_run_env(
-        getattr(request, "project", None),
-        root=getattr(request, "projects_root", None),
-    )
-
-
-def step_dir_for(
-    slug: str,
-    run_id: str,
-    plan_step_id: str,
-    *,
-    step_version: int = 1,
-    root: str | Path | None = None,
-) -> Path:
-    """Return an ephemeral staging path for an attached child.
-
-    This path is not a run identity lookup and must never be used to authorize
-    or select a run.  The runtime response/environment supplies the identity.
-    """
-
-    paths.validate_project_slug(slug)
-    paths.validate_run_id(run_id)
-    paths.validate_run_id(plan_step_id)
-    if not isinstance(step_version, int) or isinstance(step_version, bool) or step_version < 1:
-        raise ProjectRuntimeError("step_version must be an int >= 1")
-    if root is None:
-        raise ProjectRuntimeError(
-            "runtime staging requires an explicit projects root; cwd is not a project authority"
-        )
-    base = Path(root).expanduser().resolve()
-    return base / ".astrid-runtime-staging" / slug / run_id / "steps" / plan_step_id / f"v{step_version}"
+    return project_run_env(getattr(request, "project", None))
 
 
 def redact_cli_args(argv: Iterable[str]) -> list[str]:
@@ -107,5 +77,4 @@ __all__ = [
     "project_run_env",
     "redact_cli_args",
     "reject_project_with_out",
-    "step_dir_for",
 ]

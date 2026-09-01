@@ -152,7 +152,8 @@ class AstridClient:
         """
         from astrid.sdk.invocation import invoke_result
 
-        return invoke_result(capability_id, kind=kind, _client=self, **kwargs)
+        kwargs.setdefault("client", self)
+        return invoke_result(capability_id, kind=kind, **kwargs)
 
     def __enter__(self) -> Self:
         return self

@@ -83,7 +83,6 @@ def test_filesystem_modes_are_rejected_without_touching_the_tree(tmp_path: Path)
         invocation._prepare_managed_render_inputs(
             {"timeline": str(tmp_path / "assembly.json")},
             project="demo",
-            project_root=tmp_path,
         )
     assert not hasattr(select, "select_timeline")
     assert not hasattr(select, "discover_timelines")

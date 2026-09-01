@@ -572,17 +572,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         pre_parser = argparse.ArgumentParser(add_help=False)
         pre_parser.add_argument("--project")
         pre_parser.add_argument("--out")
-        pre_parser.add_argument("--projects-root", dest="projects_root")
         parsed, _unknown = pre_parser.parse_known_args(effective_argv)
 
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            kernel_ctx = admit_orchestrator_project_run(
-                project=parsed.project,
-                tool_id="video_editing.event_talks",
-                argv=["event_talks", *effective_argv],
-            )
+            from astrid.sdk.client import AstridClient
+
+            with AstridClient.open_from_launcher() as client:
+                kernel_ctx = admit_orchestrator_project_run(
+                    project=parsed.project,
+                    tool_id="video_editing.event_talks",
+                    argv=["event_talks", *effective_argv],
+                    client=client,
+                )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
         args = resolve_args(effective_argv)

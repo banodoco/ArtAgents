@@ -495,17 +495,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--project")
         parser.add_argument("--out")
-        parser.add_argument("--projects-root", dest="projects_root")
         parsed, _unknown = parser.parse_known_args(effective_argv)
 
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            kernel_ctx = admit_orchestrator_project_run(
-                project=parsed.project,
-                tool_id="video_editing.thumbnail_maker",
-                argv=["thumbnail_maker", *effective_argv],
-            )
+            from astrid.sdk.client import AstridClient
+
+            with AstridClient.open_from_launcher() as client:
+                kernel_ctx = admit_orchestrator_project_run(
+                    project=parsed.project,
+                    tool_id="video_editing.thumbnail_maker",
+                    argv=["thumbnail_maker", *effective_argv],
+                    client=client,
+                )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
         args = resolve_args(effective_argv)

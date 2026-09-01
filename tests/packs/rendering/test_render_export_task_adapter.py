@@ -110,7 +110,6 @@ def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -
     manifest = execute_render_export_task(
         task=task,
         staging_dir=tmp_path / "staging",
-        projects_root=tmp_path,
     )
     output = tmp_path / "staging" / manifest["outputs"][0]["path"]
     assert manifest["outputs"][0]["path"] == "requested-render.mp4"
@@ -162,7 +161,6 @@ def test_media_timeline_selects_ffmpeg_without_remotion_configuration(
     manifest = execute_render_export_task(
         task=task,
         staging_dir=tmp_path / "staging",
-        projects_root=tmp_path,
     )
 
     assert captured["selector"] == "rendering.ffmpeg"
@@ -222,7 +220,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
     monkeypatch.setattr(task_adapter_module, "run_executor", fake_run_executor)
     monkeypatch.setattr(task_adapter_module, "load_default_registry", lambda: object())
 
-    RenderExportTaskAdapter(projects_root=tmp_path).execute(
+    RenderExportTaskAdapter().execute(
         task=task,
         staging_dir=tmp_path / "staging",
     )
@@ -241,7 +239,7 @@ def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:
     }
 
     with pytest.raises(RenderExportRefused, match="plain .mp4 filename"):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        RenderExportTaskAdapter().execute(
             task=task,
             staging_dir=tmp_path / "staging",
         )
@@ -405,7 +403,6 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
     manifest = execute_render_export_task(
         task=task,
         staging_dir=tmp_path / "staging",
-        projects_root=tmp_path,
     )
     output = tmp_path / "staging" / manifest["outputs"][0]["path"]
     assert output.read_bytes()[4:8] == b"ftyp"
@@ -427,7 +424,7 @@ def test_forced_caption_fails_before_renderer_without_server_runtime(
     snapshot["config"] = config
     task.spec = {**task.spec, "timeline_snapshot": snapshot}
     with pytest.raises(RenderExportRefused, match="server-owned Remotion runtime unavailable"):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        RenderExportTaskAdapter().execute(
             task=task, staging_dir=tmp_path / "staging"
         )
 
@@ -572,7 +569,7 @@ def test_render_export_adapter_fails_closed_without_snapshot_or_project(tmp_path
     task.spec = dict(task.spec)
     task.spec.pop("timeline_snapshot")
     with pytest.raises(RenderExportRefused, match="timeline snapshot"):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        RenderExportTaskAdapter().execute(
             task=task, staging_dir=tmp_path / "staging"
         )
 
@@ -588,17 +585,16 @@ def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
         progress=seen.append,
     )
     with pytest.raises(RenderExportRefused, match="cancelled"):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        RenderExportTaskAdapter().execute(
             task=task,
             staging_dir=tmp_path / "staging",
             context=context,
         )
     assert seen == []
+    # Project slugs are runtime identity, not local checkout selectors.  A
+    # different slug therefore does not alter the attempt-local boundary.
     task = _task(root=tmp_path, project_slug="missing")
-    with pytest.raises(RenderExportRefused, match="project is missing"):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
-            task=task, staging_dir=tmp_path / "staging"
-        )
+    assert task.spec["project_slug"] == "missing"
 
 
 @pytest.mark.parametrize(
@@ -628,7 +624,7 @@ def test_render_export_adapter_fails_closed_on_missing_asset_or_renderer(
     if change == "missing_renderer":
         task.spec["params"] = {**task.spec["params"], "engine": "rendering.not-installed"}
     with pytest.raises(RenderExportRefused, match=expected):
-        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        RenderExportTaskAdapter().execute(
             task=task, staging_dir=tmp_path / "staging"
         )
 

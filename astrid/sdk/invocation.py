@@ -963,10 +963,13 @@ def _prepare_managed_render_inputs(
     inputs: Mapping[str, Any] | None,
     *,
     project: str | None,
-    project_root: str | Path | None,
     _client: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Resolve and materialize the explicit ``rendering.render`` ref mode."""
+    """Resolve the explicit render ref and hand it to the runtime host.
+
+    Snapshot bytes remain in the admission envelope until the generic host
+    materializes them beneath the assigned attempt.
+    """
 
     values = dict(inputs or {})
     timeline_ref = values.get("timeline_ref")
@@ -999,27 +1002,15 @@ def _prepare_managed_render_inputs(
     _validate_explicit_render_profile(values.get("profile"))
     from astrid.packs.rendering.executors.render.managed_timeline import (
         ManagedRenderValidationError,
-        materialize_managed_render_snapshot,
         resolve_managed_render_snapshot,
         _runtime_snapshot_registry,
         validate_managed_render_snapshot,
     )
 
     if _client is None:
-        # Global SDK callers do not own an application object. Use a bounded
-        # client lifetime for the read/materialization transaction; callers
-        # using AstridClient.invoke inject their already-open client.
-        from astrid.sdk.client import AstridClient
-
-        with AstridClient.open() as owned_client:
-            return _prepare_managed_render_inputs(
-                values,
-                project=project,
-                project_root=project_root,
-                _client=owned_client,
-            )
-
-    projects_root = _resolve_projects_root(project_root, project)
+        raise CapabilityInvocationError(
+            "explicit generated runtime client is required for managed render admission"
+        )
     try:
         snapshot = resolve_managed_render_snapshot(
             project_ref=str(project),
@@ -1133,14 +1124,16 @@ def _prepare_managed_render_inputs(
         )
     except RenderOutputPolicyError as exc:
         raise CapabilityValidationError(str(exc), details=exc.details) from exc
-    timeline_path, registry_path, authority = materialize_managed_render_snapshot(
-        projects_root,
-        snapshot,
-    )
+    authority = snapshot.authority()
     values.update(
         {
-            "timeline": str(timeline_path),
-            "assets_registry": str(registry_path),
+            # The generic host materializes this immutable snapshot below the
+            # assigned attempt.  The SDK never writes a project-side render
+            # snapshot or hands a project-root locator to a renderer.
+            "timeline_snapshot": {
+                "config": dict(snapshot.config),
+                "registry": dict(snapshot.registry),
+            },
             "timeline_authority": authority,
         }
     )
@@ -1184,7 +1177,6 @@ def _invocation_outputs(
     raw_result: Mapping[str, Any],
     *,
     manifest_path: str | None,
-    project_root: Path | None = None,
     capability_id: str | None = None,
 ) -> dict[str, Any]:
     outputs: dict[str, Any] = {}
@@ -1232,16 +1224,6 @@ def _invocation_outputs(
     return _json_safe_mapping(outputs)
 
 
-def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
-    del project
-    if project_root is not None:
-        return Path(project_root).expanduser().resolve()
-    raise CapabilityPreconditionError(
-        "project_root is required for local project-file validation; "
-        "runtime project identity is supplied by the workspace service"
-    )
-
-
 def _runtime_selected_project() -> str | None:
     """Project selection is never inferred by the SDK runtime boundary."""
     return None
@@ -1252,7 +1234,6 @@ def _kernel_invoke(
     *,
     kind: Any,
     project: str | None,
-    projects_root: Path | None,
     inputs: Mapping[str, Any] | None,
     outputs: Mapping[str, Any] | None,
     extra_pack_roots: tuple[str, ...] = (),
@@ -1264,11 +1245,11 @@ def _kernel_invoke(
 
     The SDK is a client of the workspace runtime.  It must not compose a
     local application, open SQLite, or execute a capability in-process on the
-    normal invocation path.  ``projects_root`` and ``registry`` are explicit
-    dependency-injection seams for callers that provide test doubles and are
-    intentionally unused by the runtime admission request.
+    normal invocation path. ``registry`` is an explicit dependency-injection
+    seam for callers that provide test doubles and is intentionally unused by
+    the runtime admission request.
     """
-    del projects_root, registry
+    del registry
 
     spec: dict[str, Any] = {
         "capability_id": str(capability.id),
@@ -1286,20 +1267,9 @@ def _kernel_invoke(
     ).hexdigest()
 
     if _client is None:
-        from astrid.sdk.client import AstridClient
-
-        with AstridClient.open() as owned_client:
-            return _kernel_invoke(
-                capability,
-                kind=kind,
-                project=project,
-                projects_root=Path(),
-                inputs=inputs,
-                outputs=outputs,
-                extra_pack_roots=extra_pack_roots,
-                idempotency_context=idempotency_context,
-                _client=owned_client,
-            )
+        raise CapabilityInvocationError(
+            "explicit generated runtime client is required for task admission"
+        )
 
     tasks = getattr(_client, "tasks", None)
     create_task = getattr(tasks, "create", None)
@@ -1371,8 +1341,9 @@ def invoke(
     argv: tuple[str, ...] = (),
     orchestrator_args: tuple[str, ...] = (),
     registry: FrozenSchemaPackRegistry | None = None,
-    _client: Any | None = None,
+    client: Any | None = None,
 ) -> InvocationResult:
+    _client = client
     sdk_module = _sdk_module()
     include_elements = kind == "element"
     registries = sdk_module._load_registries(
@@ -1425,7 +1396,6 @@ def invoke(
             inputs, invocation_authority_context = _prepare_managed_render_inputs(
                 inputs,
                 project=project,
-                project_root=project_root,
                 _client=_client,
             )
 
@@ -1526,9 +1496,6 @@ def invoke(
         )
     # Use resolved project (handles auto-resolved via selected_project)
     project = resolved_project
-    projects_root = (
-        Path(project_root).expanduser().resolve() if project_root is not None else None
-    )
     kernel_capability_version: str | None = None
     if capability.capability_type == "executor":
         from astrid.core.foundation.hash import executor_definition_digest
@@ -1546,7 +1513,6 @@ def invoke(
         kernel_kwargs: dict[str, Any] = {
             "kind": kind,
             "project": project,
-            "projects_root": projects_root,
             "inputs": inputs,
             "outputs": outputs,
             "extra_pack_roots": extra_pack_roots,
@@ -1604,9 +1570,6 @@ def invoke(
             outputs=_invocation_outputs(
                 raw_result,
                 manifest_path=manifest_path,
-                project_root=(projects_root / project).resolve()
-                if projects_root is not None
-                else None,
                 capability_id=capability.id,
             ),
             executor_version=executor_version_raw

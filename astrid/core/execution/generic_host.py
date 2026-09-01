@@ -1253,7 +1253,26 @@ class GenericPackHost:
         # the immutable snapshot rather than as a separate input file. Expose
         # it to the same host-only materialization path used by render tasks.
         snapshot = input_spec.get("timeline_snapshot")
+        if not isinstance(snapshot, Mapping):
+            # Managed render admission carries the frozen snapshot inside the
+            # immutable inputs document.  Materialize it here, under this
+            # attempt, rather than allowing SDK code to write a project-side
+            # snapshot.
+            candidate = values.get("timeline_snapshot")
+            snapshot = candidate if isinstance(candidate, Mapping) else None
+        # The snapshot is an admission envelope, not a renderer input port.
+        # Once its derived files are created, do not forward the authoring
+        # document as an undeclared child argument.
+        values.pop("timeline_snapshot", None)
         snapshot_registry = snapshot.get("registry") if isinstance(snapshot, Mapping) else None
+        snapshot_config = snapshot.get("config") if isinstance(snapshot, Mapping) else None
+        if isinstance(snapshot_config, Mapping) and "timeline" not in values:
+            snapshot_timeline_path = Path(attempt).resolve() / "inputs" / "timeline.json"
+            snapshot_timeline_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_timeline_path.write_text(
+                json.dumps(snapshot_config, sort_keys=True), encoding="utf-8"
+            )
+            values["timeline"] = str(snapshot_timeline_path)
         if "assets_registry" not in values and isinstance(snapshot_registry, Mapping):
             snapshot_registry_path = Path(attempt).resolve() / "inputs" / "snapshot-assets.json"
             snapshot_registry_path.parent.mkdir(parents=True, exist_ok=True)

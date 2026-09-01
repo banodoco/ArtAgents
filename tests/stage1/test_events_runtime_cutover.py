@@ -48,7 +48,7 @@ def test_read_events_uses_injected_runtime_run_events() -> None:
     records = events.read_events(
         "demo",
         "run-1",
-        _client=client,
+        client=client,
     )
 
     assert client.runs.calls == [("demo", "run-1")]
@@ -67,7 +67,7 @@ def test_subscribe_events_polls_the_injected_runtime_client() -> None:
             "demo",
             "run-1",
             follow=False,
-            _client=client,
+            client=client,
         )
     )
 

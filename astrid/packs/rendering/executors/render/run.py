@@ -22,7 +22,6 @@ from typing import Any, Mapping, Sequence
 
 from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.output_policy import (
     DEFAULT_RENDER_OUTPUT_NAME,

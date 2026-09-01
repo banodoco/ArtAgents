@@ -15,8 +15,8 @@ runs the real image-generation pipeline in-process:
    spec.
 2. **Sanctioned in-process invocation.** ``run_sdk`` is imported lazily
    inside :func:`astrid.core.pack.entrypoint.canonical_runtime_entrypoint`
-   (the canonical runtime capability context), and ``ASTRID_PROJECTS_ROOT``
-   is scoped to the assigned managed root for the duration of the call.
+   (the canonical runtime capability context); no project-tree environment is
+   consulted and the assigned staging root is the only filesystem boundary.
    The real ``generate_core`` pipeline executes end to end — model/mode
    validation, backend dispatch through the injected
    ``load_default_generation_backend_registry``, sequential N=1 generation,
@@ -43,11 +43,9 @@ nothing in the kernel imports this module.
 from __future__ import annotations
 
 import hashlib
-import os
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Mapping
 
 from astrid.core.generation import GENERATION_RESULT_KEY
 
@@ -185,35 +183,12 @@ def _decode_inputs(spec: Mapping[str, Any]) -> GenerationInputs:
     )
 
 
-@contextmanager
-def _scoped_env(key: str, value: str) -> Iterator[None]:
-    """Temporarily set one environment variable, restoring the prior value."""
-    previous = os.environ.get(key)
-    os.environ[key] = value
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = previous
-
-
 class GenerateImageAdapter:
     """The injected pack-owned handler for ``generation.generate_image``.
 
-    Construct with the assigned managed projects root (the same root the
-    kernel media staging and managed publication use); the caller injects
-    the instance into :meth:`ExecutionService.execute` exactly like any
-    other runtime task handler.
+    The caller injects the instance into :meth:`ExecutionService.execute`.
+    The task's assigned staging directory is the sole filesystem boundary.
     """
-
-    def __init__(self, *, projects_root: str | Path) -> None:
-        self._projects_root = Path(projects_root).resolve()
-        if not self._projects_root.is_dir():
-            raise GenerateImageAdapterError(
-                f"projects root is not a directory: {self._projects_root}"
-            )
 
     def execute(
         self, *, task: Any, staging_dir: Path
@@ -234,15 +209,12 @@ class GenerateImageAdapter:
         # in-process equivalent of ASTRID_INTERNAL_INVOCATION=1. Importing
         # here (not at module import) keeps the adapter importable without
         # the generator's heavy dependency chain.
-        with _scoped_env("ASTRID_PROJECTS_ROOT", str(self._projects_root)):
-            from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
+        from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
-            with canonical_runtime_entrypoint(PACK_ID):
-                from astrid.packs.generation.executors.generate_image.run import (
-                    run_sdk,
-                )
+        with canonical_runtime_entrypoint(PACK_ID):
+            from astrid.packs.generation.executors.generate_image.run import run_sdk
 
-                result = run_sdk(argv)
+            result = run_sdk(argv)
 
         returncode = result.get("returncode")
         if returncode != 0:

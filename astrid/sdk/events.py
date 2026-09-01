@@ -108,7 +108,7 @@ def read_events(
     project: str,
     run_id: str,
     *,
-    _client: Any | None = None,
+    client: Any | None = None,
 ) -> tuple[EventStreamRecord, ...]:
     """Return the runtime event snapshot for one run.
 
@@ -118,12 +118,11 @@ def read_events(
     slug = _validate_project_ref(project)
     if not isinstance(run_id, str) or not run_id.strip():
         raise CapabilityValidationError("run id must be a non-empty string")
-    if _client is not None:
-        return _read_runtime_events(_client, slug, run_id)
-    from astrid.sdk.client import AstridClient
-
-    with AstridClient.open() as client:
-        return _read_runtime_events(client, slug, run_id)
+    if client is None:
+        raise CapabilityInvocationError(
+            "explicit generated runtime client is required to read events"
+        )
+    return _read_runtime_events(client, slug, run_id)
 
 
 def subscribe_events(
@@ -133,7 +132,7 @@ def subscribe_events(
     follow: bool = False,
     poll_interval: float = 0.1,
     idle_polls: int | None = None,
-    _client: Any | None = None,
+    client: Any | None = None,
 ) -> Iterator[EventStreamRecord]:
     """Yield runtime events, optionally polling for newly appended events."""
     slug = _validate_project_ref(project)
@@ -158,16 +157,11 @@ def subscribe_events(
             if poll_interval > 0:
                 time.sleep(poll_interval)
 
-    if _client is not None:
-        return _iter(_client)
-
-    def _owned_iter() -> Iterator[EventStreamRecord]:
-        from astrid.sdk.client import AstridClient
-
-        with AstridClient.open() as client:
-            yield from _iter(client)
-
-    return _owned_iter()
+    if client is None:
+        raise CapabilityInvocationError(
+            "explicit generated runtime client is required to subscribe to events"
+        )
+    return _iter(client)
 
 
 __all__ = [

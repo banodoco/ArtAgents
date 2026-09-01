@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 recovery_command="Check project configuration and retry: astrid status",
             ) from exc
         if project_context is not None:
-            project_env = _set_project_env()
+            project_env = _set_project_env(project_context.project_slug)
         try:
             args = resolve_args(effective_argv)
         except AstridError as exc:

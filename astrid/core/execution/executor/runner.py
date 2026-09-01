@@ -730,7 +730,13 @@ def _validate_project_owned_inputs(
     request: ExecutorRunRequest,
     executor: ExecutorDefinition,
 ) -> None:
-    """Fail closed for declared timeline/experiment inputs outside the project."""
+    """Require declared inputs to be attempt-local runtime artifacts.
+
+    Live generic-host requests have no project-tree authority.  A legacy
+    ``projects_root`` is accepted only for explicit offline callers that have
+    opted into the old ownership check; normal runtime requests must resolve
+    every path beneath their assigned output/run attempt.
+    """
 
     if not request.project:
         return
@@ -750,11 +756,28 @@ def _validate_project_owned_inputs(
         value = request.inputs.get(port.name)
         if not _has_value(value):
             continue
+        attempt_roots = tuple(
+            Path(str(root)).expanduser().resolve()
+            for root in (request.out, request.run_root)
+            if root not in (None, "")
+        )
         for item in _iter_input_values(value):
+            raw = _stringify_value(item)
+            candidate = Path(raw).expanduser()
+            if not candidate.is_absolute() and attempt_roots:
+                candidate = (attempt_roots[0] / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            if any(candidate == root or root in candidate.parents for root in attempt_roots):
+                continue
+            if request.projects_root is None:
+                raise ExecutorRunnerError(
+                    f"{normalized} input {raw!r} must be materialized beneath the assigned attempt"
+                )
             require_project_owned_artifact(
                 request.project,
                 normalized,
-                _stringify_value(item),
+                raw,
                 root=request.projects_root,
             )
 
@@ -952,10 +975,8 @@ def _command_subprocess_env(
     for key in secret_values:
         explicit_env.pop(key, None)
     return build_child_subprocess_env(
-        # Project routing attached to the admitted request is authoritative.
-        # Overlay it onto the parent invariants as well as the explicit child
-        # environment so an unrelated ambient ASTRID_PROJECTS_ROOT cannot
-        # redirect execution after the request has been bound.
+        # Project identity attached to the admitted request is authoritative;
+        # no project-tree locator is exported to the child.
         parent={**os.environ, **project_env},
         explicit_env=explicit_env,
         passthrough=executor.isolation.env_passthrough,

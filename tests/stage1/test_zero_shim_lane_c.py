@@ -9,7 +9,6 @@ import pytest
 
 from astrid.core.contracts.identifiers import generate_run_id, is_ulid
 from astrid.core.project.guidance import selected_project
-from astrid.sdk.invocation import _resolve_projects_root
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,11 +30,6 @@ def test_lineage_ids_live_in_neutral_contracts() -> None:
 def test_guidance_ignores_ambient_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ASTRID_PROJECT_SLUG", "ambient-project")
     assert selected_project(None) == (None, "missing")
-
-
-def test_local_project_root_fallback_fails_actionably() -> None:
-    with pytest.raises(Exception, match="project_root is required"):
-        _resolve_projects_root(None, None)
 
 
 @pytest.mark.parametrize(

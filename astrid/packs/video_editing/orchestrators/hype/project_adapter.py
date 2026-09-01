@@ -39,26 +39,29 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     parser.add_argument("--out")
     parser.add_argument("--brief")
     parser.add_argument("--brief-slug", dest="brief_slug")
-    parser.add_argument("--projects-root", dest="projects_root")
     parsed, _unknown = parser.parse_known_args(argv)
     if not parsed.project:
         return None, argv
     reject_project_with_out(parsed.project, parsed.out)
-    context = admit_orchestrator_project_run(
-        project=parsed.project,
-        tool_id="video_editing.hype",
-        argv=["hype", *argv],
-    )
+    from astrid.sdk.client import AstridClient
+
+    with AstridClient.open_from_launcher() as client:
+        context = admit_orchestrator_project_run(
+            project=parsed.project,
+            tool_id="video_editing.hype",
+            argv=["hype", *argv],
+            client=client,
+        )
     return context, [*argv, "--out", str(context.run_root)]
 
 
-def _set_project_env() -> dict[str, str | None]:
+def _set_project_env(project_slug: str | None = None) -> dict[str, str | None]:
     """Capture and set project environment variables.
 
     Returns a prior-state dict suitable for ``_restore_project_env``.
     """
-    prior = {key: os.environ.get(key) for key in project_run_env()}
-    os.environ.update(project_run_env())
+    prior = {key: os.environ.get(key) for key in project_run_env(project_slug)}
+    os.environ.update(project_run_env(project_slug))
     return prior
 
 

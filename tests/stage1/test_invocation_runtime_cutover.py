@@ -43,7 +43,6 @@ def test_kernel_invoke_admits_task_through_injected_runtime_client() -> None:
         _Capability(),
         kind="executor",
         project="demo",
-        projects_root=Path("/unused/local/root"),
         inputs={"prompt": "hello"},
         outputs={"format": "json"},
         _client=client,
@@ -63,30 +62,14 @@ def test_kernel_invoke_admits_task_through_injected_runtime_client() -> None:
     assert client.tasks.kwargs["capability"] == "render.basic"
     assert client.tasks.kwargs["spec"]["inputs"] == {"prompt": "hello"}
 
-def test_kernel_invoke_opens_runtime_without_project_root(monkeypatch) -> None:
-    client = _Client()
+def test_kernel_invoke_requires_explicit_runtime_client() -> None:
+    import pytest
 
-    class _Opened:
-        def __enter__(self):
-            return client
-
-        def __exit__(self, *exc_info):
-            return False
-
-    calls = []
-
-    def open_runtime(*args, **kwargs):
-        calls.append((args, kwargs))
-        return _Opened()
-
-    monkeypatch.setattr("astrid.sdk.client.AstridClient.open", open_runtime)
-    invocation._kernel_invoke(
-        _Capability(),
-        kind="executor",
-        project="demo",
-        projects_root=Path("/unused/local/root"),
-        inputs={},
-        outputs={},
-    )
-
-    assert calls == [((), {})]
+    with pytest.raises(invocation.CapabilityInvocationError, match="explicit generated"):
+        invocation._kernel_invoke(
+            _Capability(),
+            kind="executor",
+            project="demo",
+            inputs={},
+            outputs={},
+        )

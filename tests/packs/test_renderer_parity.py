@@ -28,7 +28,6 @@ from astrid.core.execution.executor.runner import ExecutorRunRequest, run_execut
 from astrid.core.foundation import project_paths
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.media import ffprobe_metadata_strict
-from astrid.core.project.runtime import step_dir_for
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
@@ -724,13 +723,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     # this explicit prevents the test from asserting the retired runner-owned
     # run.json ledger behavior.
     if attached:
-        staging_root = step_dir_for(
-            "demo",
-            PARENT_RUN_ID,
-            TASK_STEP_ID,
-            step_version=1,
-            root=projects_root,
-        )
+        staging_root = tmp_path / "attached-render-staging"
     else:
         staging_root = tmp_path / "standalone-render-staging"
 

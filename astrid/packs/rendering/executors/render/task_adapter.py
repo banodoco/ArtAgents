@@ -224,12 +224,6 @@ def _scoped_env(key: str, value: str) -> Iterator[None]:
             os.environ[key] = previous
 
 
-@contextmanager
-def _project_env(project_root: Path) -> Iterator[None]:
-    with _scoped_env("ASTRID_PROJECTS_ROOT", str(project_root.parent)):
-        yield
-
-
 def _decode_spec(task: Any) -> tuple[str, Mapping[str, Any], Mapping[str, Any], dict[str, Any]]:
     spec = getattr(task, "spec", None)
     if not isinstance(spec, Mapping):
@@ -261,11 +255,6 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 class RenderExportTaskAdapter:
     """Execute one admitted render-export task through ``rendering.render``."""
 
-    def __init__(self, *, projects_root: str | Path) -> None:
-        self._projects_root = Path(projects_root).expanduser().resolve()
-        if not self._projects_root.is_dir():
-            raise RenderExportRefused(f"projects root is not a directory: {self._projects_root}")
-
     def execute(
         self,
         *,
@@ -292,10 +281,6 @@ class RenderExportTaskAdapter:
                 "server-owned Remotion runtime unavailable: "
                 + (remotion_status.reason or "unknown reason")
             )
-        project_root = (self._projects_root / project_slug).resolve()
-        if not project_root.is_dir() or project_root.parent != self._projects_root:
-            raise RenderExportRefused(f"render_export project is missing: {project_slug}")
-
         staging_dir = Path(staging_dir).resolve()
         staging_dir.mkdir(parents=True, exist_ok=True)
         inputs_dir = staging_dir / "render-inputs"
@@ -340,10 +325,10 @@ class RenderExportTaskAdapter:
         _write_json(timeline_path, config)
         _write_json(assets_path, staged_registry)
 
-        # The canonical executor enforces that declared timeline artifacts are
-        # project-owned. Keep the externally-visible staging pack unchanged,
-        # but provide short-lived owned copies for dispatch.
-        owned_inputs_dir = Path(tempfile.mkdtemp(prefix=".render-inputs-", dir=project_root))
+        # The canonical executor consumes only attempt-local artifacts. Keep
+        # the externally-visible staging pack unchanged, but provide
+        # short-lived writable copies inside this same assigned attempt.
+        owned_inputs_dir = Path(tempfile.mkdtemp(prefix=".render-inputs-", dir=staging_dir))
         try:
             owned_timeline_path = owned_inputs_dir / "timeline.json"
             owned_assets_path = owned_inputs_dir / "assets.json"
@@ -395,7 +380,7 @@ class RenderExportTaskAdapter:
                 # attempt root; without it support probing would (correctly)
                 # reject the private paths as retired caller locators.
                 # The renderer receives a second, writable copy under the
-                # project-owned input directory.  Its derived registry paths
+                # attempt-owned input directory.  Its derived registry paths
                 # must therefore be checked against that copy's root (the
                 # original host root remains immutable evidence).
                 "materialized_root": str(owned_inputs_dir),
@@ -422,11 +407,7 @@ class RenderExportTaskAdapter:
             # the ownership boundary for dispatch; this adapter supplies only the
             # immutable, server-owned inputs admitted above.
             context.report("render", 10)
-            with (
-                _project_env(project_root),
-                _scoped_env("ASTRID_RENDER_INHERIT_PROCESS_GROUP", "1"),
-                render_env,
-            ):
+            with _scoped_env("ASTRID_RENDER_INHERIT_PROCESS_GROUP", "1"), render_env:
                 result = run_executor(
                     ExecutorRunRequest(
                         executor_id=PACK_ID,
@@ -434,7 +415,6 @@ class RenderExportTaskAdapter:
                         project=project_slug,
                         inputs=renderer_inputs,
                         project_was_auto_resolved=True,
-                        projects_root=self._projects_root,
                         invocation="render-export-task",
                     ),
                     load_default_registry(),
@@ -496,7 +476,6 @@ def execute_render_export_task(
     *,
     task: Any,
     staging_dir: Path,
-    projects_root: str | Path,
     deadline_seconds: float = 30 * 60,
     cancelled: Callable[[], bool] | None = None,
     progress: Callable[[Mapping[str, Any]], None] | None = None,
@@ -507,18 +486,18 @@ def execute_render_export_task(
         cancelled=cancelled,
         progress=progress,
     )
-    return RenderExportTaskAdapter(projects_root=projects_root).execute(
+    return RenderExportTaskAdapter().execute(
         task=task, staging_dir=staging_dir, context=context
     )
 
 
 def task_handler_for_capability(
-    capability_id: str, *, projects_root: str | Path
+    capability_id: str,
 ) -> RenderExportTaskAdapter:
     """Resolve the transport-neutral handler registered by this pack."""
     if capability_id != PACK_ID:
         raise RenderExportRefused(f"no render-export handler is registered for {capability_id!r}")
-    return RenderExportTaskAdapter(projects_root=projects_root)
+    return RenderExportTaskAdapter()
 
 
 __all__ = [
@@ -540,7 +519,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="astrid-render-export-child")
     parser.add_argument("--task-json", type=Path, required=True)
     parser.add_argument("--staging-dir", type=Path, required=True)
-    parser.add_argument("--projects-root", type=Path, required=True)
     parser.add_argument("--deadline-seconds", type=float, default=30 * 60)
     args = parser.parse_args(argv)
     from types import SimpleNamespace
@@ -556,7 +534,6 @@ def main(argv: list[str] | None = None) -> int:
     manifest = execute_render_export_task(
         task=task,
         staging_dir=args.staging_dir,
-        projects_root=args.projects_root,
         deadline_seconds=args.deadline_seconds,
     )
     (args.staging_dir / "manifest.json").write_text(

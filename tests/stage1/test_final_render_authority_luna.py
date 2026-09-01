@@ -59,6 +59,81 @@ def test_public_sdk_has_no_direct_render_compatibility_surface() -> None:
     assert "sdk.invoke(" in source and "rendering.render" in source
 
 
+def test_managed_adapters_have_no_project_root_or_implicit_client_fallback() -> None:
+    render_source = (
+        ROOT / "astrid/packs/rendering/executors/render/task_adapter.py"
+    ).read_text(encoding="utf-8")
+    generation_source = (
+        ROOT / "astrid/packs/generation/executors/generate_image/task_adapter.py"
+    ).read_text(encoding="utf-8")
+    invocation_source = (ROOT / "astrid/sdk/invocation.py").read_text(encoding="utf-8")
+    events_source = (ROOT / "astrid/sdk/events.py").read_text(encoding="utf-8")
+    assert "ASTRID_PROJECTS_ROOT" not in render_source
+    assert "ASTRID_PROJECTS_ROOT" not in generation_source
+    assert "AstridClient.open()" not in invocation_source
+    assert "AstridClient.open()" not in events_source
+
+
+def test_generic_host_materializes_managed_snapshot_inside_attempt(tmp_path: Path) -> None:
+    """A managed snapshot reaches a real child command via attempt-local files."""
+
+    pack_root = tmp_path / "pack"
+    executor_root = pack_root / "executors" / "probe"
+    executor_root.mkdir(parents=True)
+    manifest = {
+        "schema_version": 1,
+        "id": "probe.snapshot",
+        "name": "Snapshot probe",
+        "kind": "external",
+        "version": "1.0",
+        "command": {
+            "argv": [
+                "{python_exec}",
+                "-c",
+                (
+                    "from pathlib import Path; p=Path('{out}').parent/'inputs'/'timeline.json'; "
+                    "assert p.is_relative_to(Path('{out}').parent); "
+                    "Path('{out}/seen.json').write_text(p.read_text())"
+                ),
+            ]
+        },
+        "outputs": [
+            {
+                "name": "seen",
+                "type": "file",
+                "path_template": "{out}/seen.json",
+                "artifact_type": "application/json",
+            }
+        ],
+    }
+    (executor_root / "executor.yaml").write_text(json.dumps(manifest), encoding="utf-8")
+
+    host = GenericPackHost(pack_roots=[pack_root])
+    record = host.discover()[0]
+    attempt = tmp_path / "attempt"
+    inputs = host._materialize_inputs(
+        {
+            "inputs": {
+                "timeline_snapshot": {
+                    "config": {"tracks": [], "clips": []},
+                    "registry": {"assets": {}},
+                }
+            }
+        },
+        attempt,
+    )
+    assert Path(inputs["timeline"]).is_relative_to(attempt.resolve())
+    assert Path(inputs["assets_registry"]).is_relative_to(attempt.resolve())
+    output_root = attempt / "outputs"
+    output_root.mkdir(parents=True)
+    result = host._run_command_definition(record, inputs, output_root, attempt)
+    assert result.outputs == {"seen": str(attempt / "outputs" / "seen.json")}
+    assert json.loads((attempt / "outputs" / "seen.json").read_text()) == {
+        "tracks": [],
+        "clips": [],
+    }
+
+
 def test_renderer_authoring_cli_has_no_unadmitted_smoke_render_route() -> None:
     source = (ROOT / "astrid/core/rendering/cli.py").read_text()
     assert "RenderService" not in source

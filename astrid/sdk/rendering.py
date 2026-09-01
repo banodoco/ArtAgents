@@ -47,12 +47,14 @@ Worked example (scaffold → SDK renderer):
    owns materialization, execution, settlement, and publication::
 
        import astrid.sdk as sdk
-       result = sdk.invoke(
-           "rendering.render",
-           kind="executor",
-           project="demo",
-           inputs={"timeline_ref": "main"},
-       )
+       with sdk.AstridClient.open_from_launcher() as client:
+           result = sdk.invoke(
+               "rendering.render",
+               kind="executor",
+               client=client,
+               project="demo",
+               inputs={"timeline_ref": "main"},
+           )
        # result.run_id identifies the admitted runtime run; inspect its
        # outputs through the runtime client or `astrid runs show`.
 

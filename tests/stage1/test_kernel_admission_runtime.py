@@ -35,8 +35,7 @@ def test_admission_uses_injected_runtime_task_client() -> None:
         project="demo",
         tool_id="video_editing.hype",
         argv=["--project", "demo"],
-        projects_root=Path("/legacy/projects"),
-        _client=client,
+        client=client,
     )
 
     assert context.run_id == "run-1"
@@ -47,29 +46,15 @@ def test_admission_uses_injected_runtime_task_client() -> None:
     assert client.tasks.calls[0]["spec"]["argv"] == ["--project", "demo"]
 
 
-def test_admission_opens_runtime_without_projects_root(monkeypatch) -> None:
-    client = _Client()
+def test_admission_requires_explicit_runtime_client() -> None:
+    import pytest
 
-    class _Opened:
-        def __enter__(self):
-            return client
-
-        def __exit__(self, *exc_info):
-            return False
-
-    calls = []
-
-    def open_runtime(*args, **kwargs):
-        calls.append((args, kwargs))
-        return _Opened()
-
-    monkeypatch.setattr("astrid.sdk.client.AstridClient.open", open_runtime)
-    kernel_admission.admit_orchestrator_project_run(
-        project="demo",
-        tool_id="video_editing.hype",
-        argv=[],
-    )
-    assert calls == [((), {})]
+    with pytest.raises(kernel_admission.ProjectRuntimeError, match="explicit generated"):
+        kernel_admission.admit_orchestrator_project_run(
+            project="demo",
+            tool_id="video_editing.hype",
+            argv=[],
+        )
 
 
 def test_admission_and_normal_callers_have_no_local_composition() -> None:
