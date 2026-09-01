@@ -410,9 +410,9 @@
         "active_index": 4
       },
       "vo": {
-        "text": "For each of these, we provide strong defaults that you can customize as you please. Everything is built to be a plugin.",
+        "text": "For each of these, we provide strong defaults.",
         "audio": {
-          "asset": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/segments/idea1_defaults.wav"
+          "asset": "../projects/astrid-intro/build/segments/idea1_defaults.wav"
         }
       },
       "provenance": {
