@@ -1553,3 +1553,12 @@
   databases`): six frozen product/test paths plus accepted B3 briefs, receipts,
   evidence, and control state. Production remains legacy-active; cumulative
   gate 1 is next.
+- Cumulative gate 1 froze exact B1/B2/B3 checkpoints
+  `14f1f7d5`/`a293e4c4`/`cd4dc91a` at control HEAD `2018f8a7`; the committed
+  product tree is clean. One independent exact-Luna cutover-readiness
+  certification was dispatched, reusing accepted checkpoint receipts and
+  avoiding any B1 candidate reset or broad full-suite duplication.
+- Cumulative gate 1 returned `PASS`: linear base/B1/B2/B3/control ancestry,
+  accepted B1–B3 evidence, production legacy isolation, B4 cutover readiness,
+  and 70 bounded integration tests passed with no blockers. B4 atomic
+  activation may begin.

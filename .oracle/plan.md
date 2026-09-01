@@ -77,7 +77,7 @@ is in `.oracle/implementation-ledger.md`.
   B3 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`; 3/5 committed.
 - Frozen end-to-end criteria: 0/15 complete; B1–B3 provide accepted isolated
   and unshipped evidence.
-- Next action: run cumulative gate 1 before B4 activation.
+- Cumulative gate 1: PASS; next action is B4 atomic activation.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

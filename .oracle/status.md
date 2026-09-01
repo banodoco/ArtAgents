@@ -25,9 +25,9 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 8 — cumulative gate 1**
-- Active batch: **integrated B1–B3 contract/manifest/database-projection and
-  cutover-readiness certification before B4**
+- Current Megado phase: **Phase 9 — B4 atomic activation**
+- Active batch: **converge all operational consumers on one catalog-derived
+  projection, activate strict v2, and delete alternate authorities atomically**
 - Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
   normal implementation, validation, and bounded independent certification.
   Segment Sol review requires a recorded high-risk reason; final independent
@@ -76,7 +76,7 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Run cumulative gate 1 over B1–B3 while production remains legacy-active.
+Execute B4 consumer convergence and atomic activation.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

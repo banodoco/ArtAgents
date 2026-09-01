@@ -235,6 +235,11 @@ an extra segment Sol review. Reviewed B3 checkpoint:
 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`. Run cumulative gate 1 over
 B1–B3 before B4 begins.
 
+Cumulative gate 1: **PASS**. One independent Luna review confirmed linear
+B1–B3 checkpoint ancestry, reused accepted frozen receipts, passed 70 bounded
+integration tests, and found no cutover-readiness blockers. Production remains
+legacy-active until B4's atomic activation.
+
 ## B4 — converge consumers and activate the atomic hard cut
 
 Goal criteria: 2, 4, 7, 9.

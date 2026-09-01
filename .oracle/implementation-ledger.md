@@ -548,6 +548,9 @@ composes; all declared docs/resources resolve; final tests and review pass.
   `8f2140a6a79f3f591c04385f72bf3cd8ba7eedf299011ecf9ea7360d17a6f087`;
   integrated closure and independent certification each passed 122 tests with
   6/6 hashes and no findings.
+- Cumulative gate 1 independently confirmed linear B1–B3 ancestry, accepted
+  checkpoint evidence, production legacy isolation, and B4 cutover readiness;
+  its bounded integration command passed 70 tests with no blockers.
 
 ## Honest progress assessment
 
@@ -563,8 +566,7 @@ composes; all declared docs/resources resolve; final tests and review pass.
   truth.
 - **Frozen final criteria:** 0/15 complete end to end; B1–B3 provide accepted
   isolated/unshipped evidence.
-- **Remaining sequence:** run cumulative gate 1, then B4–B5 under the frozen
-  cutover gates.
+- **Remaining sequence:** B4–B5 under the frozen cutover gates.
 
-The correct product action is cumulative gate 1 over B1–B3. Cloud capacity and
-tooling preflight are green.
+The correct product action is B4 atomic consumer convergence and activation.
+Cloud capacity and tooling preflight are green.
