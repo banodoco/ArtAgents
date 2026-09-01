@@ -224,7 +224,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         assert host.capabilities[record.id].ready is True
 
         registration = host.register()
-        assert registration["registration"]["executor_id"] == "generic-remotion-host"
+        assert registration["registration"].executor_id == "generic-remotion-host"
 
         spec = {
             "inputs": {

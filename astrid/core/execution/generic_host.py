@@ -659,7 +659,7 @@ class RuntimeProtocolClient:
         }
         return self.generated.register_executor(
             payload,
-            idempotency_key=f"executor:{executor_id}",
+            idempotency_key=f"executor:{executor_id}:{_canonical_digest(payload)}",
         )
 
     def register_capability(
@@ -674,15 +674,21 @@ class RuntimeProtocolClient:
         unavailable_reason: str | None = None,
     ):
         """Publish one capability through the generated runtime client."""
+        registration = {
+            "required_resource_keys": list(required_resource_keys or []),
+            "status": status,
+            "estimated_scratch_bytes": int(estimated_scratch_bytes),
+            "estimated_output_bytes": int(estimated_output_bytes),
+            "unavailable_reason": unavailable_reason,
+        }
         return self.generated.register_capability(
             capability_id,
             digest,
-            required_resource_keys=list(required_resource_keys or []),
-            status=status,
-            estimated_scratch_bytes=int(estimated_scratch_bytes),
-            estimated_output_bytes=int(estimated_output_bytes),
-            unavailable_reason=unavailable_reason,
-            idempotency_key=f"capability:{capability_id}:{digest}",
+            **registration,
+            idempotency_key=(
+                f"capability:{capability_id}:{digest}:"
+                f"{_canonical_digest(registration)}"
+            ),
         )
 
     def withdraw_capability(self, capability_id: str, *, digest: str, reason: str):
@@ -1644,14 +1650,13 @@ class GenericPackHost:
             path = Path(str(raw_path))
             media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
             object_row = upload_object(path, media_type=media_type, filename=path.name)
-            object_id = getattr(object_row, "object_id", None)
             digest = getattr(object_row, "digest", None)
-            if not object_id or not digest:
-                raise HostError("generated object upload returned no canonical object id/digest")
+            if not digest:
+                raise HostError("generated object upload returned no canonical digest")
             uploaded.append({
                 "name": descriptor.get("name"),
+                "kind": "object",
                 "media_type": media_type,
-                "object_id": object_id,
                 "digest": digest,
                 "size": int(getattr(object_row, "size", descriptor.get("size", 0))),
             })

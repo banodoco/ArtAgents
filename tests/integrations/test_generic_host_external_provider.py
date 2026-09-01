@@ -11,6 +11,7 @@ import subprocess
 import sys
 import sysconfig
 import threading
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -27,8 +28,41 @@ from banodoco_workspace_client import ApiError, WorkspaceClient
 from runtime_protocol.daemon import RuntimeDaemon
 
 
+class _TaskRuntime:
+    """Canonical in-memory runtime surface for isolated provider-host tests."""
+
+    def heartbeat(self, *_args, **_kwargs):
+        return {"ok": True}
+
+    def task(self, task_id):
+        return {"task": {"id": task_id, "status": "running"}}
+
+    def settle(self, *_args, **_kwargs):
+        return {"state": "succeeded"}
+
+    def fail(self, *_args, **_kwargs):
+        return {"ok": True}
+
+    def upload_object(self, path, **_kwargs):
+        payload = Path(path).read_bytes()
+        digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+        return SimpleNamespace(object_id=digest, digest=digest, size=len(payload))
+
+
 def _run_provider(host: GenericPackHost, task: dict, *, lease_token: str = "fixture"):
     """Exercise the explicit provider grant request/consume seam."""
+    if host.client is None:
+        host.client = _TaskRuntime()
+    task_data = task.setdefault("task", task)
+    task_data.setdefault("attempt_id", f"attempt-{task_data['id']}")
+    task_data.setdefault("fence", 1)
+    raw_spec = task_data.get("spec", {})
+    if isinstance(raw_spec, dict) and "spec" not in raw_spec:
+        task_data["spec"] = {
+            "input_object_ids": [],
+            "schema_version": "1",
+            "spec": raw_spec,
+        }
     grant = host.request_provider_route_grant(task)
     return host.run_task(task, lease_token=lease_token, provider_route_grant=grant)
 
@@ -123,8 +157,18 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
         "FIXTURE_PROVIDER_URL",
         f"http://127.0.0.1:{server.server_port}/response",
     )
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     try:
-        host = GenericPackHost(pack_roots=[pack_root], attempt_root=tmp_path / "attempt")
+        generated = WorkspaceClient(daemon.endpoint, daemon.token)
+        generated.handshake(
+            "provider-fixture", "0.1.0", ["projects:read", "worker:execute"]
+        )
+        host = GenericPackHost(
+            pack_roots=[pack_root],
+            attempt_root=tmp_path / "attempt",
+            client=RuntimeProtocolClient(daemon.endpoint, daemon.token),
+            executor_id="provider-fixture-host",
+        )
         record = host.discover()[0]
         assert record.definition.metadata["source_pack"] == "fixture_provider"
         assert Path(record.definition.metadata["pack_root"]) == pack_root
@@ -132,15 +176,20 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
         assert record.adapter.family == "provider"
         assert host.capabilities[record.id].ready
 
-        settled = _run_provider(
-            host,
-            {"task": {"id": "provider-task", "capability": record.id, "spec": {"inputs": {}}}},
-            lease_token="fixture-lease",
+        host.register()
+        task = generated.admit_task(
+            capability_id=record.id,
+            capability_digest=record.capability_digest,
+            input_object_ids=[],
+            idempotency_key="provider-task",
         )
+        settled = host.run(once=True)
+        assert len(settled) == 1 and settled[0].state == "succeeded"
+        assert generated.get_task(task.task_id).state == "succeeded"
     finally:
+        daemon.stop()
         server.shutdown()
         server.server_close()
-    assert settled["output_objects"][0]["name"] == "response"
     assert (tmp_path / "attempt" / "outputs" / "response.txt").read_text(encoding="utf-8") == "provider-http-response"
 
 
@@ -543,8 +592,20 @@ def test_native_network_command_is_unready_without_enforceable_observable_gatewa
     host.preflight()
     assert host.capabilities[record.id].ready is False
     assert "host-managed broker" in host.capabilities[record.id].preflight["network"]["reason"]
+    host.client = _TaskRuntime()
     with pytest.raises(HostError, match="capability .* unavailable"):
-        host.run_task({"task": {"id": "native-task", "capability": record.id, "spec": {"inputs": {}}}}, lease_token="fixture")
+        host.run_task(
+            {
+                "task": {
+                    "id": "native-task",
+                    "capability": record.id,
+                    "attempt_id": "attempt-native-task",
+                    "fence": 1,
+                    "spec": {"input_object_ids": [], "spec": {"inputs": {}}},
+                }
+            },
+            lease_token="fixture",
+        )
 
 
 def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Path) -> None:

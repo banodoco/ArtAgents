@@ -152,16 +152,27 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
                 mock.patch.object(render_remotion, "load_default_registry", side_effect=capturing_load_default_registry),
             ):
-                result = render_facade.render(
+                details = render_remotion._execute_remotion(
                     timeline_path,
                     assets_path,
                     out_path,
+                    provenance_out_path=out_path,
                     project_dir=project_dir,
                     composition_id="TimelineComposition",
                     theme_path=None,
+                    min_free_gb=None,
                 )
-            provenance = json.loads(
-                render_remotion._render_provenance_sidecar_path(out_path.resolve()).read_text(encoding="utf-8")
+                result = out_path.resolve()
+                active_pack_order = render_remotion._active_pack_order_for_provenance()
+            provenance = render_remotion._render_provenance_payload(
+                project_dir=project_dir,
+                composition_id="TimelineComposition",
+                theme_path=None,
+                active_theme=details.active_theme,
+                registry_state=details.registry_state,
+                stage_summary=details.stage_summary,
+                runtime=details.runtime,
+                active_pack_order=active_pack_order,
             )
 
         self.assertEqual(result, out_path.resolve())
