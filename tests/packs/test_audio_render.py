@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.packs.rendering.executors.render import run as render_remotion
+from astrid.packs.rendering.executors.render import run as render_executor
 from astrid.core import timeline
 
 
@@ -122,7 +122,7 @@ class AudioRenderTest(unittest.TestCase):
         timeline.save_registry(registry, assets_path)
 
         try:
-            output = render_remotion.render(
+            output = render_executor.render(
                 timeline_path,
                 assets_path,
                 out_path,

@@ -10,8 +10,6 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 
 from .contracts import (
-    PROVENANCE_V1_ALWAYS_KEYS,
-    PROVENANCE_V1_COMPATIBILITY_KEYS,
     PROVENANCE_V2_CORE_KEYS,
     _ECMA_WHITESPACE,
     Attachment,
@@ -32,7 +30,6 @@ PROVENANCE_SCHEMA_VERSION = 2
 ADDITIVE_PROVENANCE_V2_CORE_KEYS = frozenset({"resolved_policy", "routing"})
 CORE_OWNED_KEYS = frozenset(
     PROVENANCE_V2_CORE_KEYS
-    | PROVENANCE_V1_COMPATIBILITY_KEYS
     | ADDITIVE_PROVENANCE_V2_CORE_KEYS
 )
 
@@ -92,35 +89,6 @@ def _normalize_attachments(
             raise ValueError(f"duplicate attachment name: {name}")
         result[name] = attachment.to_dict()
     return result
-
-
-def _legacy_segment_projection(segment: RenderSegment) -> dict[str, Any]:
-    """Derive one v1 segment projection from an authoritative v2 segment."""
-
-    numerator, denominator = segment.window.fps_rational
-    return {
-        "engine": segment.renderer.id.rsplit(".", 1)[-1],
-        "from": segment.window.start_frame * denominator / numerator,
-        "to": segment.window.end_frame * denominator / numerator,
-    }
-
-
-def _resolution_request_id(segment: RenderSegment) -> str:
-    """Recover the registry id that selected one validated renderer.
-
-    Alias chains retain their requested id first.  An override without an
-    alias retains its source in ``override.from``.  Otherwise the resolved id
-    was also the requested id.  This is enough to distinguish the legacy
-    ``remotion`` policy's FFmpeg-first route without accepting parallel,
-    caller-authored routing evidence.
-    """
-
-    renderer = segment.renderer
-    if renderer.alias_chain:
-        return renderer.alias_chain[0]
-    if renderer.override is not None:
-        return renderer.override["from"]
-    return renderer.id
 
 
 def _resolved_policy(plan: RenderPlan) -> dict[str, Any]:
@@ -350,29 +318,6 @@ def _artifact_lineage(artifact: VideoArtifact) -> dict[str, Any]:
     )
 
 
-def _normalize_v1_compatibility(
-    fields: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    if fields is None:
-        raise ValueError(
-            "v1_compatibility is required and must preserve all always-emitted v1 fields"
-        )
-    compatibility = _json_safe_mapping(fields, label="v1_compatibility")
-    unknown = sorted(set(compatibility) - PROVENANCE_V1_COMPATIBILITY_KEYS)
-    if unknown:
-        raise ValueError(
-            "v1 compatibility projection contains non-v1 or core-owned keys: "
-            + ", ".join(unknown)
-        )
-    missing = sorted(PROVENANCE_V1_ALWAYS_KEYS - set(compatibility))
-    if missing:
-        raise ValueError(
-            "v1 compatibility projection is missing always-emitted fields: "
-            + ", ".join(missing)
-        )
-    return compatibility
-
-
 def assemble_provenance_v2(
     *,
     engine: str,
@@ -385,14 +330,11 @@ def assemble_provenance_v2(
     normalization: Sequence[str] = (),
     attachments: Mapping[str, Attachment | Mapping[str, Any]] | None = None,
     backend_fragments: Mapping[str, Mapping[str, Any]] | None = None,
-    v1_compatibility: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble additive provenance v2 with protected ownership boundaries.
 
     ``engine`` records the selected qualified backend id. Routing and replay
-    lineage come exclusively from the validated ``RenderPlan``. Optional v1
-    fields are accepted only through ``v1_compatibility`` and cannot replace
-    any v2 core field.
+    lineage come exclusively from the validated ``RenderPlan``.
     """
 
     backend_id = _require_string(engine, "engine")
@@ -407,14 +349,10 @@ def assemble_provenance_v2(
         else RenderPlan.from_dict(_json_safe_mapping(plan, label="render plan"))
     )
     normalized_segments = [segment.to_dict() for segment in normalized_plan.segments]
-    legacy_segments = [
-        _legacy_segment_projection(segment) for segment in normalized_plan.segments
-    ]
     normalized_normalization = [
         _require_string(item, f"normalization[{index}]")
         for index, item in enumerate(normalization)
     ]
-    compatibility = _normalize_v1_compatibility(v1_compatibility)
     resolved_policy = _resolved_policy(normalized_plan)
 
     payload: dict[str, Any] = {
@@ -432,10 +370,6 @@ def assemble_provenance_v2(
             resolved_policy,
         ),
         "planner": normalized_plan.planner.to_dict(),
-        # V1-compatible segment projection: flat {engine, from, to} entries,
-        # exactly the shape legacy consumers read from `segments`.
-        "segments": legacy_segments,
-        # Additive normalized v2 segment records; never overwrite v1 fields.
         "segments_v2": normalized_segments,
         "artifact_profiles": _normalize_artifact_profiles(
             artifact_profiles,
@@ -447,14 +381,7 @@ def assemble_provenance_v2(
         "attachments": _normalize_attachments(attachments),
         "backend_fragments": validate_backend_fragments(backend_fragments),
     }
-    payload.update(compatibility)
     return _json_safe_mapping(payload, label="provenance")
-
-
-def assemble_provenance(**kwargs: Any) -> dict[str, Any]:
-    """Compatibility spelling for :func:`assemble_provenance_v2`."""
-
-    return assemble_provenance_v2(**kwargs)
 
 
 def write_provenance_v2(path: str | Path, **kwargs: Any) -> dict[str, Any]:
@@ -484,7 +411,6 @@ __all__ = [
     "ADDITIVE_PROVENANCE_V2_CORE_KEYS",
     "CORE_OWNED_KEYS",
     "PROVENANCE_SCHEMA_VERSION",
-    "assemble_provenance",
     "assemble_provenance_v2",
     "digest_manifest",
     "hash_input_files",

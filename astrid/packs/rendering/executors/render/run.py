@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.errors import RendererException
+from astrid.core.rendering.contracts import RenderRequest, SCHEMA_VERSION
 from astrid.core.rendering.output_policy import (
     DEFAULT_RENDER_OUTPUT_NAME,
     validate_output_basename,
@@ -270,16 +271,30 @@ def render(
             overlaid = dict(existing)
             overlaid.update({k: v for k, v in value.items() if v is not None})
             config[str(key)] = overlaid
+    request = RenderRequest.from_dict(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "timeline_path": str(Path(timeline_path).expanduser().resolve()),
+            "assets_registry_path": str(Path(assets_path).expanduser().resolve()),
+            "output_name": out_path.name,
+            "window": None,
+            "audio": None,
+            "profile": profile,
+            "backend_config": config,
+            "metadata": {},
+            "materialized_root": (
+                None
+                if materialized_root is None
+                else str(Path(materialized_root).expanduser().resolve())
+            ),
+            "materialized_objects": dict(materialized_objects or {}),
+        }
+    )
     output = _default_service().render(
-        timeline_path,
-        assets_path,
-        out_path,
+        request,
         selector=selector,
-        backend_config=config,
-        profile=profile,
+        out_path=out_path,
         previous_outputs=previous_outputs,
-        materialized_root=materialized_root,
-        materialized_objects=materialized_objects,
     )
     _rewrite_provenance_output_path(
         Path(output),

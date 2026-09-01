@@ -611,7 +611,7 @@ def _run_revise(args: argparse.Namespace, prior_arrangement: Path, editor_notes:
             step_args,
             "arrange",
             [
-                *step_argv("arrange.py", step_args.python_exec),
+                *step_argv("editorial.arrange", step_args.python_exec),
                 "--pool",
                 str(step_args.out / "pool.json"),
                 "--brief",

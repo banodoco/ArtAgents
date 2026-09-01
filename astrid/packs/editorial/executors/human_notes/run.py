@@ -83,8 +83,8 @@ def _pool_ids(pool: dict[str, Any]) -> set[str]:
     }
 
 
-def _step_argv(name: str, python_exec: str) -> list[str]:
-    return executor_argv(name, python_exec)
+def _step_argv(executor_id: str, python_exec: str) -> list[str]:
+    return executor_argv(executor_id, python_exec)
 
 
 def _parse_asset_entry(parser: argparse.ArgumentParser, raw: str) -> tuple[str, Path]:
@@ -182,7 +182,7 @@ def _apply_pipeline(args: argparse.Namespace) -> None:
     metadata_path = args.brief_dir / "hype.metadata.json"
 
     arrange_cmd = [
-        *_step_argv("arrange.py", args.python_exec),
+        *_step_argv("editorial.arrange", args.python_exec),
         "--revise",
         "--pool",
         str(args.pool),
@@ -201,7 +201,7 @@ def _apply_pipeline(args: argparse.Namespace) -> None:
         arrange_cmd.extend(["--model", args.model])
 
     cut_cmd = [
-        *_step_argv("cut.py", args.python_exec),
+        *_step_argv("video_editing.cut", args.python_exec),
         "--scenes",
         str(scenes_path),
         "--transcript",
@@ -223,7 +223,7 @@ def _apply_pipeline(args: argparse.Namespace) -> None:
         cut_cmd.extend(["--primary-asset", args.primary_asset])
 
     refine_cmd = [
-        *_step_argv("refine.py", args.python_exec),
+        *_step_argv("editorial.refine", args.python_exec),
         "--arrangement",
         str(arrangement_path),
         "--pool",

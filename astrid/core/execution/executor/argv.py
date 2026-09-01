@@ -1,45 +1,28 @@
-"""Executor runtime resolution and argv construction.
-
-Resolves executor ids / legacy pipeline step names to runtime modules and
-builds the argv tokens that invoke a pipeline executor's module entrypoint.
-"""
+"""Executor runtime resolution and argv construction."""
 
 from __future__ import annotations
 
 
-def resolve_executor_runtime_module(script_name: str) -> str:
-    """Resolve an executor id or legacy pipeline step name to its runtime module.
+def resolve_executor_runtime_module(executor_id: str) -> str:
+    """Resolve one qualified executor id to its runtime module.
 
-    Qualified ids resolve through the registry so aliases land on the canonical
-    executor definition. Bare names remain supported only for legacy pipeline
-    step dispatch via ``metadata.pipeline_step``.
-
-    Deliberately uncached: registry overrides (override store, local pack
-    edits, capability re-registration) must be observable by callers, and a
-    stale in-process resolution must not outlive them.
+    Resolution remains uncached so registry edits and capability
+    re-registration are observable by callers.
     """
-    stem = script_name[:-3] if script_name.endswith(".py") else script_name
+    if not isinstance(executor_id, str) or executor_id.count(".") != 1:
+        raise ValueError(
+            f"executor id must be qualified as '<pack>.<executor>', got {executor_id!r}"
+        )
     from astrid.core.execution.executor.registry import load_default_registry
 
     registry = load_default_registry()
-    if "." in stem:
-        executor = registry.get(stem)
-    else:
-        candidates = [
-            executor
-            for executor in registry.list()
-            if executor.metadata.get("pipeline_step") == stem
-        ]
-        if len(candidates) != 1:
-            matches = ", ".join(executor.id for executor in candidates) or "none"
-            raise ValueError(f"could not resolve executor step {stem!r}; matches: {matches}")
-        executor = candidates[0]
+    executor = registry.get(executor_id)
     runtime_module = executor.metadata.get("runtime_module")
     if not isinstance(runtime_module, str) or not runtime_module:
         raise ValueError(f"executor {executor.id!r} is missing metadata.runtime_module")
     return runtime_module
 
 
-def executor_argv(script_name: str, python_exec: str) -> list[str]:
-    """Return argv tokens that invoke a pipeline executor's module entrypoint."""
-    return [python_exec, "-m", resolve_executor_runtime_module(script_name)]
+def executor_argv(executor_id: str, python_exec: str) -> list[str]:
+    """Return argv tokens for a qualified executor's module entrypoint."""
+    return [python_exec, "-m", resolve_executor_runtime_module(executor_id)]

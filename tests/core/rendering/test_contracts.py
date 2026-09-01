@@ -26,7 +26,6 @@ from astrid.core.rendering.contracts import (
     FinalizerResolution,
     PlannerManifest,
     PlannerResolution,
-    PROVENANCE_V1_COMPATIBILITY_KEYS,
     RenderSegment,
     RendererManifest,
     RendererResolution,
@@ -519,40 +518,7 @@ def test_backend_fragment_cannot_overwrite_current_or_retired_core_keys() -> Non
             validate_backend_fragments({"acme.example": {key: "stolen"}})
 
 
-def _compatibility() -> dict[str, Any]:
-    return {
-        "project_dir": "/workspace/remotion",
-        "composition_id": "TimelineComposition",
-        "active_pack_order": [],
-        "active_theme": None,
-        "registry_hash": SHA_B,
-        "registry_state": {},
-        "resolved_effect_ids": [],
-        "resolved_effects": [],
-        "source_pack_ids": [],
-        "element_roots": [],
-        "staged_asset_ids": [],
-        "staged_asset_root": None,
-        "segment_provenance": [{"engine": "spoofed", "from": -1, "to": -1}],
-        "ffmpeg_specialization": None,
-        "audio_reactive_colour": None,
-    }
-
-
-def test_provenance_requires_always_emitted_v1_projection() -> None:
-    with pytest.raises(ValueError, match="v1_compatibility is required"):
-        assemble_provenance_v2(
-            engine="remotion",
-            output="/workspace/video.mp4",
-            timeline="/workspace/timeline.json",
-            assets_registry=None,
-            plan=_plan(),
-        )
-
-
-def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: Path) -> None:
-    compatibility = _compatibility()
-    assert set(compatibility) == set(PROVENANCE_V1_COMPATIBILITY_KEYS)
+def test_provenance_v2_preserves_lineage(tmp_path: Path) -> None:
     plan = _plan(
         segments=[
             _segment(0, 24, backend="acme.first", digest=SHA_B),
@@ -585,7 +551,6 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
         "normalization": [],
         "attachments": {},
         "backend_fragments": {"acme.first": {"vendor": "Acme"}},
-        "v1_compatibility": compatibility,
     }
     payload = assemble_provenance_v2(**kwargs)
     assert payload["schema_version"] == 2
@@ -601,16 +566,7 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
         {"window", "renderer", "input_hashes"},
         {"window", "renderer", "input_hashes"},
     ]
-    # V1-compatible projections are preserved unchanged.
-    assert payload["segments"] == [
-        {"engine": "first", "from": 0.0, "to": 1.0},
-        {"engine": "second", "from": 1.0, "to": 2.0},
-    ]
-    # segment_provenance passes through from the v1 compatibility projection
-    # verbatim — the host never rewrites it.
-    assert payload["segment_provenance"] == compatibility["segment_provenance"]
     assert payload["finalizer"] == _finalizer().to_dict()
-    assert payload["composition_id"] == "TimelineComposition"
 
     sidecar = tmp_path / "video.mp4.provenance.json"
     assert write_provenance_v2(sidecar, **kwargs) == payload
@@ -627,7 +583,6 @@ def test_provenance_rejects_spoofed_segment_projection_in_plan_mapping() -> None
             timeline="timeline.json",
             assets_registry=None,
             plan=plan,
-            v1_compatibility=_compatibility(),
         )
 
 
@@ -719,7 +674,6 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
         normalization=[],
         attachments={},
         backend_fragments={},
-        v1_compatibility=_compatibility(),
     )
     assert payload["planner"]["alias_chain"] == planner.alias_chain
     assert payload["planner"]["override"] == planner.override
@@ -774,7 +728,6 @@ def test_provenance_emits_hashed_artifact_lineage() -> None:
         normalization=[],
         attachments={},
         backend_fragments={},
-        v1_compatibility=_compatibility(),
     )
     lineage = payload["artifact_profiles"]["outputs/visual.mp4"]
     assert lineage["sha256"] == SHA_B
@@ -826,7 +779,6 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
         normalization=[],
         attachments={},
         backend_fragments={},
-        v1_compatibility=_compatibility(),
     )
     with pytest.raises(TypeError, match="hashed lineage"):
         assemble_provenance_v2(

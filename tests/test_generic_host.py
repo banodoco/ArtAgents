@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import signal
 import subprocess
@@ -23,28 +24,32 @@ from astrid.core.execution.generic_host import (
 
 
 class FakeRuntime:
+    schema_digest = "sha256:" + "1" * 64
+
     def __init__(self):
         self.registrations = []
-        self.preflights = []
         self.settlements = []
         self.failures = []
         self.heartbeats = []
         self.capability_registrations = []
         self.tasks = {}
 
+    def health(self):
+        return {
+            "protocol": "workspace.v1",
+            "schema_digest": self.schema_digest,
+            "runtime_epoch": 1,
+        }
+
     def register_executor(self, executor_id, **payload):
         self.registrations.append((executor_id, payload))
         return {"id": executor_id, "state": "registered"}
 
-    def preflight_executor(self, executor_id, **payload):
-        self.preflights.append((executor_id, payload))
-        return {"id": executor_id, "ready": payload["ready"]}
-
     def register_capability(self, capability_id, **payload):
         self.capability_registrations.append((capability_id, payload))
 
-    def heartbeat(self, task_id, lease_token):
-        self.heartbeats.append((task_id, lease_token))
+    def heartbeat(self, task_id, lease_token, *, attempt_id, fence):
+        self.heartbeats.append((task_id, lease_token, attempt_id, fence))
 
     def task(self, task_id):
         return self.tasks[task_id]
@@ -59,6 +64,24 @@ class FakeRuntime:
     def claim_next(self, **payload):
         self.claim_payload = payload
         return None
+
+    def upload_object(self, path, *, media_type, filename=None):
+        data = Path(path).read_bytes()
+        return SimpleNamespace(
+            object_id=f"object-{hashlib.sha256(data).hexdigest()[:12]}",
+            digest=hashlib.sha256(data).hexdigest(),
+            size=len(data),
+            media_type=media_type,
+            filename=filename,
+        )
+
+    def withdraw_capability(self, capability_id, *, digest, reason):
+        self.register_capability(
+            capability_id,
+            digest=digest,
+            status="unavailable",
+            unavailable_reason=reason,
+        )
 
 
 def _write_manifest(
@@ -161,7 +184,15 @@ def test_input_materialization_rejects_traversal_names(tmp_path):
     host = GenericPackHost(pack_roots=[tmp_path], client=Objects())
     with pytest.raises(HostError, match="input name escapes"):
         host._materialize_inputs(
-            {"input_digests": [{"name": "../escape", "digest": "a" * 64}]},
+            {
+                "input_object_ids": [],
+                "spec": {
+                    "inputs": {},
+                    "input_digests": [
+                        {"name": "../escape", "digest": "a" * 64}
+                    ],
+                },
+            },
             tmp_path / "attempt",
         )
 
@@ -499,7 +530,10 @@ def test_removed_capability_invalidates_and_is_withdrawn_on_deliberate_reregistr
     assert runtime.withdrawals == [
         ("test.echo", removed_digest, "capability removed from source checkout")
     ]
-    assert runtime.registrations[-1][1]["capabilities"] == ["test.base"]
+    assert [
+        item["capability_id"]
+        for item in runtime.registrations[-1][1]["capabilities"]
+    ] == ["test.base"]
 
 
 def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(tmp_path):
@@ -511,15 +545,11 @@ def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(t
             self.epoch = 7
 
         def health(self):
-            try:
-                from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
-            except ImportError:
-                # The host's protocol/epoch checks remain deterministic in
-                # the lightweight unit-test environment without the optional
-                # generated client package.
-                SCHEMA_DIGEST = ""
-
-            return {"protocol": "workspace.v1", "schema_digest": SCHEMA_DIGEST, "runtime_epoch": self.epoch}
+            return {
+                "protocol": "workspace.v1",
+                "schema_digest": self.schema_digest,
+                "runtime_epoch": self.epoch,
+            }
 
     runtime = EpochRuntime()
     host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
@@ -530,7 +560,10 @@ def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(t
     assert payload["runtime_epoch"] == 7
     assert payload["source_epoch"] == host.source_epoch
     assert payload["dependency_digest"]
-    assert payload["capability_states"]["test.echo"]["source_digest"]
+    capability = payload["capabilities"][0]
+    assert capability["capability_id"] == "test.echo"
+    assert capability["definition_digest"] == host.capabilities["test.echo"].capability_digest
+    assert capability["status"] == "ready"
 
     runtime.epoch = 8
     with pytest.raises(HostError, match="runtime epoch changed; deliberate re-registration required"):
@@ -542,7 +575,11 @@ def test_runtime_protocol_mismatch_blocks_registration_before_publish(tmp_path):
 
     class IncompatibleRuntime(FakeRuntime):
         def health(self):
-            return {"protocol": "workspace.v0", "schema_digest": "", "runtime_epoch": 1}
+            return {
+                "protocol": "workspace.v0",
+                "schema_digest": self.schema_digest,
+                "runtime_epoch": 1,
+            }
 
     runtime = IncompatibleRuntime()
     host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
@@ -560,11 +597,20 @@ def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):
     result = host.register()
     assert runtime.registrations[0][1]["resource_keys"] == ["cpu"]
     assert runtime.capability_registrations[0][0] == "test.echo"
-    task = {"task": {"id": "task-1", "capability": "test.echo", "project": "demo", "spec": {}}}
+    task = {
+        "task": {
+            "id": "task-1",
+            "capability": "test.echo",
+            "project": "demo",
+            "attempt_id": "attempt-1",
+            "fence": 1,
+            "spec": {"spec": {"inputs": {}}},
+        }
+    }
     runtime.tasks["task-1"] = task
     settled = host.run_task(task, lease_token="lease-1")
     assert settled["task"]["status"] == "completed"
-    assert runtime.heartbeats == [("task-1", "lease-1")]
+    assert runtime.heartbeats == [("task-1", "lease-1", "attempt-1", 1)]
     outputs = runtime.settlements[0][2]["outputs"]
     assert outputs[0]["name"] == "answer"
     assert outputs[0]["digest"]
@@ -654,8 +700,17 @@ def test_register_preserves_declared_dispositions_and_block_reasons(tmp_path, mo
     matrix.write_text(json.dumps({"schema_version": 1, "capabilities": capabilities}), encoding="utf-8")
 
     class CaptureRuntime(RuntimeProtocolClient):
+        schema_digest = FakeRuntime.schema_digest
+
         def __init__(self):
             self.capability_registrations = []
+
+        def health(self):
+            return {
+                "protocol": "workspace.v1",
+                "schema_digest": self.schema_digest,
+                "runtime_epoch": 1,
+            }
 
         def register_capability(self, capability_id, **payload):
             self.capability_registrations.append((capability_id, payload))

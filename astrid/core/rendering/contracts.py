@@ -68,7 +68,6 @@ PROVENANCE_V2_CORE_KEYS = frozenset(
         "request_digest",
         "requested_policy",
         "planner",
-        "segments",
         "segments_v2",
         "artifact_profiles",
         "audio_ownership",
@@ -76,43 +75,6 @@ PROVENANCE_V2_CORE_KEYS = frozenset(
         "finalizer",
         "attachments",
         "backend_fragments",
-    }
-)
-
-PROVENANCE_V1_COMPATIBILITY_KEYS = frozenset(
-    {
-        "project_dir",
-        "composition_id",
-        "active_pack_order",
-        "active_theme",
-        "registry_hash",
-        "registry_state",
-        "resolved_effect_ids",
-        "resolved_effects",
-        "source_pack_ids",
-        "element_roots",
-        "staged_asset_ids",
-        "staged_asset_root",
-        "segment_provenance",
-        "ffmpeg_specialization",
-        "audio_reactive_colour",
-    }
-)
-
-PROVENANCE_V1_ALWAYS_KEYS = frozenset(
-    {
-        "project_dir",
-        "composition_id",
-        "active_pack_order",
-        "active_theme",
-        "registry_hash",
-        "registry_state",
-        "resolved_effect_ids",
-        "resolved_effects",
-        "source_pack_ids",
-        "element_roots",
-        "staged_asset_ids",
-        "staged_asset_root",
     }
 )
 
@@ -132,7 +94,6 @@ _RETIRED_PROVENANCE_V2_KEYS = frozenset(
 RESERVED_BACKEND_FRAGMENT_KEYS = frozenset(
     RENDER_RESULT_CORE_KEYS
     | PROVENANCE_V2_CORE_KEYS
-    | PROVENANCE_V1_COMPATIBILITY_KEYS
     | _RETIRED_PROVENANCE_V2_KEYS
 )
 

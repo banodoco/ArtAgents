@@ -6,14 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-try:
-    import yaml
-except ModuleNotFoundError:  # pragma: no cover - exercised by no-deps probes
-    # The gateway's documentation/version paths do not parse capability
-    # manifests. Keep importing the gateway possible in a minimal wheel
-    # environment; manifest parsing below still fails over to Astrid's
-    # deterministic flat parser when PyYAML is unavailable.
-    yaml = None  # type: ignore[assignment]
+import yaml
 
 from astrid.core.pack._common import (
     ELEMENT_MANIFEST_NAMES,
@@ -158,58 +151,10 @@ def _load_manifest_payload(path: Path) -> Any:
             return json.loads(text)
         except json.JSONDecodeError as exc:
             raise PackValidationError(f"invalid JSON pack manifest {path}: {exc.msg}") from exc
-    # Try canonical YAML parsing first (handles both flat and nested manifests).
-    # Fall back to the legacy flat parser for manifests that yaml.safe_load cannot parse.
-    if yaml is not None:
-        try:
-            data = yaml.safe_load(text)
-            if isinstance(data, dict):
-                if "schema_version" in data:
-                    return data
-                try:
-                    return _parse_flat_yaml(text, path=path)
-                except PackValidationError:
-                    return data
-        except yaml.YAMLError:
-            pass
-    return _parse_flat_yaml(text, path=path)
-
-
-def _parse_flat_yaml(text: str, *, path: Path) -> dict[str, Any]:
-    data: dict[str, Any] = {}
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if raw_line[: len(raw_line) - len(raw_line.lstrip())].strip():
-            raise PackValidationError(f"{path}: invalid indentation at line {line_number}")
-        if ":" not in stripped:
-            raise PackValidationError(f"{path}: expected key: value at line {line_number}")
-        key, value = stripped.split(":", 1)
-        key = key.strip()
-        value = _strip_comment(value.strip())
-        if not key:
-            raise PackValidationError(f"{path}: empty key at line {line_number}")
-        if value in {"", "{}"}:
-            data[key] = {}
-        else:
-            data[key] = _unquote(value)
-    if not data:
-        raise PackValidationError(f"{path}: empty pack manifest")
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise PackValidationError(f"invalid YAML pack manifest {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PackValidationError(f"pack manifest must contain a YAML object: {path}")
     return data
-
-
-def _strip_comment(value: str) -> str:
-    in_quote: str | None = None
-    for index, char in enumerate(value):
-        if char in {"'", '"'} and (index == 0 or value[index - 1] != "\\"):
-            in_quote = None if in_quote == char else char if in_quote is None else in_quote
-        if char == "#" and in_quote is None and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-    return value
-
-
-def _unquote(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value

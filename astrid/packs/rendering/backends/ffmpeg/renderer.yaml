@@ -9,7 +9,7 @@ command:
 operations:
   - render
   - support
-description: Render legacy media and text-overlay timelines with FFmpeg.
+description: Render media and text-overlay timelines with FFmpeg.
 capabilities:
   clip_types:
     - media

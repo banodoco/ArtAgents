@@ -145,11 +145,7 @@ def _active_theme_for_provenance(
 
 
 def _render_provenance_payload(
-    out_path: Path,
     *,
-    engine: str,
-    timeline_path: Path,
-    assets_path: Path,
     project_dir: Path,
     composition_id: str,
     theme_path: Path | None,
@@ -165,11 +161,6 @@ def _render_provenance_payload(
     animations = list(stage_summary.get("animations") or [])
     transitions = list(stage_summary.get("transitions") or [])
     payload: dict[str, Any] = {
-        "schema_version": 1,
-        "engine": engine,
-        "output": str(out_path.resolve()),
-        "timeline": str(timeline_path.resolve()),
-        "assets_registry": str(assets_path.resolve()),
         "project_dir": str(project_dir.resolve()),
         "composition_id": composition_id,
         "active_pack_order": (
@@ -229,7 +220,7 @@ def _render_provenance_payload(
     if runtime is not None:
         payload["runtime"] = dict(runtime)
     if segments is not None:
-        payload["segments"] = segments
+        payload["segment_windows"] = segments
     if segment_provenance is not None:
         payload["segment_provenance"] = segment_provenance
     return payload

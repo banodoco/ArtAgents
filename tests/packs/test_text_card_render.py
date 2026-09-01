@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.packs.rendering.executors.render import run as render_remotion
+from astrid.packs.rendering.executors.render import run as render_executor
 from astrid.core import timeline
 
 
@@ -36,7 +36,7 @@ class TextCardRenderTest(unittest.TestCase):
             }
             timeline.save_timeline(config, timeline_path)
             timeline.save_registry({"assets": {}}, assets_path)
-            render_remotion.render(timeline_path, assets_path, out_path)
+            render_executor.render(timeline_path, assets_path, out_path)
             self.assertGreater(out_path.stat().st_size, 0)
 
 

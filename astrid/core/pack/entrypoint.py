@@ -14,7 +14,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Callable, Iterator
 
-from astrid.core.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
+from astrid.core.contracts.errors import (
+    AstridError,
+    coerce_astrid_error,
+    render_astrid_error,
+)
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PROJECT_RUN
 
 _CANONICAL_RUNTIME_CAPABILITY: ContextVar[str | None] = ContextVar(
@@ -79,7 +83,7 @@ def run_pack_main(
     argv: list[str] | None = None,
     recovery_command: str | None = None,
 ) -> int:
-    """Run a pack entrypoint with AstridError rendering and degraded fallback."""
+    """Run a pack entrypoint with the canonical AstridError renderer."""
 
     snapshot = {"argv": list(argv or ()), "capability_id": capability_id}
     try:
@@ -95,8 +99,10 @@ def run_pack_main(
             )
         )
     except Exception as exc:  # noqa: BLE001
-        bug = wrap_degraded_error(
-            exc,
-            state_snapshot=snapshot,
+        return render_astrid_error(
+            coerce_astrid_error(
+                exc,
+                state_snapshot={**snapshot, "original_type": type(exc).__name__},
+                degraded=True,
+            )
         )
-        return render_astrid_error(bug)

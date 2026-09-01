@@ -76,7 +76,12 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         )
         registration = host.register()
         assert registration["registration"]["executor_id"] == "echo-host"
-        assert registration["registration"]["capability_digests"][record.id] == record.capability_digest
+        capability = next(
+            item
+            for item in registration["registration"].capabilities
+            if item.capability_id == record.id
+        )
+        assert capability.definition_digest == record.capability_digest
 
         task = generated.admit_task(
             capability_id=record.id,

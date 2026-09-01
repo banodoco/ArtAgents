@@ -1,8 +1,8 @@
 """Parser construction for the pack CLI.
 
-Extracted from ``astrid/core/pack/cli.py`` during M4 giant-file split.
-``build_parser`` remains the public entry point; it lazily imports command
-handlers from ``.cli`` to avoid a circular import between the two modules.
+Extracted from ``astrid/core/pack/cli.py`` during the pack CLI split.
+``build_parser`` remains the public entry point and binds each command to the
+module that owns its implementation.
 """
 
 from __future__ import annotations
@@ -37,23 +37,17 @@ def _add_taxonomy_filter_args(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``packs`` subcommand parser.
 
-    M4 T14 documented compatibility case: all command handlers are imported
-    through the .cli facade rather than from their canonical modules so that
-    existing imports of handlers from ``astrid.core.pack.cli`` (and the
-    ``astrid.core.pack.cli`` / ``astrid.core.pack.cli`` compatibility
-    shims) keep resolving correctly.  The facade module re-exports the
-    canonical definitions.
+    Handlers are imported from their owning modules so the parser has one
+    canonical implementation path and does not depend on the public facade.
     """
-    # Late import to avoid circular dependency — .cli imports from .cli_parser
-    from .cli import (  # noqa: PLC0415
-        _handle_agent_index,
-        _handle_inspect,
+    from .cli_basic import (  # noqa: PLC0415
         _handle_list,
         _handle_new,
-        _handle_search,
         _handle_status,
         _handle_validate,
     )
+    from .cli_inspect import _handle_inspect  # noqa: PLC0415
+    from .cli_search import _handle_agent_index, _handle_search  # noqa: PLC0415
 
     parser = RecoverableArgumentParser(
         prog="python3 -m astrid.core.pack.cli",

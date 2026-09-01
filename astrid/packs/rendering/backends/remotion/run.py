@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Remotion renderer and raw rendering-protocol v1 command adapter.
 
-The public ``render`` function is the compatibility seam used by the legacy
-``rendering.render`` executor.  The command-line entry point is the leaf
-backend protocol used by the generic renderer transport: it reads one request
-file and writes exactly one result or structured error file.
+The command-line entry point is the leaf backend protocol used by the generic
+renderer transport: it reads one request file and writes exactly one result or
+structured error file.
 """
 
 from __future__ import annotations
@@ -24,14 +23,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
 from typing import Any, Mapping, Sequence
-
-# Raw renderer commands are deliberately executable without an installed
-# Astrid wheel.  The command transport sanitizes PYTHONPATH, so direct script
-# execution must make the owning checkout importable before SDK imports.
-if __package__ in {None, ""}:
-    _CHECKOUT_ROOT = Path(__file__).resolve().parents[5]
-    if str(_CHECKOUT_ROOT) not in sys.path:
-        sys.path.insert(0, str(_CHECKOUT_ROOT))
 
 from astrid.core import timeline
 from astrid.core.audit import AuditContext
@@ -93,7 +84,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by wheel installs
     gen_effect_registry = None
 
 
-_SHIM_EXTENSIONS = (".ts", ".js", ".d.ts", ".js.map", ".d.ts.map")
 _RangeHTTPRequestHandler = _rendering_assets.RangeHTTPRequestHandler
 
 
@@ -184,26 +174,6 @@ def _timeline_composition_src(project_dir: Path) -> Path | None:
     return composition_src if composition_src.is_dir() else None
 
 
-def _remotion_source_dir(project_dir: Path) -> Path:
-    """Return the Remotion app's own generated-shim directory.
-
-    The source checkout historically generated shims in ``REPO_ROOT/remotion``
-    because that is also the in-tree Remotion app.  A render can instead be
-    pointed at a separately provisioned app, though; using the checkout path
-    in that case makes its registry cache permanently stale and lets parallel
-    apps overwrite one another.  Bind the generated outputs to the app being
-    rendered, while retaining the source-checkout path for compatibility.
-    """
-
-    in_tree_remotion = (REPO_ROOT / "remotion").resolve()
-    try:
-        if project_dir.resolve() == in_tree_remotion:
-            return in_tree_remotion / "src"
-    except OSError:
-        pass
-    return project_dir / "src"
-
-
 def _registry_output_paths(project_dir: Path) -> list[Path]:
     composition_src = _timeline_composition_src(project_dir)
     package_src = composition_src or (
@@ -212,15 +182,6 @@ def _registry_output_paths(project_dir: Path) -> list[Path]:
     paths = [
         package_src / f"{kind}.generated.ts" for kind in ("effects", "animations", "transitions")
     ]
-    remotion_src = _remotion_source_dir(project_dir)
-    for kind in ("effects", "animations", "transitions"):
-        base = remotion_src / f"{kind}.generated"
-        paths.extend(
-            Path(f"{base}{extension}")
-            for extension in (
-                gen_effect_registry.SHIM_EXTENSIONS if gen_effect_registry else _SHIM_EXTENSIONS
-            )
-        )
     return paths
 
 
@@ -289,12 +250,6 @@ def _regenerate_element_registries_locked(
     composition_src = _timeline_composition_src(project_dir)
     if composition_src is not None:
         env["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
-    if gen_effect_registry is not None:
-        # Keep generated shims beside the app's composition source.  This is
-        # essential when two isolated Remotion projects render concurrently;
-        # neither should mutate the checkout's generated files or the other
-        # project's cache.
-        env["ASTRID_REMOTION_SRC"] = str(_remotion_source_dir(project_dir))
     env.update(remotion_lock.remotion_render_lock_child_env())
     subprocess.run(
         cmd,
@@ -548,45 +503,6 @@ def _stage_effect_assets_for_timeline(
     }
 
 
-def _render_provenance_sidecar_path(out_path: Path) -> Path:
-    return Path(f"{out_path}.provenance.json")
-
-
-def _write_render_provenance(
-    out_path: Path,
-    *,
-    engine: str,
-    timeline_path: Path,
-    assets_path: Path,
-    project_dir: Path,
-    composition_id: str,
-    theme_path: Path | None,
-    active_theme: dict[str, Any] | None,
-    registry_state: dict[str, Any],
-    stage_summary: dict[str, Any],
-    segments: list[dict[str, float | str]] | None = None,
-    segment_provenance: list[dict[str, Any]] | None = None,
-) -> Path:
-    payload = _render_provenance_payload(
-        out_path,
-        engine=engine,
-        timeline_path=timeline_path,
-        assets_path=assets_path,
-        project_dir=project_dir,
-        composition_id=composition_id,
-        theme_path=theme_path,
-        active_theme=active_theme,
-        registry_state=registry_state,
-        stage_summary=stage_summary,
-        segments=segments,
-        segment_provenance=segment_provenance,
-        active_pack_order=_active_pack_order_for_provenance(),
-    )
-    sidecar_path = _render_provenance_sidecar_path(out_path)
-    write_json_atomic(sidecar_path, payload)
-    return sidecar_path
-
-
 def _stderr_tail(stderr: str) -> str:
     lines = stderr.splitlines()
     tail = lines[-40:] if len(lines) > 40 else lines
@@ -802,106 +718,6 @@ def _execute_remotion_locked(
         finally:
             props_path.unlink(missing_ok=True)
             shutil.rmtree(staged_public_root, ignore_errors=True)
-
-
-def render(
-    timeline_path: Path,
-    assets_path: Path,
-    out_path: Path,
-    *,
-    project_dir: Path | None = None,
-    composition_id: str = DEFAULT_COMPOSITION_ID,
-    theme_path: Path | None = None,
-    min_free_gb: float | None = None,
-    previous_outputs: Sequence[Path] = (),
-    materialized_root: Path | None = None,
-    materialized_objects: Mapping[str, str] | None = None,
-) -> Path:
-    """Render privately, then publish the legacy video/provenance pair."""
-
-    timeline_path = Path(timeline_path)
-    assets_path = Path(assets_path)
-    out_path = Path(out_path)
-    project_dir = Path(project_dir) if project_dir is not None else REPO_ROOT / "remotion"
-    if _timeline_alpha(_serialize_timeline(timeline_path)):
-        # Stamped segments render ProRes 4444, which Remotion only writes to
-        # a .mov container; remap the legacy publication path the same way
-        # the protocol path does so the published file keeps a truthful name.
-        out_path = Path(_alpha_output_name(str(out_path)))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(
-        prefix=f".{out_path.name}.publication-",
-        dir=str(out_path.parent),
-    ) as publication_tmp:
-        staged_video = Path(publication_tmp) / out_path.name
-        details = _execute_remotion(
-            timeline_path,
-            assets_path,
-            staged_video,
-            provenance_out_path=out_path,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            min_free_gb=min_free_gb,
-            staging_parent=out_path.parent,
-            materialized_root=materialized_root,
-            materialized_objects=materialized_objects,
-        )
-        provenance = _render_provenance_payload(
-            out_path,
-            engine="remotion",
-            timeline_path=timeline_path,
-            assets_path=assets_path,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            active_theme=details.active_theme,
-            registry_state=details.registry_state,
-            stage_summary=details.stage_summary,
-            runtime=details.runtime or None,
-            active_pack_order=_active_pack_order_for_provenance(),
-        )
-        output = publish_render_result(
-            staged_video,
-            provenance,
-            out_path=out_path,
-            sidecar_path=_render_provenance_sidecar_path(out_path),
-            previous_outputs=previous_outputs,
-        )
-
-    audit = AuditContext.from_env()
-    if audit is not None:
-        timeline_id = audit.register_asset(
-            kind="timeline",
-            path=timeline_path,
-            label="Render timeline",
-            stage="render_remotion",
-        )
-        assets_id = audit.register_asset(
-            kind="assets_registry",
-            path=assets_path,
-            label="Render asset registry",
-            stage="render_remotion",
-        )
-        render_id = audit.register_asset(
-            kind="render",
-            path=output,
-            label="Rendered video",
-            parents=[timeline_id, assets_id],
-            stage="render_remotion",
-            metadata={"composition": composition_id},
-        )
-        audit.register_node(
-            stage="render_remotion",
-            label="Render Remotion timeline",
-            parents=[timeline_id, assets_id],
-            outputs=[render_id],
-            metadata={
-                "composition": composition_id,
-                "project_dir": str(project_dir),
-            },
-        )
-    return output
 
 
 def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSettings:
@@ -1159,11 +975,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
         os.replace(staged_video, output_path)
 
     try:
-        provenance_v1 = _render_provenance_payload(
-            output_path,
-            engine="remotion",
-            timeline_path=timeline_path,
-            assets_path=requested_assets_path or assets_path,
+        backend_provenance = _render_provenance_payload(
             project_dir=settings.project_dir,
             composition_id=settings.composition_id,
             theme_path=settings.theme_path,
@@ -1189,7 +1001,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
                     "renderer": "remotion",
                     "renderer_version": BACKEND_VERSION,
                     "composition": settings.composition_id,
-                    "legacy_v1": provenance_v1,
+                    **backend_provenance,
                 }
             },
             normalization=[],

@@ -315,7 +315,6 @@
               "request_digest",
               "requested_policy",
               "planner",
-              "segments",
               "artifact_profiles",
               "finalizer",
               "attachments",

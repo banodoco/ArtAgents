@@ -670,9 +670,8 @@ def test_live_media_plus_text_smoke(tmp_path: Path) -> None:
     report = ffmpeg_run.support(request, workspace=tmp_path)
     assert report.supported is True
 
-    output = ffmpeg_run.render(
-        timeline_path, assets_path, tmp_path / "smoke.mp4"
-    )
+    result = ffmpeg_run._protocol_render(request, workspace=tmp_path)
+    output = tmp_path / result.video.path
 
     assert output.exists()
     # Hang regression guard: a render wedged by an unterminated overlay input

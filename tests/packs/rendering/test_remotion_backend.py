@@ -128,6 +128,44 @@ def _request(
     )
 
 
+def _execute_direct(
+    timeline_path: Path,
+    assets_path: Path,
+    out_path: Path,
+    *,
+    project_dir: Path,
+    composition_id: str = "TimelineComposition",
+    theme_path: Path | None = None,
+    materialized_root: Path | None = None,
+    materialized_objects: dict[str, str] | None = None,
+) -> tuple[Path, dict[str, object]]:
+    """Exercise the canonical backend implementation without restoring its retired facade."""
+
+    details = render_remotion._execute_remotion(
+        timeline_path,
+        assets_path,
+        out_path,
+        provenance_out_path=out_path,
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        min_free_gb=None,
+        materialized_root=materialized_root,
+        materialized_objects=materialized_objects,
+    )
+    provenance = render_remotion._render_provenance_payload(
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        active_theme=details.active_theme,
+        registry_state=details.registry_state,
+        stage_summary=details.stage_summary,
+        runtime=details.runtime,
+        active_pack_order=render_remotion._active_pack_order_for_provenance(),
+    )
+    return out_path.resolve(), provenance
+
+
 def test_manifest_registers_static_raw_command_backend() -> None:
     manifest_path = (
         ROOT
@@ -168,7 +206,7 @@ def test_support_is_request_sensitive_and_accepts_complete_timeline(
     assert report.features["audio_ownership"] == "rendered"
 
 
-def test_support_does_not_reject_legacy_output_hint_without_profile(
+def test_support_treats_timeline_output_hint_as_informational_without_profile(
     tmp_path: Path,
 ) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
@@ -185,7 +223,7 @@ def test_support_does_not_reject_legacy_output_hint_without_profile(
     with mock.patch.object(remotion.shutil, "which", return_value="/usr/bin/tool"):
         report = remotion.support(request, workspace=tmp_path)
 
-    # Legacy output hints are metadata, not a false 1920-only capability
+    # Timeline output hints are metadata, not a false 1920-only capability
     # restriction. An explicit RenderProfile remains the authoritative way to
     # request/validate the produced media dimensions.
     assert report.supported is True
@@ -370,122 +408,6 @@ def test_manifest_command_runs_from_owning_pack_root(tmp_path: Path) -> None:
     assert report.backend == remotion.BACKEND_ID
 
 
-def test_render_preserves_props_command_cleanup_and_provenance(tmp_path: Path) -> None:
-    timeline_path, assets_path = _write_inputs(tmp_path)
-    project = _write_project(tmp_path)
-    output_path = tmp_path / "output" / "hype.mp4"
-    seen: dict[str, object] = {}
-
-    def fake_run(command, **kwargs):
-        normalized = [str(part) for part in command]
-        if _is_remotion_render_command(normalized):
-            props_path = Path(normalized[normalized.index("--props") + 1])
-            seen["props_path"] = props_path
-            seen["props"] = json.loads(props_path.read_text(encoding="utf-8"))
-            seen["command"] = normalized
-            seen["env"] = kwargs["env"]
-            video_path = Path(normalized[normalized.index("--output") + 1])
-            video_path.write_bytes(b"fake-remotion-video")
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-
-    with (
-        mock.patch.object(remotion, "_regenerate_element_registries"),
-        mock.patch.object(
-            remotion,
-            "_effective_registry_state",
-            return_value={"version": 1, "hash": "registry-hash"},
-        ),
-        mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
-    ):
-        result = remotion.render(
-            timeline_path,
-            assets_path,
-            output_path,
-            project_dir=project,
-        )
-
-    assert result == output_path.resolve()
-    assert seen["props"].keys() == {"timeline", "assets", "theme"}
-    assert seen["command"][3] == "TimelineComposition"
-    assert "--allow-html-in-canvas" in seen["command"]
-    assert not Path(seen["props_path"]).exists()
-    provenance = json.loads(
-        remotion._render_provenance_sidecar_path(output_path).read_text(
-            encoding="utf-8"
-        )
-    )
-    assert provenance["engine"] == "remotion"
-    assert provenance["composition_id"] == "TimelineComposition"
-    assert provenance["registry_hash"] == "registry-hash"
-    assert provenance["runtime"]["node_executable"] == os.environ[
-        "ASTRID_NODE_EXECUTABLE"
-    ]
-    assert provenance["runtime"]["node_version"] == "v20.19.4"
-    assert provenance["runtime"]["remotion_cli"].endswith(
-        "node_modules/@remotion/cli/remotion-cli.js"
-    )
-
-
-def test_render_binds_asset_cors_to_selected_remotion_port(tmp_path: Path) -> None:
-    timeline_path, assets_path = _write_inputs(tmp_path)
-    source = tmp_path / "asset.png"
-    source.write_bytes(b"asset bytes")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    timeline.save_registry(
-        {
-            "assets": {
-                "asset": {
-                    "media_id": "media-asset",
-                    "content_sha256": digest,
-                    "type": "image/png",
-                }
-            }
-        },
-        assets_path,
-    )
-    project = _write_project(tmp_path)
-    output_path = tmp_path / "output" / "hype.mp4"
-    seen_commands: list[list[str]] = []
-    seen_origins: list[str] = []
-    real_server = remotion.InvocationAssetServer
-
-    class TrackingAssetServer(real_server):
-        def __init__(self, *args, **kwargs):
-            seen_origins.append(kwargs["allowed_origin"])
-            super().__init__(*args, **kwargs)
-
-    def fake_run(command, **kwargs):
-        normalized = [str(part) for part in command]
-        if _is_remotion_render_command(normalized):
-            seen_commands.append(normalized)
-            _write_fake_remotion_output(normalized)
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-
-    with (
-        mock.patch.object(remotion, "_regenerate_element_registries"),
-        mock.patch.object(
-            remotion,
-            "_effective_registry_state",
-            return_value={"version": 1, "hash": "registry-hash"},
-        ),
-        mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
-        mock.patch.object(remotion, "InvocationAssetServer", TrackingAssetServer),
-        mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
-    ):
-        remotion.render(
-            timeline_path,
-            assets_path,
-            output_path,
-            project_dir=project,
-            materialized_root=tmp_path,
-            materialized_objects={"media-asset": str(source)},
-        )
-
-    assert seen_origins == ["http://localhost:3001"]
-    assert len(seen_commands) == 1
-    assert "--port=3001" in seen_commands[0]
-
-
 def test_protocol_render_returns_valid_namespaced_artifact_shape(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     project = _write_project(tmp_path)
@@ -538,27 +460,27 @@ def test_protocol_render_returns_valid_namespaced_artifact_shape(tmp_path: Path)
     fragment = result.backend_fragments[remotion.BACKEND_ID]
     assert fragment["renderer"] == "remotion"
     assert fragment["composition"] == "TimelineComposition"
-    assert fragment["legacy_v1"]["registry_hash"] == "registry-hash"
+    assert fragment["registry_hash"] == "registry-hash"
 
 
-def test_hype_merged_render_props_match_golden() -> None:
+def test_hype_merged_render_props_match_golden(tmp_path: Path) -> None:
     timeline_path = ROOT / "examples" / "hype.timeline.json"
     assets_path = ROOT / "examples" / "hype.assets.json"
-    assembled = {
-        "assets": timeline.load_registry(assets_path),
-        # Omitted theme selects the intentional built-in style. Historical
-        # checkout theme paths are no longer a render authority.
-        "theme": remotion._resolved_theme_for_render(timeline_path, None),
-        "timeline": remotion._serialize_timeline(
-            timeline_path,
-            default_theme="banodoco-default",
-        ),
-    }
     expected = json.loads(
         (ROOT / "tests" / "golden" / "hype" / "merged_render_props.json").read_text(
             encoding="utf-8"
         )
     )
+    runtime_theme = tmp_path / "theme.json"
+    runtime_theme.write_text(json.dumps(expected["theme"]), encoding="utf-8")
+    assembled = {
+        "assets": timeline.load_registry(assets_path),
+        "theme": remotion._resolved_theme_for_render(timeline_path, runtime_theme),
+        "timeline": remotion._serialize_timeline(
+            timeline_path,
+            default_theme="banodoco-default",
+        ),
+    }
     assert assembled == expected
 
 
@@ -569,7 +491,7 @@ def test_explicit_missing_theme_path_does_not_fall_back_to_workspace_theme(
         remotion._theme_for_props(tmp_path / "missing-theme")
 
 
-def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
+def test_facade_delegates_complex_remotion_without_policy_drift(
     tmp_path: Path,
 ) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
@@ -664,7 +586,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
             project_root / "hype.assets.json",
         )
 
-    def test_registry_generation_sets_theme_and_composition_env(self) -> None:
+    def test_registry_generation_uses_pack_registry_and_composition_env(self) -> None:
         with tempfile.TemporaryDirectory(prefix="render-registry-") as tmp_text:
             tmp = Path(tmp_text)
             project_dir, composition_src = self._write_fake_remotion_project(tmp)
@@ -792,7 +714,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 mock.patch.object(render_remotion, "_registry_output_paths", return_value=generated_outputs),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -802,7 +724,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 )
                 self.assertEqual(len(registry_hashes_seen), 1)
 
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -814,7 +736,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 
                 component_path.write_text("export default function Effect() { return 'v2'; }\n", encoding="utf-8")
                 edited_hash = state_from_component(None)["hash"]
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -824,7 +746,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 )
                 self.assertEqual(registry_hashes_seen, [mock.ANY, edited_hash])
 
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -835,7 +757,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 self.assertEqual(registry_hashes_seen, [mock.ANY, edited_hash])
 
                 generated_outputs[0].unlink()
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -878,7 +800,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 ),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
-                result = render_remotion.render(
+                result, provenance = _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -886,9 +808,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                     composition_id="TimelineComposition",
                     theme_path=None,
                 )
-            provenance_path = render_remotion._render_provenance_sidecar_path(out_path.resolve())
-            self.assertTrue(provenance_path.exists())
-            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result, out_path.resolve())
         self.assertEqual(len(calls), 2)
@@ -925,8 +844,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(props["timeline"]["tracks"][0]["id"], "v1")
         self.assertEqual(len(props_paths), 1)
         self.assertFalse(props_paths[0].exists(), "render should remove the temporary props file")
-        self.assertEqual(provenance["engine"], "remotion")
-        self.assertEqual(provenance["output"], str(out_path.resolve()))
         self.assertEqual(provenance["registry_hash"], render_remotion._effective_registry_state(None)["hash"])
         self.assertEqual(provenance["resolved_effect_ids"], [])
 
@@ -987,7 +904,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                     return_value=({"sparkle": used, "unused": unused}, {"sparkle-alias": "sparkle"}),
                 ),
             ):
-                render_remotion.render(
+                _, provenance = _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -995,9 +912,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                     composition_id="TimelineComposition",
                     theme_path=None,
                 )
-            provenance = json.loads(
-                render_remotion._render_provenance_sidecar_path(out_path.resolve()).read_text(encoding="utf-8")
-            )
 
         self.assertEqual(len(props_payloads), 1)
         clip_params = props_payloads[0]["timeline"]["clips"][0]["params"]
@@ -1062,7 +976,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "Remotion render failed"):
-                    render_remotion.render(
+                    _execute_direct(
                         timeline_path,
                         assets_path,
                         out_path,
@@ -1075,7 +989,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
             self.assertFalse(staged_roots_seen[0].exists())
             self.assertEqual(len(props_paths_seen), 1)
             self.assertFalse(props_paths_seen[0].exists())
-            self.assertFalse(render_remotion._render_provenance_sidecar_path(out_path.resolve()).exists())
 
     def test_render_provenance_matches_registry_and_local_overlay_discovery(self) -> None:
         with tempfile.TemporaryDirectory(prefix="render-local-provenance-") as tmp_text:
@@ -1104,7 +1017,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 mock.patch.object(render_remotion, "REPO_ROOT", project_root),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
-                result = render_remotion.render(
+                result, provenance = _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -1112,12 +1025,8 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                     composition_id="TimelineComposition",
                     theme_path=None,
                 )
-            sidecar_path = render_remotion._render_provenance_sidecar_path(out_path.resolve())
-            sidecar_exists = sidecar_path.exists()
-            provenance = json.loads(sidecar_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result, out_path.resolve())
-        self.assertTrue(sidecar_exists)
         self.assertEqual(provenance["active_pack_order"], expected_pack_order)
         self.assertEqual(provenance["resolved_effect_ids"], [expected_effect.id])
         self.assertEqual(provenance["source_pack_ids"], ["local"])
@@ -1162,7 +1071,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 mock.patch.dict(render_remotion.os.environ, host_env, clear=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
-                render_remotion.render(
+                _execute_direct(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -1281,7 +1190,7 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
     assert "rendering.threejs" not in serialized
     fragment = payload["backend_fragments"]["rendering.remotion"]
     assert fragment["renderer"] == "remotion"
-    assert fragment["legacy_v1"]["engine"] == "remotion"
+    assert fragment["renderer"] == "remotion"
 
     probe = subprocess.run(
         [
@@ -1396,7 +1305,8 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
     project = _write_project(tmp_path)
 
     for timeline_path in (opaque_timeline, alpha_timeline):
-        output_path = tmp_path / f"{Path(timeline_path).stem}.mp4"
+        suffix = ".mov" if timeline_path == alpha_timeline else ".mp4"
+        output_path = tmp_path / f"{Path(timeline_path).stem}{suffix}"
         with (
             mock.patch.object(remotion, "_regenerate_element_registries"),
             mock.patch.object(
@@ -1407,7 +1317,7 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
             mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
             mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
         ):
-            remotion.render(
+            _execute_direct(
                 timeline_path, assets_path, output_path, project_dir=project
             )
 

@@ -90,9 +90,9 @@ def reconcile_runtime_module(
     """Fold a ``runtime.module`` declaration into ``metadata.runtime_module``.
 
     ``metadata.runtime_module`` is the single canonical runtime declaration the
-    loaders read (SD2). A manifest may legacy-declare the same module inside a
-    python ``runtime`` block; fold it into metadata so the module is declared
-    exactly once, and reject a double-declaration that conflicts.
+    loaders read (SD2). Python runtime blocks are normalized into that field so
+    every loader observes one module identity and conflicting declarations are
+    rejected.
     """
     block_module = _runtime_block_module(runtime_raw)
     if block_module is None:

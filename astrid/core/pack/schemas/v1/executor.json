@@ -17,8 +17,7 @@
       "oneOf": [
         {"$ref": "_defs.json#/definitions/runtime_python_cli"},
         {"$ref": "_defs.json#/definitions/runtime_python"},
-        {"$ref": "_defs.json#/definitions/runtime_command"},
-        {"$ref": "_defs.json#/definitions/runtime_command_legacy"}
+        {"$ref": "_defs.json#/definitions/runtime_command"}
       ]
     },
     "command": {

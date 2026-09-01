@@ -46,8 +46,8 @@ class RenderCommandInputs:
     registry: dict[str, Any]
     audio_sample_rate: int = 48000
     # Probe-derived evidence from strict support: stream-copy is only
-    # permitted when the actual media probe confirmed whole-source
-    # compatibility (never trust registry metadata alone).
+    # permitted when the probe confirms the entire source (never trust
+    # registry metadata alone).
     stream_copy_allowed: bool = False
     text_overlays: tuple[TextOverlaySpec, ...] = ()
 
@@ -148,38 +148,10 @@ def resolve_render_command_inputs(
     )
 
 
-def _command_inputs_for_paths(
-    timeline_path: Path,
-    assets_path: Path,
-    output_path: Path,
-) -> RenderCommandInputs:
-    resolved_timeline = Path(timeline_path).resolve()
-    resolved_assets = Path(assets_path).resolve()
-    if not resolved_timeline.exists():
-        raise FileNotFoundError(f"Timeline missing: {resolved_timeline}")
-    if not resolved_assets.exists():
-        raise FileNotFoundError(f"Asset registry missing: {resolved_assets}")
-    timeline_data = json.loads(resolved_timeline.read_text(encoding="utf-8"))
-    if not isinstance(timeline_data, dict):
-        raise ValueError("timeline must contain a JSON object")
-    registry = timeline.load_registry(resolved_assets)
-    validate_ffmpeg_media_timeline(timeline_data)
-    return RenderCommandInputs(
-        timeline_path=resolved_timeline,
-        assets_path=resolved_assets,
-        # The legacy explicit-path helper passed the caller's spelling through
-        # to FFmpeg and returned the same Path.  Protocol requests use the
-        # workspace builder above, which deliberately resolves their output.
-        output_path=Path(output_path),
-        timeline_data=timeline_data,
-        registry=dict(registry),
-    )
-
-
 def build_filter_graph(
     inputs: RenderCommandInputs,
 ) -> tuple[list[str], int | None]:
-    """Return the legacy filter graph and optional stream-copy input index."""
+    """Return the filter graph and optional stream-copy input index."""
 
     timeline_data = inputs.timeline_data
     registry = inputs.registry
@@ -562,59 +534,11 @@ def build_render_command(
     return build_render_command_from_inputs(inputs)
 
 
-def build_render_command_from_data(
-    timeline_path: Path,
-    assets_path: Path,
-    output_path: Path,
-    timeline_data: Mapping[str, Any],
-    registry: Mapping[str, Any],
-    *,
-    audio_sample_rate: int = 48000,
-    stream_copy_allowed: bool = False,
-    text_overlays: tuple[TextOverlaySpec, ...] = (),
-) -> list[str]:
-    """Build FFmpeg argv from ALREADY-LOADED, strictly supported data.
-
-    Used by the legacy facade path so the exact mappings it validated with
-    strict support are the ones rendered — no reload, no TOCTOU window.
-    """
-    return build_render_command_from_inputs(
-        RenderCommandInputs(
-            timeline_path=Path(timeline_path).resolve(),
-            assets_path=Path(assets_path).resolve(),
-            output_path=Path(output_path).resolve(),
-            timeline_data=dict(timeline_data),
-            registry=dict(registry),
-            audio_sample_rate=audio_sample_rate,
-            stream_copy_allowed=stream_copy_allowed,
-            text_overlays=text_overlays,
-        )
-    )
-
-
-def build_render_command_for_paths(
-    timeline_path: Path,
-    assets_path: Path,
-    output_path: Path,
-    *,
-    text_overlays: tuple[TextOverlaySpec, ...] = (),
-) -> list[str]:
-    """Compatibility builder for the legacy facade's explicit output path."""
-
-    return build_render_command_from_inputs(
-        replace(
-            _command_inputs_for_paths(timeline_path, assets_path, output_path),
-            text_overlays=text_overlays,
-        )
-    )
-
-
 __all__ = [
     "RenderCommandInputs",
     "TextOverlaySpec",
     "build_filter_graph",
     "build_render_command",
-    "build_render_command_for_paths",
     "build_render_command_from_inputs",
     "clip_duration_seconds",
     "resolve_render_command_inputs",

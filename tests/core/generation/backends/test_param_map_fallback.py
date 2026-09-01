@@ -181,6 +181,8 @@ class TestFalParamMapFallback:
         out_dir = tmp_path / "out"
 
         entry = _make_fal_entry(mode="i2i", param_map={})
+        source = tmp_path / "ref.png"
+        source.write_bytes(b"\x89PNG\r\n\x1a\n")
 
         captured_payload: dict = {}
 
@@ -202,13 +204,13 @@ class TestFalParamMapFallback:
                         params={
                             "prompt": "enhance",
                             "seed": 42,
-                            "image_ref": "https://example.com/ref.png",
+                            "image_ref": str(source),
                             "strength": 0.7,
                         },
                         out_dir=out_dir,
                     )
 
-        assert captured_payload.get("image_url") == "https://example.com/ref.png"
+        assert str(captured_payload.get("image_url")).startswith("data:image/png;base64,")
         assert captured_payload.get("strength") == 0.7
 
     def test_fallback_t2v_mapping(
@@ -263,6 +265,10 @@ class TestFalParamMapFallback:
         out_dir = tmp_path / "out"
 
         entry = _make_fal_entry(mode="flf", param_map={})
+        start = tmp_path / "start.png"
+        end = tmp_path / "end.png"
+        start.write_bytes(b"\x89PNG\r\n\x1a\nstart")
+        end.write_bytes(b"\x89PNG\r\n\x1a\nend")
 
         captured_payload: dict = {}
 
@@ -284,15 +290,15 @@ class TestFalParamMapFallback:
                         params={
                             "prompt": "morph",
                             "seed": 7,
-                            "image_ref": "https://example.com/start.png",
-                            "image_end_ref": "https://example.com/end.png",
+                            "image_ref": str(start),
+                            "image_end_ref": str(end),
                             "frames": 49,
                         },
                         out_dir=out_dir,
                     )
 
-        assert captured_payload.get("image_url") == "https://example.com/start.png"
-        assert captured_payload.get("end_image_url") == "https://example.com/end.png"
+        assert str(captured_payload.get("image_url")).startswith("data:image/png;base64,")
+        assert str(captured_payload.get("end_image_url")).startswith("data:image/png;base64,")
 
     def test_override_takes_precedence_over_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

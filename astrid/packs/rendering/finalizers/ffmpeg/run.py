@@ -3,8 +3,7 @@
 
 The protocol path validates every segment in full before starting FFmpeg,
 normalizes only incompatible streams, and performs the final concat as a
-stream copy.  The small ``concat_segment_files`` surface is also the legacy
-hybrid-render compatibility seam used by ``rendering.render``.
+stream copy.
 """
 
 from __future__ import annotations
@@ -15,20 +14,12 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
-
-# Raw commands run with a sanitized environment and their owning pack as cwd.
-# Make the checkout importable when this file is executed directly.
-if __package__ in {None, ""}:
-    _CHECKOUT_ROOT = Path(__file__).resolve().parents[5]
-    if str(_CHECKOUT_ROOT) not in sys.path:
-        sys.path.insert(0, str(_CHECKOUT_ROOT))
 
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.media import MediaProbe, MediaProbeError, ffprobe_metadata_strict
@@ -849,127 +840,6 @@ def _profile_from_probe(
     )
 
 
-def _duration_frames_from_probe(probe: MediaProbe, profile: RenderProfile) -> int:
-    frames = _duration_fraction(probe) * Fraction(*profile.fps_rational)
-    return max(1, int(frames + Fraction(1, 2)))
-
-
-def concat_segment_files(
-    segment_paths: Sequence[Path],
-    output_path: Path,
-    *,
-    profile: RenderProfile | None = None,
-    audio: AudioOwnership | str | None = None,
-    faststart: bool = True,
-    runner: Runner | None = None,
-    probe: Probe | None = None,
-) -> list[str]:
-    """Strictly probe and assemble explicit files for the legacy facade.
-
-    Protocol callers use :func:`finalize`; this helper exists so hybrid
-    rendering can keep its historical two-argument concat seam while sharing
-    the finalizer's normalization implementation.
-    """
-
-    execute = subprocess.run if runner is None else runner
-    inspect = ffprobe_metadata_strict if probe is None else probe
-    paths = [Path(path).resolve() for path in segment_paths]
-    if not paths:
-        raise ValueError("at least one segment is required for finalization")
-    probes = [inspect(path) for path in paths]
-
-    if audio is None:
-        ownership = (
-            AudioOwnership.RENDERED
-            if (profile is not None and profile.has_audio)
-            or (profile is None and probes[0].has_audio_stream)
-            else AudioOwnership.NONE
-        )
-    else:
-        ownership = audio if isinstance(audio, AudioOwnership) else AudioOwnership(audio)
-
-    if profile is None:
-        first_profile = _profile_from_probe(
-            probes[0],
-            ownership=ownership,
-            duration_tolerance=1,
-        )
-        target_profile = (
-            first_profile
-            if ownership is AudioOwnership.RENDERED
-            else _profile_without_audio(first_profile)
-        )
-    else:
-        target_profile = (
-            profile if ownership is AudioOwnership.RENDERED else _profile_without_audio(profile)
-        )
-
-    prepared: list[_PreparedSegment] = []
-    for index, (path, media_probe) in enumerate(zip(paths, probes, strict=True)):
-        source_ownership = (
-            AudioOwnership.RENDERED
-            if media_probe.has_audio_stream
-            else (
-                AudioOwnership.PASSTHROUGH
-                if ownership is AudioOwnership.PASSTHROUGH
-                else AudioOwnership.NONE
-            )
-        )
-        source_profile = _profile_from_probe(
-            media_probe,
-            ownership=source_ownership,
-            duration_tolerance=target_profile.duration_tolerance,
-        )
-        prepared.append(
-            _PreparedSegment(
-                index=index,
-                path=path,
-                profile=source_profile,
-                audio=source_ownership,
-                duration_frames=_duration_frames_from_probe(media_probe, source_profile),
-            )
-        )
-
-    assembly_profile = _assembly_profile(target_profile, prepared)
-    published = False
-    try:
-        normalization = _assemble_prepared_segments(
-            prepared,
-            Path(output_path),
-            target_profile=assembly_profile,
-            faststart=faststart,
-            runner=execute,
-        )
-        published = True
-        final_probe = inspect(Path(output_path))
-        final_profile = _profile_from_probe(
-            final_probe,
-            ownership=ownership,
-            duration_tolerance=assembly_profile.duration_tolerance,
-        )
-        remaining = _profile_differences(final_profile, assembly_profile)
-        if remaining:
-            raise_invalid_artifact_error(
-                backend=BACKEND_ID,
-                message="finalized video does not match the requested canonical profile",
-                recovery_command="rerun finalization in a fresh invocation workspace",
-                details={
-                    "mismatches": [
-                        _normalization_record(-1, difference) for difference in remaining
-                    ]
-                },
-            )
-        return normalization
-    except BaseException:
-        if published:
-            Path(output_path).unlink(missing_ok=True)
-        raise
-
-
-# Historical private name retained for direct callers while the facade moves.
-_concat_segments = concat_segment_files
-
-
 def _config(mapping: Mapping[str, Any]) -> tuple[bool, list[str]]:
     config = dict(mapping.get(BACKEND_ID, {}))
     reasons: list[str] = []
@@ -1568,7 +1438,6 @@ __all__ = [
     "FINALIZER_ID",
     "build_concat_command",
     "build_normalize_command",
-    "concat_segment_files",
     "finalize",
     "main",
     "support",

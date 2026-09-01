@@ -587,7 +587,12 @@ def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Pat
             client=RuntimeProtocolClient(daemon.endpoint, daemon.token), executor_id="hivemind-host",
         )
         registration = runtime_host.register()
-        assert registration["registration"]["capability_digests"][record.id] == record.capability_digest
+        capability = next(
+            item
+            for item in registration["registration"].capabilities
+            if item.capability_id == record.id
+        )
+        assert capability.definition_digest == record.capability_digest
         task = generated.admit_task(capability_id=record.id, capability_digest=record.capability_digest, input_object_ids=[], idempotency_key="hivemind-fixture-task")
         settled = runtime_host.run(once=True)
         assert len(settled) == 1 and settled[0].state == "succeeded"

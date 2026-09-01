@@ -570,9 +570,8 @@ def test_threejs_real_render_empty_timeline_through_public_service(
     assert sidecar.is_file()
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(Path(published).read_bytes()).hexdigest()
-    # v2 provenance enrichment sets the top-level engine to the resolved
-    # renderer id; the engine="threejs" identity lives in the retained
-    # legacy_v1 payload inside the backend fragment.
+    # Canonical provenance keeps routing identity at the top level and
+    # backend-specific details inside the namespaced fragment.
     assert payload["engine"] == THREEJS_ID
     assert payload["audio_ownership"] == "rendered"
     assert payload["routing"]["resolved_backend"] == THREEJS_ID
@@ -581,7 +580,7 @@ def test_threejs_real_render_empty_timeline_through_public_service(
     assert fragment["renderer"] == "threejs"
     assert fragment["capture_host"] == "remotion"
     assert fragment["composition"] == "ThreeTimelineComposition"
-    assert fragment["legacy_v1"]["engine"] == "threejs"
+    assert fragment["renderer"] == "threejs"
 
     probe = _probe(published)
     video = next(s for s in probe["streams"] if s["codec_type"] == "video")
@@ -662,11 +661,8 @@ def test_threejs_real_render_text_timeline_through_public_service(
     assert payload["routing"]["resolved_backend"] == THREEJS_ID
     assert payload["segments_v2"][0]["renderer"]["id"] == THREEJS_ID
     assert payload["backend_fragments"][THREEJS_ID]["renderer"] == "threejs"
-    assert payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["engine"] == "threejs"
-    assert (
-        payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["composition_id"]
-        == "ThreeTimelineComposition"
-    )
+    assert payload["backend_fragments"][THREEJS_ID]["renderer"] == "threejs"
+    assert payload["backend_fragments"][THREEJS_ID]["composition"] == "ThreeTimelineComposition"
 
 
 # ---------------------------------------------------------------------------
@@ -842,7 +838,7 @@ def test_threejs_real_render_works_with_npm_offline(tmp_path: Path) -> None:
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["engine"] == THREEJS_ID
     assert payload["audio_ownership"] == "rendered"
-    assert payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["engine"] == "threejs"
+    assert payload["backend_fragments"][THREEJS_ID]["renderer"] == "threejs"
 
 # ---------------------------------------------------------------------------
 # Batch 4 - alpha output (consumes the astrid_layer.alpha stamp)

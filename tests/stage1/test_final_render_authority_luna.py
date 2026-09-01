@@ -113,12 +113,12 @@ def test_generic_host_materializes_managed_snapshot_inside_attempt(tmp_path: Pat
     attempt = tmp_path / "attempt"
     inputs = host._materialize_inputs(
         {
-            "inputs": {
+            "spec": {"inputs": {
                 "timeline_snapshot": {
                     "config": {"tracks": [], "clips": []},
                     "registry": {"assets": {}},
                 }
-            }
+            }}
         },
         attempt,
     )

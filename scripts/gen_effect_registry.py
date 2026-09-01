@@ -21,25 +21,14 @@ from astrid.core.element.registry import ElementRegistry, load_default_registry 
 from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES, ElementDefinition  # noqa: E402
 
 WORKSPACE_ROOT = TOOLS_DIR.parent
-# The default is the in-tree app.  Render workers override this for an
-# isolated/provisioned Remotion project so generated shims stay owned by that
-# project and concurrent workers cannot overwrite one another.
-REMOTION_SRC = Path(
-    os.environ.get("ASTRID_REMOTION_SRC", str(TOOLS_DIR / "remotion" / "src"))
-)
-# Sprint 5: composition source moved into
-# packages/timeline-composition. The codegen now writes the generated
-# registries directly into the package source so the package is the
-# single owner of its own runtime tables. The in-tree shell at
-# tools/remotion/ keeps a re-export shim (effects.generated.ts) for
-# back-compat with tests that imported from the old location.
+# Composition source is package-owned; codegen writes generated registries
+# directly into the package source so it remains the single runtime owner.
 PACKAGE_SRC = Path(
     os.environ.get(
         "ASTRID_TIMELINE_COMPOSITION_SRC",
         str(WORKSPACE_ROOT / "packages" / "timeline-composition" / "typescript" / "src"),
     )
 )
-OUTPUT = PACKAGE_SRC / "effects.generated.ts"
 OUTPUTS = {
     "effects": PACKAGE_SRC / "effects.generated.ts",
     "animations": PACKAGE_SRC / "animations.generated.ts",
@@ -47,12 +36,6 @@ OUTPUTS = {
 }
 # Shim files in the in-tree shell that re-export from the package, so
 # any pre-Sprint-5 callers that still imported the in-tree path resolve.
-SHIM_OUTPUTS = {
-    "effects": REMOTION_SRC / "effects.generated.ts",
-    "animations": REMOTION_SRC / "animations.generated.ts",
-    "transitions": REMOTION_SRC / "transitions.generated.ts",
-}
-SHIM_EXTENSIONS = (".ts", ".js", ".d.ts", ".js.map", ".d.ts.map")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 ElementKind = Literal["effects", "animations", "transitions"]
@@ -258,41 +241,6 @@ def _ts_property_key(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", value) else _ts_string(value)
 
 
-def _shim_module_text(kind: ElementKind, *, extension: str) -> str:
-    package_module = f"@banodoco/timeline-composition/typescript/src/{kind}.generated"
-    if extension in {".ts", ".js"}:
-        return (
-            "// DO NOT EDIT - generated shim by tools/scripts/gen_effect_registry.py\n"
-            "// Re-exports the package-owned registry.\n"
-            f"export * from '{package_module}';\n"
-        )
-    if extension == ".d.ts":
-        return (
-            "// DO NOT EDIT - generated shim by tools/scripts/gen_effect_registry.py\n"
-            f"export * from '{package_module}';\n"
-            f"//# sourceMappingURL={kind}.generated.d.ts.map\n"
-        )
-    raise ValueError(f"unsupported shim extension: {extension}")
-
-
-def _empty_source_map(path: Path) -> str:
-    return json.dumps(
-        {"version": 3, "file": path.name, "sources": [], "names": [], "mappings": ""},
-        sort_keys=True,
-    ) + "\n"
-
-
-def _write_shim_family(kind: ElementKind, shim_ts: Path) -> None:
-    shim_ts.parent.mkdir(parents=True, exist_ok=True)
-    base = shim_ts.with_suffix("")
-    for extension in SHIM_EXTENSIONS:
-        path = Path(f"{base}{extension}")
-        if extension.endswith(".map"):
-            path.write_text(_empty_source_map(path), encoding="utf-8")
-        else:
-            path.write_text(_shim_module_text(kind, extension=extension), encoding="utf-8")
-
-
 def _write_generated_registry(path: Path, content: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -465,14 +413,12 @@ def _main_unlocked(argv: list[str] | None = None) -> int:
         )
         if not _write_generated_registry(output, content):
             failed_outputs.append(output)
-    for kind, shim in SHIM_OUTPUTS.items():
-        _write_shim_family(kind, shim)
     if failed_outputs:
         formatted = "\n".join(f"  - {path}" for path in failed_outputs)
         print(
             "ERROR failed to write package-owned generated registries:\n"
             f"{formatted}\n"
-            "Remotion shim files were refreshed, but package outputs must be writable.",
+            "Generated registry outputs must be writable.",
             file=sys.stderr,
         )
         return 1

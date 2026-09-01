@@ -618,11 +618,13 @@ class RuntimeProtocolClient:
         self.timeout = timeout
         try:
             from banodoco_workspace_client import WorkspaceClient
+            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
         except ImportError as exc:
             raise HostError(
                 "generated banodoco_workspace_client is unavailable; install the "
-                "workspace runtime client or set PYTHONPATH to its packages/python"
+                "workspace runtime client package"
             ) from exc
+        self.schema_digest = SCHEMA_DIGEST
         self.generated = WorkspaceClient(self.endpoint, self.credential)
         self._runtime_epoch: int | None = None
 
@@ -642,7 +644,7 @@ class RuntimeProtocolClient:
             raise HostError("runtime health returned no runtime_epoch")
         return int(epoch)
 
-    def register_executor(self, executor_id: str, *, capabilities: list[str], max_concurrency: int, resource_keys: list[str], source_digest: str | None, capability_digests: Mapping[str, str] | None = None, dependency_digest: str | None = None, source_epoch: str | None = None, protocol_version: str = "workspace.v1", schema_digest: str | None = None, runtime_epoch: int | None = None, capability_states: Mapping[str, Mapping[str, str]] | None = None):
+    def register_executor(self, executor_id: str, *, capabilities: list[Mapping[str, Any]], max_concurrency: int, resource_keys: list[str], source_digest: str | None, dependency_digest: str | None = None, source_epoch: str | None = None, protocol_version: str = "workspace.v1", schema_digest: str | None = None, runtime_epoch: int | None = None):
         payload = {
             "executor_id": executor_id,
             "capabilities": capabilities,
@@ -654,23 +656,16 @@ class RuntimeProtocolClient:
             "dependency_digest": dependency_digest,
             "schema_digest": schema_digest,
             "runtime_epoch": runtime_epoch,
-            "capability_digests": dict(capability_digests or {}),
-            "definition_digests": dict(capability_digests or {}),
-            "capability_states": {key: dict(value) for key, value in (capability_states or {}).items()},
         }
-        try:
-            return self.generated.register_executor(payload, idempotency_key=f"executor:{executor_id}")
-        except TypeError:
-            # control2 currently returns capability ids while the generated
-            # response model expects expanded capability records.  The HTTP
-            # operation has succeeded; preserve its neutral response shape.
-            return payload
+        return self.generated.register_executor(
+            payload,
+            idempotency_key=f"executor:{executor_id}",
+        )
 
     def register_capability(
         self,
         capability_id: str,
         *,
-        definition: Mapping[str, Any],
         digest: str,
         required_resource_keys: list[str] | None = None,
         status: str = "ready",
@@ -678,14 +673,7 @@ class RuntimeProtocolClient:
         estimated_output_bytes: int = 0,
         unavailable_reason: str | None = None,
     ):
-        """Publish one capability through the generated runtime client.
-
-        The definition itself remains pack-owned; the runtime stores its
-        digest and admission metadata only.  ``definition`` is accepted to
-        keep the host/fake seam compatible, but is intentionally not sent as a
-        second schema owned by Astrid.
-        """
-        del definition
+        """Publish one capability through the generated runtime client."""
         return self.generated.register_capability(
             capability_id,
             digest,
@@ -698,20 +686,7 @@ class RuntimeProtocolClient:
         )
 
     def withdraw_capability(self, capability_id: str, *, digest: str, reason: str):
-        """Withdraw a capability that disappeared from the source checkout.
-
-        Newer runtimes may expose an explicit withdrawal operation.  Older
-        workspace.v1 runtimes only expose capability registration, so mark the
-        stale row unavailable there; this closes the readiness hole without
-        inventing a second runtime protocol route.
-        """
-        withdraw = getattr(self.generated, "withdraw_capability", None)
-        if callable(withdraw):
-            return withdraw(
-                capability_id,
-                reason=reason,
-                idempotency_key=f"capability-withdraw:{capability_id}:{digest}",
-            )
+        """Mark a removed capability unavailable in the canonical registry."""
         return self.generated.register_capability(
             capability_id,
             digest,
@@ -720,9 +695,6 @@ class RuntimeProtocolClient:
             unavailable_reason=reason,
             idempotency_key=f"capability-withdraw:{capability_id}:{digest}",
         )
-
-    def preflight_executor(self, executor_id: str, *, checks: Mapping[str, Any], ready: bool):
-        return {"executor_id": executor_id, "checks": dict(checks), "ready": ready}
 
     def heartbeat(self, task_id: str, lease_token: str, *, attempt_id: str | None = None, fence: int | None = None):
         if not attempt_id or fence is None:
@@ -739,8 +711,6 @@ class RuntimeProtocolClient:
         raise HostError("per-task claim is not a canonical operation; use claim_task")
 
     def claim_next(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str):
-        if not hasattr(self.generated, "claim_task"):
-            raise HostError("generated workspace client lacks claim-next operation: POST /v1/tasks/claim")
         return self.generated.claim_task(
             executor_id=executor_id,
             capability_ids=capability_ids,
@@ -805,7 +775,7 @@ class GenericPackHost:
 
     def __init__(self, *, pack_roots: list[str | Path], client: RuntimeProtocolClient | Any | None = None, executor_id: str = "astrid-pack-host", max_concurrency: int = 1, attempt_root: str | Path | None = None, capability_matrix: str | Path | None = None, credential_source: Mapping[str, str] | None = None):
         configured_roots = [Path(root).expanduser().resolve() for root in pack_roots]
-        # ASTRID_PACKS_PATH is an explicit discovery input, never a fallback
+        # ASTRID_PACKS_PATH is an explicit discovery input, never an implicit
         # directory. Keep it in the same admitted root set so env-only packs
         # receive identical discovery, digest, and child import treatment.
         for raw_root in os.environ.get(ASTRID_PACKS_PATH, "").split(os.pathsep):
@@ -832,6 +802,15 @@ class GenericPackHost:
         # their signing key never crosses into a child or runtime payload.
         self._provider_grants = ProviderRouteGrantAuthority()
         self._pending_provider_grants: dict[str, str] = {}
+
+    def _client_operation(self, name: str):
+        if self.client is None:
+            raise HostError(f"runtime client is required for {name}")
+        operation = getattr(self.client, name, None)
+        if not callable(operation):
+            label = "claim-next" if name == "claim_next" else name
+            raise HostError(f"runtime client lacks canonical {label} operation")
+        return operation
 
     def _default_matrix_path(self) -> Path | None:
         checkout = Path(__file__).resolve().parents[3]
@@ -1084,67 +1063,58 @@ class GenericPackHost:
         # Publish capability admission metadata before advertising the executor.
         # A real runtime must be able to validate a task against the exact
         # definition digest/source-derived readiness before it can claim work.
-        if hasattr(self.client, "register_capability"):
-            for record in self.capabilities.values():
-                disposition = str(record.matrix.get("disposition", ""))
-                if disposition in {"unsupported", "retired"}:
-                    # A declared disposition is authoritative even when the
-                    # optional source happens to fail another preflight check;
-                    # preserve its human-readable reason rather than exposing
-                    # an incidental local environment failure.
-                    status = disposition
-                    unavailable_reason = str(record.matrix.get("evidence_reason") or disposition)
-                else:
-                    status = "ready" if record.ready else "unavailable"
-                    unavailable_reason = None if record.ready else _preflight_unavailable_reason(record)
-                if isinstance(self.client, RuntimeProtocolClient):
-                    self.client.register_capability(
-                        record.id,
-                        definition=record.definition.to_dict(),
-                        digest=record.capability_digest,
-                        required_resource_keys=list(record.resource_keys),
-                        status=status,
-                        estimated_scratch_bytes=record.estimated_scratch_bytes,
-                        estimated_output_bytes=record.estimated_output_bytes,
-                        unavailable_reason=unavailable_reason,
-                    )
-                else:
-                    # Legacy fakes retain their definition-shaped seam.
-                    self.client.register_capability(record.id, definition=record.definition.to_dict(), digest=record.capability_digest)
+        register_capability = getattr(self.client, "register_capability", None)
+        if not callable(register_capability):
+            raise HostError("runtime client lacks canonical capability registration operation")
+        executor_capabilities: list[dict[str, Any]] = []
+        for record in self.capabilities.values():
+            disposition = str(record.matrix.get("disposition", ""))
+            if disposition in {"unsupported", "retired"}:
+                # A declared disposition is authoritative even when the
+                # source happens to fail another preflight check; preserve its
+                # human-readable reason rather than an incidental local error.
+                status = disposition
+                unavailable_reason = str(record.matrix.get("evidence_reason") or disposition)
+            else:
+                status = "ready" if record.ready else "unavailable"
+                unavailable_reason = None if record.ready else _preflight_unavailable_reason(record)
+            register_capability(
+                record.id,
+                digest=record.capability_digest,
+                required_resource_keys=list(record.resource_keys),
+                status=status,
+                estimated_scratch_bytes=record.estimated_scratch_bytes,
+                estimated_output_bytes=record.estimated_output_bytes,
+                unavailable_reason=unavailable_reason,
+            )
+            executor_capabilities.append(
+                {
+                    "capability_id": record.id,
+                    "definition_digest": record.capability_digest,
+                    "status": status,
+                    "required_resource_keys": list(record.resource_keys),
+                    "estimated_scratch_bytes": record.estimated_scratch_bytes,
+                    "estimated_output_bytes": record.estimated_output_bytes,
+                    "unavailable_reason": unavailable_reason,
+                }
+            )
         all_keys = sorted({key for record in self.capabilities.values() for key in record.resource_keys})
-        digests = {key: record.capability_digest for key, record in self.capabilities.items()}
         dependency_digests = {key: record.dependency_digest for key, record in self.capabilities.items()}
-        capability_states = {
-            key: {
-                "capability_digest": record.capability_digest,
-                "source_digest": record.source_digest,
-                "dependency_digest": record.dependency_digest,
-            }
-            for key, record in self.capabilities.items()
-        }
         registration_kwargs = {
-            "capabilities": sorted(self.capabilities),
+            "capabilities": sorted(
+                executor_capabilities,
+                key=lambda item: str(item["capability_id"]),
+            ),
             "max_concurrency": self.max_concurrency,
             "resource_keys": all_keys,
             "source_digest": _canonical_digest({key: record.source_digest for key, record in self.capabilities.items()}),
-            "capability_digests": digests,
             "dependency_digest": _canonical_digest(dependency_digests),
             "source_epoch": self.source_epoch,
             "protocol_version": runtime_state.get("protocol", "workspace.v1"),
             "schema_digest": runtime_state.get("schema_digest"),
             "runtime_epoch": runtime_state.get("runtime_epoch"),
-            "capability_states": capability_states,
         }
-        try:
-            registration = self.client.register_executor(self.executor_id, **registration_kwargs)
-        except TypeError as exc:
-            if "capability_digests" not in str(exc):
-                raise
-            registration_kwargs.pop("capability_digests")
-            registration = self.client.register_executor(self.executor_id, **registration_kwargs)
-        if not isinstance(self.client, RuntimeProtocolClient):
-            for record in self.capabilities.values():
-                self.client.preflight_executor(record.id, checks=record.preflight, ready=record.ready)
+        registration = self.client.register_executor(self.executor_id, **registration_kwargs)
         self._registered_digests = {key: record.capability_digest for key, record in self.capabilities.items()}
         self._registered_state = state
         self._registered_runtime_state = {**runtime_state, "source_epoch": self.source_epoch}
@@ -1156,27 +1126,12 @@ class GenericPackHost:
             prior = self._registered_state[capability_id]
             reason = "capability removed from source checkout"
             withdraw = getattr(self.client, "withdraw_capability", None)
-            if callable(withdraw):
-                withdraw(
-                    capability_id,
-                    digest=prior.get("capability_digest", ""),
-                    reason=reason,
-                )
-                continue
-            # Preserve compatibility with simple runtime fakes and older
-            # clients which have registration but no explicit withdrawal seam.
-            register = getattr(self.client, "register_capability", None)
-            if callable(register):
-                register(
-                    capability_id,
-                    definition={},
-                    digest=prior.get("capability_digest", ""),
-                    status="unavailable",
-                    unavailable_reason=reason,
-                )
-                continue
-            raise HostError(
-                f"runtime cannot withdraw removed capability: {capability_id}"
+            if not callable(withdraw):
+                raise HostError(f"runtime cannot withdraw removed capability: {capability_id}")
+            withdraw(
+                capability_id,
+                digest=prior.get("capability_digest", ""),
+                reason=reason,
             )
 
     def refresh(self) -> tuple[CapabilityRecord, ...]:
@@ -1195,22 +1150,23 @@ class GenericPackHost:
         return tuple(old[key] if key in removed else self.capabilities[key] for key in changed)
 
     def _runtime_compatibility(self) -> dict[str, Any]:
-        """Read and validate protocol/schema/runtime epoch when available."""
+        """Read and validate the exact runtime protocol/schema/epoch."""
         expected_protocol = "workspace.v1"
-        expected_schema = None
-        try:
-            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
-            expected_schema = SCHEMA_DIGEST
-        except ImportError:
-            pass
-        health: Any = None
-        if self.client is not None and hasattr(self.client, "health"):
-            # RuntimeProtocolClient subclasses used by unit tests may omit the
-            # generated transport; those fakes retain matrix-only semantics.
-            if not isinstance(self.client, RuntimeProtocolClient) or hasattr(self.client, "generated"):
-                health = self.client.health()
+        if self.client is None:
+            return {
+                "protocol": expected_protocol,
+                "schema_digest": None,
+                "runtime_epoch": None,
+            }
+        expected_schema = getattr(self.client, "schema_digest", None)
+        if not isinstance(expected_schema, str) or not expected_schema:
+            raise HostError("runtime client lacks generated schema digest metadata")
+        health_operation = getattr(self.client, "health", None)
+        if not callable(health_operation):
+            raise HostError("runtime client lacks canonical health operation")
+        health: Any = health_operation()
         if health is None:
-            return {"protocol": expected_protocol, "schema_digest": expected_schema, "runtime_epoch": None}
+            raise HostError("runtime health returned no protocol document")
         value = dict(health) if isinstance(health, Mapping) else {
             "protocol": getattr(health, "protocol", None),
             "schema_digest": getattr(health, "schema_digest", None),
@@ -1223,9 +1179,16 @@ class GenericPackHost:
             mismatches.append(f"protocol expected={expected_protocol} actual={actual_protocol or 'missing'}")
         if expected_schema and actual_schema != expected_schema:
             mismatches.append(f"schema_digest expected={expected_schema} actual={actual_schema or 'missing'}")
+        runtime_epoch = value.get("runtime_epoch")
+        if isinstance(runtime_epoch, bool) or not isinstance(runtime_epoch, int) or runtime_epoch < 1:
+            mismatches.append("runtime_epoch must be a positive integer")
         if mismatches:
             raise HostError("runtime compatibility blocked: " + "; ".join(mismatches))
-        return {"protocol": actual_protocol, "schema_digest": actual_schema or expected_schema, "runtime_epoch": value.get("runtime_epoch")}
+        return {
+            "protocol": actual_protocol,
+            "schema_digest": actual_schema,
+            "runtime_epoch": runtime_epoch,
+        }
 
     def _materialize_inputs(self, spec: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
         """Materialize digest inputs and managed registry objects in *attempt*.
@@ -1237,17 +1200,13 @@ class GenericPackHost:
         registry whose ``file`` values point at those attempt-local copies.
         """
         # Runtime admission wraps the immutable capability input document in
-        # the task envelope alongside input_object_ids/schema metadata.  The
+        # the task envelope alongside input_object_ids/schema metadata. The
         # nested document is the one canonical managed-input shape shared by
-        # task admission and this host; accept the direct form too for the
-        # focused host contract tests.
+        # task admission and this host.
         admitted = spec.get("spec")
-        input_spec = (
-            admitted
-            if isinstance(admitted, Mapping)
-            and any(key in spec for key in ("input_object_ids", "schema_version", "capability_digest"))
-            else spec
-        )
+        if not isinstance(admitted, Mapping):
+            raise HostError("runtime task is missing its immutable spec envelope")
+        input_spec = admitted
         values = dict(input_spec.get("inputs", {})) if isinstance(input_spec.get("inputs", {}), Mapping) else {}
         # Timeline visualization tasks carry their canonical registry inside
         # the immutable snapshot rather than as a separate input file. Expose
@@ -1295,7 +1254,7 @@ class GenericPackHost:
         fetched_objects: dict[tuple[str, str], Path] = {}
 
         def fetch_object(reference: str, digest: str, name: str, *, filename: str | None = None) -> Path:
-            if self.client is None or not hasattr(self.client, "get_object"):
+            if self.client is None:
                 raise HostError(f"runtime client is required to materialize managed input {name}")
             normalized = str(digest).removeprefix("sha256:")
             if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
@@ -1304,7 +1263,7 @@ class GenericPackHost:
             cached = fetched_objects.get(cache_key)
             if cached is not None:
                 return cached
-            data = self.client.get_object(normalized)
+            data = self._client_operation("get_object")(normalized)
             if not isinstance(data, (bytes, bytearray)):
                 data = getattr(data, "data", None)
             if not isinstance(data, (bytes, bytearray)):
@@ -1329,7 +1288,11 @@ class GenericPackHost:
         }
         for name, value in list(values.items()):
             digest = value.get("digest") if isinstance(value, Mapping) else (value if isinstance(value, str) and len(value) == 64 else None)
-            if digest and self.client is not None and hasattr(self.client, "get_object"):
+            if digest:
+                if self.client is None or not callable(getattr(self.client, "get_object", None)):
+                    raise HostError(
+                        f"runtime client is required to materialize digest input {name}"
+                    )
                 if str(name) == "theme":
                     destination = fetch_object(
                         str(value.get("object_id") or "theme"),
@@ -1667,34 +1630,38 @@ class GenericPackHost:
 
     def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Publish staged outputs and return settlement-safe object refs."""
+        upload_object = getattr(self.client, "upload_object", None)
+        if not callable(upload_object):
+            raise HostError(
+                "runtime client must provide canonical upload_object for output publication"
+            )
         uploaded: list[dict[str, Any]] = []
         for descriptor in outputs:
-            path = Path(str(descriptor.pop("path")))
-            if self.client is not None and hasattr(self.client, "upload_object"):
-                media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
-                object_row = self.client.upload_object(path, media_type=media_type, filename=path.name)
-                object_id = getattr(object_row, "object_id", None)
-                digest = getattr(object_row, "digest", None)
-                if not object_id or not digest:
-                    raise HostError("generated object upload returned no canonical object id/digest")
-                uploaded.append({
-                    "name": descriptor.get("name"),
-                    "media_type": media_type,
-                    "object_id": object_id,
-                    "digest": digest,
-                    "size": int(getattr(object_row, "size", descriptor.get("size", 0))),
-                })
-            else:
-                # Offline and legacy fakes receive a digest-only reference;
-                # never put staged bytes in a settlement payload.
-                uploaded.append({key: value for key, value in descriptor.items() if key != "path"})
+            descriptor = dict(descriptor)
+            raw_path = descriptor.pop("path", None)
+            if not raw_path:
+                raise HostError("generated output is missing its staged path")
+            path = Path(str(raw_path))
+            media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
+            object_row = upload_object(path, media_type=media_type, filename=path.name)
+            object_id = getattr(object_row, "object_id", None)
+            digest = getattr(object_row, "digest", None)
+            if not object_id or not digest:
+                raise HostError("generated object upload returned no canonical object id/digest")
+            uploaded.append({
+                "name": descriptor.get("name"),
+                "media_type": media_type,
+                "object_id": object_id,
+                "digest": digest,
+                "size": int(getattr(object_row, "size", descriptor.get("size", 0))),
+            })
         return uploaded
 
     def _run_command_definition(self, record: CapabilityRecord, inputs: Mapping[str, Any], output_root: Path, attempt: Path, *, cancelled=None, admission: Mapping[str, Any] | None = None, network_broker: _NetworkBrokerContext | None = None) -> Any:
         """Run a manifest command without importing Astrid's project authority.
 
-        The legacy runner is still available for built-in pipeline steps, but
-        command capabilities must be runnable from an attempt directory alone.
+        Built-in pipeline steps and command capabilities are both runnable from
+        an attempt directory alone.
         """
         command = record.definition.command
         if command is None:
@@ -1959,11 +1926,20 @@ class GenericPackHost:
         keep_attempt: bool = False,
         provider_route_grant: str | None = None,
     ) -> Mapping[str, Any]:
+        if self.client is None:
+            raise HostError("runtime client is required to execute a task")
+        for operation in ("heartbeat", "task", "settle", "fail", "upload_object"):
+            if not callable(getattr(self.client, operation, None)):
+                raise HostError(
+                    f"runtime client lacks canonical {operation} operation"
+                )
         task_data = task.get("task", task)
         task_id = str(task_data["id"])
         capability_id = str(task_data["capability"])
         attempt_id = attempt_id or (str(task_data["attempt_id"]) if task_data.get("attempt_id") else None)
         fence = fence if fence is not None else (int(task_data["fence"]) if task_data.get("fence") is not None else None)
+        if not attempt_id or fence is None:
+            raise HostError("runtime task execution requires attempt_id and fence")
         record = self.capabilities.get(capability_id)
         if record is None:
             self.discover()
@@ -2023,40 +1999,38 @@ class GenericPackHost:
             output_root.mkdir(parents=True, exist_ok=True)
             cancel_signal = threading.Event()
             pump_stop = threading.Event()
-            if self.client is not None and hasattr(self.client, "heartbeat"):
-                try:
-                    self.client.heartbeat(task_id, lease_token, attempt_id=attempt_id, fence=fence)
-                except TypeError:
-                    self.client.heartbeat(task_id, lease_token)
+            self.client.heartbeat(
+                task_id,
+                lease_token,
+                attempt_id=attempt_id,
+                fence=fence,
+            )
 
-                def pump_lease():
-                    while not pump_stop.wait(5.0):
-                        try:
-                            try:
-                                self.client.heartbeat(task_id, lease_token, attempt_id=attempt_id, fence=fence)
-                            except TypeError:
-                                self.client.heartbeat(task_id, lease_token)
-                            if hasattr(self.client, "task"):
-                                current = self.client.task(task_id)
-                                current_task = current.get("task", current) if isinstance(current, Mapping) else current
-                                state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
-                                if state == "cancelled":
-                                    cancel_signal.set()
-                        except Exception:
-                            # The daemon fences settlement if a heartbeat is
-                            # lost; the subprocess is still cleaned up here.
+            def pump_lease():
+                while not pump_stop.wait(5.0):
+                    try:
+                        self.client.heartbeat(
+                            task_id,
+                            lease_token,
+                            attempt_id=attempt_id,
+                            fence=fence,
+                        )
+                        current = self.client.task(task_id)
+                        current_task = current.get("task", current) if isinstance(current, Mapping) else current
+                        state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
+                        if state == "cancelled":
                             cancel_signal.set()
+                    except Exception:
+                        # The daemon fences settlement if a heartbeat is
+                        # lost; the subprocess is still cleaned up here.
+                        cancel_signal.set()
 
-                pump_thread = threading.Thread(target=pump_lease, name=f"astrid-heartbeat-{task_id}", daemon=True)
-                pump_thread.start()
-            else:
-                pump_thread = None
+            pump_thread = threading.Thread(target=pump_lease, name=f"astrid-heartbeat-{task_id}", daemon=True)
+            pump_thread.start()
 
             def cancelled():
                 if cancel_signal.is_set():
                     return True
-                if self.client is None or not hasattr(self.client, "task"):
-                    return False
                 current = self.client.task(task_id)
                 current_task = current.get("task", current) if isinstance(current, Mapping) else current
                 state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
@@ -2106,12 +2080,11 @@ class GenericPackHost:
                 pump_stop.set()
                 if pump_thread is not None:
                     pump_thread.join(timeout=2)
-            if self.client is not None and hasattr(self.client, "task"):
-                current = self.client.task(task_id)
-                current_task = current.get("task", current) if isinstance(current, Mapping) else current
-                state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
-                if state == "cancelled":
-                    return {"task_id": task_id, "status": "cancelled", "cancelled": True}
+            current = self.client.task(task_id)
+            current_task = current.get("task", current) if isinstance(current, Mapping) else current
+            state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
+            if state == "cancelled":
+                return {"task_id": task_id, "status": "cancelled", "cancelled": True}
             outputs = self._upload_outputs(self._typed_outputs(record, result, root))
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
             network_evidence = self._network_evidence(
@@ -2137,40 +2110,28 @@ class GenericPackHost:
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):
                 effect = effect[0] if effect else None
-            if self.client is not None:
-                try:
-                    settlement = self.client.settle(
-                        task_id,
-                        lease_token,
-                        result=payload,
-                        outputs=outputs,
-                        effect=effect,
-                        attempt_id=attempt_id,
-                        fence=fence,
-                    )
-                except TypeError:
-                    settlement = self.client.settle(task_id, lease_token, result=payload, outputs=outputs, effect=effect)
-            else:
-                settlement = {"task_id": task_id, "result": payload, "output_objects": outputs, "effect": effect}
+            settlement = self.client.settle(
+                task_id,
+                lease_token,
+                result=payload,
+                outputs=outputs,
+                effect=effect,
+                attempt_id=attempt_id,
+                fence=fence,
+            )
             settled = True
             return settlement
         except HostCancelled:
             return {"task_id": task_id, "status": "cancelled", "cancelled": True}
         except Exception as exc:
-            if self.client is not None and hasattr(self.client, "fail"):
-                try:
-                    self.client.fail(
-                        task_id,
-                        lease_token,
-                        str(exc),
-                        retryable=False,
-                        attempt_id=attempt_id,
-                        fence=fence,
-                    )
-                except TypeError:
-                    # Compatibility with simple offline fakes; real generated
-                    # clients always use the typed attempt-fail operation.
-                    self.client.fail(task_id, lease_token, str(exc), retryable=False)
+            self.client.fail(
+                task_id,
+                lease_token,
+                str(exc),
+                retryable=False,
+                attempt_id=attempt_id,
+                fence=fence,
+            )
             raise
         finally:
             if network_broker is not None:
@@ -2180,17 +2141,11 @@ class GenericPackHost:
 
     def cancel_task(self, task_id: str) -> Any:
         """Propagate cancellation through the runtime client boundary."""
-        if self.client is None or not hasattr(self.client, "cancel"):
-            raise HostError("runtime client is required to cancel a task")
-        return self.client.cancel(task_id)
+        return self._client_operation("cancel")(task_id)
 
     def claim_once(self) -> Mapping[str, Any] | None:
         """Claim and execute one queued task through the generated boundary."""
-        if self.client is None or not hasattr(self.client, "claim_next"):
-            raise HostError(
-                "runtime client lacks canonical claim-next operation; "
-                "use generated WorkspaceClient.claim_task"
-            )
+        claim_next = self._client_operation("claim_next")
         # Readiness is an admission predicate, not merely registration
         # metadata.  Credentials, binaries, and external-pack provenance can
         # change while a host is running, so refresh the local preflight before
@@ -2210,7 +2165,7 @@ class GenericPackHost:
         )
         if not capability_ids:
             return None
-        claim = self.client.claim_next(
+        claim = claim_next(
             executor_id=self.executor_id,
             capability_ids=capability_ids,
             idempotency_key=f"claim:{self.executor_id}:{time.time_ns()}",
@@ -2230,9 +2185,7 @@ class GenericPackHost:
         if not claim_data.get("task_id"):
             raise HostError("generated claim operation returned no task_id")
         task_id = str(claim_data["task_id"])
-        if not hasattr(self.client, "task"):
-            raise HostError("runtime client lacks canonical task read operation")
-        task = self.client.task(task_id)
+        task = self._client_operation("task")(task_id)
         if isinstance(task, Mapping):
             task_data = dict(task.get("task", task))
         else:

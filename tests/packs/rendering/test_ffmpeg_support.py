@@ -520,7 +520,7 @@ def test_visual_only_protocol_result_declares_none(tmp_path: Path) -> None:
         mock.patch.object(
             ffmpeg.remotion_backend,
             "_render_provenance_payload",
-            return_value={"engine": "ffmpeg"},
+            return_value={"registry_hash": "test-registry"},
         ),
         mock.patch.object(ffmpeg, "validate_render_result"),
     ):
@@ -650,7 +650,7 @@ def test_audio_reactive_support_gain_and_protocol_provenance_fragments(
         mock.patch.object(
             ffmpeg.remotion_backend,
             "_render_provenance_payload",
-            return_value={"engine": "ffmpeg"},
+            return_value={"registry_hash": "test-registry"},
         ),
         mock.patch.object(ffmpeg, "validate_render_result"),
     ):

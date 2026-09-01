@@ -261,86 +261,42 @@ class RenderService:
 
     def render(
         self,
-        request: RenderRequest | Mapping[str, Any] | str | Path,
-        assets_path: str | Path | None = None,
-        out_path: str | Path | None = None,
+        request: RenderRequest | Mapping[str, Any],
         *,
         selector: str | None = None,
         output_path: str | Path | None = None,
+        out_path: str | Path | None = None,
         sidecar_path: str | Path | None = None,
         backend_config: Mapping[str, Mapping[str, Any]] | None = None,
         audio: AudioOwnership | str | None = None,
         profile: Any | None = None,
         metadata: Mapping[str, str] | None = None,
         previous_outputs: Iterable[object] = (),
-        v1_compatibility: Mapping[str, Any] | None = None,
         materialized_root: str | Path | None = None,
         materialized_objects: Mapping[str, str] | None = None,
     ) -> Path:
-        """Render either a wire request or a timeline/assets path pair.
+        """Render one canonical wire request and publish its result."""
 
-        For a wire request, the second positional argument may be the output
-        path.  The path-pair form is a compatibility convenience used by the
-        facade while it migrates to constructing :class:`RenderRequest`
-        directly.
-        """
-
-        selected = selector
-        destination = output_path or out_path
-        if isinstance(request, (RenderRequest, Mapping)):
-            if destination is None and assets_path is not None:
-                destination = assets_path
-                assets_path = None
-            parsed = (
-                request
-                if isinstance(request, RenderRequest)
-                else RenderRequest.from_dict(request)
+        if output_path is not None and out_path is not None:
+            raise_protocol_error(
+                backend=_CORE_BACKEND_ID,
+                message="supply only one of output_path or out_path",
+                recovery_command="remove the duplicate output path and retry",
             )
-        else:
-            if destination is None:
-                raise_protocol_error(
-                    backend=_CORE_BACKEND_ID,
-                    message="out_path/output_path is required",
-                    recovery_command="supply one output path and retry",
-                )
-            destination_path = Path(destination)
-            parsed = RenderRequest.from_dict(
-                {
-                    "schema_version": SCHEMA_VERSION,
-                    "timeline_path": str(Path(request).expanduser().resolve()),
-                    "assets_registry_path": (
-                        None
-                        if assets_path is None
-                        else str(Path(assets_path).expanduser().resolve())
-                    ),
-                    "output_name": destination_path.name,
-                    "window": None,
-                    "audio": (
-                        audio.value if isinstance(audio, AudioOwnership) else audio
-                    ),
-                    "profile": profile,
-                    "backend_config": {
-                        str(key): dict(value)
-                        for key, value in (backend_config or {}).items()
-                    },
-                    "metadata": dict(metadata or {}),
-                    "materialized_root": None if materialized_root is None else str(Path(materialized_root).expanduser().resolve()),
-                    "materialized_objects": dict(materialized_objects or {}),
-                }
-            )
+        destination = output_path if output_path is not None else out_path
         if destination is None:
             raise_protocol_error(
                 backend=_CORE_BACKEND_ID,
                 message="out_path/output_path is required",
                 recovery_command="supply one output path and retry",
             )
+        parsed = request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
         return self.render_request(
             parsed,
-            selector=selected,
+            selector=selector,
             out_path=destination,
             sidecar_path=sidecar_path,
             previous_outputs=previous_outputs,
-            v1_compatibility=v1_compatibility,
         )
 
     def render_request(
@@ -351,7 +307,6 @@ class RenderService:
         out_path: str | Path,
         sidecar_path: str | Path | None = None,
         previous_outputs: Iterable[object] = (),
-        v1_compatibility: Mapping[str, Any] | None = None,
     ) -> Path:
         """Execute the frozen selection lifecycle for one protocol request."""
 
@@ -435,7 +390,6 @@ class RenderService:
                             out_path=output,
                             sidecar_path=sidecar,
                             previous_outputs=tuple(previous_outputs),
-                            v1_compatibility=v1_compatibility,
                         )
                 except RendererException as exc:
                     self._capture_failure_bundle(exc, request=localized)
@@ -513,7 +467,6 @@ class RenderService:
         out_path: Path,
         sidecar_path: Path,
         previous_outputs: tuple[object, ...],
-        v1_compatibility: Mapping[str, Any] | None,
     ) -> Path:
         selected = selected or self._select(request, policy=policy, workspace=workspace)
         if policy.kind == "planner":
@@ -539,7 +492,6 @@ class RenderService:
             )
             finalizer_ran = plan.finalizer.id != _DIRECT_FINALIZER_ID
             artifact_lineage = [item.video for item in segment_results]
-            compatibility_results = segment_results
             fragment_results = (
                 ([*segment_results, final_result] if finalizer_ran else segment_results)
                 if len(segment_results) == 1
@@ -605,9 +557,6 @@ class RenderService:
                     requested_policy=policy.requested,
             )
             artifact_lineage = [renderer_result.video]
-            compatibility_results = (
-                [renderer_result] if finalizer_ran else [final_result]
-            )
             fragment_results = (
                 [renderer_result, final_result]
                 if finalizer_ran
@@ -615,10 +564,6 @@ class RenderService:
             )
 
         source_video = self._artifact_path(final_result, workspace)
-        compatibility = self._v1_compatibility(
-            compatibility_results,
-            supplied=v1_compatibility,
-        )
         fragments = self._merge_backend_fragments(fragment_results)
         provenance = self._provenance_builder(
             engine=policy.requested,
@@ -631,7 +576,6 @@ class RenderService:
             normalization=final_result.normalization,
             attachments=final_result.attachments,
             backend_fragments=fragments,
-            v1_compatibility=compatibility,
         )
         self._observe(
             "publish",
@@ -1358,8 +1302,7 @@ class RenderService:
                 details={"received_type": type(response).__name__},
             )
         # The registry selection is authoritative.  A planner response may
-        # still carry the pre-alias/pre-override identity it was asked to
-        # replace (notably during compatibility routing); normalize that
+        # still carry the requested identity it was asked to replace; normalize that
         # self-description to the selected candidate and its complete
         # resolution evidence below.
         planner_resolution = self._planner_resolution(selected)
@@ -1645,7 +1588,7 @@ class RenderService:
         ``rendered`` is already complete. ``none`` is an intentional
         visual-only result, while ``passthrough`` must be completed by the
         embedding host before publication.  A configured completer may also
-        apply an optional compatibility policy to ``none`` without requiring
+        apply its declared policy to ``none`` without requiring
         arbitrary renderers to synthesize silence.
         """
 
@@ -1662,7 +1605,7 @@ class RenderService:
                 recovery_command="rerender with an audio/profile pair that agrees",
             )
         if defer_to_finalizer:
-            # A registered finalizer owns cross-segment compatibility: it may
+            # A registered finalizer owns cross-segment normalization: it may
             # synthesize silence for NONE segments or preserve a uniform set
             # of PASSTHROUGH segments.  Completion, if still necessary, runs
             # once on the finalized result below.
@@ -2033,7 +1976,7 @@ class RenderService:
         """Assemble the bundle record for the most recent backend invocation."""
 
         payload = invocation.payload
-        payload_dict = payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+        payload_dict = payload.to_dict()
         # Attempt-local media handles are deliberately not replay authority;
         # the replay bundle captures the registry bytes and must be
         # re-materialized by a future host invocation.
@@ -2230,48 +2173,6 @@ class RenderService:
                             "service_fragment_sequence": [current, dict(fragment)]
                         }
         return merged
-
-    @staticmethod
-    def _v1_compatibility(
-        results: Sequence[RenderResult],
-        *,
-        supplied: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        compatibility: dict[str, Any] = {
-            "project_dir": None,
-            "composition_id": "TimelineComposition",
-            "active_pack_order": [],
-            "active_theme": None,
-            "registry_hash": None,
-            "registry_state": {},
-            "resolved_effect_ids": [],
-            "resolved_effects": [],
-            "source_pack_ids": [],
-            "element_roots": [],
-            "staged_asset_ids": [],
-            "staged_asset_root": None,
-        }
-        segment_provenance: list[dict[str, Any]] = []
-        for result in results:
-            for fragment in result.backend_fragments.values():
-                legacy = fragment.get("legacy_v1")
-                if not isinstance(legacy, Mapping):
-                    continue
-                segment_provenance.append(dict(legacy))
-                for key in compatibility:
-                    if key in legacy:
-                        compatibility[key] = legacy[key]
-                for key in (
-                    "ffmpeg_specialization",
-                    "audio_reactive_colour",
-                ):
-                    if key in legacy:
-                        compatibility[key] = legacy[key]
-        if len(segment_provenance) > 1:
-            compatibility["segment_provenance"] = segment_provenance
-        if supplied is not None:
-            compatibility.update(dict(supplied))
-        return compatibility
 
     @staticmethod
     def _alternatives(

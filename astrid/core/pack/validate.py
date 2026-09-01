@@ -234,6 +234,7 @@ class PackValidator:
         self._pack_data: Optional[dict[str, Any]] = None
         self._layout_issues: list[LayoutValidationIssue] = []
         self._layout_exceptions: list[PackLayoutException] = []
+        self._schema_cache: dict[tuple, tuple[dict[str, Any], Registry]] = {}
 
     def validate(self) -> list[str]:
         """Run all validations. Returns list of error strings (empty = valid)."""
@@ -416,8 +417,6 @@ class PackValidator:
         Cached per (manifest_kind, version).
         """
         schema_key = (manifest_kind, version)
-        if not hasattr(self, "_schema_cache"):
-            self._schema_cache: dict[tuple, tuple[dict[str, Any], Registry]] = {}
         if schema_key in self._schema_cache:
             return self._schema_cache[schema_key]
 
@@ -1064,12 +1063,7 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
         if isinstance(agent.get("normal_entrypoints"), list)
         else []
     )
-    legacy_entrypoints = (
-        [str(ep) for ep in agent.get("entrypoints", []) if ep]
-        if isinstance(agent.get("entrypoints"), list)
-        else []
-    )
-    display_entrypoints = normal_entrypoints or legacy_entrypoints
+    display_entrypoints = normal_entrypoints
 
     secrets_raw = data.get("secrets")
     secrets_list: list[str] = []

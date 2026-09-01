@@ -213,7 +213,6 @@ def test_support_is_strict_while_legacy_facade_eligibility_is_preserved(
     assert report.backend == ffmpeg.BACKEND_ID
     assert report.features["audio_ownership"] == "rendered"
     assert report.features["whole_media"] is True
-    assert ffmpeg.can_render_with_ffmpeg_media(timeline_path, assets_path) is True
 
 
 def test_support_rejects_non_media_timeline(tmp_path: Path) -> None:
@@ -226,7 +225,6 @@ def test_support_rejects_non_media_timeline(tmp_path: Path) -> None:
 
     assert report.supported is False
     assert any("unsupported clip kind" in reason for reason in report.reasons)
-    assert ffmpeg.can_render_with_ffmpeg_media(timeline_path, assets_path) is False
 
 
 def test_raw_support_adapter_writes_authoritative_report(tmp_path: Path) -> None:

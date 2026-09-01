@@ -47,9 +47,9 @@ class Step:
     always_run: bool = False
     invoke: Callable[[argparse.Namespace], Path] | None = None
 
-def step_argv(name: str, python_exec: str) -> list[str]:
-    """Argv tokens that invoke a pipeline step's executor module."""
-    return executor_argv(name, python_exec)
+def step_argv(executor_id: str, python_exec: str) -> list[str]:
+    """Argv tokens that invoke a qualified pipeline executor module."""
+    return executor_argv(executor_id, python_exec)
 
 
 def add_extra_args(args: argparse.Namespace, step_name: str, cmd: list[str]) -> list[str]:
@@ -77,7 +77,7 @@ def _arrange_target_duration(args: argparse.Namespace) -> float | None:
 
 def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [
-        *step_argv("cut.py", args.python_exec),
+        *step_argv("video_editing.cut", args.python_exec),
         "--pool",
         str(args.out / "pool.json"),
         "--arrangement",
@@ -143,7 +143,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "transcribe",
                 [
-                    *step_argv("transcribe.py", args.python_exec),
+                    *step_argv("editorial.transcribe", args.python_exec),
                     "--audio",
                     str(args.audio),
                     "--out",
@@ -158,7 +158,7 @@ def build_pool_steps() -> list[Step]:
             lambda args: add_extra_args(
                 args,
                 "scenes",
-                [*step_argv("scenes.py", args.python_exec), "--video", str(args.video), "--out", str(args.out / "scenes.json")],
+                [*step_argv("editorial.scenes", args.python_exec), "--video", str(args.video), "--out", str(args.out / "scenes.json")],
             ),
         ),
         Step(
@@ -168,7 +168,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "quality_zones",
                 [
-                    *step_argv("quality_zones.py", args.python_exec),
+                    *step_argv("editorial.quality_zones", args.python_exec),
                     str(args.video),
                     "--out",
                     str(args.out / "quality_zones.json"),
@@ -181,7 +181,7 @@ def build_pool_steps() -> list[Step]:
             lambda args: add_extra_args(
                 args,
                 "shots",
-                [*step_argv("shots.py", args.python_exec), "--video", str(args.video), "--scenes", str(args.out / "scenes.json"), "--out", str(args.out)],
+                [*step_argv("editorial.shots", args.python_exec), "--video", str(args.video), "--scenes", str(args.out / "scenes.json"), "--out", str(args.out)],
             ),
         ),
         Step(
@@ -191,7 +191,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "triage",
                 [
-                    *step_argv("triage.py", args.python_exec),
+                    *step_argv("editorial.triage", args.python_exec),
                     "--scenes",
                     str(args.out / "scenes.json"),
                     "--shots",
@@ -211,7 +211,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "scene_describe",
                 [
-                    *step_argv("scene_describe.py", args.python_exec),
+                    *step_argv("understanding.scene_describe", args.python_exec),
                     "--scenes",
                     str(args.out / "scenes.json"),
                     "--triage",
@@ -231,7 +231,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "quote_scout",
                 [
-                    *step_argv("quote_scout.py", args.python_exec),
+                    *step_argv("editorial.quote_scout", args.python_exec),
                     "--transcript",
                     str(args.out / "transcript.json"),
                     "--out",
@@ -247,7 +247,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "pool_build",
                 [
-                    *step_argv("pool_build.py", args.python_exec),
+                    *step_argv("training.pool_build", args.python_exec),
                     "--triage",
                     str(args.out / "scene_triage.json"),
                     "--scene-descriptions",
@@ -272,7 +272,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "pool_merge",
                 [
-                    *step_argv("pool_merge.py", args.python_exec),
+                    *step_argv("training.pool_merge", args.python_exec),
                     "--pool",
                     str(args.out / "pool.json"),
                     "--out",
@@ -290,7 +290,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "arrange",
                 [
-                    *step_argv("arrange.py", args.python_exec),
+                    *step_argv("editorial.arrange", args.python_exec),
                     "--pool",
                     str(args.out / "pool.json"),
                     "--brief",
@@ -324,7 +324,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "refine",
                 [
-                    *step_argv("refine.py", args.python_exec),
+                    *step_argv("editorial.refine", args.python_exec),
                     "--arrangement",
                     str(args.brief_out / "arrangement.json"),
                     "--pool",
@@ -358,7 +358,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "editor_review",
                 [
-                    *step_argv("editor_review.py", args.python_exec),
+                    *step_argv("editorial.editor_review", args.python_exec),
                     "--brief-dir",
                     str(args.brief_out),
                     "--run-dir",
@@ -379,7 +379,7 @@ def build_pool_steps() -> list[Step]:
                 args,
                 "validate",
                 [
-                    *step_argv("validate.py", args.python_exec),
+                    *step_argv("editorial.validate", args.python_exec),
                     "--video",
                     str(args.brief_out / "hype.mp4"),
                     "--timeline",

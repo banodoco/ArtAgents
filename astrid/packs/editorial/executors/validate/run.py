@@ -67,7 +67,7 @@ def joined_text(segments: list[dict]) -> str:
 def run_transcribe(video: Path, out_dir: Path, env_file: Path | None) -> Path:
     transcript_json = out_dir / "transcript.json"
     cmd = [
-        *executor_argv("transcribe", sys.executable),
+        *executor_argv("editorial.transcribe", sys.executable),
         "--audio",
         str(video),
         "--out",

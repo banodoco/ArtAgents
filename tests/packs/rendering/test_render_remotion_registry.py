@@ -152,7 +152,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
                 mock.patch.object(render_remotion, "load_default_registry", side_effect=capturing_load_default_registry),
             ):
-                result = render_remotion.render(
+                result = render_facade.render(
                     timeline_path,
                     assets_path,
                     out_path,

@@ -16,9 +16,6 @@ manifest fields, component metadata, doc paths, and bounded STAGE.md excerpts.
     authoritative source and always runs first.
 
 External roots are supplied explicitly through the pack discovery API.
-
-The dual-path design preserves backward compatibility with PR #8's index
-format while anchoring enumeration on the pack-system's canonical resolver.
 """
 
 from __future__ import annotations
@@ -249,8 +246,7 @@ def _scan_components(root: Path, content: dict[str, Any]) -> list[dict[str, Any]
 def _normalize_secrets(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Return a structured secrets list from a pack manifest.
 
-    Handles both legacy ``{required:[...]}`` dict and new
-    ``[{name, required, description}]`` list formats.
+    The manifest schema requires the structured list form.
     """
     secrets_raw = manifest.get("secrets")
     if isinstance(secrets_raw, list):
@@ -263,14 +259,6 @@ def _normalize_secrets(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                     "description": str(s_obj.get("description", "")),
                 })
         return result
-    if isinstance(secrets_raw, dict):
-        # Legacy format
-        req_list = secrets_raw.get("required")
-        if isinstance(req_list, list):
-            return [
-                {"name": str(s), "required": True, "description": ""}
-                for s in req_list if s
-            ]
     return []
 
 
@@ -373,10 +361,6 @@ def _assemble_pack_entry(
     normal_entrypoints: list[str] = []
     if isinstance(agent_section.get("normal_entrypoints"), list):
         normal_entrypoints = [str(ep) for ep in agent_section["normal_entrypoints"] if ep]
-    if not normal_entrypoints and isinstance(agent_section.get("entrypoints"), list):
-        # Fall back to legacy entrypoints
-        normal_entrypoints = [str(ep) for ep in agent_section["entrypoints"] if ep]
-
     # do_not_use_for
     do_not_use_for = str(agent_section.get("do_not_use_for", "")) or None
 

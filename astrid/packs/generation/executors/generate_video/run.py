@@ -471,7 +471,7 @@ def generate_core(
     warnings: list[dict[str, str]] = []
     dropped_features: list[str] = []
 
-    # --- compute duration→frames shim (if duration provided without frames) ---
+    # --- derive duration→frames deterministically ---------------------------
     if args.duration is not None and args.frames is None and args.fps is not None:
         args.frames = round(args.duration * args.fps)
 

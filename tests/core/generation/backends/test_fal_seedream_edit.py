@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,9 @@ def test_seedream_edit_wraps_single_image_ref_for_plural_fal_input(
         }
 
     backend = FalBackend()
+    source = tmp_path / "source.png"
+    source_bytes = b"\x89PNG\r\n\x1a\n"
+    source.write_bytes(source_bytes)
     with (
         patch.object(fal_mod, "fal_submit_and_poll", side_effect=capture_submit),
         patch.object(FalBackend, "_resolve_api_key", return_value="test-key"),
@@ -41,7 +45,7 @@ def test_seedream_edit_wraps_single_image_ref_for_plural_fal_input(
             mode="edit",
             params={
                 "prompt": "Keep the landscape fixed; thicken only the plant feeder.",
-                "image_ref": "https://example.com/source.png",
+                "image_ref": str(source),
                 "size": "landscape_16_9",
             },
             out_dir=tmp_path / "out",
@@ -50,7 +54,9 @@ def test_seedream_edit_wraps_single_image_ref_for_plural_fal_input(
     assert captured["endpoint"] == "bytedance/seedream/v5/pro/edit"
     assert captured["payload"] == {
         "prompt": "Keep the landscape fixed; thicken only the plant feeder.",
-        "image_urls": ["https://example.com/source.png"],
+        "image_urls": [
+            "data:image/png;base64," + base64.b64encode(source_bytes).decode("ascii")
+        ],
         "image_size": "landscape_16_9",
         "output_format": "png",
     }

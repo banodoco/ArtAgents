@@ -11,8 +11,8 @@ sibling submodules so that ``astrid.core.pack`` stays the stable import path:
 * :mod:`astrid.core.pack.walkers` — content-root filesystem iterators.
 * :mod:`astrid.core.pack.loader` — manifest loading/parsing, discovery, packs root.
 
-Every name importable from ``astrid.core.pack`` before the split (public and
-``_underscore`` private) remains importable from this exact path.
+The package re-exports the canonical public pack APIs from these focused
+modules; retired parser compatibility helpers are intentionally not exposed.
 """
 
 from __future__ import annotations
@@ -49,9 +49,6 @@ from astrid.core.pack.loader import (
     DEFAULT_PACKS_ROOT,
     _default_stability_for_status,
     _load_manifest_payload,
-    _parse_flat_yaml,
-    _strip_comment,
-    _unquote,
     discover_packs,
     load_pack_manifest,
     pack_manifest_path,

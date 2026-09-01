@@ -479,11 +479,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
         os.replace(staged_video, output_path)
 
     try:
-        provenance_v1 = _render_provenance_payload(
-            output_path,
-            engine="threejs",
-            timeline_path=timeline_path,
-            assets_path=requested_assets_path or assets_path,
+        backend_provenance = _render_provenance_payload(
             project_dir=settings.project_dir,
             composition_id=THREE_COMPOSITION_ID,
             theme_path=settings.theme_path,
@@ -509,7 +505,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
                     "three_version": THREE_VERSION,
                     "capture_host": "remotion",
                     "composition": THREE_COMPOSITION_ID,
-                    "legacy_v1": provenance_v1,
+                    **backend_provenance,
                 }
             },
             normalization=[],

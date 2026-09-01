@@ -223,8 +223,8 @@ class FalBackend(BackendAdapter):
         # --- compute applied / dropped feature lists -------------------------
         applied_features, dropped_features = split_feature_support(params, mode_spec.supports)
 
-        # --- compute-from-duration shim (Sprint 04) --------------------------
-        # If duration is supplied without frames, and fps is known, derive frames
+        # --- derive frame count deterministically ----------------------------
+        # If duration is supplied without frames, and fps is known, derive frames.
         computed_frames = derive_frames_from_duration(params)
         if computed_frames is not None:
             logger.debug("Computed frames=%d from duration * fps", computed_frames)
@@ -380,15 +380,6 @@ class FalBackend(BackendAdapter):
                     payload["guidance_scale"] = hint_value
                 else:
                     payload.setdefault(hint_key, hint_value)
-        else:
-            # Defensive fallback: old per-entry-id branches (S4 cleanup).
-            # flux-schnell: guidance_scale is always 1.0 (frozen value)
-            if entry.id == "flux-schnell" and mode == "t2i":
-                payload["guidance_scale"] = 1.0
-
-            # ideogram-v4: disable fal's safety checker by default.
-            if entry.id == "ideogram-v4":
-                payload.setdefault("enable_safety_checker", False)
 
         # --- attach LoRA payload if present ----------------------------------
         if loras_raw and fal_loras:
@@ -475,22 +466,24 @@ def _upload_ref_if_local(
     client: HttpClient,
     api_key: str,
 ) -> str:
-    """Upload *ref_str* to fal if it is a local path; otherwise return as-is.
+    """Upload one host-materialized local input to fal.
 
-    Small images are inlined as base64 data URIs (legacy behaviour). Files
-    larger than 500 KB, and any non-image media, are uploaded to fal CDN
-    because fal docs discourage base64 for large payloads.
+    Small images are inlined as base64 data URIs. Files larger than 500 KB,
+    and any non-image media, are uploaded to fal CDN because fal docs
+    discourage base64 for large payloads. Provider inputs never accept an
+    arbitrary URL or unresolved caller path at this boundary.
     """
     ref_path = Path(ref_str)
-    if ref_path.is_file():
-        size = ref_path.stat().st_size
-        if size > 512_000:
-            logger.info("Uploading %s to fal CDN: %s (%d bytes)", feature_name, ref_path, size)
-            return fal_storage_upload(client, ref_path, api_key)
-        logger.info("Uploading %s to fal as data URI: %s", feature_name, ref_path)
-        return fal_upload(client, ref_path, api_key)
-    # Assume it's already a URL
-    return ref_str
+    if not ref_path.is_file():
+        raise ValueError(
+            f"{feature_name} must be a host-materialized local file, got {ref_str!r}"
+        )
+    size = ref_path.stat().st_size
+    if size > 512_000:
+        logger.info("Uploading %s to fal CDN: %s (%d bytes)", feature_name, ref_path, size)
+        return fal_storage_upload(client, ref_path, api_key)
+    logger.info("Uploading %s to fal as data URI: %s", feature_name, ref_path)
+    return fal_upload(client, ref_path, api_key)
 
 
 def _extract_asset_urls(result: dict[str, Any]) -> list[str]:
