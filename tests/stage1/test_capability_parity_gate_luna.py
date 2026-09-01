@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import subprocess
+import sys
 from typing import Any
 
 from astrid.core.execution.generic_host import GenericPackHost
@@ -96,10 +99,42 @@ def _report(host: GenericPackHost) -> dict[str, Any]:
     }
 
 
+def _run_proofs(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Execute each unique proof selector needed by a ready capability."""
+    selectors = {
+        str(row["proof"]["selector"])
+        for row in report["records"]
+        if row["ready"] and isinstance(row.get("proof"), dict)
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for selector in sorted(selectors):
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", selector],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=240,
+        )
+        output = f"{completed.stdout}\n{completed.stderr}"
+        # A successful pytest exit is not sufficient: a skipped representative
+        # is not execution evidence for a capability advertised as ready.
+        skipped = bool(re.search(r"\b\d+\s+skipped\b", output))
+        passed = bool(re.search(r"\b\d+\s+passed\b", output))
+        results[selector] = {
+            "returncode": completed.returncode,
+            "status": "pass" if completed.returncode == 0 and passed and not skipped else "fail",
+            "output_tail": output[-2000:],
+        }
+    return results
+
+
 def test_stage1_capability_parity_is_explicit_and_family_proven(tmp_path: Path) -> None:
     host = GenericPackHost(pack_roots=[PACKS], capability_matrix=MATRIX, credential_source={})
     records = host.discover()
     report = _report(host)
+    proof_runs = _run_proofs(report)
+    report["proof_runs"] = proof_runs
     report_path = tmp_path / "astrid-capability-parity.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -121,6 +156,10 @@ def test_stage1_capability_parity_is_explicit_and_family_proven(tmp_path: Path) 
         assert selector and _selector_path(selector).is_file(), f"{record.id}: proof selector is not in checkout"
         if row["ready"]:
             assert proof["kind"] in {"family_representative", "direct"}, f"{record.id}: ready without executable proof"
+            proof_run = proof_runs.get(selector)
+            assert proof_run and proof_run["status"] == "pass", (
+                f"{record.id}: proof did not execute cleanly: {proof_run}"
+            )
         if row["direct_proof_required"] and row["ready"]:
             assert proof["kind"] == "direct", "rendering.render cannot be certified by an offline render-family helper"
 
