@@ -110,14 +110,16 @@ overlays, and `include_missing_roots=True` to include element roots that have
 not been locally installed yet.
 
 The readiness ledger is a separate, host-facing projection of this inventory.
-In the current checkout it reconciles 77 pack labels (75 historical labels)
-and 68 historical executor contract rows; the local generic host discovers 59
-executable in-tree executor manifests. Historical external rows (including
-Hivemind, Discord-local, and Seedance-local) are reported as
+In the current checkout it reconciles 76 pack labels (81 historical non-Fal
+labels) and 74 historical executor contract rows; the local generic host
+discovers 59 executable in-tree executor manifests. Historical external rows
+(including Hivemind, Discord-local, and Seedance-local) are reported as
 `unavailable_external` when their source pack is not installed, never as ready
 local capabilities. The host re-runs preflight before each runtime claim, so
 the capability IDs offered for admission are exactly the capabilities that
-are currently ready.
+are currently ready. The projection also retains 19 retired pre-cutover Reigh
+IDs and records the unresolved seven-declared/eight-installed Hivemind census
+without guessing the eighth ID.
 
 ### Schema Inspection
 

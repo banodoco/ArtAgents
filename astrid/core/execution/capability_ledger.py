@@ -18,6 +18,173 @@ class CapabilityLedgerError(ValueError):
     """Raised when a capability source cannot be reconciled safely."""
 
 
+# These rows are deliberately data, not importable capability definitions.  The
+# source manifests and the Reigh admission registry were retired, but their
+# historical occurrences remain part of the B9 census and must not disappear
+# merely because the executable routes were removed.
+_HISTORICAL_SOURCE_LABELS: tuple[dict[str, Any], ...] = (
+    {
+        "pack": "iteration",
+        "label": "collect_thread_provenance",
+        "source": "historical: astrid/packs/iteration/pack.yaml",
+        "canonical_id": "iteration.collect_runtime_provenance",
+        "disposition": "replaced",
+        "equivalent_to": "iteration.collect_runtime_provenance",
+        "executable": False,
+        "reason": "Replaced by runtime-owned provenance collection.",
+    },
+    {
+        "pack": "iteration",
+        "label": "prepare_iteration",
+        "source": "historical: astrid/packs/iteration/pack.yaml",
+        "canonical_id": None,
+        "disposition": "retired",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Retired with the thread/sidecar iteration preparation authority.",
+    },
+    {
+        "pack": "reigh",
+        "label": "build_spatial_audio_page",
+        "source": "historical: astrid/packs/reigh/pack.yaml",
+        "canonical_id": None,
+        "disposition": "unsupported",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Reigh integration pack is not shipped in the current checkout.",
+    },
+    {
+        "pack": "reigh",
+        "label": "fetch_reigh_data",
+        "source": "historical: astrid/packs/reigh/pack.yaml",
+        "canonical_id": None,
+        "disposition": "unsupported",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Reigh integration pack is not shipped in the current checkout.",
+    },
+    {
+        "pack": "reigh",
+        "label": "open_in_reigh",
+        "source": "historical: astrid/packs/reigh/pack.yaml",
+        "canonical_id": None,
+        "disposition": "unsupported",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Reigh bridge authority was retired and is not shipped.",
+    },
+    {
+        "pack": "reigh",
+        "label": "publish_timeline",
+        "source": "historical: astrid/packs/reigh/pack.yaml",
+        "canonical_id": None,
+        "disposition": "unsupported",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Reigh publishing authority was retired and is not shipped.",
+    },
+    {
+        "pack": "training",
+        "label": "manage_asset_cache",
+        "source": "historical: astrid/packs/training/pack.yaml",
+        "canonical_id": None,
+        "disposition": "retired",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Retired with the persistent URL asset-cache authority.",
+    },
+    {
+        "pack": "typed_timeline",
+        "label": "typed_timeline.render",
+        "source": "historical: astrid/packs/typed_timeline/pack.yaml",
+        "canonical_id": None,
+        "disposition": "retired",
+        "equivalent_to": None,
+        "executable": False,
+        "reason": "Retired typed-timeline render route; rendering is runtime-owned.",
+    },
+)
+
+_HISTORICAL_EXECUTOR_ROWS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "iteration.prepare",
+        "result_contract": "manifest",
+        "disposition": "retired",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired thread/sidecar iteration preparation executor.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+    {
+        "id": "reigh.open_in_reigh",
+        "result_contract": "exempted",
+        "disposition": "unsupported",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired Reigh bridge executor; external integration is not shipped.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+    {
+        "id": "reigh.publish",
+        "result_contract": "exempted",
+        "disposition": "unsupported",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired Reigh publishing executor; external integration is not shipped.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+    {
+        "id": "reigh.reigh_data",
+        "result_contract": "exempted",
+        "disposition": "unsupported",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired Reigh data executor; external integration is not shipped.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+    {
+        "id": "reigh.spatial_audio_page",
+        "result_contract": "manifest",
+        "disposition": "unsupported",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired Reigh spatial-audio executor; external integration is not shipped.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+    {
+        "id": "training.asset_cache",
+        "result_contract": "exempted",
+        "disposition": "retired",
+        "discovery_status": "historical_only",
+        "executable": False,
+        "reason": "Retired persistent URL asset-cache executor.",
+        "source": "historical: astrid/core/contracts/output_result_exemptions.json",
+    },
+)
+
+_LEGACY_REIGH_IDS: tuple[tuple[str, str], ...] = (
+    ("reigh.wan_2_2_t2i", "wgp"),
+    ("reigh.qwen_image", "vibecomfy"),
+    ("reigh.qwen_image_style", "vibecomfy"),
+    ("reigh.qwen_image_2512", "vibecomfy"),
+    ("reigh.z_image_turbo", "vibecomfy"),
+    ("reigh.image_upscale", "vibecomfy"),
+    ("reigh.individual_travel_segment", "wgp"),
+    ("reigh.join_clips_orchestrator", "wgp"),
+    ("reigh.video_enhance", "vibecomfy"),
+    ("reigh.z_image_turbo_i2i", "vibecomfy"),
+    ("reigh.qwen_image_edit", "vibecomfy"),
+    ("reigh.image_inpaint", "vibecomfy"),
+    ("reigh.annotated_image_edit", "vibecomfy"),
+    ("reigh.travel_orchestrator", "wgp"),
+    ("reigh.wan_2_2_i2v", "wgp"),
+    ("reigh.travel_stitch", "wgp"),
+    ("reigh.edit_video_orchestrator", "wgp"),
+    ("reigh.animate_character", "vibecomfy"),
+    ("reigh.flux_klein_edit", "vibecomfy"),
+)
+
+
 def _repo_root_for_matrix(path: Path) -> Path | None:
     candidate = path.expanduser().resolve().parent.parent
     return candidate if (candidate / "astrid" / "packs").is_dir() else None
@@ -78,7 +245,25 @@ def _executor_inventory(repo_root: Path) -> list[dict[str, Any]]:
             "reason": str(detail.get("note", "")),
             "source": str(source.relative_to(repo_root)),
         })
+    rows.extend(dict(row) for row in _HISTORICAL_EXECUTOR_ROWS if row["id"] not in {item["id"] for item in rows})
     return rows
+
+
+def _legacy_ids(repo_root: Path) -> list[dict[str, Any]]:
+    """Return the exact pre-cutover Reigh registry as inert historical data."""
+    source = "historical: astrid/core/integrations/reigh/capabilities.py"
+    return [
+        {
+            "id": capability_id,
+            "binding": binding,
+            "disposition": "retired",
+            "discovery_status": "historical_only",
+            "executable": False,
+            "source": source,
+            "reason": "Removed legacy Reigh registry entry; retained for census only.",
+        }
+        for capability_id, binding in _LEGACY_REIGH_IDS
+    ]
 
 
 def _model_inventory(repo_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -121,12 +306,23 @@ def _provider_inventory(capabilities: list[Mapping[str, Any]]) -> list[dict[str,
 
 def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -> dict[str, Any]:
     labels = _source_labels(repo_root)
-    # The frozen historical census excludes the two dedicated fal labels. Keep
-    # that historical projection for auditability while retaining all current
-    # labels in the no-drop source projection below.
-    historical_labels = [row for row in labels if row["pack"] != "fal"]
+    # Keep current manifests distinct from the historical projection.  The
+    # latter includes retired source occurrences, while Fal's two current
+    # labels remain outside the non-Fal historical census.
+    historical_labels = [
+        row
+        for row in labels
+        if row["pack"] != "fal"
+        and not (
+            row["pack"] == "iteration"
+            and row["label"] == "collect_runtime_provenance"
+        )
+    ]
+    historical_labels.extend(dict(row) for row in _HISTORICAL_SOURCE_LABELS)
+    historical_labels.sort(key=lambda row: (row["pack"], row["label"]))
     aliases = _aliases(repo_root)
     executors = _executor_inventory(repo_root)
+    legacy = _legacy_ids(repo_root)
     models, model_backends = _model_inventory(repo_root)
     rendering_backends = _render_backend_inventory(repo_root)
     current_ids = {str(row.get("id")) for row in capabilities}
@@ -149,11 +345,15 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         elif row["disposition"] == "historical":
             row["reason"] = row.get("reason") or "retained in historical executor snapshot; no current executor manifest"
             row["discovery_status"] = "historical_only"
+    for row in executors:
+        if row.get("discovery_status") != "discovered":
+            row.setdefault("executable", False)
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
     coverage = {
         "source_labels": {"source": 76, "ledger": len(labels), "missing": [], "complete": len(labels) == 76},
-        "historical_source_labels": {"source": 74, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 74},
-        "executor_inventory": {"source": 68, "ledger": len(executors), "missing": [], "complete": len(executors) == 68},
+        "historical_source_labels": {"source": 81, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 81},
+        "executor_inventory": {"source": 74, "ledger": len(executors), "missing": [], "complete": len(executors) == 74},
+        "legacy_ids": {"source": 19, "ledger": len(legacy), "missing": [], "complete": len(legacy) == 19},
     }
     if not all(section["complete"] for section in coverage.values()):
         raise CapabilityLedgerError(f"capability source census drifted: {coverage}")
@@ -162,13 +362,23 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         "historical_pack_labels": historical_labels,
         "aliases": aliases,
         "executor_inventory": executors,
+        "legacy_ids": legacy,
         "providers": _provider_inventory(capabilities),
         "models": models,
         "generation_backends": model_backends,
         "rendering_backends": rendering_backends,
-        "hivemind": {"disposition": "optional_external", "executor_ids": expected_hivemind},
+        "hivemind": {
+            "disposition": "optional_external",
+            "executor_ids": expected_hivemind,
+            "external_census": {
+                "declared_count": 7,
+                "installed_count": 8,
+                "unresolved": True,
+                "note": "The eighth installed Hivemind item is not identified; no ID is guessed.",
+            },
+        },
         "coverage": coverage,
-        "counts": {"pack_labels": len(labels), "historical_pack_labels": len(historical_labels), "executor_inventory": len(executors), "aliases": len(aliases), "models": len(models), "rendering_backends": len(rendering_backends)},
+        "counts": {"pack_labels": len(labels), "historical_pack_labels": len(historical_labels), "executor_inventory": len(executors), "legacy_ids": len(legacy), "aliases": len(aliases), "models": len(models), "rendering_backends": len(rendering_backends)},
     }
 
 
