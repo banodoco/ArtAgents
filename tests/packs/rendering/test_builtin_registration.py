@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import hashlib
 import importlib
 import json
 import os
@@ -96,6 +97,8 @@ def _request(
     backend: str,
     output_name: str,
     backend_settings: dict[str, str] | None = None,
+    materialized_root: Path | None = None,
+    materialized_objects: dict[str, str] | None = None,
 ) -> RenderRequest:
     return RenderRequest(
         schema_version=SCHEMA_VERSION,
@@ -103,6 +106,10 @@ def _request(
         assets_registry_path=str(assets_path),
         output_name=output_name,
         backend_config={backend: backend_settings or {}},
+        materialized_root=(
+            None if materialized_root is None else str(materialized_root)
+        ),
+        materialized_objects=materialized_objects or {},
     )
 
 
@@ -319,12 +326,23 @@ def test_real_remotion_render_through_registered_backend(
         source_path,
         duration=0.5,
     )
+    registry = json.loads(assets_path.read_text(encoding="utf-8"))
+    registry["assets"]["source"].pop("file")
+    registry["assets"]["source"].update(
+        {
+            "media_id": "source-object",
+            "content_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        }
+    )
+    assets_path.write_text(json.dumps(registry), encoding="utf-8")
     request = _request(
         timeline_path,
         assets_path,
         backend="rendering.remotion",
         output_name="remotion-smoke.mp4",
         backend_settings={"project_dir": str(REMOTION_PROJECT)},
+        materialized_root=tmp_path,
+        materialized_objects={"source-object": str(source_path)},
     )
     renderers, _planners, _finalizers = _registries()
     candidate = renderers.get("rendering.remotion")

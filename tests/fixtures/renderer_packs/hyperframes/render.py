@@ -166,7 +166,40 @@ def _effective_gain(clip: dict, tracks: list) -> float:
     return max(0.0, min(1.0, track_gain * clip_gain))
 
 
-def _support_reasons(timeline: dict, registry: dict | None = None) -> list[str]:
+def _materialized_source(request: dict, entry: dict) -> Path | None:
+    """Resolve and verify one host-provided managed-media handoff."""
+
+    media_id = entry.get("media_id")
+    digest = entry.get("content_sha256")
+    root_value = request.get("materialized_root")
+    objects = request.get("materialized_objects")
+    if not isinstance(media_id, str) or not isinstance(digest, str):
+        return None
+    if not isinstance(root_value, str) or not isinstance(objects, dict):
+        return None
+    source_value = objects.get(media_id)
+    if not isinstance(source_value, str):
+        return None
+    root = Path(root_value).resolve()
+    source = Path(source_value).resolve()
+    try:
+        source.relative_to(root)
+    except ValueError:
+        return None
+    expected = digest.removeprefix("sha256:")
+    if not source.is_file() or len(expected) != 64:
+        return None
+    if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+        return None
+    return source
+
+
+def _support_reasons(
+    timeline: dict,
+    registry: dict | None = None,
+    *,
+    request: dict | None = None,
+) -> list[str]:
     """Return reasons this timeline is unsupported.
 
     * ``registry``: parsed assets registry (``{"assets": {id: entry}}``) or
@@ -213,7 +246,13 @@ def _support_reasons(timeline: dict, registry: dict | None = None) -> list[str]:
             if not isinstance(asset_id, str) or not asset_id:
                 reasons.append(f"clip[{index}] media clip needs an asset id")
             entry = asset_entries.get(asset_id) if isinstance(asset_id, str) else None
-            if not isinstance(entry, dict) or not isinstance(entry.get("file"), str):
+            has_file = isinstance(entry, dict) and isinstance(entry.get("file"), str)
+            has_handoff = (
+                isinstance(entry, dict)
+                and request is not None
+                and _materialized_source(request, entry) is not None
+            )
+            if not has_file and not has_handoff:
                 reasons.append(
                     f"clip[{index}] asset {asset_id!r} is not in the assets registry"
                 )
@@ -408,6 +447,7 @@ def _stage_assets(
     registry: dict | None,
     registry_path: Path | None,
     workspace: Path,
+    request: dict,
 ) -> dict:
     """Copy each referenced media asset into ``workspace/assets/``.
 
@@ -423,14 +463,19 @@ def _stage_assets(
             continue
         asset_id = clip.get("asset")
         entry = registry.get("assets", {}).get(asset_id)
-        if not isinstance(entry, dict) or not isinstance(entry.get("file"), str):
+        if not isinstance(entry, dict):
             continue
         if asset_id in staged:
             continue
-        file_value = entry["file"]
-        source = Path(file_value)
-        if not source.is_absolute():
-            source = registry_path.parent / source
+        file_value = entry.get("file")
+        if isinstance(file_value, str):
+            source = Path(file_value)
+            if not source.is_absolute():
+                source = registry_path.parent / source
+        else:
+            source = _materialized_source(request, entry)
+            if source is None:
+                continue
         if not source.is_file():
             continue
         assets_dir.mkdir(parents=True, exist_ok=True)
@@ -461,7 +506,7 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
 
     if verb == "support":
         registry, _registry_path = _load_registry(request, workspace)
-        reasons = _support_reasons(timeline, registry=registry)
+        reasons = _support_reasons(timeline, registry=registry, request=request)
         _write(
             result_path,
             {
@@ -482,7 +527,7 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
         return 0
 
     registry, registry_path = _load_registry(request, workspace)
-    reasons = _support_reasons(timeline, registry=registry)
+    reasons = _support_reasons(timeline, registry=registry, request=request)
     if reasons:
         _error(
             result_path,
@@ -506,7 +551,7 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
 
     width, height, fps = _canvas(timeline)
     assert width is not None and height is not None and fps is not None
-    asset_srcs = _stage_assets(timeline, registry, registry_path, workspace)
+    asset_srcs = _stage_assets(timeline, registry, registry_path, workspace, request)
     index_html = _compose_html(
         timeline,
         width=width,

@@ -18,6 +18,7 @@ pretending to render.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -497,7 +498,8 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
             {
                 "assets": {
                     "src": {
-                        "file": source.name,
+                        "media_id": "source-object",
+                        "content_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                         "type": "video/mp4",
                         "duration": 1.0,
                         "resolution": "320x180",
@@ -523,6 +525,8 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
                         "hyperframes.renderer": {},
                         "rendering.remotion": {},
                     },
+                    materialized_root=str(tmp_path),
+                    materialized_objects={"source-object": str(source)},
                 ),
                 selector="hyperframes.planner",
                 out_path=output,

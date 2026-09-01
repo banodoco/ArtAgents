@@ -554,13 +554,15 @@ def test_threejs_real_render_empty_timeline_through_public_service(
 ) -> None:
     _require_threejs_environment()
     timeline_path = _empty_timeline(tmp_path)
+    assets_path = tmp_path / "threejs-empty.assets.json"
+    assets_path.write_text('{"assets": {}}', encoding="utf-8")
     output = tmp_path / "threejs-empty.mp4"
     with _execution_env():
         published = render(
             timeline_path=timeline_path,
-            assets_registry_path=None,
+            assets_path=assets_path,
             out_path=output,
-            backend=THREEJS_ID,
+            selector=THREEJS_ID,
         )
 
     assert Path(published).is_file()
@@ -628,13 +630,15 @@ def test_threejs_real_render_text_timeline_through_public_service(
             ],
         },
     )
+    assets_path = tmp_path / "threejs-text.assets.json"
+    assets_path.write_text('{"assets": {}}', encoding="utf-8")
     output = tmp_path / "threejs-text.mp4"
     with _execution_env():
         published = render(
             timeline_path=timeline_path,
-            assets_registry_path=None,
+            assets_path=assets_path,
             out_path=output,
-            backend=THREEJS_ID,
+            selector=THREEJS_ID,
         )
 
     assert Path(published).is_file()
@@ -806,6 +810,8 @@ def test_threejs_real_render_works_with_npm_offline(tmp_path: Path) -> None:
     failure."""
     _require_threejs_environment()
     timeline_path = _text_timeline(tmp_path)
+    assets_path = tmp_path / "threejs-offline.assets.json"
+    assets_path.write_text('{"assets": {}}', encoding="utf-8")
     output = tmp_path / "threejs-offline.mp4"
 
     before = _npm_offline_value()
@@ -814,9 +820,9 @@ def test_threejs_real_render_works_with_npm_offline(tmp_path: Path) -> None:
         with _execution_env():
             published = render(
                 timeline_path=timeline_path,
-                assets_registry_path=None,
+                    assets_path=assets_path,
                 out_path=output,
-                backend=THREEJS_ID,
+                    selector=THREEJS_ID,
             )
     finally:
         if before in ("null", "undefined"):

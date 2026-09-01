@@ -437,7 +437,7 @@ def test_real_remotion_renders_each_semantic_variant(
     duration = 2.0 if fixture == "transition-windows" else 0.6
     _assert_tiny_semantic_video(output, duration=duration)
     routing = sidecar["routing"]
-    assert routing["requested_engine"] == "rendering.remotion"
+    assert routing["backend"] == "rendering.remotion"
     assert routing["resolved_backends"] == ["rendering.remotion"]
     assert sidecar["audio_ownership"] == "rendered"
 

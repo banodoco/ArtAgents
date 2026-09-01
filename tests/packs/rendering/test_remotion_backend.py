@@ -1168,13 +1168,15 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
     rendering.remotion — never rendering.threejs."""
     _require_remotion_environment()
     timeline_path = _remotion_text_timeline(tmp_path)
+    assets_path = tmp_path / "remotion-angle.assets.json"
+    timeline.save_registry({"assets": {}}, assets_path)
     output = tmp_path / "remotion-angle.mp4"
     with _execution_env():
         published = render(
             timeline_path=timeline_path,
-            assets_registry_path=None,
+            assets_path=assets_path,
             out_path=output,
-            backend="rendering.remotion",
+            selector="rendering.remotion",
         )
 
     video_path = Path(published)
@@ -1416,9 +1418,9 @@ def test_stamped_top_layer_via_real_service_is_mov_prores_with_alpha(
         with _execution_env():
             published = render(
                 timeline_path=timeline_path,
-                assets_registry_path=str(assets_path),
+                assets_path=assets_path,
                 out_path=output,
-                backend="rendering.remotion",
+                selector="rendering.remotion",
             )
         video_path = Path(published)
         assert video_path.is_file() and video_path.stat().st_size > 0
@@ -1436,7 +1438,7 @@ def test_stamped_top_layer_via_real_service_is_mov_prores_with_alpha(
             assert "420p" in video["pix_fmt"], video
             corner = _rgba_corner(video_path)
             # Frozen opaque path: the DOM composition paints the resolved
-            # theme bg (this worktree resolves the black banodoco-default
-            # fallback) and the corner is fully opaque.
+            # dark theme background and the corner is fully opaque. H.264
+            # conversion can shift the exact RGB values by a few levels.
             assert corner[3] == 255, corner
-            assert corner[:3] == bytes([0, 0, 0]), corner
+            assert max(corner[:3]) <= 24, corner

@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from astrid.packs.rendering.executors.render import run as render_executor
 from astrid.core import timeline
+from tests.packs.rendering._helpers import _execution_env
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -105,14 +107,16 @@ class AudioRenderTest(unittest.TestCase):
         registry: timeline.AssetRegistry = {
             "assets": {
                 "visual": {
-                    "file": str(silent_path),
+                    "media_id": "silent-object",
+                    "content_sha256": hashlib.sha256(silent_path.read_bytes()).hexdigest(),
                     "type": "video/mp4",
                     "duration": 2.0,
                     "resolution": "640x360",
                     "fps": 30.0,
                 },
                 "tone": {
-                    "file": str(tone_path),
+                    "media_id": "tone-object",
+                    "content_sha256": hashlib.sha256(tone_path.read_bytes()).hexdigest(),
                     "type": "audio/mp4",
                     "duration": 2.0,
                 },
@@ -122,12 +126,18 @@ class AudioRenderTest(unittest.TestCase):
         timeline.save_registry(registry, assets_path)
 
         try:
-            output = render_executor.render(
-                timeline_path,
-                assets_path,
-                out_path,
-                project_dir=ROOT / "remotion",
-            )
+            with _execution_env():
+                output = render_executor.render(
+                    timeline_path,
+                    assets_path,
+                    out_path,
+                    project_dir=ROOT / "remotion",
+                    materialized_root=tmp_dir,
+                    materialized_objects={
+                        "silent-object": str(silent_path),
+                        "tone-object": str(tone_path),
+                    },
+                )
         except RuntimeError as exc:
             if remotion_launch_blocked(exc):
                 self.skipTest(f"Remotion browser launch is blocked in this environment: {exc}")
