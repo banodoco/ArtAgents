@@ -541,7 +541,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         _run([str(runtime_pkg / "node_modules" / ".bin" / "tsc"), "-p", str(conformance / "tsconfig.json")], {**envless, "CI": "1"}, check=True)
         actor = conformance / "dist" / "conformance" / "fake-second-product.js"
         assert actor.is_file()
-        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", astrid_token, "--worker-token", new_token], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
+        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", astrid_token, "--worker-token", new_token, "--executor-id", str(new_discovery["worker_actor"])], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
         actor_payload = json.loads(actor_result.stdout)
         assert actor_payload["product"] == "neutral-gallery"
         assert actor_payload["realm_id"] == started["realm_id"]
