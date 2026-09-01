@@ -33,7 +33,7 @@ GENERATED_PATH = ROOT / "banodoco_workspace_client" / "generated.py"
 # future runtime contract refresh must update the source commit, digest, and
 # this test in one reviewed change; no ambient sibling checkout can silently
 # alter the shipped transport.
-PINNED_SOURCE_COMMIT = "1c6ab208cd0df0a7ec40be5c3ec539fd3561c293"
+PINNED_SOURCE_COMMIT = "aa54009de988c714fb140d99ce34449c44b91d91"
 PINNED_SOURCE_REPOSITORY = "https://github.com/banodoco/banodoco-workspace-runtime.git"
 PINNED_PROTOCOL = "workspace.v1"
 PINNED_SCHEMA_DIGEST = "sha256:99086502e2fc6f1a110b25fb1e6b12c6954359b6781daec22c4e53ab346c0243"
