@@ -27,6 +27,7 @@ _TOP_LEVEL_FAMILIES = frozenset(
 # (family, nested) -> parser module for the manifest-declared nested mounts.
 _NESTED_MOUNTS: dict[tuple[str, str], str] = {
     ("timelines", "shots"): "astrid.packs.shots.cli",
+    ("timelines", "text"): "astrid.packs.shots.text_cli",
     ("media", "references"): "astrid.packs.references.cli",
 }
 

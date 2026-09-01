@@ -374,6 +374,73 @@ mutation response.
 
 ---
 
+## 8. Timeline text editing — checkout / apply / render
+
+Timeline-oriented authored text is discovered through the shot-owned nested
+mount. It is not timeline-owned and there is no timeline filter. Use an exact
+binding id or a bounded project/shot/kind selector; ambiguous friendly
+selectors return candidates rather than guessing.
+
+```bash
+python3 -m astrid timelines shots list --project demo --json
+python3 -m astrid timelines text list --project demo \
+  --shot S_01ABC --kind transcript --json
+python3 -m astrid timelines text checkout --project demo \
+  --shot S_01ABC --kind transcript --out ./text-checkout --json
+python3 -m astrid timelines text status ./text-checkout --json
+python3 -m astrid timelines text diff ./text-checkout --json
+python3 -m astrid timelines text apply ./text-checkout \
+  --idempotency-key transcript-edit-1 --json
+```
+
+Checkout files and the manifest are editable projections. Apply freezes and
+validates bounded UTF-8 caller bytes, checks every selected stream head, and
+commits atomically through the existing UnitOfWork, events, and receipt. An
+unchanged file is a no-op: it writes nothing, creates no receipt, and does not
+consume its key. Changed retries replay from their receipt; stale heads fail
+closed. `set` is the complete replacement path and may create only from the
+full natural tuple. `rebind` is existing-only and points at same-project
+immutable text media. Persisted non-UTF-8 text is an integrity failure; a
+caller encoding failure is validation. Core media reads use the active-UoW
+repository and the path does not call `prepare_media_file()` or direct Core
+media SQL.
+
+```bash
+python3 -m astrid timelines text set --project demo \
+  --shot S_01ABC --kind voiceover_script --expected-head 3 \
+  --file ./script.txt --json
+python3 -m astrid timelines text rebind --binding B_01ABC \
+  --expected-head 4 --media M_TEXT01 --json
+```
+
+Resolve prompt bindings before submitting an existing generation task. Task
+specs keep literal resolved inputs; no generation or render adapter hydrates
+bindings. Editing a voiceover script never silently synthesizes or replaces
+the promoted WAV—synthesis and promotion remain explicit. Rebuild the media
+timeline and bake caption plates from transcript binding bytes, recording the
+plate's `uses_as_input` lineage to that transcript, then render and verify:
+
+```bash
+python3 -m astrid timelines show primary --project demo --json
+python3 -m astrid timelines save primary --project demo \
+  --config '{"tracks":[],"clips":[]}' --registry '{"assets":{}}' \
+  --expected-version 2 --json
+python3 -m astrid timelines render primary --project demo \
+  --expected-version 2 --backend rendering.render --json
+python3 -m astrid media verify M_RENDERED --project demo \
+  --realm managed_local --json
+```
+
+The isolated Intro render remains media-only FFmpeg. The approved push-3s
+opening and its embedded ASTRID logo pixels stay in the source media; there is
+no separate ASTRID wordmark text clip or overlay. Verify output/input hashes,
+`ffprobe` video and audio streams, and the unchanged WAV identity before
+opening the result.
+
+Source-tree skill discovery and default `_core` sync use the standalone
+`python3 -m astrid.skills.cli` module. Wheel distribution and HTTP bridge
+routes for this workstream are deferred.
+
 ## Exit codes
 
 | Code | Meaning                                        |
@@ -385,7 +452,7 @@ mutation response.
 Scripts should parse the `--json` envelope for outcome details and treat the
 process exit code as the coarse success/failure signal.
 
-## 8. Diagnostics and failure recovery
+## 9. Diagnostics and failure recovery
 
 Run the read-only doctor before changing a project:
 
@@ -432,6 +499,10 @@ Healthy locations are stamped and committed independently; missing or mutated
 locations remain unchanged. A mixed result is a typed `integrity_error` whose
 details include both successes and failures, plus recovery commands. Repair a
 specific location and retry with `--location-id <id>` or `--locator <path>`.
+
+Unexpected failures use the typed `internal_error` code. Preserve the exact
+request and do not retry a mutation blindly; inspect the receipt/error details
+and verify whether the old or new state is complete before continuing.
 
 Backups are staged and validated before publication. If a restore process is
 interrupted, run the same restore command again or start the local bridge; the

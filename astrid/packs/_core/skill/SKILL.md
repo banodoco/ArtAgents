@@ -6,13 +6,44 @@ description: "Use for the Astrid repo: a file-based toolkit for agents to make a
 
 # Astrid
 
+
+<!-- PACKS:BEGIN (managed by `astrid skills sync`) -->
+## Installed packs
+
+| Pack | Description | Full skill |
+| --- | --- | --- |
+| comfy_wrap | Comfy Workflow Wrapper — generate images by injecting a text prompt into a ComfyUI workflow JSON and running it via v... | `astrid/packs/comfy_wrap/skill/SKILL.md` |
+| editorial | Editorial pack: the 14-step hype video pipeline from transcribe through validate, plus auxiliary tools for human-in-t... | `astrid/packs/editorial/skill/SKILL.md` |
+| fal | fal.ai integration for short-clip Foley plus MiniMax H3 text-to-video and multimodal reference-to-video generation. R... | `astrid/packs/fal/skill/SKILL.md` |
+| foley | Spatial Foley pipeline: tile a video into a grid, generate Foley audio per tile via fal.ai, review and flag bad tiles... | `astrid/packs/foley/skill/SKILL.md` |
+| generation | Generate images and videos from text prompts using the elegant `astrid.generate` facade.  Image, audio, and video gen... | `astrid/packs/generation/skill/SKILL.md` |
+| generation.generate_image | Generate images from text prompts using local (vibecomfy) or cloud (fal) backends.  Uses the model → mode → backend t... | `astrid/packs/generation/executors/generate_image/skill/SKILL.md` |
+| hivemind | Search the Banodoco knowledge corpus — a public PostgREST endpoint combining a Discord message feed, external resourc... | `/Users/peteromalley/.astrid/packs/hivemind/revisions/hivemind/skill/SKILL.md` |
+| iteration | Iteration pack — builds iteration videos from thread provenance by gathering candidate runs, scoring quality, and ass... | `astrid/packs/iteration/skill/SKILL.md` |
+| media |  | `astrid/packs/media/skill/SKILL.md` |
+| moirae | Moirae pack — renders YAML screenplays into terminal-as-cinema videos via asciinema, agg, and ffmpeg.  External pack ... | `astrid/packs/moirae/skill/SKILL.md` |
+| references | Create and manage reusable Astrid references for characters, places, objects, logos, clothing, styles, and layouts. U... | `astrid/packs/references/skill/SKILL.md` |
+| reigh | Reigh platform integration: publish timelines via API, stage local outputs for handoff, fetch canonical project data,... | `astrid/packs/reigh/skill/SKILL.md` |
+| rendering | Rendering pack: the stable rendering.render facade, protocol-v1 Remotion and FFmpeg renderers, the legacy hybrid plan... | `astrid/packs/rendering/skill/SKILL.md` |
+| runpod | RunPod pack — provision GPU pods, execute scripts remotely, pull artifacts, and tear down, including a guaranteed-cle... | `astrid/packs/runpod/skill/SKILL.md` |
+| stream_content | Distill long event or stream recordings into content blocks and clip candidates. | `astrid/packs/stream_content/skill/SKILL.md` |
+| timeline | Edit shot-owned timeline text and carry it through a verified render. | `astrid/packs/timeline/skill/SKILL.md` |
+| training | Training pack — build video training datasets and run LoRA training end to end: clip pools, captioning/review, RunPod... | `astrid/packs/training/skill/SKILL.md` |
+| understanding | Understanding pack: modality-specific LLM inspection executors for audio, images, video, and scene captioning.  Inclu... | `astrid/packs/understanding/skill/SKILL.md` |
+| vibecomfy | VibeComfy pack — run and validate ComfyUI / VibeComfy workflow JSON to generate images, video, and audio.  The escape... | `astrid/packs/vibecomfy/skill/SKILL.md` |
+| video_editing | Video editing pack: orchestrators for the full hype pipeline, event talk videos, thumbnail generation, iteration vide... | `astrid/packs/video_editing/skill/SKILL.md` |
+| youtube | YouTube pack — acquire YouTube media (audio MP3 / video MP4 via yt-dlp) and publish finished videos to YouTube via Za... | `astrid/packs/youtube/skill/SKILL.md` |
+
+<!-- PACKS:END -->
+
 Astrid is a file-based toolkit for making video, image, and audio art alongside
 a human. There are exactly two surfaces:
 
 - **The CLI gateway** — `python3 -m astrid` owns the eight families: five
   product families (`projects`, `timelines`, `media`, `tasks`, `runs`) and
-  three operational families (`serve`, `doctor`, `backup`), plus the two
-  manifest-declared nested mounts (`timelines shots`, `media references`).
+  three operational families (`serve`, `doctor`, `backup`), plus the three
+  manifest-declared nested mounts (`timelines shots`, `timelines text`,
+  `media references`).
   One verb = one SDK call.
 - **The SDK** — `import astrid` (`astrid.sdk.client.AstridClient`,
   `astrid.sdk.discover` / `get_capability` / `invoke`) is the sanctioned
@@ -33,7 +64,7 @@ python3 -m astrid --version       # the app name (importlib.metadata)
 python3 -m astrid projects --help # inspect one family's verbs
 ```
 
-`--help` prints exactly the eight families and the two nested mounts. There
+`--help` prints exactly the eight families and the three nested mounts. There
 is no other CLI surface to discover; when you do not know which family a
 question belongs to, read the census first.
 
@@ -111,6 +142,7 @@ Nested mounts (reachable only beneath their parent family, never top-level):
 ```bash
 python3 -m astrid media references ...      # create/update/archive/unarchive/associate/link/set-primary/list/show
 python3 -m astrid timelines shots ...       # project-level reusable list/create/show/add/remove/reorder
+python3 -m astrid timelines text ...        # shot-owned prompt/VO-script/transcript editing
 ```
 
 To return to paused work without remembered ids, discover archived timelines
@@ -127,6 +159,35 @@ python3 -m astrid media references unarchive "Character Name" --project demo --j
 Both unarchive commands report `changed: false` when the item is already
 active. An ambiguous reference name fails closed with candidate ids; retry
 with one exact id from the inclusive list.
+
+## Timeline text authoring
+
+The Timeline skill is the executable workstream for shot-owned authored text.
+Use `python3 -m astrid timelines shots ...` to discover reusable shots and
+`python3 -m astrid timelines text ...` to list, checkout, status, diff, apply,
+set, or rebind their `prompt`, `voiceover_script`, and `transcript` bindings.
+There is no timeline filter: the binding belongs to its project and shot.
+The full workflow is documented in
+[`astrid/packs/timeline/skill/SKILL.md`](../timeline/skill/SKILL.md).
+
+Text commands are receipt-backed domain commands in the active UnitOfWork,
+not capability invocations. Checkout files and manifests are bounded,
+editable projections; they are frozen and UTF-8-validated before mutation,
+while persisted media is checked for integrity. Current/base media must be
+text, and Core media reads use the active-UoW repository. The new path does
+not use `prepare_media_file()` or direct Core-media SQL. A no-op does not
+write a receipt or consume its key; changed commands replay by receipt and
+stale heads fail closed. `set` can create only from a complete natural tuple;
+`rebind` selects existing same-project text media and never creates.
+
+Generation and rendering do not hydrate bindings. Generation task specs keep
+literal resolved inputs, and voiceover synthesis/promotion remains explicit;
+editing a script never silently replaces a WAV. Captions are baked derived
+media whose plate uses transcript bytes as input. The approved push-3s opening
+and its embedded ASTRID logo remain, with no separate wordmark/text overlay.
+Source-tree/default registry sync is supported through
+`python3 -m astrid.skills.cli`; wheel distribution and HTTP routes for this
+workstream are deferred.
 
 ## Runs & tasks
 

@@ -7,8 +7,9 @@ that agents can rely on when invoking Astrid subcommands.
 
 The gateway owns **exactly eight families** — the five product families
 (`projects`, `timelines`, `media`, `tasks`, `runs`) and the three
-operational families (`serve`, `doctor`, `backup`) — plus the two
-manifest-declared nested mounts (`timelines shots`, `media references`).
+operational families (`serve`, `doctor`, `backup`) — plus the three
+manifest-declared nested mounts (`timelines shots`, `timelines text`,
+`media references`).
 One verb = one SDK call. No other top-level command exists; see
 [the CLI census](../getting-started.md) and
 [CLI journeys](../guides/cli-journeys.md).
@@ -127,11 +128,37 @@ Nested mounts (manifest-declared, never top-level):
 - **`media references`** — `create`, `update`, `archive`, `associate`,
   `link`, `set-primary`, `list`, `show`.
 - **`timelines shots`** — project-level reusable `list`, `create`, `show`, `add`, `remove`, `reorder`.
+- **`timelines text`** — shot-owned `list`, `checkout`, `status`, `diff`, `apply`, `set`, `rebind` for prompt, voiceover-script, and transcript bindings.
 
 There is no `next` / `status` / `attach` / `start` / `ack` surface: the
 legacy task-mode CLI was retired with the filesystem task-run store.  Pack
 capabilities are not gateway commands either — they run through the SDK
 (`astrid.sdk.invoke`, `astrid.sdk.client.AstridClient`).
+
+`timelines text` is a nested domain surface, so its `status` verb is not a
+gateway family or a retired task-mode command. `set`, `rebind`, and `apply`
+use the active UnitOfWork and existing receipts/events. Caller bytes are
+bounded, frozen, UTF-8-validated, and hashed before mutation; unchanged
+checkout files perform no write. A no-op does not consume its idempotency key
+or create a receipt, while changed commands replay only from a recorded
+receipt. `set` alone may create a binding from its complete natural tuple;
+`rebind` is existing-only. Current/base media must be text and desired
+non-text candidates keep the established validation/conflict taxonomy.
+
+Text editing never hydrates generation or rendering. Task specs retain literal
+resolved inputs and voiceover synthesis/promotion is explicit. Intro captions
+are baked derived media whose plate uses transcript bytes as input; the
+approved push-3s opening retains its embedded ASTRID logo, with no separate
+wordmark/text overlay. Source-tree/default skill sync is supported by
+`python3 -m astrid.skills.cli`; wheel distribution and HTTP bridge routes are
+deferred.
+
+The M4 feasibility gate uses a task-bound `--feasibility` input, mandatory for both full execution
+and the retained admission check-only path; there is no runtime default.
+Check-only independently
+revalidates the feasibility schema, the current frozen plan and tasklist
+hashes, the exact task count, and `admitted: true`. A retained admission is
+not sufficient when a fresh authority check fails.
 
 ## Error Contract
 

@@ -176,6 +176,34 @@ changed command has recorded a receipt. A valid no-op records no receipt and
 does not consume its key. The general :func:`derive_stable_id` rule remains
 unchanged for every other aggregate.
 
+### 4.5 Shot-owned text binding commands
+
+`prompt`, `voiceover_script`, and `transcript` bindings are a small typed
+projection over immutable Core text media. The binding is shot-owned and has
+no `timeline_id`; its stream head is the compare-and-swap head and its event
+stream is the complete history. `set`, `rebind`, and checkout `apply` are
+receipt-backed domain commands in the active UnitOfWork, not capability
+invocations or runs. A set with head zero creates only from the complete
+natural tuple; rebind selects existing same-project text media and rejects
+head zero. No revisions table or second ledger exists.
+
+Checkout callers provide bounded, frozen UTF-8 bytes. Bytes are validated and
+hashed before the UnitOfWork, and no temporary file is created until an
+absent digest is known inside that transaction. Text-binding mutations do not
+call `prepare_media_file()`; they resolve Core media through the active-UoW
+`MediaRepository`. Current/base targets that are not `media_kind == "text"`
+are persisted-state `integrity_error`s. Desired candidates that are not text,
+foreign, missing, external-only, or colliding retain the established public
+validation/conflict taxonomy. Canonical managed digest paths are mandatory.
+
+A no-op returns its key but consumes neither the key nor a receipt. Exact
+replay and mismatch checks begin only after a changed mutation has recorded a
+receipt. Caller UTF-8 failures are validation errors; malformed persisted text
+is an integrity error. Generation and rendering do not hydrate bindings:
+generation tasks retain literal resolved inputs, voiceover synthesis and WAV
+promotion are explicit, and captions are baked derived media with the plate
+recording `uses_as_input` lineage to the transcript text.
+
 ## 5. Media relation vocabulary and repository rules
 
 ### 5.1 Frozen kinds (verbatim)

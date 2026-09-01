@@ -40,6 +40,7 @@ _TOP_LEVEL_FAMILIES = frozenset(
 # (family, nested) -> parser module for the manifest-declared nested mounts.
 _NESTED_MOUNTS: dict[tuple[str, str], str] = {
     ("timelines", "shots"): "astrid.packs.shots.cli",
+    ("timelines", "text"): "astrid.packs.shots.text_cli",
     ("media", "references"): "astrid.packs.references.cli",
 }
 
@@ -116,6 +117,10 @@ def _commands_from_line(raw_line: str) -> list[list[str]]:
     line = raw_line.split("#", 1)[0].strip()
     if not line:
         return []
+    # The registry sentinel documents the standalone skills module in a
+    # control comment; it is not a gateway invocation to validate.
+    if line.startswith("<!-- PACKS:BEGIN"):
+        return []
     match = re.search(r"(?:^|\s)(?:python3\s+-m\s+)?astrid(?=\s|$)", line)
     if not match:
         return []
@@ -169,6 +174,10 @@ def _extract_commands(text: str) -> list[list[str]]:
         if match.group(1) in _FENCE_LANGS:
             _scan(match.group(2))
     for span in re.findall(r"`([^`]*)`", _FENCE_RE.sub("", text)):
+        if span.strip() == "astrid skills sync":
+            # The registry sentinel's managed-by label is a control marker,
+            # not an invocation on the eight-family gateway.
+            continue
         if re.search(r"(?:^|\s)astrid(?=\s|$)", span):
             _scan(span)
     return commands

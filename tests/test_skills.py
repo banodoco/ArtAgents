@@ -25,12 +25,18 @@ from astrid.skills.harnesses.codex import BEGIN_MARKER, END_MARKER
 
 
 class _Tmp:
-    """Test fixture that pins a tmpdir as $HOME and as the state home."""
+    """Test fixture with isolated harness roots and skill state.
+
+    All three harness directories live below one named test root.  The
+    production adapters still use their normal ``Path.home()`` defaults;
+    patching that method keeps this suite from touching the developer's real
+    harness directories without redefining the process ``HOME`` variable.
+    """
 
     def __init__(self) -> None:
         self._td = TemporaryDirectory()
         self.tmp = Path(self._td.name)
-        self.home = self.tmp / "home"
+        self.home = self.tmp / "SKILL_HARNESS_TEST_ROOT"
         self.home.mkdir()
         (self.home / ".claude").mkdir()
         (self.home / ".codex").mkdir()
@@ -38,7 +44,6 @@ class _Tmp:
         self.state_path = self.tmp / "state.json"
         self._patches = [
             mock.patch.dict("os.environ", {
-                "HOME": str(self.home),
                 "ASTRID_STATE_HOME": str(self.tmp / "_state"),
                 "ASTRID_NO_NUDGE": "",
             }, clear=False),

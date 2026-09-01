@@ -1,7 +1,8 @@
 """Tests for `astrid skills sync`: gateway linking, registry block, --deep, --check.
 
-All filesystem effects are pinned to a tmp ``$HOME`` (via the shared ``_Tmp``
-fixture, which patches ``Path.home``) and to a temp copy of the gateway
+All filesystem effects are pinned to the shared ``SKILL_HARNESS_TEST_ROOT``
+fixture (which patches ``Path.home`` to a root containing explicit Claude,
+Codex, and Hermes directories) and to a temp copy of the gateway
 SKILL.md, so the suite never mutates the real ``~/.claude`` / ``~/.codex`` dirs
 or the in-repo ``_core/skill/SKILL.md``.
 """
@@ -26,7 +27,7 @@ from astrid.skills.harnesses.base import (
     prune_orphan_skill_links,
 )
 
-# Reuse the shared HOME-pinning fixture from the main skills test module.
+# Reuse the shared isolated-harness fixture from the main skills test module.
 from tests.test_skills import _Tmp
 
 

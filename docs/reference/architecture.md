@@ -37,6 +37,37 @@ result = sdk.discover()                       # every capability, pack by pack
 cap = sdk.get_capability("rendering.render")  # typed lookup of one capability
 ```
 
+## Timeline text binding boundary
+
+The Timeline skill coordinates authored text while the Shots pack owns the
+shot-facing data. A `shot_text_binding` is a stable typed identity over
+immutable Core text media for `prompt`, `voiceover_script`, or `transcript`;
+it is shot-owned and intentionally has no timeline relation. The nested
+`timelines text` mount exposes bounded `list`, `checkout`, `status`, `diff`,
+`apply`, `set`, and `rebind` commands. These are receipt-backed domain
+commands in the active UnitOfWork, not capability invocations, runs, or a
+second ledger.
+
+Checkout projections freeze bounded UTF-8 caller bytes before mutation and
+delay temporary materialization until an absent digest is known in the
+transaction. Current/base media must be text; persisted malformed text is an
+integrity error, while caller encoding failures and desired candidate
+conflicts retain their public validation taxonomy. The binding path reads
+Core media through the active-UoW repository, does not call
+`prepare_media_file()`, and does not add direct Core-media SQL. No-op keys are
+not consumed; changed commands replay from receipts. `set` is the only
+creation path and `rebind` is existing-only. Canonical managed digest paths
+are mandatory.
+
+Generation and rendering retain literal task inputs and do not hydrate text
+bindings. Voiceover synthesis and WAV promotion are explicit. Caption plates
+are baked derived media and record output-to-input lineage: the plate
+`uses_as_input` the transcript text. The approved push-3s opening, including
+its embedded ASTRID logo pixels, remains in the media-only FFmpeg composition;
+there is no separate wordmark/text overlay. Source-tree/default skill sync is
+supported; wheel packaging and HTTP bridge routes for this workstream are
+deferred.
+
 Folder-backed orchestrators and executors include metadata such as
 `orchestrator_root`, `executor_root`, and `stage_file`; agents should load the
 top-level Astrid skill first, then open only the specific folder-level

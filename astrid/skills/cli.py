@@ -228,3 +228,7 @@ def _emit_report(report: dict[str, Any], args: argparse.Namespace) -> int:
 
 
 __all__ = ["build_parser", "main"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
