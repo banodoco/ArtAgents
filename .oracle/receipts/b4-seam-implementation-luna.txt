@@ -1,0 +1,9 @@
+IMPLEMENTATION: PASS  
+CHANGED: `astrid/core/pack/canonical.py`, `astrid/packs/__init__.py`, `astrid/application.py`, `tests/v10/test_b4_composition.py`  
+SEAM: Added immutable `StandardPackComposition` and `compose_standard_pack_database()`, deriving `BundledCatalog.from_root(DEFAULT_PACKS_ROOT)` and `project_catalog_database(...)` once per operation; injected pairs are retained verbatim without rebuilding.  
+APPLICATION: `StandardApplication` retains the exact catalog and frozen registry, owns one `DatabaseOwnerLock` and one `DatabaseWriter`, and preserves shutdown/failure cleanup ordering. Default composition is core/timeline/shots/references; `additional_pack_ids=("runaway",)` is supported.  
+BRIDGE: `StandardBridgeComposition` retains the same catalog/registry pair through restore recovery, writer, repositories, services, and bridge construction; one writer and lock are retained and released in order.  
+TESTS: `python3 -m pytest tests/v10/test_b4_composition.py tests/v10/test_standard_application.py tests/v10/test_writer_authority.py -q` — 28 passed; bridge basic routes — 8 passed, 54 deselected; B3 projection — 9 passed; canonical manifest guards — 3 passed; changed modules compiled successfully. Full bridge integration reported 43 passed, 19 baseline media-fixture failures due unavailable `ffprobe` and existing managed-media assumptions.  
+ISOLATION: Legacy deletion not yet performed; all four `schema-pack.yaml` files and legacy loaders/builders remain. Canonical bundled composition only tolerates stale `schema-pack.yaml` beside authoritative `pack.yaml`; it never reads the stale manifest.  
+BLOCKERS: No group-1 blockers. LSP `textDocument/references` was unavailable (`-32601`); bounded callsite evidence was used. SDK extended invocation remains legacy-active and is deferred to B4 group 2.
+0

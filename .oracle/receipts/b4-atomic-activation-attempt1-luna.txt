@@ -1,0 +1,5 @@
+ROUTE: codex:gpt-5.6-luna
+RESULT: WRAPPER_TIMEOUT
+DEADLINE: 1800 seconds
+OUTPUT: no final model receipt; wrapper remained at Working until termination
+DISPOSITION: preserve all 60 tracked activation changes/deletions and one untracked focused test; continue the same candidate with one exact-Luna continuation; do not restart or discard edits

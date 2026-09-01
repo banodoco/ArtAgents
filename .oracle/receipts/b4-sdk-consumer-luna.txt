@@ -1,0 +1,8 @@
+IMPLEMENTATION: PASS  
+CHANGED: `astrid/sdk/invocation.py`, `astrid/sdk/client.py`, `tests/sdk/test_extended_composition.py`  
+PROPAGATION: Bound clients forward exact `app.catalog`, `app.registry`, and `app` through `invoke`, `invoke_result`, and `_kernel_invoke`; bound invocations reuse application writer, repositories, and lock. Retry services retain the exact application registry and writer.  
+STANDALONE: `_kernel_invoke` now creates one short-lived `StandardPackComposition`, one writer, and one owner lock; legacy standard-builder fallback removed.  
+TESTS_NOT_RUN: Focused integrated SDK/composition tests, including `tests/sdk/test_extended_composition.py`, were not run per instruction. `py_compile`, import smoke checks, and bounded propagation scenarios passed.  
+ISOLATION: No activation, strict-loading change, legacy-authority deletion, format, or lint performed.  
+BLOCKERS: none
+0

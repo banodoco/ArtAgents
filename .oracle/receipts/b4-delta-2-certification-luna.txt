@@ -1,0 +1,7 @@
+VERDICT: PASS
+IDENTITY: 81/81 path identities match, including 6 deleted entries; manifest SHA-256 2e90aee2dd383f7eb4913a5cfd546b042221c89110a43f03b2e8e2d8d3c764d
+FINDING_5: 1 PASS — canonical kernel read preserves MigrationTooNewError; 2 PASS — stale legacy test contracts removed while canonical behavior remains covered; 3 PASS — projection reads canonical pack.yaml without deleted manifests
+STRICT_AUTHORITY: zero stale imports/reads of deleted manifest or standard modules; authority lint reports AUTHORITY LINT OK
+TESTS: `python3 -m pytest tests/v10/test_kernel_read_composition.py tests/v10/test_standard_application.py tests/v10/test_pack_factoring.py tests/packs/test_b2_integrated_closure.py -q` — 32 passed; `python3 -m pytest tests/v10/test_b3_canonical_projection.py tests/v10/test_authority_lint.py -q` — 43 passed; `python3 -m scripts.reshape.authority_lint` — AUTHORITY LINT OK
+BLOCKERS: none
+0

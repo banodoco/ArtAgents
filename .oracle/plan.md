@@ -71,13 +71,20 @@ is in `.oracle/implementation-ledger.md`.
   dependency-head enforcement, manifest-derived defaults, exact table
   ownership, and a deterministic Runaway round trip. Integrated closure and
   independent certification each passed 122 focused tests with no findings;
-  production remains legacy-active.
+  production remained legacy-active through the B3 checkpoint.
+- B4 converged application, SDK, kernel/timeline reads, doctor, backup/restore,
+  rendering/media, inspect, and CLI on one operation-owned catalog/database
+  projection. Atomic activation deleted four schema manifests, the separate
+  parser/standard authorities, fixed tuples, raw rereads, and active legacy
+  fallback. The bounded gate accepted an 81-path candidate after one finite
+  stale-test correction and independent finding-5 delta pass.
 - Checkpoints: B1 `14f1f7d5f77cb6bd384749941cff6e522b696590`;
   B2 `a293e4c416c0e716154c392c0dd43165344f870d`;
-  B3 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`; 3/5 committed.
-- Frozen end-to-end criteria: 0/15 complete; B1–B3 provide accepted isolated
-  and unshipped evidence.
-- Cumulative gate 1: PASS; next action is B4 atomic activation.
+  B3 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`;
+  B4 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`; 4/5 committed.
+- Frozen end-to-end criteria: 0/15 complete; B1–B4 provide accepted
+  implementation evidence, and production now uses canonical v2 only.
+- Cumulative gate 1: PASS; next action is cumulative gate 2 before B5.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

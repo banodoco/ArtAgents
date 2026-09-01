@@ -1,0 +1,8 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/core/backup/operations.py; astrid/packs/__init__.py
+REGISTRY: Exact FrozenSchemaPackRegistry now threads through staged validation, recovery, atomic swap, and restore; public calls without injection create one canonical short-lived composition.
+RESTORE: Staging validation, read-only probes, journal recovery, external-media rebasing, overwrite protection, crash cleanup, and atomic database/media publication preserved.
+TESTS_NOT_RUN: tests/v10/test_b4_composition.py; tests/v10/test_backup_restore.py; tests/v10/test_backup_external_portability.py; tests/m7_hardening.py
+ISOLATION: No activation or deletion of legacy authorities.
+BLOCKERS: none
+0

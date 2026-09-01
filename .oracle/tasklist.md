@@ -250,34 +250,35 @@ alternate authorities while preserving typed registries. Avoid a universal
 service locator, dual reads, hidden schema-pack identity, dynamic factories,
 or bypassing operational consumers.
 
-- [ ] B4.1 Construct the bundled catalog/database projection at a top-level
+- [x] B4.1 Construct the bundled catalog/database projection at a top-level
   application or operation seam and pass typed projections to consumers.
-- [ ] B4.2 Move all seven independent builder consumers: application, SDK
+- [x] B4.2 Move all seven independent builder consumers: application, SDK
   invocation, kernel reads, timeline edit helpers, doctor, backup/restore, and
   rendering/media assets.
-- [ ] B4.3 Move the direct `domain_product` CLI mount reader; preserve explicit
+- [x] B4.3 Move the direct `domain_product` CLI mount reader; preserve explicit
   typed service/repository/static CLI/bridge factories.
-- [ ] B4.4 Preserve the single lock/writer, exact SDK registry propagation,
+- [x] B4.4 Preserve the single lock/writer, exact SDK registry propagation,
   read-only, backup/restore, and current product semantics.
-- [ ] B4.5 Extend pack inspect with stable text/JSON canonical identity/source,
+- [x] B4.5 Extend pack inspect with stable text/JSON canonical identity/source,
   capability summary, database ownership/head, documentation, and declared
   resource closure.
-- [ ] B4.6 Extend doctor with the bundled census, docs/resource health, and
+- [x] B4.6 Extend doctor with the bundled census, docs/resource health, and
   expected/applied/pending migrations. Doctor must not consume the offline
   coverage ledger or scan Python ownership.
-- [ ] B4.7 At one atomic activation point, switch runtime admission to strict
+- [x] B4.7 At one atomic activation point, switch runtime admission to strict
   v2, delete all four `schema-pack.yaml` files, remove both
   `STANDARD_SCHEMA_PACKS` tuples and `_STANDARD_PACK_DIRS`/raw schema-manifest
   reads, and remove the separate schema-pack identity/parser/standard path
   after relocating reusable algorithms.
-- [ ] B4.8 Prove there is no active dual authority, no raw manifest reread, and
+- [x] B4.8 Prove there is no active dual authority, no raw manifest reread, and
   no independent standard-registry build.
 
-Gate B4: only canonical v2 is active; all operational consumers agree on one
-ordered projection; there is no shippable dual-authority state. Three
-independent Luna reviews and one Sol oracle disposition must pass; then commit
-the reviewed activation checkpoint. Run cumulative gate 2 over B1–B4 and
-require three fresh Luna passes plus one Sol disposition before B5 begins.
+Gate B4: **PASS under bounded gate control**. Candidate 2's unaffected passes
+plus candidate 3's independent finding-5 delta pass verified all 81 frozen
+paths, one ordered operation-owned projection, strict-v2-only authority, and
+zero finite blockers. Reviewed B4 checkpoint:
+`81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`. Run cumulative gate 2 over
+B1–B4 before B5 begins.
 
 ## B5 — closure, wheel proof, and final review
 
@@ -348,8 +349,10 @@ independent pass.
   `a293e4c416c0e716154c392c0dd43165344f870d`**.
 - B3 implementation: **9/9 complete; checkpoint
   `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`**.
-- Canonical-v2 implementation checkpoints: **3/5 committed**.
-- Frozen final criteria satisfied end to end: **0/15**; B1–B3 provide accepted
-  isolated/unshipped evidence without activating production.
+- B4 implementation: **8/8 complete; checkpoint
+  `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`**.
+- Canonical-v2 implementation checkpoints: **4/5 committed**.
+- Frozen final criteria satisfied end to end: **0/15**; B1–B4 provide accepted
+  implementation evidence, and production now uses canonical v2 only.
 
-Next action: run cumulative gate 1 while production remains legacy-active.
+Next action: run cumulative gate 2 over B1–B4.

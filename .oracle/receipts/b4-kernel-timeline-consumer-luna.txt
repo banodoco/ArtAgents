@@ -1,0 +1,8 @@
+IMPLEMENTATION: PASS
+CHANGED: `astrid/core/kernel/read.py`, `astrid/core/timeline/_edit_helpers.py`, `astrid/core/timeline/kernel_binding.py`, `tests/v10/test_kernel_read_composition.py`
+KERNEL_READS: Removed fixed-registry rebuilding; reads now use explicit or context-bound registries, remain read-only, and fail closed with `MigrationError` when migrations are incomplete.
+TIMELINE_GATEWAY: Removed process cache; injected the exact application registry through gateway kwargs; vocabulary validation occurs before backend work; kernel receipt-before-eventlog ordering preserved.
+TESTS_NOT_RUN: `tests/v10/test_kernel_read_composition.py`, `tests/timeline/test_edit_helpers.py`, `tests/test_managed_write_paths.py`
+ISOLATION: No activation, legacy deletion, formatting, or linting performed.
+BLOCKERS: none
+0

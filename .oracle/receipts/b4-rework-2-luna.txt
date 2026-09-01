@@ -1,0 +1,7 @@
+REWORK: PASS
+CHANGED: tests/v10/test_kernel_read_composition.py; tests/v10/test_standard_application.py; tests/v10/test_pack_factoring.py; tests/packs/test_b2_integrated_closure.py
+BLOCKERS_1_3: 1 PASS — canonical `.astrid/astrid.sqlite3` fixture preserves `MigrationTooNewError`; 2 PASS — legacy tuple/schema-pack contracts migrated or removed while canonical application/catalog behavior remains covered; 3 PASS — projection now compares directly with canonical `pack.yaml`
+STRICT_AUTHORITY: zero stale imports of deleted manifest/standard modules; zero bundled `schema-pack.yaml` reads; bundled schema-pack files absent
+TESTS: `python3 -m pytest tests/v10/test_kernel_read_composition.py tests/v10/test_standard_application.py tests/v10/test_pack_factoring.py tests/packs/test_b2_integrated_closure.py -q` — 32 passed; `python3 -m pytest tests/v10/test_b3_canonical_projection.py tests/v10/test_authority_lint.py -q` — 43 passed
+BLOCKERS: none
+0

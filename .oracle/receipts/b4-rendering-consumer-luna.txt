@@ -1,0 +1,10 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/core/rendering/assets.py; astrid/packs/rendering/backends/remotion/run.py; astrid/packs/rendering/backends/threejs/run.py; tests/core/rendering/test_assets.py; tests/packs/rendering/test_remotion_locking.py
+MATERIALIZER: AssetMaterializer accepts the exact FrozenSchemaPackRegistry, resolves operation context without rebuilding, and Remotion/Three.js boundaries propagate it.
+READS: Managed-media reads use open_database(..., read_only=True) with the injected registry; incomplete/drifted schemas propagate failure; project ownership, exact hashes, byte validation, staging, and resolver behavior remain enforced.
+TESTS_NOT_RUN: tests/core/rendering/test_assets.py; tests/packs/rendering/test_remotion_locking.py; integrated rendering/managed-media closure tests
+ISOLATION: No activation or deletion; all four schema-pack.yaml authorities remain present.
+BLOCKERS: none
+0
+
+0

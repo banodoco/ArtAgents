@@ -1,0 +1,8 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/core/pack/cli_inspect.py, astrid/core/cli/domain_product.py, astrid/core/pack/cli_parser.py
+INSPECT: Canonical timeline JSON exposes identity, bundled source/root, provenance and manifest digest, capability summary, database owner timeline with head 1/default true, documentation skill/SKILL.md, and a 2-resource closure containing migrations/0001_initial.sql and skill/SKILL.md. Capability-only rendering inspect reports database owned=false/head=null/default=false.
+MOUNTS: Injected canonical registry projection validates seven mounts: projects, media, tasks, runs, timelines→manifest:timeline, references→manifest:references, shots→manifest:shots. Static help uses REQUIRED_MANIFEST_MOUNTS without session/database access.
+TESTS_NOT_RUN: tests/v10/test_domain_cli_surface.py; tests/packs/test_packs_cli.py; focused canonical inspect and registry-projection closure tests were not run per instruction. Compile and CLI smoke checks passed.
+ISOLATION: no activation/deletion; legacy schema manifests, fixed symbols, and obsolete reader remain retained but inactive in the changed paths.
+BLOCKERS: none
+0

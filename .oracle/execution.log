@@ -1562,3 +1562,94 @@
   accepted B1–B3 evidence, production legacy isolation, B4 cutover readiness,
   and 70 bounded integration tests passed with no blockers. B4 atomic
   activation may begin.
+- Two parallel exact-Luna B4 maps were launched through the receipt wrapper.
+  The consumer map returned `PASS`. The first activation-map response omitted
+  its required contract and was unaccepted; a replacement exact-Luna map was
+  captured durably and returned `PASS` with no blockers.
+- The accepted maps define an operation-owned `BundledCatalog` plus
+  `FrozenSchemaPackRegistry`, application/bridge lifetime first, then disjoint
+  consumer migrations, followed by one atomic strict-v2 activation and legacy
+  deletion. The sequential application/bridge seam implementation was
+  dispatched before parallel consumer work.
+- The application/bridge seam returned `PASS` with one operation-owned
+  composition and 28 focused passes plus bounded bridge/projection guards.
+  Six disjoint exact-Luna consumer units then ran in parallel for SDK,
+  kernel/timeline, backup, rendering, doctor, and inspect/CLI; all returned
+  implementation `PASS` without activation or deletion.
+- The backup unit also touched the shared bridge seam while threading restore
+  recovery. The edit was preserved and explicitly flagged for reconciliation.
+  One exact-Luna integrated consumer closure was dispatched to reconcile every
+  changed path and run the bounded combined consumer tests before atomic
+  activation.
+- The inherited consumer-integration wrapper exited without a durable receipt;
+  its edits were preserved. One bounded exact-Luna continuation reconciled the
+  same B4.1–B4.6 candidate and returned `PASS`: one operation-owned catalog/
+  registry/writer identity, every named consumer converged, 134 focused tests
+  passed with four skips, and ten inherited unavailable-
+  `banodoco_timeline_schema` failures were classified baseline-only.
+- B4 consumer convergence is complete with no finite blocker. Strict-v2
+  activation and alternate-authority deletion remain the sole next unit.
+- One exact-Luna B4 atomic-activation unit was dispatched after the consumer
+  closure passed. It owns strict-v2 production admission, four schema-manifest
+  deletions, alternate-authority retirement, bounded affected tests, and no B5
+  packaging/full-suite work.
+- The first activation wrapper reached its 1800-second deadline after changing
+  60 tracked paths/deletions and one untracked focused test, without a final
+  receipt. The candidate is preserved. One exact-Luna continuation will inspect
+  and finish the same bounded activation rather than restart or widen scope.
+- The exact-Luna activation continuation returned `PASS`. The frozen B4
+  candidate contains 65 product/test paths; candidate-manifest SHA-256 is
+  `e88b14aa4133570d181ecedb58eb56d8e29c72837769937f3cae7e5dbc2d107f`.
+  It activates 22 strict-v2 packs, deletes four schema manifests and the
+  separate parser/standard authorities, passes 210 focused tests plus 78
+  subtests and 44 authority/writer/service tests, and reports no B4 blocker.
+- One independent exact-Luna B4 certification will judge the frozen identities,
+  legacy absence, consumer convergence, and finite baseline classifications.
+- Independent B4 certification verified all 65 identities but returned
+  `REWORK` with six finite groups: Remotion undefined staging state; SDK
+  catalog/registry bypass; omitted canonical capabilities in agent/inspect
+  serialization; missing Git checkout-commit verification; remaining active
+  legacy fallback/tests/tooling; and two omitted candidate paths.
+- Unaffected B4 passes remain valid. One exact-Luna bounded correction will
+  address only those six groups and their dependency closure, followed by one
+  affected-criterion delta certification.
+- The inherited exact-Luna B4 correction process reached its 3600-second
+  wrapper deadline without a recoverable final response or durable receipt.
+  Its bounded edits were preserved; no duplicate implementation was launched.
+  Attempt evidence is `.oracle/receipts/b4-rework-1-attempt1-luna.txt`.
+- Frozen B4 candidate 2 contains 78 product/test/tool/example paths.
+  `.oracle/evidence/b4-candidate-2.sha256` has SHA-256
+  `dc0db8395827fa2d825d5a66249c363862594c60a0a0edbcf645e73762b02da2`.
+  One independent exact-Luna affected-criterion delta certification will
+  verify only the six finite findings and their dependency closure; unaffected
+  candidate-1 passes remain valid.
+- The sole candidate-2 affected-criterion delta certification returned
+  `REWORK` after 78/78 identity matches. Findings 1, 2, 3, 4, and 6 passed.
+  Finding 5 has exactly three finite stale-test blockers:
+  `test_kernel_read_composition.py` uses the wrong database authority,
+  `test_standard_application.py` and `test_pack_factoring.py` retain deleted
+  legacy contracts, and `test_b2_integrated_closure.py` still reads deleted
+  schema manifests. All other candidate-2 passes remain valid.
+- One exact-Luna correction will migrate only those three stale-test groups
+  and their direct fixture closure. No production redesign, repeated broad
+  validation, review panel, B1 reopening, or candidate 47 is authorized.
+- The bounded exact-Luna stale-test correction returned `PASS`: four test
+  paths migrated to canonical authority; 32 named tests and 43 projection/lint
+  tests passed with zero stale deleted-authority imports or bundled
+  `schema-pack.yaml` reads. The worker also created commit
+  `f352422d` despite the no-commit boundary; it is preserved rather than
+  rewritten, and the complete B4 candidate is frozen across its parent.
+- Frozen B4 candidate 3 contains 81 product/test/tool/example paths relative
+  to `b918a6acbef0d443b86ed94106f5a0f103501394`.
+  `.oracle/evidence/b4-candidate-3.sha256` has SHA-256
+  `2e90aee2dd383f7eb4913a5cfd546b042221c89110a43f03b2e8e2d8d3c764d3`.
+  One independent finding-5 delta certification will verify the correction;
+  findings 1, 2, 3, 4, and 6 retain their candidate-2 passes.
+- Independent candidate-3 finding-5 delta certification returned `PASS`:
+  81/81 identities, 32 corrected authority tests, 43 projection/lint tests,
+  `AUTHORITY LINT OK`, and no blockers. Candidate-2 findings 1, 2, 3, 4, and
+  6 remain accepted; the bounded B4 gate is closed without another panel.
+- Reviewed B4 checkpoint
+  `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785` activates canonical v2 and
+  deletes alternate schema-pack authority. Cumulative gate 2 over B1–B4 is the
+  only next action before B5.

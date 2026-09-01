@@ -1,0 +1,9 @@
+IMPLEMENTATION: PASS
+CHANGED: `astrid/core/doctor.py`
+CENSUS: Canonical catalog reports all 22 bundled product packs; documentation health is 22/22; declared resource closure is healthy across 551 handles.
+MIGRATIONS: Canonical registry reports expected/applied/pending state. Smoke verification showed 4/4/0 on a migrated temporary database and 4/3/1 as a read-only warning after removing one migration row.
+OUTPUT: Stable `ok`/`checks`/`state`/`next_action` JSON envelope preserved; text output includes canonical census, resource health, and migration state. Pristine-root and injected-composition CLI smoke checks passed.
+TESTS_NOT_RUN: `tests/v10/test_doctor.py`; `tests/packs/runpod/test_doctor_integration.py`; focused integrated doctor closure tests were not run per instruction. Module compilation passed.
+ISOLATION: Legacy authorities remain active; no activation or deletion performed.
+BLOCKERS: None
+0
