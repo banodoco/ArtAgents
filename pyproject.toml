@@ -114,17 +114,6 @@ astrid = [
     "core/rendering/fixtures/renderer_parity/*",
     "core/rendering/schemas/v1/*.json",
 
-    # The frozen schema-pack composition: core plus timeline, shots,
-    # references. The manifests and their migrations are required for a first
-    # installed run and for too-new-schema refusal.
-    "core/migrations/sql/core/*.sql",
-    "packs/timeline/schema-pack.yaml",
-    "packs/timeline/migrations/*.sql",
-    "packs/shots/schema-pack.yaml",
-    "packs/shots/migrations/*.sql",
-    "packs/references/schema-pack.yaml",
-    "packs/references/migrations/*.sql",
-
     # Capability manifests and their runtime data.  STAGE.md, skill files,
     # requirements files, golden logs, and other authoring-only material are
     # intentionally not included by these patterns.

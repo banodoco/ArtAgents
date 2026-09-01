@@ -1,8 +1,7 @@
 """Product timelines family CLI (m4 plan step 26, task T28).
 
-This module is the product parser for the manifest-owned ``timelines``
-family (``astrid/packs/timeline/schema-pack.yaml`` declares the top-level
-``timelines`` mount). Every verb is **argument parsing plus exactly one SDK
+This module is the product parser for the runtime-owned ``timelines``
+family. Every verb is **argument parsing plus exactly one SDK
 call** on the composed :class:`~astrid.sdk.client.AstridClient` (stamped
 onto every subparser by
 :func:`astrid.core.cli.registration.register_product_commands`), and every
@@ -11,9 +10,8 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-The parser also mounts the manifest-declared nested ``shots`` family beneath
-``timelines`` (``astrid/packs/shots/schema-pack.yaml`` declares ``shots:
-timelines shots``): ``astrid timelines shots <verb>`` embeds the shots
+The parser also mounts the runtime-owned nested ``shots`` family beneath
+``timelines``: ``astrid timelines shots <verb>`` embeds the shots
 product parser (``astrid/packs/shots/cli.py``) so project-level reusable shot
 ``list/create/show/add/remove/reorder`` commands are executable only beneath timelines
 (plan step 26, task T29). There is **no top-level shots family**.

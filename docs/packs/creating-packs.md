@@ -9,6 +9,11 @@ optional placement, aliases, and in-place edits, use the
 Milestone 0 contract at `docs/packs/contract.md`. This guide stays focused on
 the current authoring workflow.
 
+Capability packs are not database schema packs. Do not add `schema-pack.yaml`,
+SQL migrations, or a local schema registry. Product state is written through
+the neutral workspace runtime contract; a pack may only provide executable
+capabilities and attempt-local delivery artifacts.
+
 ## Quick Start
 
 ```bash

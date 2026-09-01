@@ -15,6 +15,10 @@ top-level Python machinery except `__init__.py`. Gateway subcommand logic lives
 in the `astrid/core/gateway/` package. SDK implementation lives in the
 `astrid/sdk/` package.
 
+Astrid has no local schema-pack host, schema registry, or migration directory.
+The neutral workspace runtime owns product DDL, constraints, and migration
+application; `astrid/packs/` manifests describe executable capabilities only.
+
 ## 1. Public Facades
 
 ### 1.1 `import astrid` — The Public SDK Boundary
@@ -36,11 +40,9 @@ The 28 names in `astrid.__all__` are:
 | --- | --- | --- |
 | `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.core.gateway.main()`. |
 | `astrid.core.gateway` | `astrid/core/gateway/` | **Subcommand router package** — runtime project resolution and command dispatch. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
-| `astrid.core.orchestrate.cli` | `astrid/core/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
 | `astrid doctor` | `astrid/core/gateway/dispatch.py` | **Runtime health diagnostic** — delegates to the generated workspace client. |
 | `astrid.skills.cli` | `astrid/skills/cli.py` | **Skills CLI** — skill discovery and harness management. |
-| `astrid.core.threads.cli` | `astrid/core/threads/cli.py` | **Threads CLI** — thread index and lineage commands. |
-| `astrid.core.timeline.cli` | `astrid/core/timeline/cli.py` | **Timeline CLI** — timeline inspection and manipulation commands. |
+| `astrid.core.timeline` | `astrid/core/timeline/` | **Timeline value helpers** — non-authoritative validation and rendering support. Product timeline commands are runtime-client adapters. |
 
 ### 1.3 Non-Contract Surfaces (v1)
 
@@ -75,7 +77,7 @@ and their purposes:
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
 | `core/runtime/` | In-process runtime invocation and subprocess log capture |
 | `core/task_handler_registry.py` | Task-handler registration boundary for pack-owned adapters |
-| `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, track, transition), erasure, integrity, migration, projection, undo, observability, local event log, banodoco schema |
+| `core/timeline/` | Timeline value models, validation, integrity, projection, and rendering support. Durable timeline state and schema belong to the neutral workspace runtime. |
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 
 Loose `.py` files at `astrid/core/` are kernel helpers such as `scaffold.py`,
@@ -141,20 +143,18 @@ Canonical homes:
 | `astrid/packs/editorial/hype/` | **Pack-owned domain library** | Hype/editing logic such as arrangement rules, enriched arrangements, and text matching. |
 | `astrid/core/util/` | **Utility library** | Generic helpers (LLM client construction, environment handling). |
 | `astrid/core/audit/` | **Ephemeral pack helper** | In-process provenance descriptions; durable events, receipts, and evidence are owned by the workspace runtime. It never creates or reads an audit ledger. |
-| `astrid/core/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.core.threads.__all__`. |
 | `astrid/core/verify/` | **Verification helpers** | Soft boundary — currently a convention, not a hard gate. |
 | `astrid/core/modalities/` | **Modality helpers** | Modality-specific support code. |
 | `astrid/skills/` | **Skill harnesses** | Agent skill discovery, registry, and harness runtimes (base, codex, claude, hermes). |
-| `astrid/core/orchestrate/` | **Plan compilation and test running** | DSL, compile, test runner, CLI. |
 | `astrid/core/theme/` | **Shared library** | Theme resolution, CLI, and schema validation helpers. Soft boundary — convention. |
-| `astrid/core/paths.py` | **Shared library** | Repository and workspace path resolution. |
+| `astrid/core/paths.py` | **Shared library** | Repository path resolution for source-only capability work. Runtime project paths come from the workspace client. |
 | `astrid/core/gateway/setup.py` | **Shared library** | Setup CLI support. |
 
 ### 4.1 CLI/Domain/Import-Layering Convention
 
 The repository enforces a strict import layering convention:
 
-- **CLI modules** live as `<subsystem>/cli.py` for each subsystem (skills, core/threads, core/orchestrate, core/timeline, core/pack). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
+- **CLI modules** live as `<subsystem>/cli.py` for each surviving subsystem (core/pack and runtime-backed product adapters). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
 - **Pack-owned domain libraries** such as `astrid/packs/editorial/hype/` may import from core shared libraries but must not import CLI modules.
 - **Core kernel** (`astrid/core/`) must not import concrete pack implementation modules except through the generic pack host.
 - **Pack data** (`astrid/packs/<pack>/`) must not import from `astrid/core/` except through sanctioned entrypoints.
@@ -282,9 +282,9 @@ Later milestones may choose to enforce these as hard gates.
 `astrid/core/structure.py` is the **single source of truth** for repository
 structure enforcement. It exposes:
 
-- `validate_repo_structure()` — top-level entry check, pack layout, import layering, migration completion (returns `StructureReport`)
+- `validate_repo_structure()` — top-level entry check, pack layout, import layering, and retired-authority checks (returns `StructureReport`)
 - `validate_import_layering()` — core→packs import prohibition
-- `validate_migration_completion()` — DEPRECATED markers, sys.modules injections, dangling `__all__` aliases, compatibility shim detection
+- `validate_migration_completion()` — retired-authority markers, sys.modules injections, dangling `__all__` aliases, compatibility shim detection
 
 ### 10.2 Exemption Lists
 

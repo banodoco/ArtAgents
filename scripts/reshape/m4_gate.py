@@ -10,13 +10,12 @@ runtime semantics:
   crash/contention, secrets, the platform matrix, and the authority lint;
 - **authority lint** over the live tree (kernel-to-pack imports,
   pack-to-pack imports, writers outside the kernel store, legacy
-  authorities on supported entry paths, schema ownership, forbidden
-  vocabulary, and declared-table/index rules), with the two
-  manifest-declared nested-mount parser edges (timelines→shots,
+  authorities on supported entry paths, and the neutral-runtime schema
+  boundary), with the two reviewed nested-mount parser edges (timelines→shots,
   media→references) recorded as documented composition exemptions — any
   other error fails closed;
-- **forbidden drift rejection**: schema/catalog composition drift (the frozen
-  22-table catalog: kernel 14 + timeline 1 + shots 4 + references 3),
+- **forbidden drift rejection**: local schema-host/migration composition drift
+  (Astrid must not contain a schema host; the neutral runtime owns DDL),
   product surface drift (exactly five top-level families, two
   manifest-declared nested mounts, no ``timelines copy`` route), SDK surface
   drift (no public raw runner promises), and sentinel-secret persistence in
@@ -50,7 +49,6 @@ retained admission document was written and re-validated.
 from __future__ import annotations
 
 import argparse
-import ast
 import datetime
 import hashlib
 import json
@@ -86,32 +84,24 @@ BASELINE_SCHEMA = "astrid.m4_baseline.v1"
 # retained m4 evidence artifact for it.
 SENTINEL = "astrid-sentinel-secret-7f3c9d"
 
-# Frozen composition: kernel 14 + timeline 1 + shots 4 + references 3.
-FROZEN_TABLE_COUNT = 22
-"""The frozen standard composition total (core + declared pack tables)."""
-FROZEN_CORE_TABLE_COUNT = 14
-FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
-    "timeline": frozenset({"timelines"}),
-    "shots": frozenset(
-        {"shots", "shot_items", "generations", "generation_variants"}
-    ),
-    "references": frozenset(
-        {"project_references", "media_references", "reference_links"}
-    ),
-}
-FROZEN_STANDARD_PACKS = ("timeline", "shots", "references")
+# Schema authority is deliberately not composed in Astrid.  The sibling
+# neutral workspace runtime owns the reviewed flattened migration stream.
+RUNTIME_MIGRATION_FILES = (
+    "003_domains.sql",
+    "014_project_shots_references.sql",
+)
 
 # Frozen product surface (m4 plan step 24 / sense check SC25).
 FROZEN_PRODUCT_FAMILIES = ("projects", "media", "tasks", "runs", "timelines")
-FROZEN_EXCLUDED_CENSUS = frozenset({"serve", "doctor", "run"})
-FROZEN_MANIFEST_MOUNTS: dict[str, tuple[str, ...]] = {
+FROZEN_EXCLUDED_CENSUS = frozenset({"serve", "doctor", "backup"})
+FROZEN_RUNTIME_MOUNTS: dict[str, tuple[str, ...]] = {
     "timelines": ("timelines",),
     "shots": ("timelines", "shots"),
     "references": ("media", "references"),
 }
 FROZEN_NESTED_FAMILIES = frozenset({"shots", "references"})
 FROZEN_PRODUCT_TIMELINE_VERBS = frozenset(
-    {"create", "list", "show", "save", "archive", "history", "diff"}
+    {"create", "list", "show", "save", "archive", "recover", "history", "diff", "visualize", "render"}
 )
 
 # Frozen SDK surface: the curated public exports keep lazy discovery, typed
@@ -135,10 +125,10 @@ FROZEN_SDK_FORBIDDEN_EXPORTS = frozenset({"run_executor", "run_orchestrator"})
 PRIMARY_PYTHON_ALLOWED = ((3, 11), (3, 12))
 
 # Documented product-CLI composition edges (m4 plan steps 26/27, tasks
-# T29/T30): the nested-mount family parsers embed the manifest-declared
+# T29/T30): the nested-mount family parsers embed the reviewed
 # nested parser exactly as ``astrid/core/gateway/dispatch.py`` is the one
 # application-composition root. These are static, manifest-declared edges
-# (``REQUIRED_MANIFEST_MOUNTS`` / ``FAMILY_PARSER_MODULES``), never dynamic
+# (``REQUIRED_RUNTIME_MOUNTS`` / ``FAMILY_PARSER_MODULES``), never dynamic
 # discovery, and the imported modules are pure argparse builders with no
 # SQL or repository logic. The gate records them as accepted exemptions;
 # any other authority-lint error fails closed. (The static lint module
@@ -539,84 +529,26 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
 
 
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
-    """Reject schema/catalog drift from the frozen 22-table composition."""
-    violations: list[str] = []
-    from astrid.core.schema_packs.catalog import CORE_TABLES, FORBIDDEN_TABLES
-    from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-    from astrid.packs import STANDARD_SCHEMA_PACKS, build_standard_registry
+    """Reject reintroduction of Astrid-local schema authority.
 
-    core_count = len(CORE_TABLES)
-    if core_count != FROZEN_CORE_TABLE_COUNT:
-        violations.append(
-            f"core catalog drift: {core_count} kernel tables != "
-            f"{FROZEN_CORE_TABLE_COUNT}"
-        )
+    The runtime checkout is audited by the dedicated parity test.  This gate
+    only checks the negative property in the Astrid artifact, so it remains
+    useful when the runtime is supplied separately in CI.
+    """
+    from scripts.reshape.authority_lint import lint_runtime_schema_boundary
 
-    packs_root = REPO_ROOT / "astrid" / "packs"
-    declared: dict[str, str] = {}
-    manifest_pack_ids: list[str] = []
-    for pack_dir in sorted(p for p in packs_root.iterdir() if p.is_dir()):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if not manifest_path.is_file():
-            continue
-        manifest = load_schema_pack_manifest(manifest_path)
-        manifest_pack_ids.append(manifest.id)
-        declared.update(
-            {
-                table: manifest.id
-                for migration in manifest.migrations
-                for table in migration.tables
-            }
-        )
-    if tuple(sorted(manifest_pack_ids)) != tuple(sorted(STANDARD_SCHEMA_PACKS)):
-        violations.append(
-            f"schema-pack drift: found packs {sorted(manifest_pack_ids)} != "
-            f"standard {sorted(STANDARD_SCHEMA_PACKS)}"
-        )
-    for pack_id, expected in FROZEN_PACK_TABLES.items():
-        actual = frozenset(
-            table for table, owner in declared.items() if owner == pack_id
-        )
-        if actual != expected:
-            violations.append(
-                f"pack {pack_id!r} table drift: {sorted(actual)} != {sorted(expected)}"
-            )
-    total = len(CORE_TABLES) + len(declared)
-    if total != FROZEN_TABLE_COUNT:
-        violations.append(
-            f"composition table count {total} != frozen {FROZEN_TABLE_COUNT}"
-        )
-    forbidden_hit = sorted(set(declared) & set(FORBIDDEN_TABLES))
-    if forbidden_hit:
-        violations.append(
-            f"forbidden table(s) declared: {forbidden_hit}"
-        )
-
-    registry_ok = True
-    registry_error = ""
-    try:
-        registry = build_standard_registry()
-        pack_ids = set(registry.packs)
-        if pack_ids - {"core"} != set(STANDARD_SCHEMA_PACKS):
-            violations.append(
-                f"standard registry pack ids {sorted(pack_ids)} != "
-                f"{sorted(STANDARD_SCHEMA_PACKS)} plus core vocabulary"
-            )
-    except Exception as exc:  # noqa: BLE001 - registry construction failed
-        registry_ok = False
-        registry_error = f"{type(exc).__name__}: {exc}"
-        violations.append(f"standard registry failed to freeze: {registry_error}")
-
+    violations = lint_runtime_schema_boundary(REPO_ROOT)
+    astrid_root = REPO_ROOT / "astrid"
+    capability_manifests = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in (REPO_ROOT / "astrid" / "packs").glob("*/pack.yaml")
+    )
     record: dict[str, object] = {
-        "core_table_count": core_count,
-        "pack_tables": {
-            pack: sorted(table for table, owner in declared.items() if owner == pack)
-            for pack in sorted(FROZEN_PACK_TABLES)
-        },
-        "pack_ids": sorted(manifest_pack_ids),
-        "total_table_count": total,
-        "registry_frozen": registry_ok,
-        "registry_error": registry_error,
+        "local_schema_hosts": [],
+        "runtime_migration_files": list(RUNTIME_MIGRATION_FILES),
+        "capability_manifests": capability_manifests,
+        "runtime_authority": "neutral workspace runtime",
+        "astrid_present": astrid_root.is_dir(),
     }
     return not violations, violations, record
 
@@ -635,10 +567,10 @@ def _check_cli_surface() -> tuple[bool, list[str], dict[str, object]]:
             "excluded-from-census set drift: "
             f"{sorted(product.EXCLUDED_FROM_PRODUCT_CENSUS)}"
         )
-    if dict(product.REQUIRED_MANIFEST_MOUNTS) != FROZEN_MANIFEST_MOUNTS:
+    if dict(product.REQUIRED_RUNTIME_MOUNTS) != FROZEN_RUNTIME_MOUNTS:
         violations.append(
-            f"manifest mounts {dict(product.REQUIRED_MANIFEST_MOUNTS)} != "
-            f"{FROZEN_MANIFEST_MOUNTS}"
+            f"runtime mounts {dict(product.REQUIRED_RUNTIME_MOUNTS)} != "
+            f"{FROZEN_RUNTIME_MOUNTS}"
         )
     if set(product.NESTED_FAMILIES) != FROZEN_NESTED_FAMILIES:
         violations.append(
@@ -681,32 +613,15 @@ def _check_cli_surface() -> tuple[bool, list[str], dict[str, object]]:
             f"{sorted(expected_tokens)}"
         )
 
-    # ``timelines copy`` is reserved for m6: it must not be a product verb.
-    dispatch_src = (REPO_ROOT / "astrid/core/gateway/dispatch.py").read_text(
-        encoding="utf-8"
-    )
-    verbs: set[str] = set()
+    # The timeline adapter is the reviewed parser authority; do not inspect a
+    # deleted dispatch-side verb table.
     try:
-        tree = ast.parse(dispatch_src)
-        for node in tree.body:
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            if isinstance(node, ast.Assign):
-                targets = list(node.targets)
-                value = node.value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                targets = [node.target]
-                value = node.value
-            if not any(
-                isinstance(target, ast.Name)
-                and target.id == "_PRODUCT_TIMELINE_VERBS"
-                for target in targets
-            ):
-                continue
-            if isinstance(value, ast.Call) and value.args:
-                verbs = set(ast.literal_eval(value.args[0]))
-    except (ValueError, SyntaxError) as exc:  # pragma: no cover - parse issue
-        violations.append(f"cannot parse product timeline verbs: {exc}")
+        from astrid.packs.timeline.cli import COMMANDS
+
+        verbs = {spec.name for spec in COMMANDS}
+    except Exception as exc:  # noqa: BLE001 - malformed parser source
+        verbs = set()
+        violations.append(f"cannot load product timeline verbs: {exc}")
     if verbs != FROZEN_PRODUCT_TIMELINE_VERBS:
         violations.append(
             f"product timeline verbs {sorted(verbs)} != "

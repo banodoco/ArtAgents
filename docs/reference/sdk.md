@@ -17,6 +17,11 @@ receipts, and events. `AstridClient` is a runtime client: it does not open a
 checkout-local database or content store and does not execute a pack
 in-process as the live authority.
 
+The Astrid checkout contains no schema registry or migration runner. The
+neutral workspace runtime is the sole owner of product tables, constraints,
+and migration application; pack manifests remain executable capability
+metadata.
+
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in
 > [docs/platform-contract.md](../contracts/platform-contract.md). That file defines the

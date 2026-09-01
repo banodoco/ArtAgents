@@ -216,9 +216,9 @@ Every live capability invocation crosses the workspace runtime:
 ## Retired legacy surface
 
 The legacy task-mode CLI (`attach`/`next`/`start`/`ack`) and filesystem task
-store are retired. Historical pre-runtime plans and thread/session records may
-remain for migration or research, but they are not live authority and must not
-be updated as part of a runtime operation.
+store are retired. Historical pre-runtime plans and thread/session records are
+outside this checkout and are handled by neutral-runtime migration tooling;
+they are not live authority and must not be updated from Astrid.
 
 ## Shared Knowledge With Hivemind
 

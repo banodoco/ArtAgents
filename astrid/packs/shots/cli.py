@@ -1,8 +1,7 @@
 """Product shots family CLI — nested beneath timelines (m4 plan step 26, task T29).
 
-This module is the product parser for the manifest-declared nested ``shots``
-mount (``astrid/packs/shots/schema-pack.yaml`` declares ``shots: timelines
-shots``). It is **never** a top-level command: ``shots`` is reachable only as
+This module is the product parser for the runtime-owned nested ``shots``
+mount. It is **never** a top-level command: ``shots`` is reachable only as
 ``astrid timelines shots <verb>`` through the timelines family parser
 (``astrid/packs/timeline/cli.py`` embeds this parser beneath its ``shots``
 subcommand), and the product gateway dispatch never registers a top-level

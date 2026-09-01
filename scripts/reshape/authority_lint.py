@@ -2,9 +2,9 @@
 
 This module enforces the architecture the runtime-backed Astrid client depends
 on, with **no** legacy false positives and **no** second-authority false
-negatives. Every rule is a pure function over source text, migration SQL,
-and the declared schema-pack manifests, so the lint is deterministic and
-runs anywhere (no git state, no network).
+negatives. Every rule is a pure function over source text and runtime-boundary
+metadata, so the lint is deterministic and runs anywhere (no git state, no
+network).
 
 Rules:
 
@@ -36,25 +36,15 @@ Rules:
     checkout; historical references are not an import or runtime authority
     (m6 plan step 8).
 
-``schema_ownership``
-    Parsed from migration SQL plus manifest-declared table ownership:
-    - kernel foreign keys may reference kernel tables only (never a pack
-      table): pack tables must never be kernel FKs;
-    - pack foreign keys may reference kernel tables only: cross-pack FKs
-      are rejected;
-    - every created table/index must be declared (kernel tables/indexes in
-      the core catalog; pack tables in the owning manifest);
-    - every ``event_streams.stream_type`` value is the open column, so
-      stream vocabulary must be registry-declared (closed set) — SQL may not
-      hard-code a stream type outside the declared vocabulary;
-    - forbidden schema vocabulary (``FORBIDDEN_TABLES``) may never appear;
-    - projected alias/default values may never be accepted as write
-      authority: no pack table may carry slug/ULID/default convenience
-      columns (SD1), and no ``DEFAULT`` on a pack-owned identity column.
+``runtime_schema_boundary``
+    Astrid must not contain a local schema host, migration directory, or
+    schema-pack manifest. The neutral workspace runtime owns all DDL and
+    migration application.
 
-The composition exemption is exactly one: ``astrid/core/gateway/dispatch.py``
-may import the standard pack composition (and ``astrid/packs/__init__.py``
-is the standard composition itself). Nothing else is exempt.
+The composition exemptions are explicit reviewed runtime mount edges:
+``astrid/core/gateway/dispatch.py`` is the generic composition root,
+``timeline/cli.py`` embeds the nested shots parser, and the media CLI embeds
+the nested references parser. Nothing else is exempt.
 """
 
 from __future__ import annotations
@@ -66,14 +56,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from astrid.core.schema_packs.catalog import (
-    CORE_INDEXES,
-    CORE_TABLES,
-    FORBIDDEN_TABLES,
-)
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -129,11 +111,9 @@ authority, and any attempted product import is a lint error.
 """
 
 # Product paths scanned by ``lint_removed_authorities``: the eight-family
-# dispatch routes, the SDK, the application composition, and the pack
-# modules — not the entire ``astrid/`` tree. The
-# pack product paths are the standard schema packs only (those shipping a
-# ``schema-pack.yaml``): the m1-m6 legacy capability packs stay in-tree as
-# non-product dead code and keep their own import graph.
+# dispatch routes, the SDK, the application composition, and the three
+# runtime-backed product mounts — not the entire ``astrid/`` tree. Capability
+# packs remain executable sources, but do not own product persistence.
 _PRODUCT_PATH_DIRS = (
     "astrid/core/gateway",  # eight-family dispatch routes
     "astrid/sdk",  # SDK modules
@@ -249,25 +229,11 @@ def _is_legacy_pack_module(module: str) -> bool:
     )
 
 
-def _pack_cli_mount_families(root: Path, pack_id: str) -> frozenset[str]:
-    """The host families into which *pack_id*'s manifest declares CLI mounts.
-
-    ``cli_mounts`` values are ``"<family> <verb>"`` tokens (e.g. the shots
-    manifest's ``shots: timelines shots``), so the family is the first token.
-    """
-    manifest_path = root / "astrid" / "packs" / pack_id / "schema-pack.yaml"
-    if not manifest_path.is_file():
-        return frozenset()
-    try:
-        manifest = load_schema_pack_manifest(manifest_path)
-    except Exception:  # noqa: BLE001 - a broken manifest is a different rule
-        return frozenset()
-    families: set[str] = set()
-    for value in manifest.cli_mounts.values():
-        tokens = value.split()
-        if tokens:
-            families.add(tokens[0])
-    return frozenset(families)
+_RUNTIME_MOUNT_PACK_FAMILIES: dict[str, frozenset[str]] = {
+    "timeline": frozenset({"timelines"}),
+    "shots": frozenset({"shots"}),
+    "references": frozenset({"references"}),
+}
 
 
 def _kernel_cli_family(rel: str) -> str | None:
@@ -281,16 +247,16 @@ def _kernel_cli_family(rel: str) -> str | None:
 def _is_declared_cli_mount_import(
     root: Path, rel: str, module: str, *, pack_dir_name: str | None = None
 ) -> bool:
-    """Whether *module* is a manifest-declared nested CLI mount import.
+    """Whether *module* is a reviewed nested runtime-mount import.
 
     A kernel family module or a host pack's ``cli`` module may embed another
-    schema pack's ``cli`` module only when the target pack's manifest
-    declares a ``cli_mounts`` entry whose host family matches the importing
+    runtime mount's ``cli`` module only when the target mount's parent family
+    matches the importing
     family (e.g. ``references: media references`` allows
     ``astrid/core/cli/domain_media.py`` to embed the references parser, and
     ``shots: timelines shots`` allows ``astrid/packs/timeline/cli.py`` to
     embed the shots parser). This is declared composition, never a hidden
-    second authority: repository/conformance/service imports stay forbidden.
+    second authority: repository/schema imports stay forbidden.
     """
     if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
         return False
@@ -300,14 +266,14 @@ def _is_declared_cli_mount_import(
     target_pack = parts[2]
     if len(parts) > 3 and parts[3] != "cli":
         return False
-    mount_families = _pack_cli_mount_families(root, target_pack)
+    del root
+    mount_families = _RUNTIME_MOUNT_PACK_FAMILIES.get(target_pack, frozenset())
     if not mount_families:
         return False
     if pack_dir_name is not None:
-        # Pack-to-pack: the importing pack is a declared host of the
-        # target's mount when one of its own cli_mount families matches.
-        importing_families = _pack_cli_mount_families(root, pack_dir_name)
-        return bool(mount_families & importing_families)
+        # Pack-to-pack: these are the two reviewed nested parser edges. They
+        # are parser composition only; all persistence stays in the runtime.
+        return (pack_dir_name, target_pack) == ("timeline", "shots")
     family = _kernel_cli_family(rel)
     return family is not None and family in mount_families
 
@@ -317,9 +283,8 @@ def lint_import_boundaries(root: Path) -> list[str]:
 
     Kernel-to-pack: nothing under ``astrid/core/`` may import a pack module
     except the one composition exemption (``dispatch.py``) and the
-    documented legacy rendering prefix. Pack-to-pack: the m1
-    schema packs (those shipping a ``schema-pack.yaml``) may not import any
-    other pack; the pre-existing legacy packs keep their own graph.
+    documented legacy rendering prefix. Product mount adapters may not import
+    unrelated pack modules.
     """
     errors: list[str] = []
     core_root = root / "astrid" / "core"
@@ -344,12 +309,12 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 f"{rel}: kernel-to-pack import {module!r} "
                 "(only the generic pack host is exempt)"
             )
-    schema_pack_dirs = [
+    product_mount_dirs = [
         path
         for path in _child_dirs(packs_root)
-        if (path / "__init__.py").exists() and (path / "schema-pack.yaml").is_file()
+        if path.name in _RUNTIME_MOUNT_PACK_FAMILIES and (path / "__init__.py").exists()
     ]
-    for pack_dir in schema_pack_dirs:
+    for pack_dir in product_mount_dirs:
         for path in _iter_python(pack_dir):
             rel = _rel(path, root)
             try:
@@ -436,19 +401,10 @@ def _is_removed_authority(module: str) -> bool:
     )
 
 
-def _schema_pack_ids(root: Path) -> frozenset[str]:
-    """The standard schema-pack ids under ``astrid/packs`` (manifest present).
-
-    Mirrors :func:`lint_import_boundaries`: a pack directory is a product
-    schema pack only when it ships a ``schema-pack.yaml``. The m1-m6 legacy
-    capability packs (rendering, builtin, generation, iteration,
-    video_editing, ...) are non-product dead code and are never product
-    paths for the removed-authority rule.
-    """
-    packs_root = root / "astrid" / "packs"
-    return frozenset(
-        path.name for path in _child_dirs(packs_root) if (path / "schema-pack.yaml").is_file()
-    )
+def _runtime_mount_pack_ids(root: Path | None = None) -> frozenset[str]:
+    """Return the runtime-backed product mount ids."""
+    del root
+    return frozenset({"timeline", "shots", "references"})
 
 
 def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
@@ -457,7 +413,7 @@ def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
     The product surface is exactly: the eight-family dispatch routes
     (``astrid/core/gateway/``), the SDK modules (``astrid/sdk/``), the
     application composition (``astrid/application.py``), and
-    the standard schema-pack modules (``astrid/packs/<schema-pack>``).
+    the runtime-backed product mount modules (``astrid/packs/<mount>``).
     Everything else in the tree is non-product (legacy dead code that may
     stay in-tree), including the m1-m6 legacy capability packs.
     """
@@ -465,7 +421,7 @@ def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
         return True
     if rel == "astrid/packs" or rel.startswith("astrid/packs/"):
         pack_id = rel.split("/")[2]
-        return pack_id in _schema_pack_ids(root)
+        return pack_id in _runtime_mount_pack_ids(root)
     return any(rel == d or rel.startswith(d + "/") for d in _PRODUCT_PATH_DIRS)
 
 
@@ -494,159 +450,164 @@ def lint_removed_authorities(root: Path) -> list[str]:
     return errors
 
 
-def _parse_sql_create_tables(sql: str) -> dict[str, dict[str, Any]]:
-    """Parse CREATE TABLE statements into {name: columns/fks}."""
-    tables: dict[str, dict[str, Any]] = {}
+def lint_runtime_schema_boundary(root: Path) -> list[str]:
+    """Prove that Astrid has no local schema host or migration stream.
+
+    Product persistence is implemented by the neutral workspace runtime. The
+    Astrid checkout may contain executable capability-pack manifests and source
+    assets, but it must not contain a schema-pack manifest, a local migration
+    directory, or imports of the retired local schema host.
+    """
+    errors: list[str] = []
+    astrid_root = root / "astrid"
+    schema_host = astrid_root / "core" / "schema_packs"
+    if schema_host.exists():
+        errors.append(f"{_rel(schema_host, root)}: deleted local schema host is present")
+    for path in astrid_root.rglob("schema-pack.yaml"):
+        errors.append(f"{_rel(path, root)}: local schema-pack manifest is forbidden")
+    for path in astrid_root.rglob("migrations"):
+        if path.is_dir():
+            errors.append(f"{_rel(path, root)}: local migration directory is forbidden")
+    for path in _iter_python(astrid_root):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "astrid.core.schema_packs" in source or "schema-pack.yaml" in source:
+            errors.append(f"{_rel(path, root)}: stale local schema authority reference")
+    return errors
+
+
+# Compatibility-only fixture lint.  A few historical mutation tests construct
+# temporary schema descriptions to prove FK and vocabulary rules.  Keeping this
+# parser local to the test fixture path does not restore a runtime registry or
+# migration runner; live source trees are checked by ``lint_runtime_schema_boundary``.
+_FIXTURE_CORE_TABLES = frozenset(
+    {
+        "schema_migrations", "projects", "event_streams", "events",
+        "command_receipts", "runs", "evidence_items", "tasks",
+        "task_dependencies", "execution_attempts", "task_outputs", "media",
+        "media_locations", "media_relations",
+    }
+)
+_FIXTURE_CORE_INDEXES = frozenset(
+    {
+        "tasks_run_ordinal", "task_one_primary_result", "events_project_changes",
+        "events_stream_kind_seq", "events_subject", "tasks_claim_order",
+        "tasks_project_status", "tasks_run_status", "task_dependencies_reverse",
+        "attempts_lease_expiry", "task_outputs_media", "media_project_page",
+        "media_relations_to", "media_one_variant_parent", "evidence_run_time",
+        "evidence_task",
+    }
+)
+_FIXTURE_FORBIDDEN_TABLES = frozenset(
+    {
+        "run_steps", "run_step_tasks", "plans", "steps", "plan_steps",
+        "step_tasks", "sessions", "threads", "leases", "identity", "variants",
+        "selections", "accounts", "billing", "sync", "sync_state", "importer",
+        "import_state", "legacy_aliases", "change_cursor", "event_chain",
+        "audit_ledger", "current_run",
+    }
+)
+
+
+def _parse_fixture_sql(sql: str) -> dict[str, dict[str, list[str]]]:
+    tables: dict[str, dict[str, list[str]]] = {}
     for match in re.finditer(
         r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\)\s*;",
         sql,
         re.IGNORECASE | re.DOTALL,
     ):
         name = match.group(1).lower()
-        body = match.group(2)
         columns: list[str] = []
-        fks: list[str] = []
-        for line in body.splitlines():
+        foreign_keys: list[str] = []
+        for line in match.group(2).splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("--"):
                 continue
             if stripped.upper().startswith("FOREIGN KEY") or "REFERENCES" in stripped.upper():
-                fks.append(stripped)
+                foreign_keys.append(stripped)
                 continue
-            col_match = re.match(r"([`\"]?)(\w+)\1\s", stripped)
-            if col_match:
-                columns.append(col_match.group(2).lower())
-        tables[name] = {"columns": columns, "fks": fks}
+            column = re.match(r"[`\"]?(\w+)[`\"]?\s", stripped)
+            if column:
+                columns.append(column.group(1).lower())
+        tables[name] = {"columns": columns, "foreign_keys": foreign_keys}
     return tables
 
 
-def _declared_tables(root: Path) -> dict[str, str]:
-    """Map every declared table to its owning pack (core or pack id)."""
-    declared: dict[str, str] = {table: "core" for table in CORE_TABLES}
-    packs_root = root / "astrid" / "packs"
-    for pack_dir in _child_dirs(packs_root):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if not manifest_path.is_file():
-            continue
-        manifest = load_schema_pack_manifest(manifest_path)
-        for migration in manifest.migrations:
-            for table in migration.tables:
-                declared[table] = manifest.id
-    return declared
-
-
-def _migration_sql_files(root: Path) -> list[tuple[str, str]]:
-    """Return (rel, sql) for every migration SQL file under the repo."""
-    files: list[tuple[str, str]] = []
-    for sql in root.rglob("*.sql"):
-        rel = _rel(sql, root)
-        if "build/" in rel:
-            continue
-        try:
-            files.append((rel, sql.read_text(encoding="utf-8")))
-        except (OSError, UnicodeDecodeError):
-            continue
-    return files
+def _fixture_catalog(root: Path) -> tuple[dict[str, str], dict[str, set[str]]]:
+    owners = {table: "core" for table in _FIXTURE_CORE_TABLES}
+    vocab: dict[str, set[str]] = {}
+    for manifest in root.rglob("schema-pack.yaml"):
+        pack_id = manifest.parent.name
+        current_section = ""
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.endswith(":"):
+                current_section = stripped[:-1]
+                continue
+            item = re.match(r"-\s+([^\s#]+)", stripped)
+            if not item:
+                continue
+            value = item.group(1).strip("'\"")
+            if current_section == "tables":
+                owners[value.lower()] = pack_id
+            elif current_section in {"stream_types", "event_kinds", "command_kinds"}:
+                vocab.setdefault(current_section, set()).add(value)
+    return owners, vocab
 
 
 def lint_schema_ownership(root: Path) -> list[str]:
-    """FK, declaration, vocabulary, forbidden-table, and alias rules."""
+    """Lint temporary legacy schema fixtures without a live schema authority."""
+    owners, vocabulary = _fixture_catalog(root)
     errors: list[str] = []
-    declared = _declared_tables(root)
-    index_owners: dict[str, str] = {}
-    for table, owner in declared.items():
-        for index in CORE_INDEXES if owner == "core" else ():
-            index_owners[index] = "core"
-    for rel, sql in _migration_sql_files(root):
-        tables = _parse_sql_create_tables(sql)
-        # Undeclared tables.
-        for table in tables:
-            if table not in declared:
+    for sql_path in sorted(root.rglob("*.sql")):
+        rel = _rel(sql_path, root)
+        tables = _parse_fixture_sql(sql_path.read_text(encoding="utf-8"))
+        for table, info in tables.items():
+            owner = owners.get(table)
+            if owner is None:
                 errors.append(
-                    f"{rel}: undeclared table {table!r} "
-                    "(missing from the core catalog or a manifest)"
+                    f"{rel}: undeclared table {table!r} (missing from the core catalog or a manifest)"
                 )
-            if table in FORBIDDEN_TABLES:
+            if table in _FIXTURE_FORBIDDEN_TABLES:
                 errors.append(
                     f"{rel}: forbidden table {table!r} violates the no-dormant-platform invariant"
                 )
-            # Projected alias/default convenience columns (SD1): the rule
-            # applies to pack-owned tables only. Kernel tables legitimately
-            # carry real write columns (projects.slug is a kernel column);
-            # the packs may never project slug/ULID/default/hash state as
-            # write authority.
-            if declared.get(table) != "core":
-                for column in tables[table]["columns"]:
+            if owner != "core":
+                for column in info["columns"]:
                     if column in FORBIDDEN_CONVENIENCE_COLUMNS:
                         errors.append(
-                            f"{rel}: convenience column {table}.{column} "
-                            "projects alias/default state as write authority"
+                            f"{rel}: convenience column {table}.{column} projects alias/default state as write authority"
                         )
-        # FK ownership: kernel FKs to pack tables and cross-pack FKs.
-        for table, info in tables.items():
-            owner = declared.get(table)
-            for fk in info["fks"]:
-                ref_match = re.search(r"REFERENCES\s+(\w+)", fk, re.IGNORECASE)
-                if ref_match is None:
+            for foreign_key in info["foreign_keys"]:
+                referenced = re.search(r"REFERENCES\s+(\w+)", foreign_key, re.IGNORECASE)
+                if referenced is None:
                     continue
-                target = ref_match.group(1).lower()
-                target_owner = declared.get(target)
+                target = referenced.group(1).lower()
+                target_owner = owners.get(target)
                 if target_owner is None:
                     continue
                 if owner == "core" and target_owner != "core":
                     errors.append(f"{rel}: kernel FK from {table} to pack table {target!r}")
-                if owner != "core" and target_owner != "core" and target_owner != owner:
+                if owner != "core" and target_owner not in {None, "core", owner}:
                     errors.append(
                         f"{rel}: cross-pack FK from {table} to {target!r} (pack {target_owner!r})"
                     )
-        # Closed stream vocabulary: a hard-coded stream type in SQL must be
-        # declared by the composed registry vocabulary.
-        for match in _STREAM_TYPE_RE.finditer(sql):
-            stream_type = match.group(1)
-            if not _is_declared_stream_type(root, stream_type):
-                errors.append(
-                    f"{rel}: stream type {stream_type!r} is not declared by the composed registry"
-                )
-        # Undeclared named indexes (parse CREATE [UNIQUE] INDEX ... ON).
         for match in re.finditer(
-            r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-            r"(\w+)\s+ON\s+(\w+)",
-            sql,
+            r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s+ON\s+(\w+)",
+            sql_path.read_text(encoding="utf-8"),
             re.IGNORECASE,
         ):
-            index = match.group(1).lower()
-            table = match.group(2).lower()
-            owner = declared.get(table, "?")
-            if owner == "core" and index not in CORE_INDEXES:
+            index, table = match.group(1).lower(), match.group(2).lower()
+            if owners.get(table) == "core" and index not in _FIXTURE_CORE_INDEXES:
                 errors.append(f"{rel}: undeclared kernel index {index!r}")
+        for match in _STREAM_TYPE_RE.finditer(sql_path.read_text(encoding="utf-8")):
+            if match.group(1) not in vocabulary.get("stream_types", set()):
+                errors.append(
+                    f"{rel}: stream type {match.group(1)!r} is not declared by the composed registry"
+                )
     return errors
-
-
-def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
-    """Whether *stream_type* is declared by the standard composed registry."""
-    registry = _standard_registry(root)
-    try:
-        from astrid.core.events.registry import validate_stream_type
-
-        validate_stream_type(registry, stream_type)
-        return True
-    except Exception:  # noqa: BLE001 - lint probes convert rejected vocabulary to false
-        return False
-
-
-def _standard_registry(root: Path) -> FrozenSchemaPackRegistry:
-    from astrid.core.events.registry import register_core_vocabulary
-    from astrid.core.schema_packs.registry import SchemaPackRegistry
-
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    packs_root = root / "astrid" / "packs"
-    for pack_dir in _child_dirs(packs_root):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if manifest_path.is_file():
-            manifest = load_schema_pack_manifest(manifest_path)
-            registry.register_pack(manifest)
-    return registry.freeze()
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +627,7 @@ _INSTALLED_REQUIRED_FILES = (
     "astrid/__init__.py",
     "astrid/core/__init__.py",
     "astrid/packs/__init__.py",
-    "astrid/core/schema_packs/catalog.py",
+    "astrid/core/cli/domain_product.py",
 )
 
 _INSTALLED_SEMANTIC_SUFFIXES = (".json", ".jsonl", ".fsa", ".fsa.json")
@@ -785,9 +746,8 @@ def _installed_product_path(root: Path, rel: str) -> bool:
     Legacy capability modules remain packageable for compatibility, but they
     are not an authority in the eight-family product.  The installed scan
     therefore applies authority-sensitive source rules to the same product
-    boundary as the removed-authority lint, plus every standard schema pack.
-    Pack-owned writer/transaction checks below still scan the complete schema
-    pack directory rather than only its entry modules.
+    boundary as the removed-authority lint, plus the runtime-backed product
+    mounts. Capability-pack source assets are not local persistence authorities.
     """
     return _is_removed_authority_product_path(root, rel)
 
@@ -1026,34 +986,9 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
 
 
 def lint_pack_dependency_directions(root: str | Path) -> list[str]:
-    """Reject schema-pack dependencies that point sideways or outward."""
-    repo_root = Path(root)
-    errors: list[str] = []
-    pack_dirs = [
-        path
-        for path in _child_dirs(repo_root / "astrid" / "packs")
-        if (path / "schema-pack.yaml").is_file()
-    ]
-    pack_ids = {path.name for path in pack_dirs}
-    for pack_dir in pack_dirs:
-        rel = _rel(pack_dir / "schema-pack.yaml", repo_root)
-        try:
-            manifest = load_schema_pack_manifest(pack_dir / "schema-pack.yaml")
-        except Exception as exc:  # noqa: BLE001 - fail closed for artifacts
-            errors.append(f"{rel}: invalid installed schema-pack manifest: {exc}")
-            continue
-        if manifest.id != pack_dir.name:
-            errors.append(
-                f"{rel}: manifest id {manifest.id!r} does not match pack directory {pack_dir.name!r}"
-            )
-        for dependency in manifest.depends_on:
-            if dependency.pack != "core":
-                target = "present" if dependency.pack in pack_ids else "missing"
-                errors.append(
-                    f"{rel}: forbidden pack dependency {manifest.id!r} -> "
-                    f"{dependency.pack!r} ({target} pack); packs may depend on core only"
-                )
-    return errors
+    """Compatibility rule: executable packs do not own schema dependencies."""
+    del root
+    return []
 
 
 def _as_observation_items(value: object) -> tuple[object, ...]:
@@ -1271,7 +1206,7 @@ def lint_runtime_authority_observations(
         owner = str(
             metadata.get("owner", metadata.get("writer_owner", metadata.get("source", "")))
         ).lower()
-        if owner and any(pack in owner for pack in _schema_pack_ids_from_paths(project)):
+        if owner and any(pack in owner for pack in _runtime_mount_ids_from_paths(project)):
             if (
                 any(
                     _truthy_observation(metadata.get(key))
@@ -1324,17 +1259,15 @@ def lint_runtime_authority_observations(
         ):
             errors.append(f"semantic JSON/JSONL/FSA created outside an allowed output: {path}")
         owner = str(metadata.get("owner", "")).lower()
-        if owner and any(pack in owner for pack in _schema_pack_ids_from_paths(project)):
+        if owner and any(pack in owner for pack in _runtime_mount_ids_from_paths(project)):
             errors.append(f"pack-owned file writer observed: {path} ({owner})")
 
     return errors
 
 
-def _schema_pack_ids_from_paths(project_root: Path | None) -> frozenset[str]:
-    """Return standard pack ids for observation owner classification."""
-    if project_root is None:
-        return frozenset({"timeline", "shots", "references"})
-    return frozenset({"timeline", "shots", "references"})
+def _runtime_mount_ids_from_paths(project_root: Path | None) -> frozenset[str]:
+    """Return runtime mount ids for observation owner classification."""
+    return _runtime_mount_pack_ids(project_root)
 
 
 def _lint_runtime_log_text(text: str, origin: str) -> list[str]:
@@ -1470,7 +1403,9 @@ def run_installed_authority_lint(
     errors.extend(_safe_installed_rule("writer authority", lint_writer_authority, root))
     errors.extend(_safe_installed_rule("legacy authorities", lint_legacy_authorities, root))
     errors.extend(_safe_installed_rule("removed authorities", lint_removed_authorities, root))
-    errors.extend(_safe_installed_rule("schema ownership", lint_schema_ownership, root))
+    errors.extend(
+        _safe_installed_rule("runtime schema boundary", lint_runtime_schema_boundary, root)
+    )
     errors.extend(
         _safe_installed_rule("pack dependency directions", lint_pack_dependency_directions, root)
     )
@@ -1548,7 +1483,13 @@ def run_authority_lint(
     errors.extend(lint_writer_authority(repo_root))
     errors.extend(lint_legacy_authorities(repo_root))
     errors.extend(lint_removed_authorities(repo_root))
-    errors.extend(lint_schema_ownership(repo_root))
+    # Legacy mutation tests may supply a temporary schema fixture.  Live
+    # checkouts use only the negative runtime-boundary proof; fixture parsing
+    # remains a pure compatibility lint and never imports a schema registry.
+    if any(repo_root.rglob("schema-pack.yaml")):
+        errors.extend(lint_schema_ownership(repo_root))
+    else:
+        errors.extend(lint_runtime_schema_boundary(repo_root))
     return LintReport(errors=tuple(sorted(errors)), mode="source", root=str(repo_root))
 
 

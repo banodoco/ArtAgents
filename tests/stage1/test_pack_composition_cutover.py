@@ -8,19 +8,21 @@ from pathlib import Path
 
 import astrid.packs
 import astrid.sdk
+from astrid.core.cli.domain_product import REQUIRED_RUNTIME_MOUNTS, build_product_mounts
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_packs_registry_keeps_only_checkout_composition() -> None:
-    assert astrid.packs.STANDARD_SCHEMA_PACKS == (
-        "timeline",
-        "shots",
-        "references",
-    )
-    registry = astrid.packs.build_standard_registry()
-    assert set(registry.packs) >= {"core", *astrid.packs.STANDARD_SCHEMA_PACKS}
+    assert REQUIRED_RUNTIME_MOUNTS == {
+        "timelines": ("timelines",),
+        "shots": ("timelines", "shots"),
+        "references": ("media", "references"),
+    }
+    assert len(build_product_mounts()) == 7
+    assert not hasattr(astrid.packs, "STANDARD_SCHEMA_PACKS")
+    assert not hasattr(astrid.packs, "build_standard_registry")
     assert not hasattr(astrid.packs, "compose_standard_bridge")
     assert not hasattr(astrid.packs, "open_standard_writer")
 

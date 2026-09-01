@@ -1,8 +1,7 @@
 """Product references family CLI — nested beneath media (m4 plan step 27, task T30).
 
-This module is the product parser for the manifest-declared nested
-``references`` mount (``astrid/packs/references/schema-pack.yaml`` declares
-``references: media references``). It is **never** a top-level command:
+This module is the product parser for the runtime-owned nested
+``references`` mount. It is **never** a top-level command:
 ``references`` is reachable only as ``astrid media references <verb>``
 through the media family parser (``astrid/core/cli/domain_media.py`` embeds
 this parser beneath its ``references`` subcommand), and the product gateway

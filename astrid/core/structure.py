@@ -18,7 +18,6 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 
 LEGACY_PUBLIC_DIRS = (
     "conductors",
@@ -65,11 +64,11 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
     errors.extend(_validate_pack_element_folders(repo_root / "astrid" / "packs"))
     errors.extend(validate_import_layering(repo_root))
     errors.extend(validate_cli_domain_boundary(repo_root))
-    # Migration-completion drift is a blocking structure violation, not a warning.
+    # Retired-authority drift is a blocking structure violation, not a warning.
     errors.extend(validate_migration_completion(repo_root))
     # Top-level astrid/packs/ modules: only __init__.py is allowed.
     errors.extend(_validate_packs_top_level_modules(repo_root / "astrid" / "packs"))
-    # Deterministic pack/writer/schema/authority lint (m1 plan step 22).
+    # Deterministic pack/writer/runtime-authority lint (m1 plan step 22).
     errors.extend(validate_authority_boundaries(repo_root))
     return StructureReport(errors=tuple(errors), warnings=tuple(warnings))
 
@@ -602,25 +601,22 @@ def _is_forbidden_core_import(module: str) -> bool:
 
 
 def _is_declared_cli_mount_import(root: Path, rel: str, module: str) -> bool:
-    """Allow only schema-pack CLI mounts declared by the target manifest.
+    """Allow only the two reviewed runtime product-mount imports.
 
-    A kernel family CLI may compose a nested schema-pack parser, but the
-    target pack must explicitly declare the host family in ``cli_mounts``.
-    This keeps the core-to-pack boundary closed for all other imports.
+    Product route ownership is code-declared and runtime-owned. It is not
+    inferred from pack files or a local schema description.
     """
     if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
         return False
     parts = module.split(".")
     if len(parts) < 3 or (len(parts) > 3 and parts[3] != "cli"):
         return False
-    manifest_path = root / "astrid" / "packs" / parts[2] / "schema-pack.yaml"
-    if not manifest_path.is_file():
-        return False
-    try:
-        manifest = load_schema_pack_manifest(manifest_path)
-    except Exception:  # noqa: BLE001 - malformed manifests fail elsewhere
-        return False
-    families = {token for mount in manifest.cli_mounts.values() for token in (mount.split()[:1])}
+    del root
+    families = {
+        "timeline": {"timelines"},
+        "shots": {"shots"},
+        "references": {"references"},
+    }.get(parts[2], set())
     prefix = "astrid/core/cli/domain_"
     return rel.startswith(prefix) and rel.endswith(".py") and rel[len(prefix) : -3] in families
 
@@ -783,15 +779,14 @@ def _live_import_map(repo_root: Path) -> dict[str, set[str]]:
 
 
 def validate_authority_boundaries(root: str | Path = REPO_ROOT) -> list[str]:
-    """Run the deterministic pack/writer/schema/authority lint (plan step 22).
+    """Run the deterministic pack/writer/runtime-authority lint (plan step 22).
 
     Delegates to :mod:`scripts.reshape.authority_lint`, which detects
     kernel-to-pack and pack-to-pack imports, SQLite writers outside the
     kernel store, legacy bridge/gateway authorities inside supported v10
-    entry paths, kernel FKs to pack tables, cross-pack FKs, undeclared
-    schema objects, closed stream vocabulary, forbidden tables, and
-    projected alias/default convenience columns — with exactly one
-    documented composition exemption (the gateway serve root).
+    entry paths, and the absence of Astrid-local schema hosts/migration
+    streams. Temporary mutation fixtures may still exercise historical FK and
+    vocabulary checks, but the live authority is always the neutral runtime.
     """
     from scripts.reshape.authority_lint import run_authority_lint
 

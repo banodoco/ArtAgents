@@ -29,9 +29,8 @@ Verbs (exactly these five, one SDK call each):
   ``variant_of``, ``uses_as_input``, ``mask_for``, ``audio_for``) plus
   optional ``--ordinal``/``--metadata``.
 
-The parser also mounts the manifest-declared nested ``references`` family
-beneath ``media`` (``astrid/packs/references/schema-pack.yaml`` declares
-``references: media references``): ``astrid media references <verb>``
+The parser also mounts the reviewed runtime-owned nested ``references`` family
+beneath ``media`` (``references: media references``): ``astrid media references <verb>``
 embeds the references product parser (``astrid/packs/references/cli.py``)
 so reference ``create/update/archive/associate/link/set-primary/list/show`` are
 executable only beneath media (plan step 27, task T30). There is **no

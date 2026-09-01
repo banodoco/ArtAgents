@@ -65,9 +65,9 @@ def test_canonical_runtime_lanes_have_no_bridge_or_provider_residue() -> None:
     for rel in (
         "astrid/core/rendering/remotion_runtime.py",
         "astrid/core/timeline/bundle.py",
-        "astrid/core/schema_packs/catalog.py",
     ):
         assert (root / rel).is_file(), rel
+    assert not (root / "astrid/core/schema_packs").exists()
 
     forbidden = (
         "append_imported_event",

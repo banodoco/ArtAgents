@@ -1393,9 +1393,9 @@ class TestFirstPartyPacksRootValidation(MinimalPackTestCase):
         root = self.make_pack_root() / "packs"
         root.mkdir()
         _mirror_first_party_packs_root(root)
-        (root / "builtin").unlink()
+        (root / "blender").unlink()
         _write(
-            root / "builtin" / "pack.yaml",
+            root / "blender" / "pack.yaml",
             """id: builtin
 name: Builtin
 version: 0.1.0
@@ -1413,12 +1413,12 @@ agent:
             "first-party pack validation failed (2 issues)",
         )
         self.assertIn(
-            "[internal-schema] unexpected top-level directory: rogue",
+            "[internal-inventory] unexpected top-level directory: rogue",
             errors,
         )
         self.assertTrue(
             any(
-                line.startswith("[layout] builtin: pack.yaml: missing required field schema_version")
+                line.startswith("[layout] blender: pack.yaml: missing required field schema_version")
                 for line in errors[1:]
             ),
             errors,

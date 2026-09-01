@@ -17,7 +17,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FIRST_PARTY_PACKS_ROOT = _REPO_ROOT / "astrid" / "packs"
 _FIRST_PARTY_PACK_IDS = (
     "blender",
-    "builtin",
     "comfy_wrap",
     "editorial",
     "fal",
@@ -34,20 +33,13 @@ _FIRST_PARTY_PACK_IDS = (
     "vibecomfy",
     "video_editing",
     "youtube",
-)
-# Internal (non-capability) directories that are allowed in the first-party
-# packs root: the ``_core`` skill-only shell plus the v10 schema packs that
-# own domain tables/repositories (not pack.yaml capability packs).
-_FIRST_PARTY_INTERNAL_DIRS = {
-    "_core",
-    "references",
-    "shots",
-    "timeline",
-    # Typed-timeline is an internal capability implementation package. Its
-    # capability manifest is handled by the generic pack loader, but it is
-    # not one of this root inventory's schema-pack directories.
     "typed_timeline",
-}
+)
+# ``_core`` is a skill-only shell. The three runtime product mount directories
+# retain executable CLI adapters but intentionally have no ``pack.yaml``:
+# their durable state belongs to the neutral workspace runtime, not a local
+# schema host.
+_FIRST_PARTY_INTERNAL_DIRS = {"_core", "references", "shots", "timeline"}
 _IGNORED_PACKS_ROOT_DIRS = {"__pycache__"}
 
 
@@ -83,7 +75,7 @@ def validate_first_party_packs_root(
     from astrid.core.pack.validate import validate_pack
 
     root = Path(packs_root).resolve()
-    internal_schema_errors = _validate_first_party_packs_root_inventory(root)
+    internal_inventory_errors = _validate_first_party_packs_root_inventory(root)
     layout_errors: list[str] = []
     warnings: list[str] = []
 
@@ -96,7 +88,7 @@ def validate_first_party_packs_root(
         warnings.extend(f"{pack_id}: {warning}" for warning in pack_warnings)
 
     errors = _aggregate_first_party_packs_root_errors(
-        internal_schema_errors=internal_schema_errors,
+        internal_inventory_errors=internal_inventory_errors,
         layout_errors=layout_errors,
     )
     return errors, warnings
@@ -126,12 +118,6 @@ def _validate_first_party_packs_root_inventory(root: Path) -> list[str]:
         errors.append(f"missing first-party pack directory: {pack_id}")
 
     for name in sorted(set(child_dirs) - allowed_names):
-        if name == "schemas":
-            errors.append(
-                "unexpected top-level directory: schemas (relocated to "
-                "astrid/core/pack/schemas/)"
-            )
-            continue
         errors.append(f"unexpected top-level directory: {name}")
 
     for pack_id in sorted(expected_pack_ids & set(child_dirs)):
@@ -194,12 +180,12 @@ def _is_repo_ignored_first_party_child(root: Path, child: Path) -> bool:
 
 def _aggregate_first_party_packs_root_errors(
     *,
-    internal_schema_errors: list[str],
+    internal_inventory_errors: list[str],
     layout_errors: list[str],
 ) -> list[str]:
-    """Combine internal-schema and layout errors into a single error list."""
+    """Combine inventory and layout errors into one aggregate result."""
     body: list[str] = []
-    body.extend(f"[internal-schema] {error}" for error in internal_schema_errors)
+    body.extend(f"[internal-inventory] {error}" for error in internal_inventory_errors)
     body.extend(f"[layout] {error}" for error in layout_errors)
     if not body:
         return []

@@ -9,6 +9,11 @@ Agents discover capabilities through the SDK (`astrid.sdk.discover`,
 `astrid/packs/` directory trees, guess ids from filenames, or import Python
 modules directly. The pack system owns discovery; agents consume it.
 
+Capability manifests describe executable sources only. Astrid has no local
+schema-pack host or migration stream: durable product state and all DDL are
+owned by the neutral workspace runtime. Do not add a schema manifest or a
+local migration directory to a capability pack.
+
 There is no session binding and no `next`/`status`/`attach` bootstrap: the
 gateway CLI (`python3 -m astrid`) owns exactly the eight families (projects,
 timelines, media, tasks, runs, serve, doctor, backup), and capability

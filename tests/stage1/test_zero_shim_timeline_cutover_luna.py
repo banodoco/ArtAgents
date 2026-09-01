@@ -260,7 +260,7 @@ def test_runaway_schema_host_and_migration_are_absent() -> None:
     assert not (runaway / "schema-pack.yaml").exists()
     assert not (runaway / "migrations").exists()
     assert not (runaway / "__init__.py").exists()
-    assert "runaway" not in astrid.packs.STANDARD_SCHEMA_PACKS
+    assert not hasattr(astrid.packs, "STANDARD_SCHEMA_PACKS")
 
 
 def test_pack_workers_are_result_only_and_have_no_timeline_write_binding() -> None:
