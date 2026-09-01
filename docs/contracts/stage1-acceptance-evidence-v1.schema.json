@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banodoco.local/schemas/astrid-stage1-acceptance-evidence-v1.schema.json",
+  "title": "Astrid Stage 1 acceptance evidence",
+  "description": "Machine-readable receipt and aggregate contracts for §§10–13 of the Astrid Beta Stage 1 blueprint. A receipt is not accepted without retained, hash-verified artifacts.",
+  "oneOf": [
+    { "$ref": "#/$defs/receipt" },
+    { "$ref": "#/$defs/acceptance" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "receipt_id", "category", "status", "observed_at", "command", "observations", "checks"],
+      "properties": {
+        "schema": { "const": "astrid.stage1.evidence.receipt.v1" },
+        "receipt_id": { "type": "string", "minLength": 1 },
+        "category": {
+          "enum": ["source_identity", "dependency_locks", "source_manifests", "schema_contracts", "authority_census", "capability_census", "cold_launch", "lifecycle", "ready_capabilities", "render", "second_client", "conformance", "minimum_correctness", "migration", "backup_restore", "rollback", "doctor", "security", "network", "filesystem", "static_scans", "docs", "isolated_composition"]
+        },
+        "status": { "enum": ["pass", "fail", "blocked"] },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "observations": { "type": "object", "minProperties": 1 },
+        "checks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/check" } }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "observations", "artifacts"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(10\\.[123]|11\\.|13\\.)[A-Za-z0-9._-]+$" },
+        "status": { "enum": ["pass", "fail", "blocked"] },
+        "observations": { "type": "object", "minProperties": 1 },
+        "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" } }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "kind"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "kind": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "ok", "generated_at", "normative_source", "normative_sections", "repositories", "dependency_locks", "source_manifests", "censuses", "receipts", "receipt_index", "artifact_index", "checks", "required_categories", "required_checks", "errors", "redaction", "provenance", "hashes"],
+      "properties": {
+        "schema": { "const": "astrid.stage1.acceptance.v1" },
+        "status": { "enum": ["pass", "fail", "blocked"] },
+        "ok": { "type": "boolean" },
+        "generated_at": { "type": ["string", "null"] },
+        "normative_source": { "const": "reigh-app/docs/local-runtime/01-astrid-beta.md" },
+        "normative_sections": { "const": ["10", "11", "12", "13"] },
+        "repositories": { "type": "array" },
+        "dependency_locks": { "type": "array" },
+        "source_manifests": { "type": "array" },
+        "censuses": { "type": "object" },
+        "receipts": { "type": "array" },
+        "receipt_index": { "type": "array" },
+        "artifact_index": { "type": "array" },
+        "checks": { "type": "object" },
+        "required_categories": { "type": "array", "minItems": 1 },
+        "required_checks": { "type": "array", "minItems": 1 },
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "redaction": { "type": "object" },
+        "provenance": { "type": "object" },
+        "hashes": {
+          "type": "object",
+          "required": ["receipt_index", "artifact_index", "report"],
+          "properties": {
+            "receipt_index": { "$ref": "#/$defs/sha256" },
+            "artifact_index": { "$ref": "#/$defs/sha256" },
+            "report": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    }
+  }
+}
