@@ -171,7 +171,7 @@ class TestFfprobeMetadataHappy:
         assert probe.fps_rational == (30000, 1001)
         assert probe.time_base == (1, 30000)
         assert probe.video_codec == "h264"
-        assert probe.codec == "h264"
+        assert probe.video_codec == "h264"
         assert probe.video_profile == "High"
         assert probe.video_level == "41"
         assert probe.pixel_format == "yuv420p"

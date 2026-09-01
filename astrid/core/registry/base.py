@@ -98,23 +98,15 @@ class CapabilityRegistry(Generic[K, T]):
             entry.sort(key=priority_key)
 
     @staticmethod
-    def _resolve_entry(entry: list[T] | T) -> T:
-        """Return the winning definition from a storage entry.
+    def _resolve_entry(entry: list[T]) -> T:
+        """Return the winning definition from a canonical storage entry."""
 
-        Handles both list entries (from ``_register_impl()``) and scalar
-        values (from legacy code that assigns directly to ``_entries``).
-        """
-        if isinstance(entry, list):
-            return entry[0]
-        return entry
+        return entry[0]
 
     @staticmethod
-    def _iter_entries(entry: list[T] | T) -> Iterable[T]:
+    def _iter_entries(entry: list[T]) -> Iterable[T]:
         """Yield every definition from a storage entry (winner + shadowed)."""
-        if isinstance(entry, list):
-            yield from entry
-        else:
-            yield entry
+        yield from entry
 
     def _winner_for(self, key: K) -> T | None:
         """Return the winning definition for *key*, or ``None`` if absent."""

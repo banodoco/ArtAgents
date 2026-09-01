@@ -729,10 +729,7 @@ def test_real_ffmpeg_normalizes_rational_profile_and_emits_valid_media(
         path=source_path,
         workspace_root=tmp_path,
         profile=source_profile,
-        duration_frames=ffmpeg_finalizer._duration_frames_from_probe(
-            source_probe,
-            source_profile,
-        ),
+        duration_frames=source_probe.frames or 25,
         audio=AudioOwnership.NONE,
     )
     canonical = _profile(

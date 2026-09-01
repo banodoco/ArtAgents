@@ -264,37 +264,16 @@ class RenderService:
         request: RenderRequest | Mapping[str, Any],
         *,
         selector: str | None = None,
-        output_path: str | Path | None = None,
-        out_path: str | Path | None = None,
+        out_path: str | Path,
         sidecar_path: str | Path | None = None,
-        backend_config: Mapping[str, Mapping[str, Any]] | None = None,
-        audio: AudioOwnership | str | None = None,
-        profile: Any | None = None,
-        metadata: Mapping[str, str] | None = None,
         previous_outputs: Iterable[object] = (),
-        materialized_root: str | Path | None = None,
-        materialized_objects: Mapping[str, str] | None = None,
     ) -> Path:
         """Render one canonical wire request and publish its result."""
-
-        if output_path is not None and out_path is not None:
-            raise_protocol_error(
-                backend=_CORE_BACKEND_ID,
-                message="supply only one of output_path or out_path",
-                recovery_command="remove the duplicate output path and retry",
-            )
-        destination = output_path if output_path is not None else out_path
-        if destination is None:
-            raise_protocol_error(
-                backend=_CORE_BACKEND_ID,
-                message="out_path/output_path is required",
-                recovery_command="supply one output path and retry",
-            )
         parsed = request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
         return self.render_request(
             parsed,
             selector=selector,
-            out_path=destination,
+            out_path=out_path,
             sidecar_path=sidecar_path,
             previous_outputs=previous_outputs,
         )

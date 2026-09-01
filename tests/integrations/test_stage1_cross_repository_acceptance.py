@@ -150,7 +150,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
             client=RuntimeProtocolClient(metadata["endpoint"], (support / "credentials" / "owner.token").read_text().strip()),
             executor_id="acceptance-host",
         )
-        assert host.register()["registration"]["executor_id"] == "acceptance-host"
+        assert host.register()["registration"].executor_id == "acceptance-host"
         assert host.register()["registration"]["executor_id"] == "acceptance-host"
         capability_page, capability_cursor = generated.list_capabilities()
         assert capability_cursor is None

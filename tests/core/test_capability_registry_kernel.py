@@ -61,19 +61,10 @@ class CapabilityRegistrySmokeTests(unittest.TestCase):
         entry = [FakeDef("a", 10), FakeDef("b", 20)]
         self.assertEqual(CapabilityRegistry._resolve_entry(entry).name, "a")
 
-    def test_resolve_entry_from_scalar(self):
-        entry = FakeDef("single", 10)
-        self.assertEqual(CapabilityRegistry._resolve_entry(entry).name, "single")
-
     def test_iter_entries_from_list(self):
         entry = [FakeDef("a", 10), FakeDef("b", 20)]
         names = [d.name for d in CapabilityRegistry._iter_entries(entry)]
         self.assertEqual(names, ["a", "b"])
-
-    def test_iter_entries_from_scalar(self):
-        entry = FakeDef("single", 10)
-        names = [d.name for d in CapabilityRegistry._iter_entries(entry)]
-        self.assertEqual(names, ["single"])
 
     # ------------------------------------------------------------------
     # _winner_for

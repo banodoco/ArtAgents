@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.rendering.contracts import RenderRequest
 from astrid.core.rendering.errors import RendererProtocolError, raise_unsupported_error
 from astrid.packs.rendering.executors.render import run as render_run
 
@@ -53,11 +54,17 @@ def test_render_delegates_to_service_with_default_selector(fake_service: _FakeSe
     assert result == sentinel
     assert len(fake_service.calls) == 1
     (call_args, call_kwargs) = fake_service.calls[0]
-    assert call_args == (timeline, assets, out)
+    assert len(call_args) == 1
+    request = call_args[0]
+    assert isinstance(request, RenderRequest)
+    assert request.timeline_path == str(timeline.resolve())
+    assert request.assets_registry_path == str(assets.resolve())
+    assert request.output_name == out.name
     assert call_kwargs["selector"] == "rendering.remotion"
+    assert call_kwargs["out_path"] == out
     assert call_kwargs["previous_outputs"] == ()
     # Facade defaults map onto the canonical backend namespace.
-    assert call_kwargs["backend_config"]["rendering.remotion"] == {
+    assert request.backend_config["rendering.remotion"] == {
         "composition_id": "TimelineComposition"
     }
 
@@ -94,7 +101,7 @@ def test_render_maps_backend_kwargs_into_namespaced_backend_config(
     )
 
     assert len(fake_service.calls) == 1
-    config = fake_service.calls[0][1]["backend_config"]
+    config = fake_service.calls[0][0][0].backend_config
     assert config["rendering.remotion"] == {
         "project_dir": str(tmp_path / "remotion"),
         "composition_id": "CustomComposition",
@@ -123,7 +130,7 @@ def test_render_merges_explicit_backend_config(
     )
 
     assert len(fake_service.calls) == 1
-    config = fake_service.calls[0][1]["backend_config"]
+    config = fake_service.calls[0][0][0].backend_config
     assert config["rendering.remotion"]["theme_path"] == str(tmp_path / "override.json")
     assert config["rendering.remotion"]["min_free_gb"] == 9.5
 

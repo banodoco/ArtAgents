@@ -41,8 +41,7 @@ class MediaProbe:
 
     _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
-    # Exact/profile fields used by rendering.  They follow the legacy fields
-    # (and ``_raw``) so existing positional construction keeps its meaning.
+    # Exact/profile fields used by rendering.
     fps_rational: tuple[int, int] | None = None
     time_base: tuple[int, int] | None = None
     video_codec: str | None = None
@@ -58,20 +57,7 @@ class MediaProbe:
     video_stream_present: bool | None = None
     audio_stream_present: bool | None = None
     audio_channels: int | None = None
-    # Appended last so existing positional construction is unaffected.
     frames: int | None = None
-
-    @property
-    def codec(self) -> str | None:
-        """Compatibility shorthand for the primary video codec."""
-
-        return self.video_codec
-
-    @property
-    def duration(self) -> float | None:
-        """Compatibility shorthand for :attr:`duration_seconds`."""
-
-        return self.duration_seconds
 
     @property
     def has_video_stream(self) -> bool:

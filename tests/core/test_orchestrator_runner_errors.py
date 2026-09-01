@@ -107,7 +107,7 @@ def _unvalidated_registry(definition: OrchestratorDefinition) -> OrchestratorReg
     """
 
     registry = OrchestratorRegistry()
-    registry._orchestrators[definition.id] = definition  # type: ignore[attr-defined]
+    registry._entries[definition.id] = [definition]  # type: ignore[attr-defined]
     return registry
 
 

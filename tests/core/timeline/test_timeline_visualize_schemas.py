@@ -147,7 +147,9 @@ def _minimal_instances() -> dict[str, dict[str, Any]]:
             "schema_version": 1,
             "kind": "timeline_visualize",
             "inputs": {
-                "timeline_source": ["projects/desert/timelines/plant"],
+                "source_mode": "kernel",
+                "resolved_project": {"slug": "desert-plant-growth"},
+                "resolved_timelines": [_timeline()],
                 "from_view": None,
                 "focus": None,
                 "scope": "timeline",
@@ -878,9 +880,7 @@ def test_project_bundle_can_lock_multiple_ordered_timeline_snapshots() -> None:
     }
     bundle["manifest"]["scope"] = deepcopy(project_scope)
     bundle["manifest"]["inputs"]["scope"] = "project"
-    bundle["manifest"]["inputs"]["timeline_source"].append(
-        "projects/desert/timelines/second"
-    )
+    bundle["manifest"]["inputs"]["resolved_timelines"].append(second_timeline)
     bundle["ground-truth"]["scope"] = deepcopy(project_scope)
     second_canonical = {
         "timeline_uuid": SECOND_TIMELINE_UUID,

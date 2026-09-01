@@ -49,7 +49,7 @@ def _valid_view_pack(tmp_path: Path) -> tuple[Path, Path]:
     )
     manifest_path.parent.mkdir(parents=True)
     manifest_bytes = json.dumps(
-        {"inputs": {"timeline_source": ["demo"]}},
+        {"inputs": {"source_mode": "frozen"}},
         sort_keys=True,
     ).encode()
     manifest_path.write_bytes(manifest_bytes)
