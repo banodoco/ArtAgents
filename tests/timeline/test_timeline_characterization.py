@@ -117,7 +117,6 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             "load_timeline",
             "materialize_output",
             "merge_generation",
-            "resolve_timeline_theme",
             "save_arrangement",
             "save_metadata",
             "save_pool",

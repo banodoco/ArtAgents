@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from argparse import Namespace
@@ -13,7 +14,6 @@ from astrid.packs.editorial.hype.arrangement_rules import ROLE_DURATION_BOUNDS
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = ROOT / "examples"
 EXPECTED_VALIDATE_BODY = """    for clip in timeline.get(\"clips\", []):
         clip_id = clip.get(\"id\")
         start = float(clip.get(\"at\", 0.0))
@@ -166,7 +166,13 @@ class MultitrackCutTest(unittest.TestCase):
             renderer="remotion",
             arrangement=self.tmp_dir / "arrangement.json",
         )
-        asset_paths = {"main": EXAMPLES / "main.mp4", "broll": EXAMPLES / "broll.mp4"}
+        # Keep media attempt-local and valid. The old examples/*.mp4 paths
+        # were not package-owned fixtures and made this test depend on a
+        # checkout-only directory.
+        asset_paths = {
+            "main": self._make_media("main.mp4", "black"),
+            "broll": self._make_media("broll.mp4", "blue"),
+        }
 
         def fake_probe(path: Path) -> dict[str, object]:
             return {
@@ -201,6 +207,21 @@ class MultitrackCutTest(unittest.TestCase):
             brief_sha256="c" * 64,
             compiled_plan=self.compiled_plan,
         )
+
+    def _make_media(self, name: str, color: str) -> Path:
+        path = self.tmp_dir / name
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", f"color=c={color}:s=16x16:r=1",
+                "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertTrue(path.is_file())
+        return path
 
     def _clip(self, clip_id: str) -> dict:
         return next(clip for clip in self.timeline_config["clips"] if clip["id"] == clip_id)

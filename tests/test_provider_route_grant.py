@@ -146,9 +146,37 @@ def test_tcp_only_broker_retires_udp_even_when_manifest_marks_broker_managed(tmp
 
 
 def test_provider_run_requires_explicit_grant(tmp_path: Path) -> None:
-    host = GenericPackHost(pack_roots=[_pack(tmp_path, protocols=["dns", "tcp"])], attempt_root=tmp_path / "attempt")
+    class _RuntimeClient:
+        def heartbeat(self, *_args, **_kwargs):
+            pass
+
+        def task(self, *_args, **_kwargs):
+            pass
+
+        def settle(self, *_args, **_kwargs):
+            pass
+
+        def fail(self, *_args, **_kwargs):
+            pass
+
+        def upload_object(self, *_args, **_kwargs):
+            pass
+
+    host = GenericPackHost(
+        pack_roots=[_pack(tmp_path, protocols=["dns", "tcp"])],
+        attempt_root=tmp_path / "attempt",
+        client=_RuntimeClient(),
+    )
     record = host.discover()[0]
     host.preflight()
-    task = {"task": {"id": "missing-grant", "capability": record.id, "spec": {"inputs": {}}}}
+    task = {
+        "task": {
+            "id": "missing-grant",
+            "capability": record.id,
+            "attempt_id": "attempt-1",
+            "fence": 1,
+            "spec": {"spec": {"inputs": {}}},
+        }
+    }
     with pytest.raises(HostError, match="route grant is required"):
         host.run_task(task, lease_token="fixture")

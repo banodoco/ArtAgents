@@ -22,12 +22,16 @@ def _configured(name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
-def _manifest_from_environment() -> Path:
+def _manifest_from_environment() -> Path | None:
     value = _configured("BANODOCO_LOCAL_SOURCE_MANIFEST")
     if not value:
-        raise AutoBootstrapError(
-            "Astrid launcher manifest is not configured; run `banodoco-local up --profile astrid`"
-        )
+        # The neutral launcher owns the persisted source profile under its
+        # fixed support directory.  An ordinary Astrid relaunch must be able
+        # to delegate to that profile without requiring the first-launch
+        # environment variable to remain in the shell.  Do not read or
+        # reconstruct the profile here: that would duplicate neutral
+        # authority and bypass its source-trust validation.
+        return None
     from astrid.sdk.workspace_client import _safe_local_path
 
     try:
@@ -65,7 +69,10 @@ def ensure_runtime() -> Mapping[str, Any]:
         raise AutoBootstrapError(
             "installed banodoco-local is unavailable; run `banodoco-local up --profile astrid`"
         )
-    command = [launcher, "up", "--profile", PROFILE, "--source-manifest", str(manifest), "--json"]
+    command = [launcher, "up", "--profile", PROFILE]
+    if manifest is not None:
+        command.extend(("--source-manifest", str(manifest)))
+    command.append("--json")
     started = time.monotonic()
     try:
         completed = subprocess.run(

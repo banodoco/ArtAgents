@@ -36,7 +36,7 @@ class TimelineElementsCatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "animations catalog"):
             timeline.validate_timeline(config)
 
-    def test_explicit_theme_arg_enables_theme_override_behavior(self) -> None:
+    def test_theme_arg_cannot_add_executable_elements(self) -> None:
         import json
         with tempfile.TemporaryDirectory() as tmp:
             theme = Path(tmp) / "theme"
@@ -58,8 +58,9 @@ class TimelineElementsCatalogTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertIn("theme-only", effects_catalog.list_effect_ids(theme=theme))
-            self.assertEqual(effects_catalog.read_effect_meta("theme-only", theme=theme)["clipTypeAliases"], ["theme"])
+            self.assertNotIn("theme-only", effects_catalog.list_effect_ids(theme=theme))
+            with self.assertRaises(KeyError):
+                effects_catalog.read_effect_meta("theme-only", theme=theme)
 
     def test_catalog_exposes_pack_declared_custom_kinds(self) -> None:
         import json

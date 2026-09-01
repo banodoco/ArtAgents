@@ -5,7 +5,6 @@ EXPECTED_PUBLIC_NAMES = (
     "get_capability",
     "invoke",
     "generate",
-    "render",
     "renderer_main",
     "support",
     "RenderContext",

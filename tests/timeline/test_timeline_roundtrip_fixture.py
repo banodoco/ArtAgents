@@ -183,14 +183,18 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
             f"only-in-astrid={set(_TIMELINE_TOP_ALLOWED) - expected_top}, "
             f"only-in-schema={shared_top - set(_TIMELINE_TOP_ALLOWED)}",
         )
+        # ``derived_output`` is a runtime-produced result envelope accepted
+        # by the shared schema, not an authoring field Astrid admits from an
+        # editor. Keep it out of the input allowlist while checking every
+        # other shared clip key remains aligned.
         self.assertEqual(
             set(_CLIP_ALLOWED),
-            shared_clip,
+            shared_clip - {"derived_output"},
             "Clip allowlist drift between Astrid (_CLIP_ALLOWED) and "
-            "imported schema (TimelineClip); "
+            "the supported subset of imported schema (TimelineClip); "
             f"schema-origin={schema_origin}; "
             f"only-in-astrid={set(_CLIP_ALLOWED) - shared_clip}, "
-            f"only-in-schema={shared_clip - set(_CLIP_ALLOWED)}",
+            f"only-in-schema={shared_clip - set(_CLIP_ALLOWED) - {'derived_output'}}",
         )
         self.assertEqual(
             set(_TRACK_ALLOWED),

@@ -438,7 +438,6 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
     assert calls[2][1] == {
         "project_root": tmp_path,
         "extra_pack_roots": ("extra/packs",),
-        "active_theme": active_theme,
         "include_missing_roots": True,
     }
     assert tuple(capability.id for capability in inventory.executors) == ("editorial.inspect_cut",)
@@ -776,11 +775,11 @@ def test_invoke_executor_prefers_universal_manifest_path_from_payload(
     import uuid as _uuid
     universal_manifest = tmp_path / "nested" / "manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
-        raw_result = {"payload": {"manifest_path": str(universal_manifest.resolve())}, "ok": True, "run_id": run_id, "run_root": str(projects_root)}
+        raw_result = {"payload": {"manifest_path": str(universal_manifest.resolve())}, "ok": True, "run_id": run_id, "run_root": str(tmp_path)}
         return run_id, task_id, attempt_id, None, raw_result, True, None
 
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -808,11 +807,11 @@ def test_invoke_executor_discovers_universal_manifest_from_out_dir(
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text("{}", encoding="utf-8")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
-        raw_result = {"payload": {"artifact": "artifact.json"}, "ok": True, "run_id": run_id, "run_root": str(projects_root)}
+        raw_result = {"payload": {"artifact": "artifact.json"}, "ok": True, "run_id": run_id, "run_root": str(tmp_path)}
         return run_id, task_id, attempt_id, None, raw_result, True, None
 
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -841,11 +840,11 @@ def test_invoke_executor_ignores_domain_manifest_payload_paths(
     universal_manifest.write_text("{}", encoding="utf-8")
     domain_manifest = tmp_path / "iteration.manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
-        raw_result = {"payload": {"manifest_path": str(domain_manifest.resolve())}, "ok": True, "run_id": run_id, "run_root": str(projects_root)}
+        raw_result = {"payload": {"manifest_path": str(domain_manifest.resolve())}, "ok": True, "run_id": run_id, "run_root": str(tmp_path)}
         return run_id, task_id, attempt_id, None, raw_result, True, None
 
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -899,13 +898,13 @@ def test_invoke_uses_kernel_execution_boundary(
 
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         seen["project"] = project
         # The SDK admits through the kernel; execution mode is not caller data.
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
-        raw_result = {"ok": True, "run_id": run_id, "run_root": str(projects_root), "payload": {}}
+        raw_result = {"ok": True, "run_id": run_id, "run_root": str(tmp_path), "payload": {}}
         return run_id, task_id, attempt_id, None, raw_result, True, None
 
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -930,13 +929,12 @@ def test_invoke_executor_allows_project_without_explicit_out(
     import uuid as _uuid
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         seen["project"] = project
-        seen["projects_root"] = projects_root
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
-        raw_result = {"ok": True, "run_id": run_id, "run_root": str(projects_root), "payload": {}}
+        raw_result = {"ok": True, "run_id": run_id, "run_root": str(Path.cwd()), "payload": {}}
         return run_id, task_id, attempt_id, None, raw_result, True, None
 
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -976,7 +974,7 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
         assert kwargs["_registries"] is registries
         return _make_capability(astrid, capability_id, "executor")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         assert project == "demo-project"
         raise ValueError("boom")
 
@@ -1009,7 +1007,7 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
     cases = ((ValueError("missing required input(s): brief"), astrid.CapabilityInvocationError),)
 
     for internal_error, expected in cases:
-        def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, _internal_error=internal_error, **_kwargs) -> Any:
+        def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, _internal_error=internal_error, **_kwargs) -> Any:
             raise _internal_error
 
         monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -1029,7 +1027,7 @@ def test_invoke_missing_input_runner_errors_raise_sdk_missing_input(
     astrid = _import_public_module()
     import astrid.sdk.invocation as inv_mod
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs) -> Any:
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs) -> Any:
         from astrid.core.execution.executor.runner import ExecutorRunnerError
 
         raise ExecutorRunnerError("executor 'editorial.arrange' missing required input(s): brief")
@@ -1054,14 +1052,14 @@ def test_invoke_maps_executor_result_error_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
         raw_result = {
             "ok": False,
             "run_id": run_id,
-            "run_root": str(projects_root),
+            "run_root": str(tmp_path),
             "payload": {},
             "returncode": 1,
             "error": {
@@ -1298,14 +1296,14 @@ def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
+    def fake_kernel_invoke(capability, *, kind, project, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
         raw_result = {
             "ok": False,
             "run_id": run_id,
-            "run_root": str(projects_root),
+            "run_root": str(tmp_path),
             "payload": {},
             "errors": [{"kind": "runtime", "message": "runtime exploded"}],
             "returncode": 1,

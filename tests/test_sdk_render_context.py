@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import os
 import sys
 import urllib.request
@@ -249,15 +250,29 @@ def test_paths_allocated_inside_workspace_and_outside_rejected(tmp_path: Path) -
 def test_asset_descriptor_resolves_to_absolute_file_and_server_url(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "source.bin"
-    source.write_bytes(b"local asset bytes")
-    registry_path = _write_registry(
-        tmp_path / "hype.assets.json",
-        {"main": {"file": source.name, "type": "application/octet-stream"}},
+    payload = b"local asset bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+    registry_path = tmp_path / "hype.assets.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "main": {
+                        "object_id": "object-main",
+                        "digest": digest,
+                        "type": "application/octet-stream",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
     )
     workspace = tmp_path / "workspace"
 
-    with AssetMaterializer(registry_path) as materializer:
+    with AssetMaterializer(
+        registry_path,
+        materialized_objects={"object-main": payload},
+    ) as materializer:
         with InvocationAssetServer(materializer.staging_dir) as server:
             with RenderContext(
                 workspace,
@@ -266,13 +281,13 @@ def test_asset_descriptor_resolves_to_absolute_file_and_server_url(
             ) as ctx:
                 staged = ctx.asset_path("main")
                 assert staged.is_absolute()
-                assert staged != source
-                assert staged.read_bytes() == b"local asset bytes"
+                assert staged.parent == materializer.staging_dir
+                assert staged.read_bytes() == payload
 
                 url = ctx.asset_url("main")
                 assert url.startswith("http://127.0.0.1:")
                 with urllib.request.urlopen(url, timeout=5) as response:
-                    assert response.read() == b"local asset bytes"
+                    assert response.read() == payload
 
                 resolved = ctx.resolved_registry()
                 assert resolved["assets"]["main"]["file"] == url

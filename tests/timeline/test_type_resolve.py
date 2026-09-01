@@ -6,7 +6,7 @@ SC6 coverage:
 - 'cross-fade' → clip/visual  (registered transition, annotated)
 - 'nonexistent-clip' → None  (unregistered — opaque fallthrough)
 - 'media'      → None         (clip kind, not an element id)
-- theme-scoped lookup: theme parameter is forwarded to list_element_ids
+- theme metadata cannot alter executable element lookup
 """
 
 from __future__ import annotations
@@ -75,21 +75,21 @@ class ResolveClipToArtifactTypeTest(unittest.TestCase):
 
     # --- Theme parameter passthrough ---
 
-    def test_theme_parameter_forwarded_to_catalog(self) -> None:
-        """theme is forwarded to list_element_ids for each kind scanned."""
+    def test_theme_parameter_does_not_select_executable_code(self) -> None:
+        """theme is authoring metadata, not an executable registry selector."""
         observed_themes: list[str | None] = []
         orig = _catalog.list_element_ids
 
-        def tracking_list(kind, theme=None, **kwargs):
-            observed_themes.append(theme)
-            return orig(kind, theme=theme, **kwargs)
+        def tracking_list(kind, **kwargs):
+            observed_themes.append(kwargs.get("theme"))
+            return orig(kind, **kwargs)
 
         with patch.object(_catalog, "list_element_ids", side_effect=tracking_list):
             result = resolve_clip_to_artifact_type(
                 "fade-up", "test-theme-sentinel", self.registry, self.artifact_registry
             )
 
-        self.assertIn("test-theme-sentinel", observed_themes)
+        self.assertNotIn("test-theme-sentinel", observed_themes)
         # fade-up is in the rendering pack (always available), so still resolves
         self.assertEqual(result, "clip/visual")
 
