@@ -50,7 +50,7 @@ from astrid.core.repositories import (
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter, WriterShutdownError
-from astrid.packs import STANDARD_SCHEMA_PACKS, open_standard_writer
+from astrid.packs import compose_standard_pack_database, open_standard_writer
 from astrid.packs.references.repository import ReferenceRepository
 from astrid.packs.shots.repository import ShotRepository
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
@@ -299,8 +299,12 @@ def test_core_event_repository_source_never_imports_packs() -> None:
 def test_composed_database_is_exactly_the_frozen_catalog(tmp_path: Path) -> None:
     with compose_standard_application(projects_root=tmp_path) as app:
         expected = set(app.registry.tables.keys())
+        composition = compose_standard_pack_database()
         assert len(expected) == EXPECTED_TABLE_COUNT
-        assert set(STANDARD_SCHEMA_PACKS) == {"timeline", "shots", "references"}
+        assert set(app.registry.packs) == set(composition.registry.packs)
+        assert {
+            projection.pack_id for projection in composition.catalog.databases
+        } == {"timeline", "shots", "references", "runaway"}
         with app.writer.read_only_connection() as conn:
             names = {
                 row[0]

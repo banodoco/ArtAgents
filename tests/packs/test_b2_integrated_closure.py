@@ -1,10 +1,9 @@
 """Focused B2 closure checks for the canonical bundled-pack candidate.
 
-B2 keeps the legacy runtime authorities active.  These tests therefore build an
-explicit temporary catalog root from the 22 converted product directories,
-while omitting the retained legacy schema manifests and injecting a tiny kernel
-migration solely to satisfy the B1 catalog dependency contract.  No production
-loader or consumer is exercised here.
+These tests build an explicit temporary catalog root from the 22 converted
+product directories and inject a tiny kernel migration solely to satisfy the
+B1 catalog dependency contract. No production loader or consumer is exercised
+here.
 """
 
 from __future__ import annotations
@@ -93,9 +92,8 @@ def _explicit_catalog_root(tmp_path: Path) -> Path:
         shutil.copytree(
             PACKS_ROOT / pack_id,
             root / pack_id,
-            ignore=shutil.ignore_patterns("schema-pack.yaml", "__pycache__"),
+            ignore=shutil.ignore_patterns("__pycache__"),
         )
-
     # B3 owns projecting the irreducible kernel.  This fixture-only declaration
     # lets B2 exercise the complete explicit-root catalog without changing it.
     core = root / "core"
@@ -157,7 +155,7 @@ def test_all_retained_manifests_and_skills_are_strict_v2(tmp_path: Path) -> None
         shutil.copytree(
             manifest_path.parent,
             isolated,
-            ignore=shutil.ignore_patterns("schema-pack.yaml", "__pycache__"),
+            ignore=shutil.ignore_patterns("__pycache__"),
         )
         entry = validate_canonical_pack(isolated)
         assert entry.id == manifest_path.parent.name
@@ -272,7 +270,8 @@ def test_database_declarations_and_defaults_are_preserved(tmp_path: Path) -> Non
     assert entries["references"].database.repositories == ("ReferenceRepository",)
     assert entries["runaway"].database.command_kinds == ("runaway.create",)
 
-def test_v2_database_projection_matches_retained_schema_manifests(tmp_path: Path) -> None:
+def test_v2_database_projection_matches_canonical_manifests(tmp_path: Path) -> None:
+    """The database projection is a direct view of canonical ``pack.yaml``."""
     catalog = BundledCatalog.from_root(_explicit_catalog_root(tmp_path))
     entries = {entry.id: entry for entry in catalog.entries}
     tuple_fields = (
@@ -286,15 +285,25 @@ def test_v2_database_projection_matches_retained_schema_manifests(tmp_path: Path
     for pack_id in DATABASE_TABLES:
         database = entries[pack_id].database
         assert database is not None
-        legacy = yaml.safe_load(
-            (PACKS_ROOT / pack_id / "schema-pack.yaml").read_text(encoding="utf-8")
+        manifest = yaml.safe_load(
+            (PACKS_ROOT / pack_id / "pack.yaml").read_text(encoding="utf-8")
         )
+        declared = manifest["database"]
         for field in tuple_fields:
-            assert tuple(getattr(database, field)) == tuple(sorted(legacy[field]))
-        assert dict(database.cli_mounts) == legacy["cli_mounts"]
-        assert tuple(database.migrations[0].tables) == tuple(sorted(legacy["migrations"][0]["tables"]))
-        assert database.migrations[0].version == legacy["migrations"][0]["version"]
-        assert database.migrations[0].name == legacy["migrations"][0]["name"]
-        assert database.migrations[0].path == legacy["migrations"][0]["path"]
-        assert database.depends_on[0].pack == legacy["depends_on"][0].split(" ", 1)[0]
-        assert database.depends_on[0].min_migration == int(legacy["depends_on"][0].split(">=", 1)[1])
+            assert tuple(sorted(getattr(database, field))) == tuple(
+                sorted(declared[field])
+            )
+        assert dict(database.cli_mounts) == declared["cli_mounts"]
+        migration = database.migrations[0]
+        declared_migration = declared["migrations"][0]
+        assert tuple(sorted(migration.tables)) == tuple(
+            sorted(declared_migration["tables"])
+        )
+        assert migration.version == declared_migration["version"]
+        assert migration.name == declared_migration["name"]
+        assert migration.path == declared_migration["path"]
+        assert database.depends_on[0].pack == declared["depends_on"][0]["pack"]
+        assert (
+            database.depends_on[0].min_migration
+            == declared["depends_on"][0]["min_migration"]
+        )
