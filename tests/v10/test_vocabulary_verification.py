@@ -39,6 +39,7 @@ from astrid.packs.references.repository import (
     REFERENCE_KINDS,
     REFERENCE_LINK_KINDS,
 )
+from astrid.packs.shots.text_bindings import TEXT_BINDING_KINDS
 
 _PACKAGE_ROOT = Path(astrid.__file__).resolve().parent
 
@@ -47,6 +48,9 @@ _REFERENCES_MIGRATION = (
 )
 _CORE_MIGRATION = (
     _PACKAGE_ROOT / "core" / "migrations" / "sql" / "core" / "0001_initial.sql"
+)
+_SHOTS_TEXT_MIGRATION = (
+    _PACKAGE_ROOT / "packs" / "shots" / "migrations" / "0002_text_bindings.sql"
 )
 
 # The five frozen vocabularies under test, in the order the sense check
@@ -129,6 +133,13 @@ def test_media_relation_kinds_match_ddl_check() -> None:
     assert ddl is not None, "media_relations.kind has no IN (...) CHECK constraint"
     assert MEDIA_RELATION_KINDS == ddl
     assert MEDIA_RELATION_KINDS  # non-empty
+
+
+def test_shot_text_binding_kinds_match_ddl_check() -> None:
+    """The Shots text-binding kind vocabulary matches its migration."""
+    sql_text = _SHOTS_TEXT_MIGRATION.read_text(encoding="utf-8")
+    ddl = _ddl_check_in_list(sql_text, "shot_text_bindings", "kind")
+    assert ddl == TEXT_BINDING_KINDS
 
 
 def test_evidence_kinds_match_closed_vocabulary_and_ddl_has_no_check() -> None:

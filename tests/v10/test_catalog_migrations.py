@@ -379,7 +379,7 @@ def test_standard_database_contains_14_plus_1_plus_2_plus_3_tables(
     conn, _ = standard_database
     # Counts are derived from the composed registry, not from a fixed "20".
     expected = len(standard_registry.tables)
-    assert expected == len(CORE_TABLES) + 1 + 2 + 3
+    assert expected == len(CORE_TABLES) + 1 + 3 + 3
     assert _table_names(conn) == set(standard_registry.tables)
     assert len(_table_names(conn)) == expected
 
@@ -393,11 +393,42 @@ def test_standard_ownership_matches_the_registry(
     assert registry.tables["timelines"] == "timeline"
     assert registry.tables["shots"] == "shots"
     assert registry.tables["shot_items"] == "shots"
+    assert registry.tables["shot_text_bindings"] == "shots"
     assert registry.tables["project_references"] == "references"
     assert registry.tables["media_references"] == "references"
     assert registry.tables["reference_links"] == "references"
     for table in _table_names(conn):
         assert registry.tables[table], f"table {table!r} has no owning pack"
+
+
+def test_shot_text_binding_ddl_is_exact_and_shot_owned(standard_database, standard_registry) -> None:
+    conn, _ = standard_database
+    assert standard_registry.tables["shot_text_bindings"] == "shots"
+    assert _columns(conn, "shot_text_bindings") == [
+        "id", "project_id", "shot_id", "kind", "slot", "media_id",
+        "event_stream_id", "created_at", "updated_at",
+    ]
+    sql = _table_sql(conn, "shot_text_bindings")
+    assert "kind IN ('prompt', 'voiceover_script', 'transcript')" in sql
+    assert "kind = 'prompt'" in sql
+    assert "length(slot) BETWEEN 1 AND 64" in sql
+    assert "timeline_id" not in sql
+    assert "content_hash" not in sql
+    assert "revision" not in sql
+    assert set(_named_indexes(conn)) >= {
+        "shot_text_binding_singleton",
+        "shot_text_binding_slot",
+        "shot_text_binding_lookup",
+    }
+    assert _index_columns(conn, "shot_text_binding_singleton") == [
+        "project_id", "shot_id", "kind",
+    ]
+    assert _index_columns(conn, "shot_text_binding_slot") == [
+        "project_id", "shot_id", "kind", "slot",
+    ]
+    assert _index_columns(conn, "shot_text_binding_lookup") == [
+        "project_id", "shot_id", "kind", "slot",
+    ]
 
 
 def test_timelines_table_has_no_convenience_columns(standard_database) -> None:
@@ -526,12 +557,13 @@ def test_pack_indexes_match_their_declarations(standard_database) -> None:
 
 def test_pack_tables_never_gain_kernel_or_foreign_tables(standard_database) -> None:
     conn, _ = standard_database
-    # The three packs add exactly their six owned tables and nothing else.
+    # The three packs add exactly their seven owned tables and nothing else.
     pack_tables = _table_names(conn) - set(CORE_TABLES)
     assert pack_tables == {
         "timelines",
         "shots",
         "shot_items",
+        "shot_text_bindings",
         "project_references",
         "media_references",
         "reference_links",

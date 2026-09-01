@@ -64,9 +64,9 @@ from astrid.sdk.shots import ShotsService
 from astrid.sdk.tasks import TasksService
 from astrid.sdk.timelines import TimelinesService
 
-EXPECTED_TABLE_COUNT = 20
-"""The frozen v10 catalog: 14 kernel tables + 6 pack tables (timeline 1,
-shots 2, references 3)."""
+EXPECTED_TABLE_COUNT = 21
+"""The frozen v10 catalog: 14 kernel tables + 7 pack tables (timeline 1,
+shots 3, references 3)."""
 
 
 # ---------------------------------------------------------------------------

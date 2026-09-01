@@ -218,6 +218,13 @@ def test_reference_and_shot_commands_are_executable_through_pack_factories(
         Path("astrid") / "packs" / "shots" / "schema-pack.yaml"
     )
     assert "ShotRepository" in shots_manifest.repositories
+    assert "ShotTextBindingRepository" in shots_manifest.repositories
+    assert "shot.text_binding" in shots_manifest.stream_types
+    assert "shot.text_binding.created" in shots_manifest.event_kinds
+    assert "shot.text_binding.rebound" in shots_manifest.event_kinds
+    assert "shot.text_binding.set" in shots_manifest.command_kinds
+    assert "shot.text_binding.rebind" in shots_manifest.command_kinds
+    assert "shot.text_binding.apply" in shots_manifest.command_kinds
     for kind in (
         "shot.create",
         "shot.add_item",

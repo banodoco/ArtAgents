@@ -31,6 +31,7 @@ repositories.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
@@ -42,6 +43,10 @@ from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
     SHOT_CREATE_COMMAND_KIND,
     ShotRepository,
+)
+from astrid.packs.shots.text_bindings import (
+    ShotTextBindingRepository,
+    freeze_text_bytes,
 )
 from astrid.sdk.contracts import (
     DomainResult,
@@ -71,6 +76,7 @@ class ShotsService:
         shots: ShotRepository,
         receipts: ReceiptService,
         media: MediaRepository | None = None,
+        text_bindings: ShotTextBindingRepository | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
@@ -80,6 +86,7 @@ class ShotsService:
         # standard application wires this so ``show`` can turn opaque media
         # ids into useful paths without a second public SDK command.
         self._media = media
+        self._text_bindings = text_bindings
 
     # -- create ------------------------------------------------------------
 
@@ -353,7 +360,158 @@ class ShotsService:
                 }
         return DomainResult.success(data)
 
+    # -- text bindings -----------------------------------------------------
+
+    def list_text_bindings(
+        self,
+        project: str,
+        *,
+        binding_ids: Sequence[str] | None = None,
+        shot_ref: str | None = None,
+        kind: str | None = None,
+        slot: str | None = None,
+        all_project: bool = False,
+    ) -> DomainResult[list[dict[str, Any]]]:
+        """List verified shot-owned text bindings through the shared repo."""
+        try:
+            project_id = self._projects.resolve(self._writer, project)
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            if not isinstance(all_project, bool):
+                raise ServiceValidationError("all_project must be a boolean")
+            if binding_ids is not None:
+                ids = self._validate_binding_ids(binding_ids)
+                if shot_ref is not None or kind is not None or slot is not None or all_project:
+                    raise ServiceValidationError(
+                        "exact binding selection cannot be combined with friendly filters"
+                    )
+                rows = [
+                    self._text_bindings.show(
+                        self._writer, project_id=project_id, binding_id=binding_id
+                    )
+                    for binding_id in ids
+                ]
+            else:
+                if shot_ref is None and not all_project:
+                    raise ServiceValidationError(
+                        "text binding list requires binding_ids, shot_ref, or all_project=True"
+                    )
+                if shot_ref is not None and all_project:
+                    raise ServiceValidationError(
+                        "shot and all_project selections are mutually exclusive"
+                    )
+                rows = self._text_bindings.list(
+                    self._writer,
+                    project_id=project_id,
+                    shot_ref=shot_ref,
+                    kind=kind,
+                    slot=slot,
+                )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+        return DomainResult.success([row.to_dict() for row in rows])
+
+    def set_text_binding(
+        self,
+        project: str,
+        *,
+        text: bytes,
+        expected_head: int,
+        binding_id: str | None = None,
+        shot_ref: str | None = None,
+        kind: str | None = None,
+        slot: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Set complete text, recording one receipt for changed work."""
+        key = idempotency_key if isinstance(idempotency_key, str) else ""
+        try:
+            key = self._resolve_key(idempotency_key)
+            frozen = freeze_text_bytes(text)
+            project_id = self._projects.resolve(self._writer, project)
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            mutation = UnitOfWork(self._writer).run(
+                lambda uow: self._text_bindings.set(
+                    uow,
+                    project_id=project_id,
+                    text=frozen.value,
+                    expected_head=expected_head,
+                    idempotency_key=key,
+                    binding_id=binding_id,
+                    shot_ref=shot_ref,
+                    kind=kind,
+                    slot=slot,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            mutation.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
+    def rebind_text_binding(
+        self,
+        project: str,
+        *,
+        media_id: str,
+        expected_head: int,
+        binding_id: str | None = None,
+        shot_ref: str | None = None,
+        kind: str | None = None,
+        slot: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Rebind to verified existing text media through one UoW."""
+        key = idempotency_key if isinstance(idempotency_key, str) else ""
+        try:
+            key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project)
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            mutation = UnitOfWork(self._writer).run(
+                lambda uow: self._text_bindings.rebind(
+                    uow,
+                    project_id=project_id,
+                    media_id=media_id,
+                    expected_head=expected_head,
+                    idempotency_key=key,
+                    binding_id=binding_id,
+                    shot_ref=shot_ref,
+                    kind=kind,
+                    slot=slot,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            mutation.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
     # -- private helpers ---------------------------------------------------
+
+    @staticmethod
+    def _validate_binding_ids(binding_ids: Sequence[str]) -> tuple[str, ...]:
+        if isinstance(binding_ids, (str, bytes)) or not isinstance(binding_ids, Sequence):
+            raise ServiceValidationError("binding_ids must be a non-empty sequence")
+        ids = tuple(binding_ids)
+        if not ids or any(not isinstance(value, str) or not value for value in ids):
+            raise ServiceValidationError(
+                "binding_ids must be a non-empty sequence of non-empty strings"
+            )
+        if len(set(ids)) != len(ids):
+            raise ServiceValidationError("binding_ids must not contain duplicates")
+        return ids
 
     @staticmethod
     def _resolve_key(idempotency_key: str | None) -> str:

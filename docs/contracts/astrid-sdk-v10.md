@@ -166,6 +166,16 @@ two independent commands.
 - Callers never supply raw identity for derived objects; address resolution is
   repository-driven (UUID/ULID/slug within the project).
 
+Shot text bindings are the one narrow key-independent identity exception. A
+binding id is UUIDv5 over the canonical JSON tuple
+``(project_id, shot_id, kind, slot)`` plus the identity schema name; the
+canonical ``slot:null`` value is distinct from a slotted prompt. Its event
+stream id is ``<binding_id>:shot.text_binding``. Different idempotency keys
+therefore address the same binding, while a key controls replay only after a
+changed command has recorded a receipt. A valid no-op records no receipt and
+does not consume its key. The general :func:`derive_stable_id` rule remains
+unchanged for every other aggregate.
+
 ## 5. Media relation vocabulary and repository rules
 
 ### 5.1 Frozen kinds (verbatim)

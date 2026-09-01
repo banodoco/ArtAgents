@@ -4,7 +4,8 @@
 # exactly the 11 snake_case top-level fields of the frozen schema-pack
 # contract and is validated by astrid.core.schema_packs.manifest.
 #
-# The shots pack owns exactly two tables (shots, shot_items) and declares the
+# The shots pack owns exactly three tables (shots, shot_items,
+# shot_text_bindings) and declares the
 # m3 namespaced shot vocabulary: the pack-owned aggregate stream type
 # ``shot.shot`` (one stream per shot, registered so events can identify shot
 # subjects without adding pack vocabulary to kernel DDL), the receipt-backed
@@ -14,7 +15,7 @@
 # (astrid.core.events.registry.STREAM_AGGREGATE_RULES) owns the shot
 # aggregate semantics.
 id: shots
-version: 1
+version: 2
 depends_on:
   - core >= 1
 migrations:
@@ -24,20 +25,32 @@ migrations:
     tables:
       - shots
       - shot_items
+  - version: 2
+    name: text_bindings
+    path: migrations/0002_text_bindings.sql
+    tables:
+      - shot_text_bindings
 stream_types:
   - shot.shot
+  - shot.text_binding
 event_kinds:
   - shot.created
   - shot.item_added
   - shot.item_removed
   - shot.reordered
+  - shot.text_binding.created
+  - shot.text_binding.rebound
 command_kinds:
   - shot.create
   - shot.add_item
   - shot.remove_item
   - shot.reorder
+  - shot.text_binding.set
+  - shot.text_binding.rebind
+  - shot.text_binding.apply
 repositories:
   - ShotRepository
+  - ShotTextBindingRepository
 conformance:
   - replay
   - mismatch_before_mutation
@@ -46,6 +59,8 @@ conformance:
   - writer_ownership
   - crash_atomicity
   - hash_chain
+  - text_binding
 cli_mounts:
   shots: timelines shots
+  text: timelines text
 bridge_mounts: []

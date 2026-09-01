@@ -72,6 +72,7 @@ from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import build_standard_registry, open_standard_writer
 from astrid.packs.references.repository import ReferenceRepository
 from astrid.packs.shots.repository import ShotRepository
+from astrid.packs.shots.text_bindings import ShotTextBindingRepository
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.contracts import DomainResult
 from astrid.sdk.exceptions import ServiceUnavailableError
@@ -182,6 +183,7 @@ class StandardApplication(CoreApplication):
 
     timelines: TimelineRepository
     shots: ShotRepository
+    text_bindings: ShotTextBindingRepository
     references: ReferenceRepository
     projects_service: ProjectsService
     timelines_service: TimelinesService
@@ -196,6 +198,11 @@ class StandardApplication(CoreApplication):
     # can prove all three surfaces reach the same service command over the
     # one writer queue with equivalent committed receipts.
     timeline_save_calls: list[TimelineSaveCall]
+
+    @property
+    def shot_text_bindings(self) -> ShotTextBindingRepository:
+        """Compatibility alias for the Shots-owned text-binding repository."""
+        return self.text_bindings
 
 
 def compose_core_application(
@@ -348,6 +355,12 @@ def compose_standard_application(
         media = MediaRepository(
             events=events, receipts=receipts, projects_root=root
         )
+        text_bindings = ShotTextBindingRepository(
+            events=events,
+            receipts=receipts,
+            media=media,
+            projects_root=root,
+        )
         runs = RunRepository(events=events, receipts=receipts)
         evidence = EvidenceRepository(events=events, receipts=receipts)
         event_log = EventRepository(writer)
@@ -391,7 +404,14 @@ def compose_standard_application(
         references_service = ReferencesService(
             writer, projects, references, receipts
         )
-        shots_service = ShotsService(writer, projects, shots, receipts, media)
+        shots_service = ShotsService(
+            writer,
+            projects,
+            shots,
+            receipts,
+            media,
+            text_bindings,
+        )
         return StandardApplication(
             projects_root=root,
             registry=registry,
@@ -401,6 +421,7 @@ def compose_standard_application(
             projects=projects,
             timelines=timelines,
             shots=shots,
+            text_bindings=text_bindings,
             references=references,
             tasks=tasks,
             media=media,

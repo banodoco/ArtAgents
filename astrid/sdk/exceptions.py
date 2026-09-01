@@ -544,6 +544,15 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         ShotReorderError,
         ShotValidationError,
     )
+    from astrid.packs.shots.text_bindings import (
+        ShotTextBindingAmbiguousError,
+        ShotTextBindingConflictError,
+        ShotTextBindingIntegrityError,
+        ShotTextBindingMediaCandidateError,
+        ShotTextBindingNotFoundError,
+        ShotTextBindingStaleError,
+        ShotTextBindingValidationError,
+    )
     from astrid.packs.timeline.repository import (
         TimelineAlreadyExistsError,
         TimelineAmbiguousError,
@@ -746,6 +755,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         ShotItemNotFoundError,
         ReferenceNotFoundError,
         EventStreamNotFoundError,
+        ShotTextBindingNotFoundError,
     )
     conflict = (
         ProjectAlreadyExistsError,
@@ -762,11 +772,13 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         EventIdempotencyError,
         StaleEpochError,
         StaleTailError,
+        ShotTextBindingConflictError,
     )
     stale_version = (
         TimelineVersionConflictError,
         RunStaleHeadError,
         EventHeadConflictError,
+        ShotTextBindingStaleError,
     )
     terminal_state = (
         RunTerminalError,
@@ -785,6 +797,9 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         ShotValidationError,
         ShotMediaError,
         ShotReorderError,
+        ShotTextBindingValidationError,
+        ShotTextBindingAmbiguousError,
+        ShotTextBindingMediaCandidateError,
         ReferenceValidationError,
         ReferenceAssociationError,
         ReferencePrimaryError,
@@ -804,7 +819,48 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         WriterShutdownError,
         TransactionControlError,
     )
-    integrity = (EventChainError, MediaVerificationError, MediaIntegrityError)
+    integrity = (
+        EventChainError,
+        MediaVerificationError,
+        MediaIntegrityError,
+        ShotTextBindingIntegrityError,
+    )
+
+    if isinstance(exc, ShotTextBindingMediaCandidateError):
+        if exc.detail == "content_hash_media_kind_collision":
+            return ServiceConflictError(
+                _SERVICE_ERROR_MESSAGES["conflict"],
+                details={"entity": "text_binding_media", "reason": exc.detail},
+            )
+        return ServiceValidationError(
+            _SERVICE_ERROR_MESSAGES["validation_error"],
+            details={"entity": "text_binding_media", "reason": exc.detail},
+        )
+    if isinstance(exc, ShotTextBindingIntegrityError):
+        return ServiceIntegrityError(
+            _SERVICE_ERROR_MESSAGES["integrity_error"],
+            details={"entity": "text_binding_media", "reason": exc.detail},
+        )
+    if isinstance(exc, ShotTextBindingConflictError):
+        return ServiceConflictError(
+            _SERVICE_ERROR_MESSAGES["conflict"],
+            details={"entity": "text_binding", "reason": exc.reason},
+        )
+    if isinstance(exc, ShotTextBindingStaleError):
+        return ServiceStaleVersionError(
+            _SERVICE_ERROR_MESSAGES["stale_version"],
+            details={
+                "entity": "text_binding",
+                "binding_id": exc.binding_id,
+                "expected_version": exc.expected_head,
+                "current_version": exc.actual_head,
+            },
+        )
+    if isinstance(exc, ShotTextBindingAmbiguousError):
+        return ServiceValidationError(
+            "text binding selector is ambiguous; retry with a candidate id",
+            details={"entity": "text_binding", "candidates": list(exc.candidates)},
+        )
 
     # Dependency admission and blocked-task retry need their typed context;
     # flattening either to the generic validation/terminal message forces an

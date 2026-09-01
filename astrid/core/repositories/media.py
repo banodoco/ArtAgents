@@ -657,6 +657,14 @@ def _query_one(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> Any:
     return cursor.fetchone()
 
 
+def _query(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> list[Any]:
+    """Run one read and return rows for a UoW/connection reader."""
+    query = getattr(reader, "query", None)
+    if query is not None:
+        return list(query(sql, parameters))
+    return list(reader.execute(sql, parameters).fetchall())
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
@@ -732,6 +740,59 @@ class MediaRepository:
         if row is None:
             raise MediaNotFoundError(media_id=f"{realm}:{locator}")
         return str(row["media_id"])
+
+    def read_project_media(
+        self,
+        reader: Any,
+        *,
+        project_id: str,
+        media_id: str | None = None,
+        content_hash: str | None = None,
+    ) -> MediaReadModel | None:
+        """Read one complete project-scoped media model through *reader*.
+
+        This is the transaction-aware read seam for pack-owned workflows
+        that need to verify media while holding the writer's
+        ``BEGIN IMMEDIATE`` transaction.  It deliberately returns ``None``
+        for an absent or foreign selector, includes every location in the
+        canonical order, and never loads relations.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        has_id = media_id is not None
+        has_hash = content_hash is not None
+        if has_id == has_hash:
+            raise MediaValidationError(
+                "read_project_media requires exactly one of media_id or "
+                "content_hash"
+            )
+        if has_id:
+            media_id = _require_non_empty_string("media_id", media_id)
+            row = _query_one(
+                reader,
+                "SELECT * FROM media WHERE id = ? AND project_id = ?",
+                (media_id, project_id),
+            )
+        else:
+            content_hash = validate_digest(content_hash)
+            row = _query_one(
+                reader,
+                "SELECT * FROM media WHERE content_hash = ? AND project_id = ? "
+                "ORDER BY id ASC LIMIT 1",
+                (content_hash, project_id),
+            )
+        if row is None:
+            return None
+        location_rows = _query(
+            reader,
+            "SELECT id, media_id, realm, locator, verified_at, created_at "
+            "FROM media_locations WHERE media_id = ? "
+            "ORDER BY created_at ASC, id ASC",
+            (row["id"],),
+        )
+        return self._row_to_read_model(
+            row,
+            [dict(location) for location in location_rows],
+        )
 
     # -- prepared import ---------------------------------------------------
 

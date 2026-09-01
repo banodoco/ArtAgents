@@ -186,6 +186,22 @@ def test_shot_command_specs_register_exactly_the_four_commands(
         assert command_kind not in standard_command_specs(conformance_context)
 
 
+def test_text_binding_vocabulary_is_declared_but_not_a_legacy_shot_spec(
+    conformance_context,
+) -> None:
+    """B1 declares text commands without widening the legacy factory yet."""
+    from astrid.core.schema_packs.manifest import load_schema_pack_manifest
+
+    manifest = load_schema_pack_manifest(
+        Path("astrid") / "packs" / "shots" / "schema-pack.yaml"
+    )
+    assert "shot.text_binding" in manifest.stream_types
+    assert "shot.text_binding.set" in manifest.command_kinds
+    assert set(shot_command_specs(conformance_context)) == {
+        "shot.create", "shot.add_item", "shot.remove_item", "shot.reorder"
+    }
+
+
 def test_every_shot_command_conforms_on_every_dimension(tmp_path: Path) -> None:
     """All four shot commands pass all seven kit dimensions."""
     specs = shot_command_specs(

@@ -299,6 +299,11 @@ STREAM_AGGREGATE_RULES: Mapping[str, StreamAggregateRule] = MappingProxyType(
             declaring_pack="shots",
             subject_type="shot",
         ),
+        "shot.text_binding": StreamAggregateRule(
+            stream_type="shot.text_binding",
+            declaring_pack="shots",
+            subject_type="shot_text_binding",
+        ),
     }
 )
 """Aggregate agreement rules for every stream type the composed registry

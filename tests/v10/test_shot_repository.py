@@ -1835,8 +1835,8 @@ def test_shot_repository_has_no_timeline_dependency(env) -> None:
     source = Path(repo_module.__file__).read_text(encoding="utf-8")
     assert "astrid.packs.timeline" not in source
 
-    # The frozen standard catalog is still exactly 20 tables (14 kernel +
-    # timelines + shots + shot_items + the three reference tables), with no
+    # The frozen standard catalog is exactly 21 tables (14 kernel + timelines
+    # + shots + shot_items + bindings + the three reference tables), with no
     # plan/step tables.
     present = env.writer.submit(
         lambda session: {
@@ -1846,7 +1846,7 @@ def test_shot_repository_has_no_timeline_dependency(env) -> None:
             )
         }
     )
-    assert len(present) == 20
+    assert len(present) == 21
     for table in ("shots", "shot_items", "timelines"):
         assert table in present
     for forbidden in ("plans", "steps", "plan_steps"):

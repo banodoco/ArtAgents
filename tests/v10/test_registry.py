@@ -70,8 +70,8 @@ from astrid.packs import (
 )
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
-# 14 kernel + timelines + shots/shot_items + the 3 reference tables.
-STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3
+# 14 kernel + timelines + shots/shot_items/bindings + the 3 reference tables.
+STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 3 + 3
 
 
 def _empty_manifest(id_: str = "probe") -> dict:
@@ -216,15 +216,16 @@ def test_pack_and_kernel_standard_registry_builders_have_exact_parity() -> None:
     assert _migration_contract(pack_registry) == _migration_contract(kernel_registry)
 
 
-def test_standard_composition_derives_20_table_catalog() -> None:
+def test_standard_composition_derives_21_table_catalog() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 20
+    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 21
     assert frozen.tables["timelines"] == "timeline"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
+    assert frozen.tables["shot_text_bindings"] == "shots"
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
@@ -245,12 +246,20 @@ def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     assert frozen.command_kinds["timeline.replace_config"] == "timeline"
     assert frozen.event_kinds["shot.item_added"] == "shots"
     assert frozen.command_kinds["shot.add_item"] == "shots"
+    assert frozen.stream_types["shot.text_binding"] == "shots"
+    assert frozen.event_kinds["shot.text_binding.created"] == "shots"
+    assert frozen.event_kinds["shot.text_binding.rebound"] == "shots"
+    assert frozen.command_kinds["shot.text_binding.set"] == "shots"
+    assert frozen.command_kinds["shot.text_binding.rebind"] == "shots"
+    assert frozen.command_kinds["shot.text_binding.apply"] == "shots"
+    assert frozen.repositories["ShotTextBindingRepository"] == "shots"
     assert frozen.event_kinds["reference.primary_changed"] == "references"
     assert frozen.command_kinds["reference.set_primary"] == "references"
 
     assert frozen.repositories["TimelineRepository"] == "timeline"
     assert frozen.cli_mounts["timelines"] == ("timeline", "timelines")
     assert frozen.cli_mounts["shots"] == ("shots", "timelines shots")
+    assert frozen.cli_mounts["text"] == ("shots", "timelines text")
     assert frozen.cli_mounts["references"] == ("references", "media references")
     assert frozen.bridge_mounts["timelines"] == "timeline"
 
@@ -1201,18 +1210,19 @@ def test_m3_pack_vocabulary_is_namespaced_and_owned() -> None:
     assert set(all_kinds).isdisjoint(CORE_COMMAND_KINDS)
 
 
-def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
-    """Manifest ownership, not DDL: the m3 vocabulary adds no tables."""
+def test_standard_catalog_includes_the_shots_text_binding_table() -> None:
+    """The B1 projection adds exactly one Shots-owned table."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 3 + 3 == 21
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
+    assert frozen.tables["shot_text_bindings"] == "shots"
     assert frozen.tables["timelines"] == "timeline"
     for table in CORE_TABLES:
         assert frozen.tables[table] == CORE_PACK_ID
