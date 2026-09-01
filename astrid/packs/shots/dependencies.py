@@ -252,6 +252,31 @@ def analyze_invalidation(
         if _string(item.get("id") or item.get("item_id")) is not None
     }
     stale_ids: set[str] = set()
+    while True:
+        stale_count = len(stale_ids)
+        for item in items:
+            if _kind(item) not in _DETERMINISTIC_KINDS:
+                continue
+            mismatch = _mismatch(
+                _descriptor(item),
+                active_item_id=active_primary,
+                item_by_id=item_by_id,
+                stale_ids=stale_ids,
+                media_hashes=media_hashes,
+            )
+            if mismatch is None:
+                mismatch = _endpoint_mismatch(
+                    item,
+                    media_hashes=media_hashes,
+                    superseded_media_ids=superseded_media_ids,
+                    active_media_id=active_media_id,
+                )
+            if mismatch is not None:
+                item_id = _string(item.get("id") or item.get("item_id"))
+                if item_id is not None:
+                    stale_ids.add(item_id)
+        if len(stale_ids) == stale_count:
+            break
     report: dict[str, list[dict[str, Any]]] = {
         "stale": [],
         "blocked_on_generation": [],
@@ -300,10 +325,6 @@ def analyze_invalidation(
                 actual=actual,
             )
         )
-        if bucket == "stale":
-            item_id = _string(item.get("id") or item.get("item_id"))
-            if item_id is not None:
-                stale_ids.add(item_id)
     seen_relations: set[tuple[str, str, str, str]] = set()
     for relation in relation_records:
         if relation.get("kind") != "uses_as_input":

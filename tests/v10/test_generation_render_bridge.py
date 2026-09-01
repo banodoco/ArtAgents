@@ -66,6 +66,57 @@ def test_invalidation_classifies_derivative_and_generative_frozen_inputs() -> No
     assert report["current"] == []
 
 
+
+def test_invalidation_is_order_independent_for_plate_and_proxy() -> None:
+    items = [
+        {
+            "id": "proxy-02",
+            "media_id": "proxy-old",
+            "metadata": {
+                "kind": "proxy",
+                "source_item_id": "plate-02",
+                "source_media_id": "plate-old",
+                "source_content_sha256": "plate-hash",
+            },
+        },
+        {
+            "id": "plate-02",
+            "media_id": "plate-old",
+            "metadata": {
+                "kind": "plate",
+                "source_item_id": "old-primary",
+                "source_media_id": "media-old",
+                "source_content_sha256": "old-hash",
+            },
+        },
+        {
+            "id": "old-primary",
+            "media_id": "media-old",
+            "metadata": {"role": "primary_visual", "status": "superseded"},
+        },
+        {
+            "id": "new-primary",
+            "media_id": "media-new",
+            "metadata": {"role": "primary_visual", "status": "primary"},
+        },
+    ]
+    report = analyze_invalidation(
+        items,
+        [
+            {"id": "media-old", "content_hash": "old-hash"},
+            {"id": "media-new", "content_hash": "new-hash"},
+            {"id": "plate-old", "content_hash": "plate-hash"},
+        ],
+    )
+
+    assert [entry["item_id"] for entry in report["stale"]] == [
+        "plate-02",
+        "proxy-02",
+    ]
+    assert report["stale"][1]["field"] == "source_item_id"
+    assert report["stale"][1]["actual"] == "stale"
+    assert report["current"] == []
+
 def _valid_recipe() -> dict:
     return {
         "schema": "astrid.shot-generation-recipe/v1",
