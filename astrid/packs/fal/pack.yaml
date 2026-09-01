@@ -27,9 +27,3 @@ agent:
   normal_entrypoints: [fal.fal_foley, fal.h3_video]
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: external.fal_foley
-  canonical_id: fal.fal_foley
-  deprecated: true
-  deprecation_message: Moved to fal.fal_foley

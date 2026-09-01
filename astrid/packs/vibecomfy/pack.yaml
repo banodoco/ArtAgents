@@ -39,14 +39,3 @@ agent:
   - vibecomfy.validate
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: external.vibecomfy.run
-  canonical_id: vibecomfy.run
-  deprecated: true
-  deprecation_message: Moved to vibecomfy.run
-- kind: executor
-  alias: external.vibecomfy.validate
-  canonical_id: vibecomfy.validate
-  deprecated: true
-  deprecation_message: Moved to vibecomfy.validate

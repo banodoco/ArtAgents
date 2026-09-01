@@ -18,12 +18,11 @@ def test_shipped_ledger_reconciles_historical_capability_sets():
     assert not sources["coverage"]["executor_inventory"]["missing"]
 
 
-def test_ledger_preserves_aliases_models_backends_and_explicit_unmapped_labels():
+def test_ledger_has_only_canonical_ids_models_backends_and_explicit_unmapped_labels():
     ledger = load_capability_ledger(Path("config/astrid-beta-capabilities.json"))
     sources = ledger["sources"]
 
-    assert sources["aliases"]
-    assert {row["canonical_id"] for row in sources["aliases"]} >= {"rendering.render", "generation.generate_image"}
+    assert sources["aliases"] == []
     assert sources["models"]
     assert {"local", "cloud"} <= set(sources["generation_backends"])
     assert {row["id"] for row in sources["rendering_backends"]} >= {"rendering.ffmpeg", "rendering.remotion", "rendering.threejs"}
