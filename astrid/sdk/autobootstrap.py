@@ -116,6 +116,7 @@ def ensure_runtime() -> Mapping[str, Any]:
             f"neutral runtime bootstrap returned an unsafe endpoint; {RECONFIGURE_ACTION}"
         ) from exc
     credential_file = value.get("credential_file", "")
+    worker_handoff: dict[str, Any] = {}
     if credential_file:
         if not isinstance(credential_file, str):
             raise AutoBootstrapError(
@@ -133,7 +134,22 @@ def ensure_runtime() -> Mapping[str, Any]:
             raise AutoBootstrapError(
                 f"neutral runtime bootstrap returned a missing credential file; {RECONFIGURE_ACTION}"
             )
-    return {
+    if value.get("worker_credential_file"):
+        worker_file = value.get("worker_credential_file")
+        if not isinstance(worker_file, str):
+            raise AutoBootstrapError(f"neutral runtime bootstrap returned an invalid worker credential path; {RECONFIGURE_ACTION}")
+        try:
+            worker_path = _safe_local_path(worker_file, field="worker credential")
+        except Exception as exc:
+            raise AutoBootstrapError(f"neutral runtime bootstrap returned an unsafe worker credential path; {RECONFIGURE_ACTION}") from exc
+        if not worker_path.is_file():
+            raise AutoBootstrapError(f"neutral runtime bootstrap returned a missing worker credential file; {RECONFIGURE_ACTION}")
+        worker_handoff = {
+            "worker_credential_file": str(worker_path),
+            "worker_actor": value.get("worker_actor"),
+            "worker_scopes": value.get("worker_scopes", ()),
+        }
+    result = {
         "status": str(value["status"]),
         "realm_id": value["realm_id"].strip(),
         "endpoint": value["endpoint"].strip(),
@@ -143,6 +159,15 @@ def ensure_runtime() -> Mapping[str, Any]:
         "credential_file": credential_file,
         "elapsed_ms": round((time.monotonic() - started) * 1000, 1),
     }
+    result.update(worker_handoff)
+    if worker_handoff:
+        from astrid.sdk.host_bootstrap import PackHostBootstrapError, ensure_pack_host
+
+        try:
+            result.update(ensure_pack_host(value, reconfigure_action=RECONFIGURE_ACTION))
+        except PackHostBootstrapError as exc:
+            raise AutoBootstrapError(str(exc)) from exc
+    return result
 
 
 __all__ = ["AutoBootstrapError", "ensure_runtime"]

@@ -613,14 +613,22 @@ class RuntimeProtocolClient:
     adapter only translates host lifecycle values to its typed operations.
 
     Worker credentials are a distinct runtime boundary from the user-facing
-    ``AstridClient`` handshake.  The runtime authorizes each registration,
-    claim, and attempt operation with ``worker:register`` or
-    ``worker:execute`` and binds the credential actor to ``executor_id``.
-    This adapter therefore never fabricates a user handshake; the runtime's
+    ``AstridClient`` handshake.  The runtime authorizes registration with
+    ``worker:register``, claim/attempt operations with ``worker:execute``,
+    task reads/writes with the task scopes, and CAS reads/writes with the
+    object scopes.  The credential actor is bound to ``executor_id``. This
+    adapter therefore never fabricates a user handshake; the runtime's
     worker-token contract is the sole identity check for this process.
     """
 
-    WORKER_SCOPES = ("worker:register", "worker:execute")
+    WORKER_SCOPES = (
+        "worker:register",
+        "worker:execute",
+        "tasks:read",
+        "tasks:write",
+        "objects:read",
+        "objects:write",
+    )
 
     def __init__(self, endpoint: str, credential: str, *, timeout: float = 30.0):
         try:
@@ -2269,9 +2277,11 @@ def _cli() -> int:
     parser.add_argument("--pack-root", action="append", required=True, help="pack/executor root to discover")
     parser.add_argument("--runtime-endpoint")
     parser.add_argument("--credential")
+    parser.add_argument("--credential-file", help="owner-only file containing the worker bearer credential")
     parser.add_argument("--executor-id", default="astrid-pack-host")
     parser.add_argument("--max-concurrency", type=int, default=1)
     parser.add_argument("--attempt-root")
+    parser.add_argument("--capability-matrix")
     parser.add_argument("--register", action="store_true")
     parser.add_argument("--run-task")
     parser.add_argument("--lease-token")
@@ -2279,21 +2289,56 @@ def _cli() -> int:
     parser.add_argument("--once", action="store_true", help="claim at most one task and exit")
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--max-tasks", type=int)
+    parser.add_argument("--ready-file", help="write host registration/readiness metadata before entering the claim loop")
     args = parser.parse_args()
-    client = RuntimeProtocolClient(args.runtime_endpoint, args.credential) if args.runtime_endpoint else None
-    host = GenericPackHost(pack_roots=args.pack_root, client=client, executor_id=args.executor_id, max_concurrency=args.max_concurrency, attempt_root=args.attempt_root)
+    if args.credential and args.credential_file:
+        parser.error("--credential and --credential-file are mutually exclusive")
+    credential = args.credential
+    if args.credential_file:
+        credential_path = Path(args.credential_file).expanduser()
+        try:
+            if (not credential_path.is_absolute() or credential_path.is_symlink()
+                    or not credential_path.is_file()
+                    or credential_path.stat().st_mode & 0o777 != 0o600):
+                raise OSError("credential file must be an absolute owner-only regular file")
+            credential = credential_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            parser.error(str(exc))
+        if not credential:
+            parser.error("credential file is empty")
+    client = RuntimeProtocolClient(args.runtime_endpoint, credential) if args.runtime_endpoint else None
+    host = GenericPackHost(pack_roots=args.pack_root, client=client, executor_id=args.executor_id, max_concurrency=args.max_concurrency, attempt_root=args.attempt_root, capability_matrix=args.capability_matrix)
     host.discover()
     host.preflight()
+    registration = None
     if args.register or not args.run_task:
-        print(json.dumps(host.register() if args.register else {"capabilities": [record.manifest() for record in host.capabilities.values()]}, indent=2, sort_keys=True))
+        registration = host.register() if args.register else {"capabilities": [record.manifest() for record in host.capabilities.values()]}
+        print(json.dumps(registration, indent=2, sort_keys=True, default=_json_safe))
+    if args.ready_file:
+        ready_path = Path(args.ready_file).expanduser()
+        if not ready_path.is_absolute() or ready_path.is_symlink():
+            parser.error("--ready-file must be an absolute non-symlink path")
+        ready_path.parent.mkdir(parents=True, exist_ok=True)
+        ready_payload = {
+            "status": "ready",
+            "pid": os.getpid(),
+            "executor_id": host.executor_id,
+            "capability_count": len(host.capabilities),
+            "ready_capabilities": sorted(record.id for record in host.capabilities.values() if record.ready),
+            "unready_capabilities": sorted(record.id for record in host.capabilities.values() if not record.ready),
+            "registration": registration,
+        }
+        temporary = ready_path.with_name(f".{ready_path.name}.{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(ready_payload, sort_keys=True, default=_json_safe), encoding="utf-8")
+        temporary.replace(ready_path)
     if args.run_task:
         if client is None or not args.lease_token:
-            parser.error("--run-task requires --runtime-endpoint, --credential, and --lease-token")
+            parser.error("--run-task requires --runtime-endpoint, --credential/--credential-file, and --lease-token")
         task = client.task(args.run_task)
         print(json.dumps(host.run_task(task, lease_token=args.lease_token, keep_attempt=args.keep_attempt), indent=2, sort_keys=True))
     if args.command == "run":
         if client is None:
-            parser.error("run requires --runtime-endpoint and --credential")
+            parser.error("run requires --runtime-endpoint and --credential/--credential-file")
         if not args.register:
             host.register()
         print(json.dumps(host.run(once=args.once, poll_seconds=args.poll_seconds, max_tasks=args.max_tasks), indent=2, sort_keys=True, default=str))
