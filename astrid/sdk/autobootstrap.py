@@ -154,6 +154,8 @@ def ensure_runtime() -> Mapping[str, Any]:
         "realm_id": value["realm_id"].strip(),
         "endpoint": value["endpoint"].strip(),
         "actor_id": value["actor_id"].strip(),
+        "runtime_instance_id": value.get("runtime_instance_id"),
+        "coordinator_epoch": value.get("coordinator_epoch"),
         # The launcher returns only a path to the owner-only credential file;
         # never put the credential value in the subprocess result or logs.
         "credential_file": credential_file,

@@ -31,6 +31,7 @@ from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH
 from astrid.core.execution.capability_ledger import load_capability_ledger
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.execution.process_group import (
+    _process_snapshot,
     group_exists as _owned_group_exists,
     popen_owned_group,
     release_group as _release_owned_group,
@@ -429,7 +430,15 @@ def source_checkout_digest(checkout: str | Path) -> str:
     tree (using the same file hashing rules as capability admission).
     """
     pack_root = Path(checkout).expanduser().resolve() / "astrid" / "packs"
+    if any(path.is_symlink() for path in pack_root.rglob("*")):
+        raise ValueError("source checkout pack root contains a symlink")
     return _source_digest(pack_root)
+
+
+def process_birth_identity(pid: int | None = None) -> str:
+    """Return the OS birth token used to distinguish a reused PID."""
+    info = _process_snapshot().get(int(pid if pid is not None else os.getpid()))
+    return str(info.birth) if info is not None else ""
 
 
 def _admitted_source_roots(root: Path, definition: Any) -> tuple[Path, ...]:
@@ -2402,6 +2411,7 @@ def _cli() -> int:
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--ready-file", help="write host registration/readiness metadata before entering the claim loop")
     parser.add_argument("--source-checkout", help="absolute source checkout bound to this host")
+    parser.add_argument("--support-root", help="absolute runtime support directory bound to this host")
     parser.add_argument("--runtime-instance-id", help="runtime instance identity bound to this host")
     args = parser.parse_args()
     credential = None
@@ -2428,6 +2438,12 @@ def _cli() -> int:
             parser.error("--source-checkout must be an absolute non-symlink directory")
     else:
         source_checkout = None
+    if args.support_root:
+        support_root = Path(args.support_root).expanduser()
+        if not support_root.is_absolute() or support_root.is_symlink() or not support_root.is_dir():
+            parser.error("--support-root must be an absolute non-symlink directory")
+    else:
+        support_root = None
 
     def handle_shutdown(_signum, _frame):
         host.shutdown()
@@ -2446,6 +2462,8 @@ def _cli() -> int:
         ready_payload = {
             "status": "ready",
             "pid": os.getpid(),
+            "process_birth_id": process_birth_identity(),
+            "endpoint": str(args.runtime_endpoint).rstrip("/") if args.runtime_endpoint else None,
             "executor_id": host.executor_id,
             "capability_count": len(host.capabilities),
             "ready_capabilities": sorted(record.id for record in host.capabilities.values() if record.ready),
@@ -2453,6 +2471,7 @@ def _cli() -> int:
             "registration": registration,
             "ready_file": str(ready_path),
             "credential_file": str(credential_path) if credential_path else None,
+            "support_root": str(support_root) if support_root else None,
             "source_checkout": str(source_checkout) if source_checkout else None,
             "source_checkout_digest": source_checkout_digest(source_checkout) if source_checkout else None,
             "source_epoch": host.source_epoch,
