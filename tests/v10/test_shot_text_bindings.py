@@ -312,6 +312,106 @@ def test_malformed_bound_hash_is_typed_zero_write_and_no_temp(text_env, monkeypa
     assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
 
 
+def test_canonical_managed_symlink_is_typed_zero_write_and_no_temp(text_env, monkeypatch) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="symlink-create",
+    )
+    canonical = managed_media_path(text_env["root"], created.binding.content_hash)
+    target = text_env["root"] / "same-byte-target.txt"
+    target.write_bytes(b"stable")
+    canonical.unlink()
+    canonical.symlink_to(target)
+    before = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    temp_root = Path(tempfile.gettempdir())
+    temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+    materialize_calls = 0
+
+    def forbidden_materialization(*args, **kwargs):
+        nonlocal materialize_calls
+        materialize_calls += 1
+        raise AssertionError("symlinked current media must fail before materialization")
+
+    monkeypatch.setattr(text_env["bindings"], "materialize_absent_text", forbidden_materialization)
+    monkeypatch.setattr(
+        tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("symlinked current media must create no temp")
+        ),
+    )
+    with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"next", expected_head=1, idempotency_key="symlink-set",
+        )
+    after = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    assert exc_info.value.detail == "managed_file_symlink"
+    assert exc_info.value.media_id == created.binding.media_id
+    assert after == before
+    assert materialize_calls == 0
+    assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
+
+
+def test_stored_managed_locator_symlink_is_typed_zero_write_and_no_temp(
+    text_env, monkeypatch
+) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="locator-symlink-create",
+    )
+    canonical = managed_media_path(text_env["root"], created.binding.content_hash)
+    alias = text_env["root"] / "managed-locator-alias.txt"
+    alias.symlink_to(canonical)
+    text_env["writer"].submit(
+        lambda s: s.execute(
+            "UPDATE media_locations SET locator = ? WHERE media_id = ? AND realm = 'managed_local'",
+            (str(alias), created.binding.media_id),
+        )
+    )
+    before = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    temp_root = Path(tempfile.gettempdir())
+    temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+    materialize_calls = 0
+
+    def forbidden_materialization(*args, **kwargs):
+        nonlocal materialize_calls
+        materialize_calls += 1
+        raise AssertionError("symlinked stored locator must fail before materialization")
+
+    monkeypatch.setattr(text_env["bindings"], "materialize_absent_text", forbidden_materialization)
+    monkeypatch.setattr(
+        tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("symlinked stored locator must create no temp")
+        ),
+    )
+    with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"next", expected_head=1, idempotency_key="locator-symlink-set",
+        )
+    after = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    assert exc_info.value.detail == "managed_file_symlink"
+    assert exc_info.value.media_id == created.binding.media_id
+    assert after == before
+    assert materialize_calls == 0
+    assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
+
+
 def test_canonical_request_hash_vectors_include_binding_stream_and_desired_hash() -> None:
     set_facts = {
         "project_id": "project", "shot_id": "shot", "kind": "transcript",

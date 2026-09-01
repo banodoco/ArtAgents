@@ -740,6 +740,20 @@ class ShotTextBindingRepository:
             raise ShotTextBindingIntegrityError(
                 detail="managed_hash_mismatch", media_id=media.id
             ) from exc
+        # Inspect the canonical path before resolving it.  Resolving first
+        # would make a same-byte symlink indistinguishable from immutable
+        # managed media and would let the read happen through the link.
+        for candidate in (locator, expected):
+            try:
+                os.lstat(candidate)
+            except FileNotFoundError:
+                # Keep the existing locator/missing taxonomy below for absent
+                # paths; this early guard exists to reject symlink identities.
+                continue
+            except OSError as exc:
+                raise ShotTextBindingIntegrityError(detail="managed_file_missing", media_id=media.id) from exc
+            if os.path.islink(candidate):
+                raise ShotTextBindingIntegrityError(detail="managed_file_symlink", media_id=media.id)
         try:
             resolved_locator = locator.resolve(strict=False)
             resolved_expected = expected.resolve(strict=False)

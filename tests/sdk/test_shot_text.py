@@ -486,6 +486,118 @@ def test_malformed_bound_hash_is_public_integrity_zero_write_and_no_temp(
         assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
 
 
+def test_canonical_managed_symlink_is_public_integrity_zero_write_and_no_temp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"stable",
+            expected_head=0, idempotency_key="symlink-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        media_id = created.data["binding"]["media_id"]
+        from astrid.core.io.media_import import managed_media_path
+
+        canonical = managed_media_path(tmp_path, created.data["binding"]["content_hash"])
+        target = tmp_path / "same-byte-target.txt"
+        target.write_bytes(b"stable")
+        canonical.unlink()
+        canonical.symlink_to(target)
+        before = _sdk_persisted_binding_snapshot(app, project_id=project_id, binding_id=binding_id)
+        temp_root = Path(tempfile.gettempdir())
+        temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+        materialize_calls = 0
+
+        def forbidden_materialization(*args, **kwargs):
+            nonlocal materialize_calls
+            materialize_calls += 1
+            raise AssertionError("symlinked current media must fail before materialization")
+
+        monkeypatch.setattr(app.text_bindings, "materialize_absent_text", forbidden_materialization)
+        monkeypatch.setattr(
+            tempfile,
+            "NamedTemporaryFile",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("symlinked current media must create no temp")
+            ),
+        )
+        result = app.shots_service.set_text_binding(
+            project_id, binding_id=binding_id, text=b"next", expected_head=1,
+            idempotency_key="symlink-set",
+        )
+        after = _sdk_persisted_binding_snapshot(app, project_id=project_id, binding_id=binding_id)
+        assert result.ok is False
+        assert result.error.code == "integrity_error"
+        assert result.error.code != "internal_error"
+        assert result.error.details == {
+            "entity": "text_binding_media",
+            "reason": "managed_file_symlink",
+        }
+        assert result.receipt is None
+        assert after == before
+        assert materialize_calls == 0
+        assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
+        assert media_id == created.data["binding"]["media_id"]
+
+
+def test_stored_managed_locator_symlink_is_public_integrity_zero_write_and_no_temp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"stable",
+            expected_head=0, idempotency_key="locator-symlink-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        media_id = created.data["binding"]["media_id"]
+        from astrid.core.io.media_import import managed_media_path
+
+        canonical = managed_media_path(tmp_path, created.data["binding"]["content_hash"])
+        alias = tmp_path / "managed-locator-alias.txt"
+        alias.symlink_to(canonical)
+        app.writer.submit(
+            lambda s: s.execute(
+                "UPDATE media_locations SET locator = ? WHERE media_id = ? AND realm = 'managed_local'",
+                (str(alias), media_id),
+            )
+        )
+        before = _sdk_persisted_binding_snapshot(app, project_id=project_id, binding_id=binding_id)
+        temp_root = Path(tempfile.gettempdir())
+        temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+        materialize_calls = 0
+
+        def forbidden_materialization(*args, **kwargs):
+            nonlocal materialize_calls
+            materialize_calls += 1
+            raise AssertionError("symlinked stored locator must fail before materialization")
+
+        monkeypatch.setattr(app.text_bindings, "materialize_absent_text", forbidden_materialization)
+        monkeypatch.setattr(
+            tempfile,
+            "NamedTemporaryFile",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("symlinked stored locator must create no temp")
+            ),
+        )
+        result = app.shots_service.set_text_binding(
+            project_id, binding_id=binding_id, text=b"next", expected_head=1,
+            idempotency_key="locator-symlink-set",
+        )
+        after = _sdk_persisted_binding_snapshot(app, project_id=project_id, binding_id=binding_id)
+        assert result.ok is False
+        assert result.error.code == "integrity_error"
+        assert result.error.details == {
+            "entity": "text_binding_media",
+            "reason": "managed_file_symlink",
+        }
+        assert result.receipt is None
+        assert after == before
+        assert materialize_calls == 0
+        assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
+
+
 def test_sdk_freezes_once_and_passes_immutable_bytes_into_uow(tmp_path: Path, monkeypatch) -> None:
     with compose_standard_application(projects_root=tmp_path) as app:
         project_id, _shot_id = _seed(app)
