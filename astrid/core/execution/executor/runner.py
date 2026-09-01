@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -33,6 +34,7 @@ from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.foundation.hash import executor_definition_digest
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.media import require_runtime_materialized_file
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
@@ -42,7 +44,6 @@ from astrid.core.project.runtime import (
     _project_subprocess_env,
     reject_project_with_out,
 )
-from astrid.core.media import require_runtime_materialized_file
 from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
@@ -615,6 +616,13 @@ def _input_flag(name: str) -> str:
     return "--" + name.replace("_", "-")
 
 
+def _stringify_declared_input(name: str, value: Any) -> str:
+    """Preserve the generate-image recipe as JSON across the argv boundary."""
+    if name == "shot_generation_recipe" and isinstance(value, Mapping):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return _stringify_value(value)
+
+
 def _auto_forward_untemplated_inputs(
     executor: ExecutorDefinition,
     values: Mapping[str, Any],
@@ -656,7 +664,7 @@ def _auto_forward_untemplated_inputs(
             if not _has_value(item):
                 continue
             argv.append(_input_flag(port.name))
-            argv.append(_stringify_value(item))
+            argv.append(_stringify_declared_input(port.name, item))
     return tuple(argv)
 
 
@@ -1111,7 +1119,7 @@ def _expand_one_input_arg_mapping(
     for item in items:
         if mapping.flag:
             argv.append(mapping.flag)
-        argv.append(_stringify_value(item))
+        argv.append(_stringify_declared_input(mapping.input, item))
     return argv
 
 

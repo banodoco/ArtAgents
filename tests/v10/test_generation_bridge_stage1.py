@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import copy
-import importlib
 from pathlib import Path
 
 import pytest
 
+from astrid.core.execution.executor.registry import load_default_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, build_executor_command
 from astrid.packs.generation.executors.generate_image.run import build_parser
 from astrid.packs.generation.executors.generate_image.task_adapter import (
     GenerateImageAdapterError,
@@ -15,6 +15,8 @@ from astrid.packs.generation.executors.generate_image.task_adapter import (
     validate_shot_generation_recipe,
 )
 from astrid.packs.shots.dependencies import analyze_invalidation
+from astrid.sdk import get_capability
+from astrid.sdk.invocation import _manifest_preview_command
 
 
 def _recipe() -> dict:
@@ -121,6 +123,49 @@ def test_task_adapter_and_cli_preserve_recipe_without_mutation() -> None:
     assert parsed.shot_generation_recipe == {"schema": "bad"}
 
 
+def test_recipe_round_trips_through_normal_executor_argv() -> None:
+    recipe = _recipe()
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="generation.generate_image",
+            out="/tmp/stage",
+            inputs={
+                "model": "z-image",
+                "mode": "t2i",
+                "execution": "cloud",
+                "prompt": "a boat",
+                "seed": 42,
+                "shot_generation_recipe": recipe,
+            },
+        ),
+        load_default_registry(),
+    )
+    parsed = build_parser().parse_args(list(command[3:]))
+    assert parsed.shot_generation_recipe == recipe
+
+
+def test_recipe_round_trips_through_generic_dry_run_argv() -> None:
+    recipe = _recipe()
+    capability = get_capability("generation.generate_image")
+    command = _manifest_preview_command(
+        capability,
+        inputs={
+            "model": "z-image",
+            "mode": "t2i",
+            "execution": "cloud",
+            "prompt": "a boat",
+            "seed": 42,
+            "shot_generation_recipe": recipe,
+        },
+        outputs=None,
+        brief=None,
+        python_exec="python",
+        out="/tmp/stage",
+    )
+    parsed = build_parser().parse_args(command[3:])
+    assert parsed.shot_generation_recipe == recipe
+
+
 def test_image_facade_forwards_recipe_and_keeps_promptless_upscale(monkeypatch, tmp_path: Path) -> None:
     import astrid
     import astrid.sdk as sdk
@@ -147,6 +192,7 @@ def test_image_facade_forwards_recipe_and_keeps_promptless_upscale(monkeypatch, 
         project="demo", image_ref="input.png", out=tmp_path,
     )
     assert seen[-1]["inputs"]["mode"] == "upscale"
+    assert "prompt" not in seen[-1]["inputs"]
 
 
 def test_generic_invoke_validates_and_forwards_recipe(monkeypatch, tmp_path: Path) -> None:

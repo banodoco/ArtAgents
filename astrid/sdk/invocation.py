@@ -409,7 +409,7 @@ def _manifest_preview_command(
                 else:
                     for item in _manifest_input_items(value):
                         if item not in (None, ""):
-                            command.extend((flag, _manifest_stringify(item)))
+                            command.extend((flag, _manifest_stringify_input(str(port.name), item)))
             if out not in (None, ""):
                 command.extend(("--out", _manifest_stringify(out)))
             return command
@@ -485,7 +485,7 @@ def _manifest_preview_command(
                 else:
                     if flag:
                         expanded.append(str(flag))
-                    expanded.append(_manifest_stringify(item))
+                    expanded.append(_manifest_stringify_input(name, item))
             before = raw_mapping.get("before")
             if before is None:
                 appended.extend(expanded)
@@ -526,7 +526,7 @@ def _manifest_preview_command(
             continue
         for item in _manifest_input_items(value):
             if item not in (None, ""):
-                command.extend((flag, _manifest_stringify(item)))
+                command.extend((flag, _manifest_stringify_input(name, item)))
     return command
 
 
@@ -547,6 +547,13 @@ def _manifest_stringify(value: Any) -> str:
     if isinstance(value, (list, tuple, set, frozenset)):
         return ",".join(str(item) for item in _manifest_input_items(value))
     return str(value)
+
+
+def _manifest_stringify_input(name: str, value: Any) -> str:
+    """Keep the shot recipe valid JSON without changing other input rendering."""
+    if name == "shot_generation_recipe" and isinstance(value, Mapping):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return _manifest_stringify(value)
 
 
 def _manifest_truthy(value: Any) -> bool:
