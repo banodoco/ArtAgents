@@ -248,17 +248,17 @@ class _RecordingReferences:
             idempotency_key=key,
         )
 
-    def unarchive(self, project, ref, *, idempotency_key=None):
+    def recover(self, project, ref, *, idempotency_key=None):
         self._owner.calls.append(
             (
-                "references.unarchive",
+                "references.recover",
                 {"project": project, "ref": ref, "idempotency_key": idempotency_key},
             )
         )
         key = idempotency_key or "generated-key"
         return DomainResult.success(
             {"reference_id": ref, "status": "active", "changed": True},
-            receipt=_receipt("reference.unarchive", key),
+            receipt=_receipt("reference.recover", key),
             idempotency_key=key,
         )
 
@@ -269,9 +269,6 @@ class _RecordingReferences:
         *,
         media_id,
         role,
-        context_task_id=None,
-        ordinal=None,
-        metadata=None,
         idempotency_key=None,
     ):
         self._owner.calls.append(
@@ -282,9 +279,6 @@ class _RecordingReferences:
                     "ref": ref,
                     "media_id": media_id,
                     "role": role,
-                    "context_task_id": context_task_id,
-                    "ordinal": ordinal,
-                    "metadata": metadata,
                     "idempotency_key": idempotency_key,
                 },
             )
@@ -335,7 +329,7 @@ class _RecordingReferences:
         project,
         ref,
         *,
-        media_reference_id,
+        association_id,
         idempotency_key=None,
     ):
         self._owner.calls.append(
@@ -344,23 +338,26 @@ class _RecordingReferences:
                 {
                     "project": project,
                     "ref": ref,
-                    "media_reference_id": media_reference_id,
+                    "association_id": association_id,
                     "idempotency_key": idempotency_key,
                 },
             )
         )
         key = idempotency_key or "generated-key"
         return DomainResult.success(
-            {"reference_id": ref, "media_reference_id": media_reference_id},
+            {"reference_id": ref, "media_reference_id": association_id},
             receipt=_receipt("reference.set_primary", key),
             idempotency_key=key,
         )
 
     def list(self, project, *, include_archived=False):
+        kwargs = {"project": project}
+        if include_archived:
+            kwargs["include_archived"] = True
         self._owner.calls.append(
             (
                 "references.list",
-                {"project": project, "include_archived": include_archived},
+                kwargs,
             )
         )
         return DomainResult.success([{"reference_id": "R-1", "name": "Aria"}])
@@ -795,7 +792,7 @@ def test_references_parser_has_exactly_nine_verbs_beneath_media() -> None:
         "create",
         "update",
         "archive",
-        "unarchive",
+        "recover",
         "associate",
         "link",
         "set-primary",
@@ -809,7 +806,7 @@ def test_references_parser_has_exactly_nine_verbs_beneath_media() -> None:
         "create",
         "update",
         "archive",
-        "unarchive",
+        "recover",
         "associate",
         "link",
         "set-primary",
@@ -827,7 +824,7 @@ def test_media_references_routes_beneath_media_parser(capsys) -> None:
         client=client,
     )
     assert rc == 0
-    assert client.calls == [("references.list", {"project": "demo", "include_archived": False})]
+    assert client.calls == [("references.list", {"project": "demo"})]
     envelope = json.loads(capsys.readouterr().out)
     assert set(envelope) == ENVELOPE_KEYS
     assert envelope["ok"] is True
@@ -984,24 +981,24 @@ def test_references_archive_is_one_sdk_call(capsys) -> None:
     assert envelope["data"]["archived"] is True
 
 
-def test_references_unarchive_accepts_recovery_name_in_one_sdk_call(capsys) -> None:
+def test_references_recover_accepts_recovery_name_in_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run(
         "media",
-        ["references", "unarchive", "--project", "demo", "Seed", "--json"],
+        ["references", "recover", "--project", "demo", "Seed", "--json"],
         client=client,
     )
     assert rc == 0
     assert client.calls == [
         (
-            "references.unarchive",
+            "references.recover",
             {"project": "demo", "ref": "Seed", "idempotency_key": None},
         )
     ]
     assert json.loads(capsys.readouterr().out)["data"]["changed"] is True
 
 
-def test_references_associate_is_one_sdk_call_with_role_and_context(capsys) -> None:
+def test_references_associate_is_one_sdk_call_with_role(capsys) -> None:
     client = _FakeClient()
     rc = _run(
         "media",
@@ -1015,10 +1012,6 @@ def test_references_associate_is_one_sdk_call_with_role_and_context(capsys) -> N
             "M-3",
             "--role",
             "used_as_input",
-            "--context-task",
-            "T-7",
-            "--ordinal",
-            "2",
             "--json",
         ],
         client=client,
@@ -1032,9 +1025,6 @@ def test_references_associate_is_one_sdk_call_with_role_and_context(capsys) -> N
                 "ref": "R-1",
                 "media_id": "M-3",
                 "role": "used_as_input",
-                "context_task_id": "T-7",
-                "ordinal": 2,
-                "metadata": None,
                 "idempotency_key": None,
             },
         )
@@ -1132,7 +1122,7 @@ def test_references_link_rejects_kind_outside_frozen_five() -> None:
     assert client.calls == []
 
 
-def test_references_list_is_one_sdk_call_with_include_archived(capsys) -> None:
+def test_references_list_is_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run(
         "media",
@@ -1141,13 +1131,12 @@ def test_references_list_is_one_sdk_call_with_include_archived(capsys) -> None:
             "list",
             "--project",
             "demo",
-            "--include-archived",
             "--json",
         ],
         client=client,
     )
     assert rc == 0
-    assert client.calls == [("references.list", {"project": "demo", "include_archived": True})]
+    assert client.calls == [("references.list", {"project": "demo"})]
     envelope = json.loads(capsys.readouterr().out)
     assert envelope["ok"] is True
     assert envelope["data"] == [{"reference_id": "R-1", "name": "Aria"}]
@@ -1224,7 +1213,7 @@ def test_references_set_primary_is_one_sdk_call(capsys) -> None:
             {
                 "project": "demo",
                 "ref": "R-1",
-                "media_reference_id": "MR-2",
+                "association_id": "MR-2",
                 "idempotency_key": "sp-key",
             },
         )

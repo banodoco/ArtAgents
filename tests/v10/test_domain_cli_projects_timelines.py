@@ -61,14 +61,14 @@ class _RecordingProjects:
     def __init__(self, owner: "_FakeClient") -> None:
         self._owner = owner
 
-    def create(self, *, slug, name, settings=None, idempotency_key=None):
+    def create(self, *, slug, name, metadata=None, idempotency_key=None):
         self._owner.calls.append(
             (
                 "projects.create",
                 {
                     "slug": slug,
                     "name": name,
-                    "settings": settings,
+                    "metadata": metadata,
                     "idempotency_key": idempotency_key,
                 },
             )
@@ -88,14 +88,14 @@ class _RecordingProjects:
         self._owner.calls.append(("projects.show", {"ref": ref}))
         return DomainResult.success({"slug": ref, "name": "Demo", "project_id": "P-1"})
 
-    def update(self, ref, *, name=None, settings=None, idempotency_key=None):
+    def update(self, ref, *, name=None, metadata=None, idempotency_key=None):
         self._owner.calls.append(
             (
                 "projects.update",
                 {
                     "ref": ref,
                     "name": name,
-                    "settings": settings,
+                    "metadata": metadata,
                     "idempotency_key": idempotency_key,
                 },
             )
@@ -133,7 +133,6 @@ class _RecordingTimelines:
         name,
         config=None,
         registry=None,
-        set_default=False,
         idempotency_key=None,
     ):
         self._owner.calls.append(
@@ -145,7 +144,6 @@ class _RecordingTimelines:
                     "name": name,
                     "config": config,
                     "registry": registry,
-                    "set_default": set_default,
                     "idempotency_key": idempotency_key,
                 },
             )
@@ -212,17 +210,17 @@ class _RecordingTimelines:
             idempotency_key=key,
         )
 
-    def unarchive(self, project, ref, *, idempotency_key=None):
+    def recover(self, project, ref, *, idempotency_key=None):
         self._owner.calls.append(
             (
-                "timelines.unarchive",
+                "timelines.recover",
                 {"project": project, "ref": ref, "idempotency_key": idempotency_key},
             )
         )
         key = idempotency_key or "generated-key"
         return DomainResult.success(
             {"timeline_id": "T-1", "status": "active", "changed": True},
-            receipt=_receipt("timeline.unarchive", key),
+            receipt=_receipt("timeline.recover", key),
             idempotency_key=key,
         )
 
@@ -434,7 +432,7 @@ def test_projects_create_is_one_sdk_call_with_exact_envelope(capsys) -> None:
             {
                 "slug": "demo",
                 "name": "Demo",
-                "settings": None,
+                "metadata": None,
                 "idempotency_key": None,
             },
         )
@@ -467,7 +465,7 @@ def test_projects_create_forwards_caller_key_and_settings(capsys) -> None:
     assert rc == 0
     (verb, kwargs) = client.calls[0]
     assert verb == "projects.create"
-    assert kwargs["settings"] == {"owner": "team"}
+    assert kwargs["metadata"] == {"owner": "team"}
     assert kwargs["idempotency_key"] == "caller-key"
     envelope = json.loads(capsys.readouterr().out)
     assert envelope["idempotency_key"] == "caller-key"
@@ -515,7 +513,7 @@ def test_projects_update_is_one_sdk_call_with_delta_and_key(capsys) -> None:
     assert kwargs == {
         "ref": "demo",
         "name": "Renamed",
-        "settings": None,
+        "metadata": None,
         "idempotency_key": "upd-key",
     }
     envelope = json.loads(capsys.readouterr().out)
@@ -613,7 +611,7 @@ def test_timelines_parser_has_visualize_and_no_aliases() -> None:
         "show",
         "save",
         "archive",
-        "unarchive",
+        "recover",
         "history",
         "diff",
         "visualize",
@@ -628,7 +626,7 @@ def test_timelines_parser_has_visualize_and_no_aliases() -> None:
         "show",
         "save",
         "archive",
-        "unarchive",
+        "recover",
         "history",
         "diff",
         "visualize",
@@ -662,12 +660,9 @@ def test_timelines_visualize_help_separates_legacy_input_from_manifest_compatibi
         parser.parse_args(["visualize", "--help"])
     assert exc_info.value.code == 0
     normalized = " ".join(capsys.readouterr().out.split())
-    assert "Explicit legacy managed timeline directory/file" in normalized
-    assert (
-        "inputs.timeline_source remains a project-slug compatibility field"
-        in normalized
-    )
-    assert "inspect source_mode and resolved identities" in normalized
+    assert "Timeline slug, UUID, or ULID" in normalized
+    assert "Prior visualization manifest for frozen navigation" in normalized
+    assert "returned durable manifest_path" in normalized
 
 
 @pytest.mark.parametrize(
@@ -709,7 +704,6 @@ def test_timelines_create_is_one_sdk_call_with_exact_envelope(capsys) -> None:
             '{"fps": 24}',
             "--registry",
             '{"assets": []}',
-            "--default",
             "--json",
         ],
         client=client,
@@ -723,7 +717,6 @@ def test_timelines_create_is_one_sdk_call_with_exact_envelope(capsys) -> None:
         "name": "Main",
         "config": {"fps": 24},
         "registry": {"assets": []},
-        "set_default": True,
         "idempotency_key": None,
     }
     envelope = json.loads(capsys.readouterr().out)
@@ -827,27 +820,27 @@ def test_timelines_archive_is_one_sdk_call(capsys) -> None:
     assert envelope["data"]["archived"] is True
 
 
-def test_timelines_inclusive_list_and_unarchive_are_one_sdk_call(capsys) -> None:
+def test_timelines_list_and_recover_are_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run(
         "timelines",
-        ["list", "--project", "demo", "--include-archived", "--json"],
+        ["list", "--project", "demo", "--json"],
         client=client,
     )
     assert rc == 0
-    assert client.calls == [("timelines.list", {"project": "demo", "include_archived": True})]
+    assert client.calls == [("timelines.list", {"project": "demo"})]
     capsys.readouterr()
 
     client.calls.clear()
     rc = _run(
         "timelines",
-        ["unarchive", "--project", "demo", "main", "--json"],
+        ["recover", "--project", "demo", "main", "--json"],
         client=client,
     )
     assert rc == 0
     assert client.calls == [
         (
-            "timelines.unarchive",
+            "timelines.recover",
             {"project": "demo", "ref": "main", "idempotency_key": None},
         )
     ]

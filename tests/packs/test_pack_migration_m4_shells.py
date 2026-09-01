@@ -62,38 +62,25 @@ EXPECTED_PACKS = {
         "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
-        "aliases": {
-            "external.fal_foley": "fal.fal_foley",
-        },
+        "aliases": {},
     },
     "vibecomfy": {
         "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
-        "aliases": {
-            "external.vibecomfy.run": "vibecomfy.run",
-            "external.vibecomfy.validate": "vibecomfy.validate",
-        },
+        "aliases": {},
     },
     "runpod": {
         "origin": "external",
         "domain": "infrastructure",
         "content": {"executors": "executors"},
-        "aliases": {
-            "external.runpod.provision": "runpod.provision",
-            "external.runpod.exec": "runpod.exec",
-            "external.runpod.pull": "runpod.pull",
-            "external.runpod.teardown": "runpod.teardown",
-            "external.runpod.session": "runpod.session",
-        },
+        "aliases": {},
     },
     "moirae": {
         "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
-        "aliases": {
-            "external.moirae": "moirae.moirae",
-        },
+        "aliases": {},
     },
 }
 

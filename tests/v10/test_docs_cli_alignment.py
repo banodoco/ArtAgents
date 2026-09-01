@@ -208,7 +208,17 @@ def _validate_command(tokens: list[str], where: str) -> list[str]:
         return errors
     if first == "backup":
         if len(tokens) >= 2 and tokens[1] not in {"--help", "-h"}:
-            if tokens[1] not in _BACKUP_COMMANDS:
+            backup_token = tokens[1]
+            # The canonical operational help uses shell brace notation to
+            # document the complete verb set in one executable-looking line.
+            # Treat that notation as the documented alternatives rather than
+            # requiring the braces to be a literal backup verb.
+            if backup_token.startswith("{") and backup_token.endswith("}"):
+                documented = frozenset(backup_token[1:-1].split(","))
+                valid = documented == _BACKUP_COMMANDS
+            else:
+                valid = backup_token in _BACKUP_COMMANDS
+            if not valid:
                 errors.append(f"{where}: backup verb {tokens[1]!r} not in {sorted(_BACKUP_COMMANDS)}")
         return errors
     # Product family: verify the verb through the family's argparse parser.
