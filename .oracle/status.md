@@ -4,11 +4,11 @@
 - Execution contract: **FROZEN**
 - Huge-run policy: **active — 4–6 engineer-weeks**
 - Existing Astrid package/product foundation: **substantial and mostly built**
-- Canonical-v2 implementation batches: **B1 GATE PASS; checkpoint commit
-  pending — 0/5 committed**
+- Canonical-v2 implementation batches: **B1 COMPLETE — 1/5 checkpoints**
 - Frozen final criteria: **0/15 end to end; B1 isolated evidence accepted**
-- Product candidate: **30 frozen source/test/fixture paths**
-- Base/current HEAD: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
+- Product checkpoint: **30 source/test/fixture paths**
+- Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
+- B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
 - Branch: `megado/canonical-pack-beta`
 - Worktree:
   `/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid`
@@ -21,10 +21,10 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 5 — B1 checkpoint preparation**
-- Active batch: **candidate 46 bounded delta PASS; B1 accepted under user
-  control from two unaffected candidate-45 Luna passes plus the sole
-  erased-metadata delta verification; no finite blockers**
+- Current Megado phase: **Phase 6 — B2 implementation dispatch**
+- Active batch: **B1 committed; prepare all 22 canonical product manifests,
+  direct structured guidance, `_core` census, customization coverage, and known
+  runtime-resource ownership while production remains legacy-active**
 - Model routing: **Sol owns the Megado run and gate decisions; Luna performs
   normal bounded work and independent reviews; later batches retain separate
   Sol oracle dispositions. B1's user-directed finite delta closure is recorded
@@ -71,8 +71,8 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Commit the reviewed B1 checkpoint, record its SHA and receipts in repo/ledger,
-then begin B2. No candidate 47 or additional B1 review/oracle dispatch.
+Dispatch bounded exact-Luna B2 implementation units with disjoint path
+ownership, then freeze and validate the complete B2 candidate.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

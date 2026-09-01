@@ -13,8 +13,8 @@ Candidate 46 closes erased canonical custody metadata after 185 focused
 lifecycle tests and 104 subtests. Per user control
 `babysit-c46-end-open-ended-b1-loop`, the independent erased-metadata delta
 gate reuses unaffected candidate-45 passes; there is no candidate 47 or whole
-review reset. The delta gate passed with no finite blockers, so B1 is accepted
-and awaits its checkpoint commit.
+review reset. The delta gate passed with no finite blockers. B1 checkpoint:
+`14f1f7d5f77cb6bd384749941cff6e522b696590`.
 
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-canonical-pack-beta`
 
@@ -369,7 +369,7 @@ useful beta dispositions are:
 | 12. External capability works; external DB fails | **B1 isolated behavior complete** | External capability admission and pre-resolution external database rejection have focused evidence; production hard cut remains later |
 | 13. Three golden pack forms validate | **B1 complete in isolated roots** | Capability-only, database-only, and combined fixtures validate under the strict path |
 | 14. Focused and broad tests pass after cutover | **B1 focused evidence green; later suites pending** | Candidate 46 repair passed 185 lifecycle tests plus 104 subtests; unaffected candidate-45 validation/baseline receipts remain accepted |
-| 15. Final evidence and independent review | **B1 bounded gate accepted; final matrix pending B5** | User-directed closure combines two unaffected candidate-45 Luna passes with one independent candidate-46 custody delta pass; B1 checkpoint commit pending |
+| 15. Final evidence and independent review | **B1 bounded gate and checkpoint complete; final matrix pending B5** | User-directed closure combines two unaffected candidate-45 Luna passes with one independent candidate-46 custody delta pass; B1 checkpoint `14f1f7d5` |
 
 ## Direct execution plan
 
@@ -504,8 +504,8 @@ composes; all declared docs/resources resolve; final tests and review pass.
 
 ## Verification evidence for this ledger
 
-- Exact checkout remains on base `7ac50c12`; B1 is an uncommitted 30-path
-  candidate frozen by `.oracle/evidence/b1-candidate-46.sha256`.
+- B1 checkpoint `14f1f7d5f77cb6bd384749941cff6e522b696590`
+  contains the frozen 30-path product candidate and accepted control evidence.
 - Candidate 45 independent validation passed 214 focused tests plus 102
   subtests and matched all three inherited clean-base failures; two unaffected
   independent Luna reviewers passed it.
@@ -529,8 +529,7 @@ composes; all declared docs/resources resolve; final tests and review pass.
 - **Clarity/reconciliation:** complete; control documents reflect accepted B1.
 - **Frozen final criteria:** 0/15 complete end to end; B1 supplies accepted
   isolated evidence toward criteria 1, 2, 6, 12, and 13.
-- **Remaining sequence:** reviewed B1 checkpoint, then B2–B5 under the frozen
-  gates.
+- **Remaining sequence:** B2–B5 under the frozen gates.
 
-The correct product action is the reviewed B1 checkpoint, not another broad
-review loop. Cloud capacity and tooling preflight are green.
+The correct product action is B2 implementation. Cloud capacity and tooling
+preflight are green.

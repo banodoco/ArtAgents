@@ -148,7 +148,7 @@ Gate B1: **PASS under user control
 passes plus candidate 46's sole erased-metadata custody delta pass accept the
 isolated v2 contract with no finite blockers. The intervention prohibited
 candidate 47, another three-review panel, and an additional oracle dispatch.
-Commit the reviewed B1 checkpoint.
+Reviewed B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`.
 
 ## B2 — prepare all 22 canonical product packs
 
@@ -332,12 +332,11 @@ independent pass.
   four database-backed slices and their migration engine are operational.
 - Clarity/reconciliation control work: **P0 9/9 complete**.
 - B1 implementation: **10/10 items complete; bounded gate PASS**.
-- Canonical-v2 implementation checkpoints: **B1 commit pending; 0/5 committed**.
+- Canonical-v2 implementation checkpoints: **B1 committed; 1/5 complete**.
 - Frozen final criteria satisfied end to end: **0/15**; B1 supplies accepted
   isolated evidence toward criteria 1, 2, 6, 12, and 13 without activating
   production.
-- Product candidate: **30 frozen source/test/fixture paths** relative to exact
-  base; production remains legacy-active.
+- B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`;
+  production remains legacy-active.
 
-Next action: commit the reviewed B1 checkpoint, record its SHA and receipt set,
-then begin B2. Do not start candidate 47 or another B1 review cycle.
+Next action: execute B2. Do not start candidate 47 or another B1 review cycle.

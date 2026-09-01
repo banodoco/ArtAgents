@@ -1454,3 +1454,7 @@
   passes plus the candidate-46 delta pass accept B1 with no finite blockers.
   No candidate 47, repeated panel, or additional independent oracle dispatch
   is run; the owner proceeds to the reviewed B1 checkpoint.
+- Reviewed B1 checkpoint committed as
+  `14f1f7d5f77cb6bd384749941cff6e522b696590` (`packs: freeze canonical v2
+  contract`): 30 frozen product/test/fixture paths plus accepted B1 control
+  evidence. Production remains legacy-active; B2 is next.
