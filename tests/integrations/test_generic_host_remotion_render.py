@@ -186,20 +186,39 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
     shutil.copytree(DEPENDENCY_ROOT, remotion / "node_modules", symlinks=True)
     timeline_path, assets_path = _make_media(workspace)
 
-    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    daemon = RuntimeDaemon(
+        tmp_path / "realm",
+        support_root=tmp_path / "support",
+        production_worker_credentials=True,
+    ).start()
     try:
         generated = WorkspaceClient(daemon.endpoint, daemon.token)
         generated.handshake(
             "generic-remotion-acceptance",
             "0.1.0",
-            ["projects:read", "worker:execute"],
+            [
+                "projects:read",
+                "projects:write",
+                "objects:read",
+                "objects:write",
+                "tasks:read",
+                "tasks:write",
+            ],
         )
+        project = generated.create_project(
+            "Generic Remotion acceptance",
+            slug="generic-remotion-acceptance",
+            idempotency_key="generic-remotion-project",
+        )
+        project_id = str(project["project_id"])
         # The host owns the only path handoff. Import both sources into the
         # runtime, then replace the fixture's stable placeholders with the
         # returned runtime identities/digests before the task is admitted.
         registry = json.loads(assets_path.read_text(encoding="utf-8"))
+        input_object_ids: list[str] = []
         for key, filename in (("black", "black.mp4"), ("silence", "silence.m4a")):
-            imported = generated.ingest_object(
+            imported = generated.ingest_project_object(
+                project_id,
                 (workspace / "media" / filename).read_bytes(),
                 media_type=registry["assets"][key]["type"],
                 idempotency_key=f"generic-remotion-{key}",
@@ -208,13 +227,14 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
             object_id = imported.get("object_id") if isinstance(imported, dict) else getattr(imported, "object_id", None)
             digest = imported.get("digest") if isinstance(imported, dict) else getattr(imported, "digest", None)
             assert isinstance(object_id, str) and isinstance(digest, str)
+            input_object_ids.append(object_id)
             registry["assets"][key]["media_id"] = object_id
             registry["assets"][key]["content_sha256"] = digest.removeprefix("sha256:")
         assets_path.write_text(json.dumps(registry), encoding="utf-8")
         pack = workspace / "astrid" / "packs" / "rendering" / "executors" / "render"
         host = GenericPackHost(
             pack_roots=[pack],
-            client=RuntimeProtocolClient(daemon.endpoint, daemon.token),
+            client=RuntimeProtocolClient(daemon.endpoint, daemon.worker_token),
             executor_id="generic-remotion-host",
             attempt_root=tmp_path / "attempt",
         )
@@ -245,8 +265,9 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,
-            input_object_ids=[],
+            input_object_ids=input_object_ids,
             idempotency_key="generic-remotion-task",
+            project_id=project_id,
             spec=spec,
         )
         claim = generated.claim_task(
@@ -262,7 +283,9 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
                 "task": {
                     "id": task.task_id,
                     "capability": record.id,
-                    "spec": spec,
+                    "spec": claim.spec,
+                    "input_object_ids": claim.input_object_ids,
+                    "project_id": claim.project_id,
                     "attempt_id": claim["attempt_id"],
                     "fence": claim["fence"],
                 }
