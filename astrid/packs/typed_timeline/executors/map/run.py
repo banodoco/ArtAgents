@@ -32,14 +32,9 @@ def main(argv=None) -> int:
         parser.add_argument("--out", required=True, type=Path)
         parser.add_argument("--run-id", dest="run_id", default=None)
         parser.add_argument("--project", default=None)
-        parser.add_argument("--project-id", dest="project_id_alias", default=None)
         parser.add_argument("--json-path", dest="json_path", default=None)
         parser.add_argument("--json-rows", dest="json_rows", default=None)
         args = parser.parse_args(argv)
-
-        # alias: --project-id supplied via sdk inputs project_id
-        if args.project_id_alias and not args.project:
-            args.project = args.project_id_alias
 
         out_dir = Path(args.out)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -101,7 +96,6 @@ def main(argv=None) -> int:
 
         # write manifest
         manifest_path = out_dir / "manifest.json"
-        # also staging fallback
         from astrid.core.util.time import utc_now_iso
 
         manifest = build_manifest(

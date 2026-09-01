@@ -1,9 +1,8 @@
 """Entrypoint help rendering for the Astrid gateway.
 
 Extracted from ``astrid/gateway.py`` during M4 batch 41 (T42) to keep the
-gateway facade focused while preserving the help-printing entrypoints that
-callers and monkeypatch seams rely on via ``astrid.core.gateway._print_entrypoint_help``
-and ``astrid.core.gateway._packs_subcommand_list``.
+gateway facade focused while preserving the help-printing entrypoint that
+callers rely on via ``astrid.core.gateway._print_entrypoint_help``.
 
 ``_product_help_text`` / ``_print_product_help`` (m4 plan step 24, task
 T26) are the executable help. They document the seven-family surface: the
@@ -15,24 +14,6 @@ convention, the stable exit codes, and the two operational families
 """
 
 from __future__ import annotations
-
-
-def _packs_subcommand_list() -> str:
-    """Return a comma-separated list of ``astrid packs`` subcommands."""
-    try:
-        import argparse
-
-        from astrid.core.pack.cli import build_parser as packs_build_parser
-
-        packs_parser = packs_build_parser()
-        # Extract subcommand names from the parser's subparsers action.
-        for action in packs_parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                return ",".join(sorted(action.choices.keys()))
-    except Exception:
-        pass
-    # Fallback: canonical list matching the packs CLI as of m5b.
-    return "agent-index,inspect,list,new,search,status,validate"
 
 
 def _print_entrypoint_help() -> None:

@@ -589,6 +589,51 @@ def test_runtime_protocol_mismatch_blocks_registration_before_publish(tmp_path):
     assert runtime.registrations == []
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "https://runtime.example",
+        "http://192.0.2.1:8000",
+        "http://127.0.0.1:not-a-port",
+    ),
+)
+def test_runtime_protocol_client_rejects_non_loopback_or_malformed_endpoint(endpoint):
+    with pytest.raises(HostError, match="loopback|malformed"):
+        RuntimeProtocolClient(endpoint, "worker-token")
+
+
+def test_runtime_protocol_client_uses_worker_token_contract_without_user_handshake(
+    monkeypatch,
+):
+    class WorkerGenerated:
+        handshake_called = False
+
+        def __init__(self, endpoint, token):
+            self.endpoint = endpoint
+            self.token = token
+
+        def handshake(self, *_args, **_kwargs):
+            self.handshake_called = True
+            raise AssertionError("worker adapter must not fabricate a user handshake")
+
+        def register_executor(self, executor, *, idempotency_key):
+            return {"executor_id": executor["executor_id"], "idempotency_key": idempotency_key}
+
+    monkeypatch.setattr("banodoco_workspace_client.WorkspaceClient", WorkerGenerated)
+    client = RuntimeProtocolClient("http://127.0.0.1:8765", "worker-token")
+    response = client.register_executor(
+        "worker-1",
+        capabilities=[],
+        max_concurrency=1,
+        resource_keys=[],
+        source_digest=None,
+    )
+
+    assert client.WORKER_SCOPES == ("worker:register", "worker:execute")
+    assert response["executor_id"] == "worker-1"
+    assert client.generated.handshake_called is False
+
+
 def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):
     _write_manifest(tmp_path / "echo")
     runtime = FakeRuntime()

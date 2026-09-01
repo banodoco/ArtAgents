@@ -41,6 +41,7 @@ from astrid.core.execution.provider_route_grant import (
     ProviderRouteGrantAuthority,
     ProviderRouteGrantError,
 )
+from astrid.sdk.workspace_client import WorkspaceClientError, validate_runtime_endpoint
 
 if TYPE_CHECKING:
     from astrid.core.execution.executor.schema import ExecutorDefinition
@@ -610,10 +611,22 @@ class RuntimeProtocolClient:
     This class intentionally contains no HTTP implementation.  The generated
     client owns transport, envelopes, authentication, and route paths; this
     adapter only translates host lifecycle values to its typed operations.
+
+    Worker credentials are a distinct runtime boundary from the user-facing
+    ``AstridClient`` handshake.  The runtime authorizes each registration,
+    claim, and attempt operation with ``worker:register`` or
+    ``worker:execute`` and binds the credential actor to ``executor_id``.
+    This adapter therefore never fabricates a user handshake; the runtime's
+    worker-token contract is the sole identity check for this process.
     """
 
+    WORKER_SCOPES = ("worker:register", "worker:execute")
+
     def __init__(self, endpoint: str, credential: str, *, timeout: float = 30.0):
-        self.endpoint = endpoint.rstrip("/")
+        try:
+            self.endpoint = validate_runtime_endpoint(endpoint)
+        except WorkspaceClientError as exc:
+            raise HostError(f"runtime endpoint rejected: {exc}") from exc
         self.credential = credential
         self.timeout = timeout
         try:

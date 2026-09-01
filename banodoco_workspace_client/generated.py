@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 PROTOCOL = "workspace.v1"
-SCHEMA_DIGEST = "sha256:eaae72871d29f70687d0aa2bde2e2026d5c37c48effe103e97c3c43e034bb25a"
+SCHEMA_DIGEST = "sha256:8560e9cf98bda529314a620dd47650dc0a7d85ba8a7ead988f5f76f2b4932acb"
 OPERATIONS = ('health', 'handshake', 'getRealm', 'doctor', 'createBackup', 'restoreBackup', 'exportRealm', 'tombstoneRealm', 'recoverRealm', 'purgeRealm', 'listProjects', 'createProject', 'getProject', 'updateProject', 'currentProject', 'selectProject', 'listDocuments', 'createDocument', 'getDocument', 'updateDocument', 'listProjectObjects', 'listProjectTasks', 'listProjectRuns', 'createTimeline', 'listTimelines', 'createTimelineDocument', 'getTimeline', 'updateTimeline', 'listTimelineHistory', 'diffTimeline', 'archiveTimeline', 'recoverTimeline', 'createShot', 'getShot', 'updateShot', 'archiveShot', 'recoverShot', 'createReference', 'createProjectShot', 'listProjectShots', 'getProjectShot', 'updateProjectShot', 'archiveProjectShot', 'recoverProjectShot', 'addShotItem', 'removeShotItem', 'reorderShotItems', 'createProjectReference', 'listProjectReferences', 'getProjectReference', 'updateProjectReference', 'archiveProjectReference', 'recoverProjectReference', 'associateReference', 'setPrimaryReference', 'linkReferences', 'getReference', 'updateReference', 'archiveReference', 'recoverReference', 'listMediaRelations', 'createMediaRelation', 'ingestObject', 'getObject', 'headObject', 'admitTask', 'claimTask', 'getTask', 'cancelTask', 'retryTask', 'getRun', 'cancelRun', 'retryRun', 'listRunEvents', 'listEvents', 'registerExecutor', 'listCapabilities', 'registerCapability', 'listGenerations', 'createGeneration', 'getGeneration', 'listVariants', 'createVariant', 'getVariant', 'settleAttempt', 'prepareReboot', 'checkpointAttempt', 'failAttempt', 'heartbeatAttempt', 'requestReboot', 'resumeAttempt')
 
 
@@ -514,9 +514,9 @@ class WorkspaceClient:
         _, _, body = self._request("PATCH", f"/v1/projects/{_path_part(project_id)}", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})
         return Project.from_json(self._json(body))
 
-    def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> ProjectDocument:
+    def create_document(self, project_id: str, document_id: str, kind: str, content: Any, *, idempotency_key: str) -> MutationResult:
         payload = {"document_id": document_id, "kind": kind, "content": content}
-        return ProjectDocument.from_json(self._json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/documents", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json"}, expected=(200, 201))[2]))
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/documents", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
 
     def list_documents(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> tuple[list[ProjectDocument], str | None]:
         query = f"?limit={int(limit)}" + (f"&cursor={_path_part(cursor)}" if cursor else "")
@@ -527,11 +527,11 @@ class WorkspaceClient:
     def get_document(self, project_id: str, document_id: str) -> ProjectDocument:
         return ProjectDocument.from_json(self._json(self._request("GET", f"/v1/projects/{_path_part(project_id)}/documents/{_path_part(document_id)}")[2]))
 
-    def update_document(self, project_id: str, document_id: str, *, expected_version: int, content: Any = None, kind: str | None = None) -> ProjectDocument:
+    def update_document(self, project_id: str, document_id: str, *, expected_version: int, idempotency_key: str, content: Any = None, kind: str | None = None) -> MutationResult:
         payload: dict[str, Any] = {"expected_version": expected_version}
         if content is not None: payload["content"] = content
         if kind is not None: payload["kind"] = kind
-        return ProjectDocument.from_json(self._json(self._request("PATCH", f"/v1/projects/{_path_part(project_id)}/documents/{_path_part(document_id)}", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json"})[2]))
+        return self._mutation_json(self._request("PATCH", f"/v1/projects/{_path_part(project_id)}/documents/{_path_part(document_id)}", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
 
     def create_timeline(self, project_id: str, timeline_id: str, *, idempotency_key: str) -> Mapping[str, Any]:
         value = self._json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/timelines", body=json.dumps({"timeline_id": timeline_id}, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
@@ -571,6 +571,7 @@ class WorkspaceClient:
         expected_version: int,
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
+        idempotency_key: str,
         slug: str | None = None,
         name: str | None = None,
     ) -> Mapping[str, Any]:
@@ -579,7 +580,7 @@ class WorkspaceClient:
         content.update({"config": dict(config), "registry": dict(registry)})
         if slug is not None: content["slug"] = slug
         if name is not None: content["name"] = name
-        document = self.update_document(project_id, f"timeline:{timeline_id}", expected_version=expected_version, content=content)
+        document = self.update_document(project_id, f"timeline:{timeline_id}", expected_version=expected_version, idempotency_key=idempotency_key, content=content)
         timeline = self.get_timeline(timeline_id)
         result = dict(timeline)
         result.update({"slug": content.get("slug", timeline_id), "name": content.get("name", timeline_id), "config_version": document.version, "config": dict(config), "registry": dict(registry)})
@@ -604,19 +605,19 @@ class WorkspaceClient:
         path = f"/v1/timelines/{_path_part(timeline_id)}/diff?from_version={int(from_version)}&to_version={int(to_version)}"
         return self._json(self._request("GET", path)[2])
 
-    def archive_timeline(self, timeline_id: str, *, expected_version: int, idempotency_key: str) -> Mapping[str, Any]:
+    def archive_timeline(self, timeline_id: str, *, expected_version: int, idempotency_key: str) -> MutationResult:
         payload = {"expected_version": expected_version}
-        return self._json(self._request("POST", f"/v1/timelines/{_path_part(timeline_id)}/archive", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
+        return self._mutation_json(self._request("POST", f"/v1/timelines/{_path_part(timeline_id)}/archive", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
 
-    def recover_timeline(self, timeline_id: str, *, expected_version: int, version: int, idempotency_key: str) -> Mapping[str, Any]:
+    def recover_timeline(self, timeline_id: str, *, expected_version: int, version: int, idempotency_key: str) -> MutationResult:
         payload = {"expected_version": expected_version, "version": version}
-        return self._json(self._request("POST", f"/v1/timelines/{_path_part(timeline_id)}/recover", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
+        return self._mutation_json(self._request("POST", f"/v1/timelines/{_path_part(timeline_id)}/recover", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
 
-    def update_timeline(self, timeline_id: str, *, expected_version: int, shots: list[Mapping[str, Any]] | None = None, references: list[Mapping[str, Any]] | None = None) -> Mapping[str, Any]:
+    def update_timeline(self, timeline_id: str, *, expected_version: int, idempotency_key: str, shots: list[Mapping[str, Any]] | None = None, references: list[Mapping[str, Any]] | None = None) -> MutationResult:
         payload: dict[str, Any] = {"expected_version": expected_version}
         if shots is not None: payload["shots"] = shots
         if references is not None: payload["references"] = references
-        return self._json(self._request("PATCH", f"/v1/timelines/{_path_part(timeline_id)}", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json"})[2])
+        return self._mutation_json(self._request("PATCH", f"/v1/timelines/{_path_part(timeline_id)}", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
 
     def create_shot(self, timeline_id: str, shot: Mapping[str, Any], *, idempotency_key: str) -> Mapping[str, Any]:
         return self._json(self._request("POST", f"/v1/timelines/{_path_part(timeline_id)}/shots", body=json.dumps(dict(shot), separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
@@ -763,10 +764,11 @@ class WorkspaceClient:
         return [ManagedObject.from_json(item) for item in items], next_cursor
 
 
-    def create_media_relation(self, project_id: str, from_object_id: str, to_object_id: str, kind: str, *, metadata: Mapping[str, Any] | None = None, idempotency_key: str) -> Mapping[str, Any]:
+    def create_media_relation(self, project_id: str, from_object_id: str, to_object_id: str, kind: str, *, idempotency_key: str, metadata: Mapping[str, Any] | None = None, ordinal: int = 0) -> MutationResult:
         payload: dict[str, Any] = {"from_object_id": from_object_id, "to_object_id": to_object_id, "kind": kind}
         if metadata is not None: payload["metadata"] = metadata
-        return self._json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/media-relations", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
+        if ordinal: payload["ordinal"] = ordinal
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/media-relations", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
 
     def list_media_relations(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> tuple[list[Mapping[str, Any]], str | None]:
         query = f"?limit={int(limit)}" + (f"&cursor={_path_part(cursor)}" if cursor else "")
@@ -891,10 +893,10 @@ class WorkspaceClient:
         items, next_cursor = self._page(value)
         return [Generation.from_json(item) for item in items], next_cursor
 
-    def create_generation(self, project_id: str, generation_id: str, *, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None) -> Generation:
-        payload: dict[str, Any] = {"generation_id": generation_id, "type": type, "metadata": metadata or {}}
+    def create_generation(self, project_id: str, generation_id: str, *, idempotency_key: str, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None, status: str = "created") -> MutationResult:
+        payload: dict[str, Any] = {"generation_id": generation_id, "type": type, "status": status, "metadata": metadata or {}}
         if source_task_id is not None: payload["source_task_id"] = source_task_id
-        return Generation.from_json(self._json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/generations", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json"}, expected=(200, 201))[2]))
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/generations", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
 
     def get_generation(self, generation_id: str) -> Generation:
         return Generation.from_json(self._json(self._request("GET", f"/v1/generations/{_path_part(generation_id)}")[2]))
@@ -908,10 +910,10 @@ class WorkspaceClient:
     def get_variant(self, variant_id: str) -> GenerationVariant:
         return GenerationVariant.from_json(self._json(self._request("GET", f"/v1/variants/{_path_part(variant_id)}")[2]))
 
-    def create_variant(self, generation_id: str, variant_id: str, *, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None) -> GenerationVariant:
+    def create_variant(self, generation_id: str, variant_id: str, *, idempotency_key: str, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None) -> MutationResult:
         payload: dict[str, Any] = {"variant_id": variant_id, "variant_type": variant_type, "metadata": metadata or {}}
         if object_id is not None: payload["object_id"] = object_id
-        return GenerationVariant.from_json(self._json(self._request("POST", f"/v1/generations/{_path_part(generation_id)}/variants", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json"}, expected=(200, 201))[2]))
+        return self._mutation_json(self._request("POST", f"/v1/generations/{_path_part(generation_id)}/variants", body=json.dumps(payload, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))[2])
 
     def register_executor(self, executor: Mapping[str, Any], *, idempotency_key: str) -> Executor:
         _, _, body = self._request("POST", "/v1/executors", body=json.dumps(dict(executor), separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key}, expected=(200, 201))

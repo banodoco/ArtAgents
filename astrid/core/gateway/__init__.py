@@ -32,7 +32,6 @@ from astrid.core.gateway.dispatch import (
     _top_level_commands,
 )
 from astrid.core.gateway.help import (
-    _packs_subcommand_list,
     _print_entrypoint_help,
     _print_product_help,
     _product_help_text,

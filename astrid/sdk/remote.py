@@ -144,7 +144,18 @@ class RemoteTimelines(_RemoteFamily):
                 ErrorObject("validation_error", "timeline save requires a project", {"field": "project"}),
                 idempotency_key=key,
             )
-        return self._typed("update_timeline_document", project, ref, expected_version=expected_version, config=config, registry=registry, slug=slug, name=name)
+        return self._typed(
+            "update_timeline_document",
+            project,
+            ref,
+            key=key,
+            expected_version=expected_version,
+            config=config,
+            registry=registry,
+            slug=slug,
+            name=name,
+            idempotency_key=key,
+        )
     def history(self, project, ref, *, cursor=None, limit=50):
         return self._typed("list_timeline_history", ref, cursor=cursor, limit=limit)
     def diff(self, project, ref, *, from_version=None, to_version=None):
@@ -431,14 +442,34 @@ class RemoteShots(_RemoteFamily):
 
 class RemoteGenerations(_RemoteFamily):
     def create(self, *, project: str, generation_id: str, metadata=None, type="image", source_task_id=None, idempotency_key=None):
-        return self._typed("create_generation", project, generation_id, key=idempotency_key, metadata=metadata or {}, type=type, source_task_id=source_task_id)
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed(
+            "create_generation",
+            project,
+            generation_id,
+            key=key,
+            metadata=metadata or {},
+            type=type,
+            source_task_id=source_task_id,
+            idempotency_key=key,
+        )
     def list(self, project, *, cursor=None, limit=50):
         return self._typed("list_generations", project, cursor=cursor, limit=limit)
     def show(self, project, generation_id): return self._typed("get_generation", generation_id)
     def variants(self, project, generation_id, *, cursor=None, limit=50):
         return self._typed("list_variants", generation_id, cursor=cursor, limit=limit)
     def create_variant(self, generation_id: str, *, variant_id: str, object_id: str | None = None, variant_type="original", metadata=None, idempotency_key=None):
-        return self._typed("create_variant", generation_id, variant_id, key=idempotency_key, object_id=object_id, variant_type=variant_type, metadata=metadata or {})
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed(
+            "create_variant",
+            generation_id,
+            variant_id,
+            key=key,
+            object_id=object_id,
+            variant_type=variant_type,
+            metadata=metadata or {},
+            idempotency_key=key,
+        )
 
 
 class RemoteAstridClient:

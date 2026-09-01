@@ -692,10 +692,13 @@ _optional_string_list = _primitives.optional_string_list
 
 def _parse_clip_kinds_supported(data: dict[str, Any]) -> list[str]:
     has_canonical = "clip_kinds_supported" in data
-    has_alias = "produces_for" in data
-    if not has_canonical and not has_alias:
+    if "produces_for" in data:
+        raise ExecutorValidationError(
+            "executor.produces_for is retired; use executor.clip_kinds_supported"
+        )
+    if not has_canonical:
         return []
-    key = "clip_kinds_supported" if has_canonical else "produces_for"
+    key = "clip_kinds_supported"
     path = f"executor.{key}"
     values = _string_list(data[key], path)
     normalized: list[str] = []

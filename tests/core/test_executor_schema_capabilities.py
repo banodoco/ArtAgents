@@ -56,13 +56,9 @@ class ExecutorSchemaCapabilityTest(unittest.TestCase):
         with self.assertRaisesRegex(ExecutorValidationError, "pipeline_requirements"):
             validate_executor_definition(_manifest(pipeline_requirements=["banana"]))
 
-    def test_deprecated_produces_for_alias_normalizes_without_round_trip(self) -> None:
-        executor = validate_executor_definition(_manifest(produces_for=["AUDIO", "TEXT"]))
-
-        self.assertEqual(executor.clip_kinds_supported, ("audio", "text"))
-        payload = executor.to_dict()
-        self.assertEqual(payload["clip_kinds_supported"], ["audio", "text"])
-        self.assertNotIn("produces_for", payload)
+    def test_retired_produces_for_alias_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ExecutorValidationError, "produces_for is retired"):
+            validate_executor_definition(_manifest(produces_for=["AUDIO", "TEXT"]))
 
     def test_external_runtime_package_metadata_and_output_extension_parse(self) -> None:
         executor = validate_executor_definition(

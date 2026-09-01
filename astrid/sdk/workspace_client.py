@@ -307,8 +307,8 @@ class WorkspaceClient:
     def create_timeline_document(self, project_id: str, timeline_id: str, *, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str | None = None, name: str | None = None, idempotency_key: str) -> Any:
         return self._call_generated("create_timeline_document", project_id, timeline_id, config=config, registry=registry, slug=slug, name=name, idempotency_key=idempotency_key)
 
-    def update_timeline_document(self, project_id: str, timeline_id: str, *, expected_version: int, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str | None = None, name: str | None = None) -> Any:
-        return self._call_generated("update_timeline_document", project_id, timeline_id, expected_version=expected_version, config=config, registry=registry, slug=slug, name=name)
+    def update_timeline_document(self, project_id: str, timeline_id: str, *, expected_version: int, config: Mapping[str, Any], registry: Mapping[str, Any], slug: str | None = None, name: str | None = None, idempotency_key: str) -> Any:
+        return self._call_generated("update_timeline_document", project_id, timeline_id, expected_version=expected_version, config=config, registry=registry, slug=slug, name=name, idempotency_key=idempotency_key)
 
     def list_timelines(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
         return self._call_generated("list_timelines", project_id, cursor=cursor, limit=limit)
@@ -413,8 +413,8 @@ class WorkspaceClient:
     def link_references(self, project_id: str, link: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("link_references", project_id, link, idempotency_key=idempotency_key)
 
-    def create_document(self, project_id: str, document_id: str, kind: str, content: Any) -> Any:
-        return self._call_generated("create_document", project_id, document_id, kind, content)
+    def create_document(self, project_id: str, document_id: str, kind: str, content: Any, *, idempotency_key: str) -> Any:
+        return self._call_generated("create_document", project_id, document_id, kind, content, idempotency_key=idempotency_key)
 
     def list_documents(self, project_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
         return self._call_generated("list_documents", project_id, cursor=cursor, limit=limit)
@@ -428,6 +428,7 @@ class WorkspaceClient:
         document_id: str,
         *,
         expected_version: int,
+        idempotency_key: str,
         content: Any = None,
         kind: str | None = None,
     ) -> Any:
@@ -436,6 +437,7 @@ class WorkspaceClient:
             project_id,
             document_id,
             expected_version=expected_version,
+            idempotency_key=idempotency_key,
             content=content,
             kind=kind,
         )
@@ -564,11 +566,11 @@ class WorkspaceClient:
     def list_variants(self, generation_id: str, *, cursor: str | None = None, limit: int = 50) -> Any:
         return self._call_generated("list_variants", generation_id, cursor=cursor, limit=limit)
 
-    def create_generation(self, project_id: str, generation_id: str, *, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None) -> Any:
-        return self._call_generated("create_generation", project_id, generation_id, metadata=metadata, type=type, source_task_id=source_task_id)
+    def create_generation(self, project_id: str, generation_id: str, *, metadata: Mapping[str, Any] | None = None, type: str = "generation", source_task_id: str | None = None, idempotency_key: str) -> Any:
+        return self._call_generated("create_generation", project_id, generation_id, metadata=metadata, type=type, source_task_id=source_task_id, idempotency_key=idempotency_key)
 
-    def create_variant(self, generation_id: str, variant_id: str, *, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None) -> Any:
-        return self._call_generated("create_variant", generation_id, variant_id, object_id=object_id, variant_type=variant_type, metadata=metadata)
+    def create_variant(self, generation_id: str, variant_id: str, *, object_id: str | None = None, variant_type: str = "original", metadata: Mapping[str, Any] | None = None, idempotency_key: str) -> Any:
+        return self._call_generated("create_variant", generation_id, variant_id, object_id=object_id, variant_type=variant_type, metadata=metadata, idempotency_key=idempotency_key)
 
     def list_capabilities(self, *, cursor: str | None = None, limit: int = 50) -> Any:
         """Return one strict ``[items, next_cursor]`` capability page.

@@ -103,11 +103,11 @@ try:
             "from pathlib import Path; import banodoco_workspace_client as c; "
             "from banodoco_workspace_client.contract_metadata import PROTOCOL, SCHEMA_DIGEST; "
             "assert PROTOCOL == 'workspace.v1'; assert SCHEMA_DIGEST.startswith('sha256:'); "
-            "assert Path(c.__file__).is_file(); print('generated runtime client: OK')",
+            "assert Path(c.__file__).is_file(); print('vendored workspace client: OK')",
         ],
         check=True,
     )
-    assert "generated runtime client: OK" in runtime_client.stdout
+    assert "vendored workspace client: OK" in runtime_client.stdout
 
     # Adversarial lanes prove that a missing resource and a checkout import
     # cannot be mistaken for a passing installed-artifact result.
