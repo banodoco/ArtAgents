@@ -149,8 +149,28 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_os.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_os.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "Five tool-system lines clearly originate at the canonical mink's two raised front paws, with normal head lighting and no head or torso connection. Full reusable edit prompt is stored in build/prompts/shot-06-tools-connected-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-06-tools-connected-paws-v2.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Preserve the clean quadruped mink silhouette exactly; route the system lines to a tiny control point directly beneath its ordinary rounded front paws. No fingers, hands, raised arms, or extra limbs. Full reusable edit prompt is stored in build/prompts/shot-06-paw-control-anatomy-lock-v3.txt.",
+            "label": "codex-paw-control-anatomy-lock-v3",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-06-paw-control-anatomy-lock-v3.png"
+          }
+        ],
+        "active_index": 2
       },
       "vo": {
         "text": "Deep connectors let agents work on top of open-source tools.",
@@ -175,8 +195,28 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_vc.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_vc.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "VibeComfy workflow noodles converge at the canonical mink's two front paws, with the glow and sparks confined to the paws and normal head lighting. Full reusable edit prompt is stored in build/prompts/shot-07-vibecomfy-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-07-vibecomfy-paws-v2.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Preserve the clean quadruped mink silhouette exactly; route the VibeComfy noodles to a tiny control point directly beneath its ordinary rounded front paws. No fingers, hands, raised arms, or extra limbs. Full reusable edit prompt is stored in build/prompts/shot-07-paw-control-anatomy-lock-v3.txt.",
+            "label": "codex-paw-control-anatomy-lock-v3",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-07-paw-control-anatomy-lock-v3.png"
+          }
+        ],
+        "active_index": 2
       },
       "vo": {
         "text": "For example, VibeComfy lets your agent deeply understand VibeComfy workflows and the ecosystem around them \u2014 and work within them.",
@@ -201,8 +241,28 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_more.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_more.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "The canonical mink operates the AI Toolkit lever with both front paws; the control glow originates at the paws and lever rather than the head. Full reusable edit prompt is stored in build/prompts/shot-08-ai-toolkit-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-08-ai-toolkit-paws-v2.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Preserve the clean quadruped mink silhouette and ordinary rounded paws exactly; move only the control glow so it originates at the existing paw-operated lever. No fingers, hands, raised arms, or extra limbs. Full reusable edit prompt is stored in build/prompts/shot-08-paw-control-anatomy-lock-v3.txt.",
+            "label": "codex-paw-control-anatomy-lock-v3",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-08-paw-control-anatomy-lock-v3.png"
+          }
+        ],
+        "active_index": 2
       },
       "vo": {
         "text": "Connectors to tools like AI Toolkit let it train new models, and it can additionally hook into any MCP server for more.",
@@ -227,8 +287,21 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_mm.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_mm.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "Sparse symbolic Astrid pixel-art slide using the canonical two-tab layout: one orange mink at lower center conducts a gently curving three-track multimedia timeline overhead with its natural front paws; no extra text or interface chrome. Full reusable prompt is stored in build/prompts/shot-09-multimedia-timeline-v2.txt.",
+            "label": "codex-timeline-conductor-v3",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-09-multimedia-timeline-v3.png"
+          }
+        ],
+        "active_index": 1
       },
       "vo": {
         "text": "Second, for working with multimedia: we provide tools for agents to work with complex forms like video timelines \u2014 to understand them, and work with them in depth, using both image and video understanding models.",
@@ -253,8 +326,28 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_data.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_data.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "Direct continuation of the timeline-conductor slide: the same lower-center mink organizes two pixel-native mountains of generations, waveforms, folders, model cubes, and action-log tiles as the overhead timeline descends into them. Full reusable prompt is stored in build/prompts/shot-10-organized-data-v1.txt.",
+            "label": "codex-organized-data-v1",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-10-organized-data-v1.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "The organized-data timeline paths terminate precisely at the canonical mink's two raised front paws; the head and torso are normally lit and disconnected. Full reusable edit prompt is stored in build/prompts/shot-10-organized-data-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-10-organized-data-paws-v2.png"
+          }
+        ],
+        "active_index": 1
       },
       "vo": {
         "text": "And third, there's a built-in data structure that automatically organizes all of your actions and all of your generations, and gives agents tools to work with them.",
@@ -279,8 +372,42 @@
         "active": 0
       },
       "image": {
-        "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_defaults.png",
-        "type": "image"
+        "variants": [
+          {
+            "source": "asset",
+            "path": "/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/slides-pyramid-full/idea1_defaults.png",
+            "label": "final-html"
+          },
+          {
+            "source": "gen",
+            "prompt": "Canonical orange mink at lower center surrounded by five clean miniature modules summarizing tools, VibeComfy, AI Toolkit training, multimedia timelines, and organized data as polished strong defaults. Full reusable prompt is stored in build/prompts/shot-11-strong-defaults-v1.txt.",
+            "label": "codex-strong-defaults-v1",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-11-strong-defaults-v1.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "All five strong-default module lines converge at the canonical mink's two raised front paws, with normal head lighting and no head or torso hub. Full reusable edit prompt is stored in build/prompts/shot-11-strong-defaults-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-11-strong-defaults-paws-v2.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Preserve the clean quadruped mink silhouette exactly; route the five module lines to a tiny control point directly beneath its ordinary rounded front paws. No fingers, hands, raised arms, or extra limbs. Full reusable edit prompt is stored in build/prompts/shot-11-paw-control-anatomy-lock-v3.txt.",
+            "label": "codex-paw-control-anatomy-lock-v3",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-11-paw-control-anatomy-lock-v3.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Preserve every pixel of the approved quadruped mink; reroute only the five module lines with clear black separation from the head and body so they meet exclusively at the ground-level control point beneath its ordinary front paws. Full reusable edit prompt is stored in build/prompts/shot-11-paw-control-clearance-v4.txt.",
+            "label": "codex-paw-control-clearance-v4",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-11-paw-control-clearance-v4.png"
+          }
+        ],
+        "active_index": 4
       },
       "vo": {
         "text": "For each of these, we provide strong defaults that you can customize as you please. Everything is built to be a plugin.",
@@ -292,6 +419,47 @@
         "prompt": "explanatory presentation slide in chunky retro pixel art style, near-black background with thin orange terminal border: TOP HEADER shows '1 TOOLS & STRUCTURES' highlighted bright orange, '2 COLLECTIVE KNOWLEDGE' dimmed gray, indicating subsection of 1; BELOW header, indented pyramid layout with headline and sub-bullets connected by thin orange lines showing hierarchy, 16-bit, landscape. Visual: pixel art modular building blocks assembling, orange mink holding out a glowing plugin chip offering forward, center-left, 16-bit, landscape",
         "generator": {
           "tool": "codex-image-generation"
+        }
+      }
+    },
+    {
+      "id": "idea1_plugins",
+      "nav": {
+        "tabs": [
+          "1 TOOLS & STRUCTURES",
+          "2 COLLECTIVE KNOWLEDGE"
+        ],
+        "active": 0
+      },
+      "image": {
+        "variants": [
+          {
+            "source": "gen",
+            "prompt": "Near-identical progression from the strong-defaults slide: the same mink removes one module cartridge and inserts a visibly different alternative into the same socket, making the replaceable plugin model immediately clear. Full reusable prompt is stored in build/prompts/shot-12-plugin-swap-v1.txt.",
+            "label": "codex-plugin-swap-v1",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-12-plugin-swap-v1.png"
+          },
+          {
+            "source": "gen",
+            "prompt": "Every module line reaches the alternate cartridges held directly in the canonical mink's front paws; no line or glow converges at the head, neck, chest, or torso. Full reusable edit prompt is stored in build/prompts/shot-12-plugin-swap-paws-v2.txt.",
+            "label": "codex-paw-control-v2",
+            "model": "codex-integrated-imagegen",
+            "alt_render_path": "../projects/astrid-intro/build/generated/shot-12-plugin-swap-paws-v2.png"
+          }
+        ],
+        "active_index": 0
+      },
+      "vo": {
+        "text": "You can customize them as you please. Everything is built to be a plugin.",
+        "audio": {
+          "asset": "../projects/astrid-intro/build/segments/idea1_plugins.wav"
+        }
+      },
+      "provenance": {
+        "prompt": "Near-identical progression from the strong-defaults slide: the same mink removes one module cartridge and inserts a visibly different alternative into the same socket, making the replaceable plugin model immediately clear. Full reusable prompt is stored in build/prompts/shot-12-plugin-swap-v1.txt.",
+        "generator": {
+          "tool": "codex-integrated-imagegen"
         }
       }
     },
