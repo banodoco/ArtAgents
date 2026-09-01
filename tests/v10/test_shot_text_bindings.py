@@ -25,6 +25,7 @@ from astrid.packs.shots.text_bindings import (
     ShotTextBindingAmbiguousError,
     ShotTextBindingIntegrityError,
     ShotTextBindingRepository,
+    ShotTextBindingValidationError,
     derive_text_binding_id,
     derive_text_binding_stream_id,
     freeze_text_bytes,
@@ -85,6 +86,14 @@ def _import_text(env, project_id: str, data: bytes, *, key: str = "media-key"):
     )
 
 
+def _set_binding(env, *, text: bytes, **kwargs):
+    """Freeze caller bytes before opening the repository unit of work."""
+    frozen = freeze_text_bytes(text)
+    return UnitOfWork(env["writer"]).run(
+        lambda u: env["bindings"].set(u, frozen=frozen, **kwargs)
+    )
+
+
 def test_identity_vectors_are_natural_and_key_independent() -> None:
     base = dict(project_id="project", shot_id="shot", kind="prompt", slot=None)
     first = derive_text_binding_id(**base)
@@ -132,11 +141,9 @@ def test_media_read_is_project_scoped_and_has_no_relations(text_env) -> None:
 def test_binding_set_creates_natural_projection_and_stream(text_env) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    result = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"Hello\n", expected_head=0, idempotency_key="binding-key",
-        )
+    result = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"Hello\n", expected_head=0, idempotency_key="binding-key",
     )
     assert result.changed is True
     assert result.binding.binding_id == derive_text_binding_id(
@@ -163,11 +170,9 @@ def test_binding_friendly_omitted_slot_is_wildcard_for_existing_target(text_env)
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
     for slot, key in (("regen-glitch", "one"), ("variant", "two")):
-        UnitOfWork(text_env["writer"]).run(
-            lambda u, slot=slot, key=key: text_env["bindings"].set(
-                u, project_id=project.id, shot_ref=shot.id, kind="prompt", slot=slot,
-                text=key.encode(), expected_head=0, idempotency_key=key,
-            )
+        _set_binding(
+            text_env, project_id=project.id, shot_ref=shot.id, kind="prompt", slot=slot,
+            text=key.encode(), expected_head=0, idempotency_key=key,
         )
     with pytest.raises(ShotTextBindingAmbiguousError) as exc_info:
         UnitOfWork(text_env["writer"]).run(
@@ -183,11 +188,9 @@ def test_binding_friendly_omitted_slot_is_wildcard_for_existing_target(text_env)
 def test_bound_media_corruption_is_integrity_failure(text_env) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    result = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"stable", expected_head=0, idempotency_key="integrity-key",
-        )
+    result = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="integrity-key",
     )
     path = managed_media_path(text_env["root"], result.binding.content_hash)
     path.write_bytes(b"changed")
@@ -225,11 +228,9 @@ def test_canonical_request_hash_vectors_include_binding_stream_and_desired_hash(
 def test_authority_corruption_is_rejected_before_any_write(text_env) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"stable", expected_head=0, idempotency_key="authority-key",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="authority-key",
     )
     binding_id = created.binding.binding_id
     stream_id = created.binding.event_stream_id
@@ -245,11 +246,9 @@ def test_authority_corruption_is_rejected_before_any_write(text_env) -> None:
         lambda s: s.execute("UPDATE shot_text_bindings SET shot_id = ? WHERE id = ?", (other_shot.id, binding_id))
     )
     with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
-        UnitOfWork(text_env["writer"]).run(
-            lambda u: text_env["bindings"].set(
-                u, project_id=project.id, binding_id=binding_id, text=b"next",
-                expected_head=1, idempotency_key="authority-fail",
-            )
+        _set_binding(
+            text_env, project_id=project.id, binding_id=binding_id, text=b"next",
+            expected_head=1, idempotency_key="authority-fail",
         )
     assert exc_info.value.detail == "binding_shot_project_mismatch"
     after = text_env["writer"].submit(
@@ -275,11 +274,9 @@ def test_corrupt_stream_authority_is_zero_write_for_exact_and_friendly_set(
 ) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"stable", expected_head=0, idempotency_key=f"stream-{column}",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key=f"stream-{column}",
     )
     stream_id = created.binding.event_stream_id
     if column == "project_id":
@@ -305,7 +302,7 @@ def test_corrupt_stream_authority_is_zero_write_for_exact_and_friendly_set(
     )
     request = {
         "project_id": project.id,
-        "text": b"next",
+        "frozen": freeze_text_bytes(b"next"),
         "expected_head": 1,
         "idempotency_key": f"stream-corrupt-{selector}-{column}",
     }
@@ -335,17 +332,13 @@ def test_corrupt_stream_authority_is_zero_write_for_exact_and_friendly_set(
 def test_receipt_replay_checks_before_full_stream_authority(text_env, monkeypatch) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"stable", expected_head=0, idempotency_key="replay-create",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="replay-create",
     )
-    changed = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"changed", expected_head=1, idempotency_key="replay-changed",
-        )
+    changed = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"changed", expected_head=1, idempotency_key="replay-changed",
     )
     text_env["writer"].submit(
         lambda s: s.execute(
@@ -357,11 +350,9 @@ def test_receipt_replay_checks_before_full_stream_authority(text_env, monkeypatc
         text_env["bindings"], "_validate_binding_authority",
         lambda *args, **kwargs: pytest.fail("replay performed full authority validation"),
     )
-    replay = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, binding_id=created.binding.binding_id,
-            text=b"changed", expected_head=1, idempotency_key="replay-changed",
-        )
+    replay = _set_binding(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id,
+        text=b"changed", expected_head=1, idempotency_key="replay-changed",
     )
     assert replay.binding == changed.binding
 
@@ -378,11 +369,9 @@ def test_natural_and_stream_identity_corruption_is_typed(
 ) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"stable", expected_head=0, idempotency_key=f"{column}-key",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key=f"{column}-key",
     )
     binding_id = created.binding.binding_id
     if column == "event_stream_id":
@@ -419,11 +408,9 @@ def test_prepared_materialization_uses_one_0600_temp_and_cleans_it(text_env, mon
         return prepared, path
 
     monkeypatch.setattr(text_env["bindings"], "_prepared_media", wrapped)
-    result = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"prepared", expected_head=0, idempotency_key="prepared-key",
-        )
+    result = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"prepared", expected_head=0, idempotency_key="prepared-key",
     )
     assert len(observed) == 1
     assert observed[0]["mode"] == "0o600"
@@ -444,11 +431,9 @@ def test_existing_digest_reuses_mime_and_never_prepares_temp(text_env, monkeypat
         )
     )
     monkeypatch.setattr(text_env["bindings"], "_prepared_media", pytest.fail)
-    result = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"reused", expected_head=0, idempotency_key="reuse-binding",
-        )
+    result = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"reused", expected_head=0, idempotency_key="reuse-binding",
     )
     assert result.binding.media_id == media.id
     assert result.binding.mime_type == "text/markdown"
@@ -458,13 +443,29 @@ def test_direct_repository_path_never_calls_prepare_media_file(text_env, monkeyp
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
     monkeypatch.setattr("astrid.packs.shots.text_bindings.prepare_media_file", pytest.fail, raising=False)
+    frozen = freeze_text_bytes(b"no-probe")
+    monkeypatch.setattr("astrid.packs.shots.text_bindings.freeze_text_bytes", pytest.fail)
     result = UnitOfWork(text_env["writer"]).run(
         lambda u: text_env["bindings"].set(
             u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"no-probe", expected_head=0, idempotency_key="no-probe-key",
+            frozen=frozen, expected_head=0, idempotency_key="no-probe-key",
         )
     )
     assert result.changed
+
+
+def test_direct_repository_rejects_raw_bytes_before_any_write(text_env) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    before = _binding_counts(text_env)
+    with pytest.raises(ShotTextBindingValidationError, match="frozen text bytes"):
+        UnitOfWork(text_env["writer"]).run(
+            lambda u: text_env["bindings"].set(
+                u, project_id=project.id, shot_ref=shot.id, kind="transcript",
+                frozen=b"raw", expected_head=0, idempotency_key="raw-key",
+            )
+        )
+    assert _binding_counts(text_env) == before
 
 
 def _binding_counts(env) -> tuple[int, int, int, int]:
@@ -477,14 +478,116 @@ def _binding_counts(env) -> tuple[int, int, int, int]:
     return tuple(row)
 
 
+def _binding_authority_snapshot(
+    env, *, project_id: str, binding_id: str, desired_digest: str,
+    desired_locator: str, binding_key: str, media_key: str,
+) -> dict[str, object]:
+    def capture(session):
+        project = session.query_one(
+            "SELECT event_head_seq FROM projects WHERE id = ?", (project_id,)
+        )
+        streams = session.query(
+            "SELECT id, project_id, stream_type, aggregate_id, head_seq "
+            "FROM event_streams WHERE project_id = ? ORDER BY id",
+            (project_id,),
+        )
+        events = session.query(
+            "SELECT * FROM events WHERE project_id = ? AND idempotency_key IN (?, ?) "
+            "ORDER BY project_seq, event_id",
+            (project_id, binding_key, media_key),
+        )
+        event_summary = session.query_one(
+            "SELECT COUNT(*), MAX(project_seq) FROM events WHERE project_id = ?",
+            (project_id,),
+        )
+        per_stream = session.query(
+            "SELECT stream_id, MAX(seq) FROM events WHERE project_id = ? "
+            "GROUP BY stream_id ORDER BY stream_id",
+            (project_id,),
+        )
+        media_summary = session.query_one(
+            "SELECT "
+            "(SELECT COUNT(*) FROM media WHERE project_id = ?), "
+            "(SELECT COUNT(*) FROM media WHERE project_id = ? AND content_hash = ?), "
+            "(SELECT COUNT(*) FROM media_locations ml JOIN media m ON m.id = ml.media_id "
+            " WHERE m.project_id = ?), "
+            "(SELECT COUNT(*) FROM media_locations ml JOIN media m ON m.id = ml.media_id "
+            " WHERE m.project_id = ? AND ml.realm = 'managed_local' AND ml.locator = ?) "
+            "",
+            (
+                project_id, project_id, desired_digest, project_id,
+                project_id, desired_locator,
+            ),
+        )
+        binding = session.query_one(
+            "SELECT * FROM shot_text_bindings WHERE id = ?", (binding_id,)
+        )
+        receipts = session.query_one(
+            "SELECT "
+            "(SELECT COUNT(*) FROM command_receipts WHERE project_id = ?), "
+            "(SELECT COUNT(*) FROM command_receipts "
+            " WHERE project_id = ? AND idempotency_key = ?) "
+            "",
+            (project_id, project_id, binding_key),
+        )
+        return {
+            "project_event_head_seq": int(project["event_head_seq"]),
+            "event_streams": {
+                "count": len(streams),
+                "rows": tuple(tuple(row) for row in streams),
+            },
+            "events": {
+                "count": int(event_summary[0]),
+                "max_project_seq": event_summary[1],
+                "per_stream_max_seq": tuple(tuple(row) for row in per_stream),
+                "key_rows": tuple(tuple(row) for row in events),
+            },
+            "media": {
+                "count": int(media_summary[0]),
+                "desired_digest_count": int(media_summary[1]),
+                "media_locations_count": int(media_summary[2]),
+                "canonical_desired_locator_count": int(media_summary[3]),
+            },
+            "shot_text_bindings": {
+                "count": int(
+                    session.query_one(
+                        "SELECT COUNT(*) FROM shot_text_bindings WHERE project_id = ?",
+                        (project_id,),
+                    )[0]
+                ),
+                "prospective_target": (
+                    {
+                        "exists": True,
+                        "row": tuple(binding),
+                        "media_id": binding["media_id"],
+                        "updated_at": binding["updated_at"],
+                        "event_stream_id": binding["event_stream_id"],
+                    }
+                    if binding is not None
+                    else {
+                        "exists": False,
+                        "row": None,
+                        "media_id": None,
+                        "updated_at": None,
+                        "event_stream_id": None,
+                    }
+                ),
+            },
+            "command_receipts": {
+                "count": int(receipts[0]),
+                "top_level_key_count": int(receipts[1]),
+            },
+        }
+
+    return env["writer"].submit(capture)
+
+
 def test_event_append_fingerprint_fence_rolls_back_set_current_race(text_env, monkeypatch) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"old", expected_head=0, idempotency_key="race-old",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"old", expected_head=0, idempotency_key="race-old",
     )
     path = managed_media_path(text_env["root"], created.binding.content_hash)
     before = _binding_counts(text_env)
@@ -498,11 +601,9 @@ def test_event_append_fingerprint_fence_rolls_back_set_current_race(text_env, mo
 
     monkeypatch.setattr(text_env["bindings"]._events, "append", append)
     with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
-        UnitOfWork(text_env["writer"]).run(
-            lambda u: text_env["bindings"].set(
-                u, project_id=project.id, binding_id=created.binding.binding_id,
-                text=b"new", expected_head=1, idempotency_key="race-current",
-            )
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"new", expected_head=1, idempotency_key="race-current",
         )
     assert exc_info.value.detail == "managed_file_mutated"
     assert _binding_counts(text_env) == before
@@ -515,11 +616,9 @@ def test_event_append_fingerprint_fence_rolls_back_set_current_race(text_env, mo
 def test_event_append_fingerprint_fence_rolls_back_set_desired_race(text_env, monkeypatch) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"old", expected_head=0, idempotency_key="desired-old",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"old", expected_head=0, idempotency_key="desired-old",
     )
     desired = _import_text(text_env, project.id, b"desired", key="desired-media")
     path = managed_media_path(text_env["root"], desired.content_hash)
@@ -534,11 +633,9 @@ def test_event_append_fingerprint_fence_rolls_back_set_desired_race(text_env, mo
 
     monkeypatch.setattr(text_env["bindings"]._events, "append", append)
     with pytest.raises(ShotTextBindingIntegrityError, match="managed_file_mutated"):
-        UnitOfWork(text_env["writer"]).run(
-            lambda u: text_env["bindings"].set(
-                u, project_id=project.id, binding_id=created.binding.binding_id,
-                text=b"desired", expected_head=1, idempotency_key="race-desired",
-            )
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"desired", expected_head=1, idempotency_key="race-desired",
         )
     assert _binding_counts(text_env) == before
     path.write_bytes(b"desired")
@@ -550,11 +647,9 @@ def test_event_append_fingerprint_fence_rolls_back_set_desired_race(text_env, mo
 def test_event_append_fingerprint_fence_rolls_back_rebind_race(text_env, monkeypatch) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"old", expected_head=0, idempotency_key="rebind-old",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"old", expected_head=0, idempotency_key="rebind-old",
     )
     desired = _import_text(text_env, project.id, b"desired", key="rebind-media")
     path = managed_media_path(text_env["root"], desired.content_hash)
@@ -580,82 +675,161 @@ def test_event_append_fingerprint_fence_rolls_back_rebind_race(text_env, monkeyp
 
 
 @pytest.mark.parametrize("failure", ["materialize", "event", "receipt"])
-def test_injected_binding_failures_roll_back_all_rows_and_clean_temp(
+def test_injected_binding_failures_roll_back_complete_authority_and_clean_temp(
     text_env, monkeypatch, failure: str
 ) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    before = _binding_counts(text_env)
+    frozen = freeze_text_bytes(f"failure-{failure}".encode())
+    binding_key = f"failure-{failure}"
+    binding_id = derive_text_binding_id(
+        project_id=project.id, shot_id=shot.id, kind="transcript", slot=None
+    )
+    media_key = f"{binding_key}:media:{frozen.digest}"
+    snapshot_args = {
+        "project_id": project.id,
+        "binding_id": binding_id,
+        "desired_digest": frozen.digest,
+        "desired_locator": str(managed_media_path(text_env["root"], frozen.digest)),
+        "binding_key": binding_key,
+        "media_key": media_key,
+    }
+    before = _binding_authority_snapshot(text_env, **snapshot_args)
+    counters = {
+        "materialize_prepared": {"attempted": 0, "committed": 0},
+        "core_media_event_append": {"attempted": 0, "committed": 0},
+        "binding_event_append": {"attempted": 0, "committed": 0},
+        "receipt_record": {"attempted": 0, "committed": 0},
+        "uow": {"attempted": 0, "committed": 0, "rollback": 0},
+        "temp_creation": {"attempted": 0, "committed": 0},
+        "temp_0600": {"attempted": 0, "committed": 0},
+        "temp_cleanup": {"attempted": 0, "committed": 0},
+    }
     observed: list[Path] = []
     original_prepare = text_env["bindings"]._prepared_media
 
-    def prepared(frozen):
-        value, path = original_prepare(frozen)
+    def prepared(value):
+        counters["temp_creation"]["attempted"] += 1
+        prepared_value, path = original_prepare(value)
         observed.append(path)
-        return value, path
+        counters["temp_creation"]["committed"] += 1
+        counters["temp_0600"]["attempted"] += 1
+        if (os.stat(path).st_mode & 0o777) == 0o600:
+            counters["temp_0600"]["committed"] += 1
+        return prepared_value, path
 
     monkeypatch.setattr(text_env["bindings"], "_prepared_media", prepared)
+    media = text_env["bindings"]._media
+    original_materialize = media.materialize_prepared
     if failure == "materialize":
-        def fail_materialize(*args, **kwargs):
+        def materialize_target(*args, **kwargs):
             raise RuntimeError("injected materialization failure")
-        monkeypatch.setattr(text_env["bindings"]._media, "materialize_prepared", fail_materialize)
-    elif failure == "event":
-        original_append = text_env["bindings"]._events.append
-        def failing_append(uow, **kwargs):
+    else:
+        materialize_target = original_materialize
+
+    def counting_materialize(*args, **kwargs):
+        counters["materialize_prepared"]["attempted"] += 1
+        return materialize_target(*args, **kwargs)
+
+    monkeypatch.setattr(media, "materialize_prepared", counting_materialize)
+    original_append = text_env["bindings"]._events.append
+    if failure == "event":
+        def append_target(uow, **kwargs):
             if kwargs["event_kind"] == "shot.text_binding.created":
                 raise RuntimeError("injected binding event failure")
             return original_append(uow, **kwargs)
-        monkeypatch.setattr(text_env["bindings"]._events, "append", failing_append)
     else:
-        def fail_receipt(*args, **kwargs):
+        append_target = original_append
+
+    def counting_append(uow, **kwargs):
+        event_kind = kwargs["event_kind"]
+        if event_kind == "core.media.imported":
+            counter = counters["core_media_event_append"]
+        elif event_kind == "shot.text_binding.created":
+            counter = counters["binding_event_append"]
+        else:
+            return append_target(uow, **kwargs)
+        counter["attempted"] += 1
+        return append_target(uow, **kwargs)
+
+    monkeypatch.setattr(text_env["bindings"]._events, "append", counting_append)
+    original_record = text_env["bindings"]._receipts.record
+    if failure == "receipt":
+        def record_target(*args, **kwargs):
             raise RuntimeError("injected receipt failure")
-        monkeypatch.setattr(text_env["bindings"]._receipts, "record", fail_receipt)
+    else:
+        record_target = original_record
+
+    def counting_record(*args, **kwargs):
+        counters["receipt_record"]["attempted"] += 1
+        return record_target(*args, **kwargs)
+
+    monkeypatch.setattr(text_env["bindings"]._receipts, "record", counting_record)
+
+    def on_statement(kind, _sql, _parameters):
+        if kind == "begin_immediate":
+            counters["uow"]["attempted"] += 1
+        elif kind == "commit":
+            counters["uow"]["committed"] += 1
+            for name in (
+                "materialize_prepared", "core_media_event_append",
+                "binding_event_append", "receipt_record",
+            ):
+                counters[name]["committed"] = counters[name]["attempted"]
+        elif kind == "rollback":
+            counters["uow"]["rollback"] += 1
     with pytest.raises((AssertionError, RuntimeError)):
-        UnitOfWork(text_env["writer"]).run(
+        UnitOfWork(text_env["writer"], on_statement=on_statement).run(
             lambda u: text_env["bindings"].set(
                 u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-                text=f"failure-{failure}".encode(), expected_head=0,
-                idempotency_key=f"failure-{failure}",
+                frozen=frozen, expected_head=0, idempotency_key=binding_key,
             )
         )
-    assert _binding_counts(text_env) == before
-    assert observed and all(not path.exists() for path in observed)
+    counters["temp_cleanup"]["attempted"] = len(observed)
+    counters["temp_cleanup"]["committed"] = sum(
+        not path.exists() for path in observed
+    )
+    assert _binding_authority_snapshot(text_env, **snapshot_args) == before
+    assert counters["uow"] == {"attempted": 1, "committed": 0, "rollback": 1}
+    assert counters["materialize_prepared"] == {"attempted": 1, "committed": 0}
+    assert counters["core_media_event_append"] == {
+        "attempted": int(failure != "materialize"), "committed": 0
+    }
+    assert counters["binding_event_append"] == {
+        "attempted": int(failure in ("event", "receipt")), "committed": 0
+    }
+    assert counters["receipt_record"] == {
+        "attempted": int(failure == "receipt"), "committed": 0
+    }
+    assert counters["temp_creation"] == {"attempted": 1, "committed": 1}
+    assert counters["temp_0600"] == {"attempted": 1, "committed": 1}
+    assert counters["temp_cleanup"] == {"attempted": 1, "committed": 1}
 
 
 def test_replay_stale_and_noop_never_prepare_temp(text_env, monkeypatch) -> None:
     project = _create_project(text_env)
     shot = _create_shot(text_env, project.id)
-    created = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
-            text=b"one", expected_head=0, idempotency_key="first",
-        )
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"one", expected_head=0, idempotency_key="first",
     )
-    changed = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, binding_id=created.binding.binding_id,
-            text=b"two", expected_head=1, idempotency_key="second",
-        )
+    changed = _set_binding(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id,
+        text=b"two", expected_head=1, idempotency_key="second",
     )
     monkeypatch.setattr(text_env["bindings"], "_prepared_media", pytest.fail)
-    replay = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, binding_id=created.binding.binding_id,
-            text=b"two", expected_head=1, idempotency_key="second",
-        )
+    replay = _set_binding(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id,
+        text=b"two", expected_head=1, idempotency_key="second",
     )
     assert replay.binding == changed.binding
     with pytest.raises(Exception, match="expected head"):
-        UnitOfWork(text_env["writer"]).run(
-            lambda u: text_env["bindings"].set(
-                u, project_id=project.id, binding_id=created.binding.binding_id,
-                text=b"three", expected_head=1, idempotency_key="stale",
-            )
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"three", expected_head=1, idempotency_key="stale",
         )
-    no_op = UnitOfWork(text_env["writer"]).run(
-        lambda u: text_env["bindings"].set(
-            u, project_id=project.id, binding_id=created.binding.binding_id,
-            text=b"two", expected_head=2, idempotency_key="no-op",
-        )
+    no_op = _set_binding(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id,
+        text=b"two", expected_head=2, idempotency_key="no-op",
     )
     assert no_op.changed is False

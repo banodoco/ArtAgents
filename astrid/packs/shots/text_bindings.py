@@ -1245,7 +1245,7 @@ class ShotTextBindingRepository:
         uow: UnitOfWork,
         *,
         project_id: str,
-        text: bytes | FrozenTextBytes | None = None,
+        frozen: FrozenTextBytes,
         expected_head: int,
         idempotency_key: str,
         binding_id: str | None = None,
@@ -1253,21 +1253,15 @@ class ShotTextBindingRepository:
         kind: str | None = None,
         slot: str | None = None,
         actor_kind: str = "local",
-        frozen: FrozenTextBytes | None = None,
         prepared: _PreparedTextBindingCommand | None = None,
         canonical_request_hash: str | None = None,
     ) -> ShotTextBindingMutation:
-        """Set complete text; caller bytes are frozen before UoW in normal use."""
+        """Set complete text from bytes frozen before the writer transaction."""
+        if not isinstance(frozen, FrozenTextBytes):
+            raise ShotTextBindingValidationError("frozen text bytes are required")
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
         idempotency_key = _require_key(idempotency_key)
-        if frozen is None:
-            if isinstance(text, FrozenTextBytes):
-                frozen = text
-            else:
-                frozen = freeze_text_bytes(text)
-        elif text is not None and not isinstance(text, FrozenTextBytes):
-            raise ShotTextBindingValidationError("text and frozen text bytes cannot be combined")
         if prepared is None:
             prepared = self.prepare_set(
                 uow, project_id=project_id, frozen=frozen,
