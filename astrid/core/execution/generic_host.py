@@ -8,6 +8,7 @@ leases, reservations, and settlement remain protocol operations on the daemon.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import hmac
 import importlib.util
@@ -54,6 +55,18 @@ class HostError(RuntimeError):
 
 class HostCancelled(HostError):
     """The runtime cancelled the attempt while the subprocess was running."""
+
+
+def _dependency_pythonpath() -> tuple[str, ...]:
+    """Keep explicitly supplied interpreter dependency roots across children."""
+    values: list[str] = []
+    for raw in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if not raw:
+            continue
+        path = Path(raw)
+        if path.name in {"site-packages", "dist-packages"}:
+            values.append(str(path))
+    return tuple(dict.fromkeys(values))
 
 
 @dataclass
@@ -645,10 +658,14 @@ class RuntimeProtocolClient:
         "worker:register",
         "worker:execute",
         "tasks:read",
-        "tasks:write",
         "objects:read",
         "objects:write",
     )
+    # The runtime associates inline settlement bytes with the task project in
+    # one transaction.  Workers are intentionally not granted projects:write,
+    # so they must not pre-publish an unscoped CAS object and then attempt a
+    # forbidden project association.
+    INLINE_SETTLEMENT_OUTPUTS = True
 
     def __init__(self, endpoint: str, credential: str, *, timeout: float = 30.0):
         try:
@@ -808,14 +825,18 @@ class RuntimeProtocolClient:
     def upload_object(self, path: Path, *, project_id: str, media_type: str, filename: str | None = None):
         if not isinstance(project_id, str) or not project_id.strip():
             raise HostError("project-scoped output upload requires project_id")
+        # Worker credentials may publish CAS bytes but are deliberately not
+        # granted projects:write, which is required to mutate project
+        # associations.  Settlement owns that association transactionally;
+        # upload only the immutable object here and keep the project binding
+        # on the task/settlement path.
         with path.open("rb") as stream:
             data = stream.read()
-            return self.generated.ingest_project_object(
-                project_id,
+            return self.generated.ingest_object(
                 data,
                 media_type=media_type,
                 idempotency_key=(
-                    f"output-{hashlib.sha256(project_id.encode()).hexdigest()}-"
+                    "output-"
                     f"{hashlib.sha256(data).hexdigest()}"
                 ),
                 filename=filename,
@@ -1750,6 +1771,7 @@ class GenericPackHost:
                 "runtime client must provide canonical upload_object for output publication"
             )
         uploaded: list[dict[str, Any]] = []
+        inline = bool(getattr(self.client, "INLINE_SETTLEMENT_OUTPUTS", False))
         for descriptor in outputs:
             descriptor = dict(descriptor)
             raw_path = descriptor.pop("path", None)
@@ -1757,6 +1779,15 @@ class GenericPackHost:
                 raise HostError("generated output is missing its staged path")
             path = Path(str(raw_path))
             media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
+            if inline:
+                data = path.read_bytes()
+                descriptor["digest"] = "sha256:" + hashlib.sha256(data).hexdigest()
+                descriptor["media_type"] = media_type
+                descriptor["size"] = len(data)
+                descriptor["kind"] = "object"
+                descriptor["data_base64"] = base64.b64encode(data).decode("ascii")
+                uploaded.append({key: descriptor[key] for key in ("name", "kind", "media_type", "digest", "size", "data_base64")})
+                continue
             object_row = upload_object(
                 path,
                 project_id=project_id,
@@ -1824,7 +1855,7 @@ class GenericPackHost:
             admission=admission,
             network_broker=network_broker,
             explicit_env={
-                "PYTHONPATH": package_parent,
+                "PYTHONPATH": os.pathsep.join((package_parent, *_dependency_pythonpath())),
                 ASTRID_INTERNAL_INVOCATION: "1",
                 **{str(key): str(value) for key, value in command.env.items()},
             },
@@ -1979,7 +2010,9 @@ class GenericPackHost:
                     ):
                         raise HostError("admitted Python import root is outside the source fence")
                     import_roots.append(str(import_root))
-        env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys((package_parent, *import_roots)))
+        env["PYTHONPATH"] = os.pathsep.join(
+            dict.fromkeys((package_parent, *_dependency_pythonpath(), *import_roots))
+        )
         env[ASTRID_PACKS_PATH] = os.pathsep.join(str(root) for root in self.pack_roots)
         broker_endpoint = str((child_env or {}).get("ASTRID_BROKER_PROXY") or "")
         process = popen_owned_group(

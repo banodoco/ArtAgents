@@ -29,10 +29,12 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_mai
 guard_canonical_entrypoint("iteration.experiment_import")
 import argparse  # noqa: E402
 import ctypes  # noqa: E402
+import errno  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import secrets  # noqa: E402
+import shutil  # noqa: E402
 import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any, Mapping  # noqa: E402
@@ -137,8 +139,10 @@ def _hardlink_media(src: Path, dst: Path) -> bool:
     inode: a writable hardlink lets later review tooling mutate the source
     evidence.  On macOS/APFS ``clonefile(2)`` creates an independent inode
     backed by copy-on-write extents, so large media is not copied eagerly.
-    Where cloning is unavailable this function fails honestly; callers record
-    a capture gap rather than falling back to a byte copy or unsafe alias.
+    Where cloning is unavailable (for example HFS+, which exposes the macOS
+    clonefile symbol but rejects the operation), a regular copy is used.  The
+    copy is still staged and verified before replacement, so it has an
+    independent inode and retains the same atomic publication contract.
 
     The clone is staged at a unique sibling and atomically replaced only after
     its bytes and inode independence are verified.  Existing destinations are
@@ -161,7 +165,29 @@ def _hardlink_media(src: Path, dst: Path) -> bool:
             pass
     tmp = _unique_temp_link_path(dst)
     try:
-        _clonefile(src, tmp)
+        try:
+            _clonefile(src, tmp)
+        except OSError as exc:
+            # clonefile(2) is present on macOS but unsupported by HFS+ and
+            # other filesystems.  Only those explicit capability errors may
+            # fall back to a byte copy; injected/permission/cross-device
+            # failures remain honest failures and preserve the destination.
+            unsupported = {
+                code
+                for code in (
+                    getattr(errno, "ENOTSUP", None),
+                    getattr(errno, "EOPNOTSUPP", None),
+                    getattr(errno, "ENOSYS", None),
+                )
+                if code is not None
+            }
+            if exc.errno not in unsupported:
+                raise
+            shutil.copyfile(src, tmp)
+        except AttributeError:
+            # Non-macOS Python has no clonefile symbol.  The destination is a
+            # sibling path, so copyfile remains safe and atomic after verify.
+            shutil.copyfile(src, tmp)
         if _same_inode(src, tmp):
             _safe_unlink(tmp)
             return False

@@ -827,7 +827,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(remotion_cmd[2], "render")
         self.assertEqual(remotion_cmd[3], "TimelineComposition")
         remotion_output = Path(remotion_cmd[remotion_cmd.index("--output") + 1])
-        self.assertEqual(remotion_output.name, out_path.name)
+        self.assertEqual(remotion_output.parent, out_path.parent)
         self.assertNotEqual(remotion_output, out_path.resolve())
         self.assertIn("--allow-html-in-canvas", remotion_cmd)
         self.assertEqual(remotion_kwargs["cwd"], str(project_dir))

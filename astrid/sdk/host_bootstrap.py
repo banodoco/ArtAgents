@@ -24,7 +24,6 @@ PACK_HOST_SCOPES = (
     "worker:register",
     "worker:execute",
     "tasks:read",
-    "tasks:write",
     "objects:read",
     "objects:write",
 )
@@ -142,6 +141,18 @@ def _write_object(path: Path, value: Mapping[str, Any]) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _dependency_pythonpath() -> tuple[str, ...]:
+    """Keep explicitly supplied interpreter dependency roots across the host boundary."""
+    values: list[str] = []
+    for raw in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if not raw:
+            continue
+        path = Path(raw)
+        if path.name in {"site-packages", "dist-packages"}:
+            values.append(str(path))
+    return tuple(dict.fromkeys(values))
 
 
 def _descendant_snapshot(pid: int) -> dict[int, tuple[str, int]]:
@@ -391,7 +402,9 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
         # ambient pack roots/PYTHONPATH entries must not silently add another
         # checkout to this host.
         child_env.pop("ASTRID_PACKS_PATH", None)
-        child_env["PYTHONPATH"] = str(source_path)
+        child_env["PYTHONPATH"] = os.pathsep.join(
+            (str(source_path), *_dependency_pythonpath())
+        )
         try:
             log = log_path.open("ab")
             process = subprocess.Popen(

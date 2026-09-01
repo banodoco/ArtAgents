@@ -22,6 +22,7 @@ the working runtime checkout is never imported by the daemon in this test.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -161,7 +162,13 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
     env["BANODOCO_LOCAL_LAUNCHER"] = str(launcher)
     env["BANODOCO_LOCAL_SOURCE_MANIFEST"] = str(source_manifest)
     env["PYTHONPATH"] = os.pathsep.join(
-        (str(ROOT), str(runtime_archive), str(runtime_python), env.get("PYTHONPATH", ""))
+        (
+            str(ROOT),
+            str(runtime_archive),
+            str(runtime_python),
+            str(Path(importlib.util.find_spec("yaml").origin).parent.parent),
+            env.get("PYTHONPATH", ""),
+        )
     )
 
     runtime_pid: int | None = None
@@ -208,7 +215,6 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             "worker:register",
             "worker:execute",
             "tasks:read",
-            "tasks:write",
             "objects:read",
             "objects:write",
         )
@@ -339,12 +345,12 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             host = GenericPackHost(
                 pack_roots=[pack],
                 client=RuntimeProtocolClient(started["endpoint"], worker_token),
-                executor_id="cold-cpu-host",
+                executor_id="astrid-pack-host",
                 attempt_root=tmp_path / "attempt",
             )
             record = host.discover()[0]
             assert host.preflight(record.id)[0].ready is True
-            host.register()
+            host.register(deliberate=True)
             # The input is already attached to this project, while the
             # fixture executor emits a distinct output. This proves the host
             # uses the claimed task project_id for output ingest rather than
@@ -390,7 +396,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             assert recovery_task.ok
             recovery_id = str(_result_data(recovery_task)["task_id"])
             old_epoch = int(host.client.health()["runtime_epoch"])
-            claim = host.client.claim_next(executor_id="cold-cpu-host", capability_ids=[record.id], idempotency_key="cold-recovery-claim")
+            claim = host.client.claim_next(executor_id="astrid-pack-host", capability_ids=[record.id], idempotency_key="cold-recovery-claim")
             assert claim is not None and getattr(claim, "task_id", None) == recovery_id
             old_attempt = claim
 
@@ -416,6 +422,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         from banodoco_workspace_client import WorkspaceClient
 
         generated = WorkspaceClient(restarted["endpoint"], new_token)
+        owner_token = str(_json(Path(restarted["credential_file"])).get("token") or "")
+        owner_generated = WorkspaceClient(restarted["endpoint"], owner_token)
         new_epoch = int(generated.health()["runtime_epoch"])
         assert new_epoch > old_epoch
         with pytest.raises(Exception):
@@ -432,7 +440,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         restarted_host = GenericPackHost(
             pack_roots=[pack],
             client=RuntimeProtocolClient(restarted["endpoint"], new_token),
-            executor_id="cold-cpu-host",
+            executor_id="astrid-pack-host",
             attempt_root=tmp_path / "attempt-restarted",
         )
         restarted_host.discover()
@@ -477,13 +485,15 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         render_host = GenericPackHost(
             pack_roots=[render_pack],
             client=RuntimeProtocolClient(restarted["endpoint"], new_token),
-            executor_id="cold-ffmpeg-host",
+            executor_id="astrid-pack-host",
             attempt_root=render_attempt,
         )
         render_record = render_host.discover()[0]
         assert render_host.preflight(render_record.id)[0].ready is True
         render_host.register()
-        render_task = render_host.client.generated.admit_task(
+        # Task admission is user-scoped control-plane work.  The worker token
+        # intentionally has no tasks:write after the scope cutover.
+        render_task = owner_generated.admit_task(
             capability_id=render_record.id,
             capability_digest=render_record.capability_digest,
             input_object_ids=[],
@@ -529,7 +539,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         _run([str(runtime_pkg / "node_modules" / ".bin" / "tsc"), "-p", str(conformance / "tsconfig.json")], {**envless, "CI": "1"}, check=True)
         actor = conformance / "dist" / "conformance" / "fake-second-product.js"
         assert actor.is_file()
-        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", new_token], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
+        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", owner_token], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
         actor_payload = json.loads(actor_result.stdout)
         assert actor_payload["product"] == "neutral-gallery"
         assert actor_payload["realm_id"] == started["realm_id"]

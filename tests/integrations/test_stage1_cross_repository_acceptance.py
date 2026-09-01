@@ -173,6 +173,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
             capability_id=record.id,
             capability_digest=record.capability_digest,
             input_object_ids=[],
+            project_id=project_id,
             idempotency_key="task",
         )
         claim = generated.claim_task(
@@ -195,6 +196,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
                 "task": {
                     "id": task.task_id,
                     "capability": record.id,
+                    "project_id": project_id,
                     "spec": {"spec": {"inputs": {}}},
                     "attempt_id": claim["attempt_id"],
                     "fence": claim["fence"],

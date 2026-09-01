@@ -665,7 +665,6 @@ def test_runtime_protocol_client_uses_worker_token_contract_without_user_handsha
         "worker:register",
         "worker:execute",
         "tasks:read",
-        "tasks:write",
         "objects:read",
         "objects:write",
     )

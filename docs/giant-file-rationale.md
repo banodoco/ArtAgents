@@ -15,7 +15,7 @@ or below the threshold.
 
 | # | File | Lines | Current exemption and next decomposition seam |
 |---:|---|---:|---|
-| 1 | `astrid/core/execution/generic_host.py` | 2304 | Generic executor host owns discovery, admission, worker execution, and settlement orchestration. Split protocol boundary, admission, and worker lifecycle into cohesive modules. |
+| 1 | `astrid/core/execution/generic_host.py` | 2500 | Generic executor host owns discovery, admission, worker execution, and settlement orchestration. Split protocol boundary, admission, and worker lifecycle into cohesive modules. |
 | 2 | `astrid/core/rendering/contracts.py` | 2279 | Rendering contract DTOs and validation remain one versioned wire surface. Split independent profile, timeline, backend, and provenance contract groups while preserving one public contract module. |
 | 3 | `astrid/core/rendering/service.py` | 2196 | Managed rendering admission and lifecycle are kept together for transaction and preflight ordering. Split backend selection, staging, and lifecycle orchestration behind the service boundary. |
 | 4 | `astrid/packs/rendering/executors/timeline_visualize/emit.py` | 2130 | Visualization evidence emission is a capability-local implementation with tightly coupled output formats. Split manifest, page, and companion emitters without changing the executor entrypoint. |

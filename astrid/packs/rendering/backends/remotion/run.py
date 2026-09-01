@@ -17,6 +17,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -547,20 +548,57 @@ def _execute_remotion(
 ) -> _ExecutionDetails:
     """Render one private video and return the data needed for provenance."""
 
-    with remotion_lock.remotion_render_lock():
-        return _execute_remotion_locked(
-            timeline_path,
-            assets_path,
-            staged_video,
-            provenance_out_path=provenance_out_path,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            min_free_gb=min_free_gb,
-            materialized_root=materialized_root,
-            staging_parent=staging_parent,
-            materialized_objects=materialized_objects,
-        )
+    final_path = provenance_out_path.resolve()
+    requested_stage = staged_video.resolve()
+    if requested_stage != final_path:
+        with remotion_lock.remotion_render_lock():
+            return _execute_remotion_locked(
+                timeline_path,
+                assets_path,
+                requested_stage,
+                provenance_out_path=provenance_out_path,
+                project_dir=project_dir,
+                composition_id=composition_id,
+                theme_path=theme_path,
+                min_free_gb=min_free_gb,
+                materialized_root=materialized_root,
+                staging_parent=staging_parent,
+                materialized_objects=materialized_objects,
+            )
+
+    # Direct backend callers may pass the final output as the staging path.
+    # Never let Remotion write the published path directly: create a unique
+    # sibling on the same filesystem and atomically publish it only after a
+    # successful, verified render.  This also avoids HFS+ temporary-path
+    # aliases observed with the platform tempfile implementation.
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{final_path.name}.remotion-stage-",
+        suffix=final_path.suffix,
+        dir=str(final_path.parent),
+    )
+    os.close(descriptor)
+    isolated_stage = Path(temporary_name)
+    isolated_stage.unlink(missing_ok=True)
+    try:
+        with remotion_lock.remotion_render_lock():
+            details = _execute_remotion_locked(
+                timeline_path,
+                assets_path,
+                isolated_stage,
+                provenance_out_path=provenance_out_path,
+                project_dir=project_dir,
+                composition_id=composition_id,
+                theme_path=theme_path,
+                min_free_gb=min_free_gb,
+                materialized_root=materialized_root,
+                staging_parent=staging_parent,
+                materialized_objects=materialized_objects,
+            )
+        os.replace(isolated_stage, final_path)
+        return details
+    finally:
+        isolated_stage.unlink(missing_ok=True)
 
 
 def _execute_remotion_locked(
@@ -951,28 +989,31 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
         # Remotion always muxes an audio track into its output (silent when
         # the timeline has none), so ownership is effectively 'rendered'.
         ownership = AudioOwnership.RENDERED
-        private_tmp = lifecycle.enter_context(
-            TemporaryDirectory(
-                prefix=f".{request.output_name}.remotion-",
-                dir=str(outputs_dir),
+        descriptor, staged_name = tempfile.mkstemp(
+            prefix=f".{output_name}.remotion-stage-",
+            suffix=Path(output_name).suffix,
+            dir=str(outputs_dir),
+        )
+        os.close(descriptor)
+        staged_video = Path(staged_name)
+        staged_video.unlink(missing_ok=True)
+        try:
+            details = _execute_remotion(
+                timeline_path,
+                assets_path,
+                staged_video,
+                provenance_out_path=output_path,
+                project_dir=settings.project_dir,
+                composition_id=settings.composition_id,
+                theme_path=settings.theme_path,
+                min_free_gb=settings.min_free_gb,
+                materialized_root=request.materialized_root,
+                staging_parent=workspace,
+                materialized_objects=request.materialized_objects,
             )
-        )
-        staged_video = Path(private_tmp) / output_name
-        details = _execute_remotion(
-            timeline_path,
-            assets_path,
-            staged_video,
-            provenance_out_path=output_path,
-            project_dir=settings.project_dir,
-            composition_id=settings.composition_id,
-            theme_path=settings.theme_path,
-            min_free_gb=settings.min_free_gb,
-            materialized_root=request.materialized_root,
-            staging_parent=workspace,
-            materialized_objects=request.materialized_objects,
-        )
-        output_path.unlink(missing_ok=True)
-        os.replace(staged_video, output_path)
+            os.replace(staged_video, output_path)
+        finally:
+            staged_video.unlink(missing_ok=True)
 
     try:
         backend_provenance = _render_provenance_payload(
