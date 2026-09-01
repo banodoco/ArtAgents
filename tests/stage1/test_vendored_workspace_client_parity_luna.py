@@ -11,11 +11,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
-from pathlib import Path
 import re
+from pathlib import Path
 
-from banodoco_workspace_client import WorkspaceClient
-from banodoco_workspace_client import generated
+from banodoco_workspace_client import WorkspaceClient, generated
 from banodoco_workspace_client.contract_metadata import (
     GENERATED_CLIENT_SHA256,
     OPERATIONS,
@@ -25,7 +24,6 @@ from banodoco_workspace_client.contract_metadata import (
     SOURCE_REPOSITORY,
 )
 
-
 ROOT = Path(__file__).resolve().parents[2]
 GENERATED_PATH = ROOT / "banodoco_workspace_client" / "generated.py"
 
@@ -33,12 +31,12 @@ GENERATED_PATH = ROOT / "banodoco_workspace_client" / "generated.py"
 # future runtime contract refresh must update the source commit, digest, and
 # this test in one reviewed change; no ambient sibling checkout can silently
 # alter the shipped transport.
-PINNED_SOURCE_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+PINNED_SOURCE_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 PINNED_SOURCE_REPOSITORY = "https://github.com/banodoco/banodoco-workspace-runtime.git"
 PINNED_PROTOCOL = "workspace.v1"
-PINNED_SCHEMA_DIGEST = "sha256:b5841ab4b66ffe0d5d779bb5acca963bdeada404b3047f8b81258c8c6489a270"
-PINNED_GENERATED_CLIENT_SHA256 = "sha256:a3bb45e05e3aeee758f462ff3975745acdde371cfde4e496a0e632978011fc82"
-PINNED_SIGNATURE_SHA256 = "sha256:a0662d5a99f7bd565c576e2237a5d22b775a64078736d242881c60ff27e2f525"
+PINNED_SCHEMA_DIGEST = "sha256:e86426f871a0ae70359ad43196a8b8c172e8b1d83d6b44d5e45b30fc9ff5c7e2"
+PINNED_GENERATED_CLIENT_SHA256 = "sha256:657c4f56deea2871c46d5f5be4b151256b373405dd559b06a92844efb3eea3ab"
+PINNED_SIGNATURE_SHA256 = "sha256:e3160e51ea25d771b401ec02c3afc00ea422e657793bd1714ef8f8eadf352c52"
 
 
 def _signature_digest() -> str:
@@ -89,7 +87,12 @@ def test_vendored_client_operation_catalog_matches_typed_methods() -> None:
 
 
 def test_frozen_mutation_signatures_require_idempotency_keys() -> None:
-    for name in ("update_timeline_document", "create_generation", "create_variant"):
+    for name in (
+        "update_timeline_document",
+        "create_generation",
+        "create_variant",
+        "promote_project_shot_candidate",
+    ):
         parameter = inspect.signature(getattr(WorkspaceClient, name)).parameters["idempotency_key"]
         assert parameter.default is inspect.Parameter.empty
 

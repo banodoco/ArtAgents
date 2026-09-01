@@ -10,7 +10,7 @@ host over loopback.
 Run it from the Astrid checkout:
 
 ```bash
-PYTHONPATH=.:../banodoco-workspace-runtime-stage1-convergence/packages/python \
+PYTHONPATH=.:../banodoco-workspace-runtime/packages/python \
   python3 -m pytest -q tests/stage1/test_final_cold_launch_matrix_luna.py
 ```
 
@@ -38,4 +38,4 @@ the Stage 1 blueprint requires the registered Astrid render/FFmpeg path and
 explicitly makes broader dependency/platform certification post-beta.
 
 The runtime archive is pinned in the test to:
-`7618aebb754a2d746f459545772487f6364fd677`.
+`4050394c5395206f1ec6bf0d905ffbfb7bb0e4de`.

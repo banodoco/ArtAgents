@@ -12,7 +12,7 @@ separate opt-in acceptance test.
 
 Run directly from the Astrid checkout::
 
-    PYTHONPATH=.:../banodoco-workspace-runtime-stage1-convergence/packages/python \
+    PYTHONPATH=.:../banodoco-workspace-runtime/packages/python \
       python3 -m pytest -q tests/stage1/test_final_cold_launch_matrix_luna.py
 
 The runtime source is archived at the immutable commit below before launch;
@@ -25,7 +25,6 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import stat
@@ -33,14 +32,22 @@ import subprocess
 import sys
 import tarfile
 import time
+from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+ASTRID_SOURCE = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+).parent
+RUNTIME_CHECKOUT = ASTRID_SOURCE.parent / "banodoco-workspace-runtime"
+RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 
 
 def _archive_runtime(destination: Path) -> Path:

@@ -8,9 +8,9 @@ attempt outputs.
 
 from __future__ import annotations
 
+import importlib
 import io
 import os
-import importlib
 import subprocess
 import sys
 import tarfile
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.rendering.service import RenderService
 import astrid.packs
+from astrid.core.rendering.service import RenderService
 from astrid.core.timeline.snapshot import snapshot_from_runtime
 from astrid.packs.rendering.executors.timeline_visualize import select
 from astrid.packs.rendering.executors.timeline_visualize.run import (
@@ -31,8 +31,16 @@ from astrid.sdk import invocation
 from astrid.sdk.exceptions import CapabilityValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_WORKTREE = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+ASTRID_SOURCE = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+).parent
+RUNTIME_WORKTREE = ASTRID_SOURCE.parent / "banodoco-workspace-runtime"
+RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(

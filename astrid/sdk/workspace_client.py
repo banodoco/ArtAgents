@@ -167,7 +167,8 @@ class WorkspaceClient:
                 "recover_timeline", "list_project_shots", "create_project_shot",
                 "get_project_shot", "update_project_shot", "archive_project_shot",
                 "recover_project_shot", "add_shot_item", "remove_shot_item",
-                "reorder_shot_items", "list_project_references", "create_project_reference",
+                "promote_project_shot_candidate", "reorder_shot_items",
+                "list_project_references", "create_project_reference",
                 "list_project_shot_text_bindings", "set_project_shot_text_binding",
                 "get_project_shot_text_binding", "set_project_shot_text_binding_by_id",
                 "rebind_project_shot_text_binding",
@@ -216,7 +217,12 @@ class WorkspaceClient:
         # RemoteAstridClient._typed consumes the stable {data, receipt}
         # envelope and turns it into DomainResult.receipt.
         if hasattr(value, "receipt") and isinstance(value, dict):
-            return {"data": plain(dict(value)), "receipt": plain(value.receipt)}
+            data = dict(value)
+            # Some generated clients retain the wire receipt in the mapping
+            # as well as on ``.receipt``.  The product envelope owns that
+            # field; do not leak a duplicate receipt into DomainResult.data.
+            data.pop("receipt", None)
+            return {"data": plain(data), "receipt": plain(value.receipt)}
         return plain(value)
 
     # The following methods are intentionally explicit.  They form the
@@ -375,6 +381,26 @@ class WorkspaceClient:
 
     def add_shot_item(self, project_id: str, shot_id: str, item: Mapping[str, Any], *, idempotency_key: str) -> Any:
         return self._call_generated("add_shot_item", project_id, shot_id, item, idempotency_key=idempotency_key)
+
+    def promote_project_shot_candidate(
+        self,
+        project_id: str,
+        shot_id: str,
+        candidate_item_id: str,
+        *,
+        expected_head_seq: int,
+        timeline_assets: list[Mapping[str, Any]] | Mapping[str, Mapping[str, Any]] = (),
+        idempotency_key: str,
+    ) -> Any:
+        return self._call_generated(
+            "promote_project_shot_candidate",
+            project_id,
+            shot_id,
+            candidate_item_id,
+            expected_head_seq=expected_head_seq,
+            timeline_assets=timeline_assets,
+            idempotency_key=idempotency_key,
+        )
 
     def remove_shot_item(self, project_id: str, shot_id: str, item_id: str, *, expected_version: int, idempotency_key: str) -> Any:
         return self._call_generated("remove_shot_item", project_id, shot_id, item_id, expected_version=expected_version, idempotency_key=idempotency_key)

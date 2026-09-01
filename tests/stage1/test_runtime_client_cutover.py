@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-import json
 import hashlib
 import io
-import os
-from pathlib import Path
+import json
 import subprocess
 import sys
 import tarfile
 import tempfile
+from pathlib import Path
 
 import pytest
 
-RUNTIME_WORKTREE = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+ASTRID_SOURCE = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+).parent
+RUNTIME_WORKTREE = ASTRID_SOURCE.parent / "banodoco-workspace-runtime"
+RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(
@@ -27,7 +34,9 @@ sys.path.insert(0, str(RUNTIME))
 
 pytest.importorskip("runtime_protocol.daemon")
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
-from astrid.core.gateway import dispatch, main as gateway_main  # noqa: E402
+
+from astrid.core.gateway import dispatch  # noqa: E402
+from astrid.core.gateway import main as gateway_main
 from astrid.sdk.client import AstridClient  # noqa: E402
 
 
@@ -439,8 +448,8 @@ def test_client_boundary_has_no_local_authority_escape_hatch():
 
 
 def test_retired_public_commands_are_absent():
-    from astrid.core.pack.cli_parser import build_parser
     from astrid.core.cli.domain_media import build_parser as media_parser
+    from astrid.core.pack.cli_parser import build_parser
 
     pack_commands = next(action for action in build_parser()._actions if isinstance(getattr(action, "choices", None), dict)).choices
     assert not {"install", "update", "rollback", "uninstall"} & set(pack_commands)

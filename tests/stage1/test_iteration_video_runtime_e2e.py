@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import io
-import os
-from contextlib import nullcontext
-from pathlib import Path
-import sys
+import json
 import subprocess
+import sys
 import tarfile
 import tempfile
+from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-RUNTIME_WORKTREE = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+ASTRID_SOURCE = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+).parent
+RUNTIME_WORKTREE = ASTRID_SOURCE.parent / "banodoco-workspace-runtime"
+RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(
@@ -32,7 +39,9 @@ pytest.importorskip("runtime_protocol.daemon")
 
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
 
-from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video  # noqa: E402
+from astrid.packs.video_editing.orchestrators.iteration_video import (
+    run as iteration_video,  # noqa: E402
+)
 from astrid.sdk.client import AstridClient  # noqa: E402
 
 

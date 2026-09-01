@@ -17,11 +17,24 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+
 import pytest
 
-WORKSPACE = Path(__file__).parents[3]
-RUNTIME_WORKTREE = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
+ASTRID_SOURCE = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+).parent
+WORKSPACE = ASTRID_SOURCE.parent
+RUNTIME_WORKTREE = (
+    WORKSPACE
+    / "banodoco-workspace-runtime"
+    / ".otto/worktrees/generation-candidate-promotion-20260901"
+)
+RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(
@@ -33,9 +46,12 @@ with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
     tar.extractall(RUNTIME)
 sys.path.insert(0, str(RUNTIME))
 
-from banodoco_workspace_client import WorkspaceClient  # noqa: E402
 from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolClient  # noqa: E402
+from astrid.packs.generation.executors.generate_image.task_adapter import (  # noqa: E402
+    validate_shot_generation_recipe,
+)
 from astrid.sdk.client import AstridClient  # noqa: E402
+from banodoco_workspace_client import WorkspaceClient  # noqa: E402
 
 
 def _start_runtime(realm: Path, support: Path, runtime: Path = RUNTIME) -> tuple[subprocess.Popen[str], dict[str, str]]:
@@ -296,5 +312,258 @@ def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypa
         )
         assert reopened.shots.show(project_id, "b71-shot").ok
         assert reopened.references.show(project_id, "b71-reference").ok
+    finally:
+        _stop_runtime(daemon)
+
+
+def test_generation_candidate_promotion_preserves_receipt_provenance_and_replay(
+    tmp_path, monkeypatch
+):
+    """Prove Astrid's recipe reaches the runtime-owned atomic promotion seam."""
+    realm, support = tmp_path / "realm", tmp_path / "support"
+    daemon, metadata = _start_runtime(realm, support)
+    monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])
+    monkeypatch.setenv(
+        "BANODOCO_RUNTIME_CREDENTIAL",
+        str(support / "credentials" / "owner.token"),
+    )
+    try:
+        astrid = AstridClient.open(
+            endpoint=metadata["endpoint"],
+            credential=support / "credentials" / "owner.token",
+            realm_id=metadata["realm_id"],
+            actor_id="owner",
+            client_name="astrid-generation-promotion-acceptance",
+            client_version="stage1",
+            protocol_version="workspace.v1",
+        )
+        project = astrid.projects.create(
+            slug="promotion", name="Promotion", idempotency_key="promotion-project"
+        )
+        assert project.ok
+        project_id = project.data["project_id"]
+        shot_id = "shot-generation-bridge"
+        assert astrid.shots.create(
+            project=project_id,
+            shot={"shot_id": shot_id, "name": "Generation Bridge"},
+            idempotency_key="promotion-shot",
+        ).ok
+
+        def ingest(name: str, content: bytes):
+            path = tmp_path / name
+            path.write_bytes(content)
+            result = astrid.media.import_file(
+                project=project_id,
+                path=path,
+                idempotency_key=f"promotion-media-{name.replace('.', '-')}",
+            )
+            assert result.ok
+            return result.data["object_id"]
+
+        old_media = ingest("old.png", b"old-primary")
+        candidate_media = ingest("candidate.png", b"generated-candidate")
+        plate_media = ingest("plate.png", b"derived-plate")
+        proxy_media = ingest("proxy.png", b"derived-proxy")
+        prompt_media = ingest("prompt.txt", b"a precise generated candidate")
+        reference_media = ingest("reference.png", b"reference-input")
+
+        def bare(media_id: str) -> str:
+            return media_id.removeprefix("sha256:")
+
+        recipe = {
+            "schema": "astrid.shot-generation-recipe/v1",
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "target_role": "primary_visual",
+            "prompt_binding": {
+                "id": "binding-generation-bridge",
+                "head": 1,
+                "media_id": prompt_media,
+                "content_sha256": bare(prompt_media),
+            },
+            "generator": {
+                "capability_id": "generation.generate_image",
+                "model": "z-image",
+                "backend": "cloud",
+                "mode": "t2i",
+                "settings": {"seed": 42},
+            },
+            "inputs": [
+                {
+                    "ordinal": 0,
+                    "role": "style",
+                    "reference_id": "reference-generation-bridge",
+                    "media_id": reference_media,
+                    "content_sha256": bare(reference_media),
+                }
+            ],
+            "parent_media_id": old_media,
+            "parent_content_sha256": bare(old_media),
+        }
+        assert validate_shot_generation_recipe(
+            recipe,
+            project_id=project_id,
+            model="z-image",
+            mode="t2i",
+            execution="cloud",
+            resolved_settings={"seed": 42},
+        ) == recipe
+
+        primary = astrid.shots.add_item(
+            project_id,
+            shot_id,
+            media_id=old_media,
+            metadata={"role": "primary_visual", "status": "primary"},
+            idempotency_key="promotion-primary",
+        )
+        primary_item = next(
+            item for item in primary.data["items"] if item["media_id"] == bare(old_media)
+        )
+        plate = astrid.shots.add_item(
+            project_id,
+            shot_id,
+            media_id=plate_media,
+            metadata={
+                "kind": "plate",
+                "source_item_id": primary_item["item_id"],
+                "source_media_id": old_media,
+                "source_content_sha256": bare(old_media),
+            },
+            idempotency_key="promotion-plate",
+        )
+        plate_item = next(
+            item for item in plate.data["items"] if item["media_id"] == bare(plate_media)
+        )
+        proxy = astrid.shots.add_item(
+            project_id,
+            shot_id,
+            media_id=proxy_media,
+            metadata={
+                "kind": "proxy",
+                "source_item_id": plate_item["item_id"],
+                "source_media_id": plate_media,
+                "source_content_sha256": bare(plate_media),
+            },
+            idempotency_key="promotion-proxy",
+        )
+        proxy_item = next(
+            item for item in proxy.data["items"] if item["media_id"] == bare(proxy_media)
+        )
+        candidate = astrid.shots.add_item(
+            project_id,
+            shot_id,
+            media_id=candidate_media,
+            metadata={
+                "role": "primary_visual",
+                "status": "candidate",
+                "content_sha256": bare(candidate_media),
+                "recipe": recipe,
+                "provenance": {
+                    "project_id": project_id,
+                    "shot_id": shot_id,
+                    "target_role": "primary_visual",
+                    "media_id": candidate_media,
+                },
+            },
+            idempotency_key="promotion-candidate",
+        )
+        candidate_item = next(
+            item
+            for item in candidate.data["items"]
+            if item["media_id"] == bare(candidate_media)
+        )
+        timeline_assets = [
+            {
+                "id": "timeline-generation-bridge",
+                "metadata": {
+                    "source_item_id": primary_item["item_id"],
+                    "source_media_id": old_media,
+                    "source_content_sha256": bare(old_media),
+                },
+            }
+        ]
+        promoted = astrid.shots.promote_candidate(
+            project_id,
+            shot_id,
+            candidate_item["item_id"],
+            expected_head_seq=candidate.data["version"],
+            timeline_assets=timeline_assets,
+            idempotency_key="promotion-command",
+        )
+        assert promoted.ok and promoted.receipt is not None
+        assert promoted.receipt.command_kind == "shot.promote_candidate"
+        assert promoted.receipt.result == promoted.data
+        assert promoted.data["promotion"]["primary_item_id"] == candidate_item["item_id"]
+        stale = {
+            entry.get("item_id") or entry.get("asset_id")
+            for entry in promoted.data["invalidation"]["stale"]
+        }
+        assert stale >= {
+            plate_item["item_id"],
+            proxy_item["item_id"],
+            "timeline-generation-bridge",
+        }
+
+        replay = astrid.shots.promote_candidate(
+            project_id,
+            shot_id,
+            candidate_item["item_id"],
+            expected_head_seq=candidate.data["version"],
+            timeline_assets=timeline_assets,
+            idempotency_key="promotion-command",
+        )
+        assert replay.ok and replay.data == promoted.data
+        assert replay.receipt is not None
+        assert replay.receipt.to_json() == promoted.receipt.to_json()
+        shown = astrid.shots.show(project_id, shot_id)
+        primary_items = [
+            item
+            for item in shown.data["items"]
+            if item["metadata"].get("role") == "primary_visual"
+        ]
+        assert sum(item["metadata"].get("status") == "primary" for item in primary_items) == 1
+        assert any(
+            item["item_id"] == primary_item["item_id"]
+            and item["metadata"].get("status") == "superseded"
+            for item in primary_items
+        )
+
+        foreign_media = ingest("foreign.png", b"foreign-provenance-candidate")
+        foreign = astrid.shots.add_item(
+            project_id,
+            shot_id,
+            media_id=foreign_media,
+            metadata={
+                "role": "primary_visual",
+                "status": "candidate",
+                "provenance": {
+                    "project_id": "foreign-project",
+                    "shot_id": shot_id,
+                    "target_role": "primary_visual",
+                    "media_id": foreign_media,
+                },
+            },
+            idempotency_key="promotion-foreign-candidate",
+        )
+        foreign_item = next(
+            item
+            for item in foreign.data["items"]
+            if item["media_id"] == bare(foreign_media)
+        )
+        rejected = astrid.shots.promote_candidate(
+            project_id,
+            shot_id,
+            foreign_item["item_id"],
+            expected_head_seq=foreign.data["version"],
+            idempotency_key="promotion-foreign-command",
+        )
+        assert not rejected.ok and rejected.error.code == "validation_error"
+        unchanged = astrid.shots.show(project_id, shot_id)
+        assert unchanged.data["version"] == foreign.data["version"]
+        assert next(
+            item
+            for item in unchanged.data["items"]
+            if item["item_id"] == foreign_item["item_id"]
+        )["metadata"]["status"] == "candidate"
     finally:
         _stop_runtime(daemon)

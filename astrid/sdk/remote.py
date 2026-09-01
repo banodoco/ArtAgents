@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import mimetypes
-from pathlib import Path
 import uuid
+from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.receipts.contract import CommandReceipt
 
 from .contracts import DomainResult, ErrorObject
-from .workspace_client import WorkspaceClient, WorkspaceClientError
 from .pagination import paged_rows
+from .workspace_client import WorkspaceClient, WorkspaceClientError
 
 
 class _RemoteFamily:
@@ -70,6 +70,7 @@ class _RemoteFamily:
             elif operation == "list_timeline_history": value = self._client.list_timeline_history(*args, **kwargs)
             elif operation == "list_timelines": value = self._client.list_timelines(*args, **kwargs)
             elif operation == "list_variants": value = self._client.list_variants(*args, **kwargs)
+            elif operation == "promote_project_shot_candidate": value = self._client.promote_project_shot_candidate(*args, **kwargs)
             elif operation == "recover_project_reference": value = self._client.recover_project_reference(*args, **kwargs)
             elif operation == "recover_project_shot": value = self._client.recover_project_shot(*args, **kwargs)
             elif operation == "recover_timeline": value = self._client.recover_timeline(*args, **kwargs)
@@ -436,6 +437,37 @@ class RemoteShots(_RemoteFamily):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("remove_shot_item", project, shot_id, item_id, key=key, expected_version=version, idempotency_key=key)
+
+    def promote_candidate(
+        self,
+        project,
+        shot_id,
+        candidate_item_id,
+        *,
+        expected_head_seq,
+        timeline_assets=(),
+        idempotency_key=None,
+    ):
+        key = idempotency_key or uuid.uuid4().hex
+        if project is None:
+            return DomainResult.failure(
+                ErrorObject(
+                    "unsupported_operation",
+                    "project-scoped shots are required",
+                    {"operation": "promote_shot_candidate"},
+                ),
+                idempotency_key=key,
+            )
+        return self._typed(
+            "promote_project_shot_candidate",
+            project,
+            shot_id,
+            candidate_item_id,
+            key=key,
+            expected_head_seq=expected_head_seq,
+            timeline_assets=timeline_assets,
+            idempotency_key=key,
+        )
     def reorder(self, project, shot_id, item_ids=None, *, expected_version=None, idempotency_key=None):
         key = idempotency_key or uuid.uuid4().hex
         if project is None:

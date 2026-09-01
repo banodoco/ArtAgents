@@ -7,16 +7,17 @@ operations and raw transport seam are implemented.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import unittest
+from pathlib import Path
 
-from astrid.sdk.remote import RemoteAstridClient, RemoteProjects, RemoteTasks
+from astrid.sdk.remote import RemoteAstridClient, RemoteProjects, RemoteShots, RemoteTasks
 
 
 class _RecordingClient:
     def __init__(self) -> None:
         self.project_call: tuple[tuple[object, ...], dict[str, object]] | None = None
         self.task_call: dict[str, object] | None = None
+        self.promotion_call: tuple[tuple[object, ...], dict[str, object]] | None = None
 
     def create_project(self, *args: object, **kwargs: object) -> dict[str, str]:
         self.project_call = (args, kwargs)
@@ -30,6 +31,15 @@ class _RecordingClient:
     def admit_task(self, **kwargs: object) -> dict[str, str]:
         self.task_call = kwargs
         return {"task_id": "task-1"}
+
+    def promote_project_shot_candidate(
+        self, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        self.promotion_call = (args, kwargs)
+        return {
+            "data": {"promotion": {"primary_item_id": "candidate-1"}, "invalidation": {}},
+            "receipt": None,
+        }
 
 
 class _ReceiptClient(_RecordingClient):
@@ -94,6 +104,25 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
         assert result.receipt is not None
         self.assertEqual(result.receipt.receipt_id, "txn-1")
         self.assertEqual(result.receipt.event_ids, ("event-1",))
+
+    def test_shot_promotion_forwards_atomic_generated_operation(self) -> None:
+        client = _RecordingClient()
+        timeline = [{"id": "asset-1"}]
+        result = RemoteShots(client).promote_candidate(
+            "project-1",
+            "shot-1",
+            "candidate-1",
+            expected_head_seq=4,
+            timeline_assets=timeline,
+            idempotency_key="promotion-key",
+        )
+        self.assertTrue(result.ok)
+        assert client.promotion_call is not None
+        args, kwargs = client.promotion_call
+        self.assertEqual(args, ("project-1", "shot-1", "candidate-1"))
+        self.assertEqual(kwargs["expected_head_seq"], 4)
+        self.assertEqual(kwargs["timeline_assets"], timeline)
+        self.assertEqual(kwargs["idempotency_key"], "promotion-key")
 
     def test_product_sdk_has_no_raw_request_seam(self) -> None:
         sdk_root = Path(__file__).resolve().parents[2] / "astrid" / "sdk"
