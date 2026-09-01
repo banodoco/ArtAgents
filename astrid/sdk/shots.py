@@ -31,9 +31,9 @@ repositories.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
+from astrid.core.receipts.canonical import request_hash
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
 from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
@@ -45,6 +45,8 @@ from astrid.packs.shots.repository import (
     ShotRepository,
 )
 from astrid.packs.shots.text_bindings import (
+    SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
+    SHOT_TEXT_BINDING_SET_COMMAND_KIND,
     ShotTextBindingRepository,
     freeze_text_bytes,
 )
@@ -435,17 +437,34 @@ class ShotsService:
                 raise ServiceValidationError(
                     "text binding support is unavailable in this composition"
                 )
+            with self._writer.read_only_connection() as conn:
+                prepared = self._text_bindings.prepare_set(
+                    conn,
+                    project_id=project_id,
+                    frozen=frozen,
+                    expected_head=expected_head,
+                    binding_id=binding_id,
+                    shot_ref=shot_ref,
+                    kind=kind,
+                    slot=slot,
+                )
+            request_digest = request_hash(
+                SHOT_TEXT_BINDING_SET_COMMAND_KIND,
+                prepared.request_facts(SHOT_TEXT_BINDING_SET_COMMAND_KIND),
+            )
             mutation = UnitOfWork(self._writer).run(
                 lambda uow: self._text_bindings.set(
                     uow,
                     project_id=project_id,
-                    text=frozen.value,
+                    frozen=frozen,
                     expected_head=expected_head,
                     idempotency_key=key,
                     binding_id=binding_id,
                     shot_ref=shot_ref,
                     kind=kind,
                     slot=slot,
+                    prepared=prepared,
+                    canonical_request_hash=request_digest,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
@@ -477,6 +496,21 @@ class ShotsService:
                 raise ServiceValidationError(
                     "text binding support is unavailable in this composition"
                 )
+            with self._writer.read_only_connection() as conn:
+                prepared = self._text_bindings.prepare_rebind(
+                    conn,
+                    project_id=project_id,
+                    media_id=media_id,
+                    expected_head=expected_head,
+                    binding_id=binding_id,
+                    shot_ref=shot_ref,
+                    kind=kind,
+                    slot=slot,
+                )
+            request_digest = request_hash(
+                SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
+                prepared.request_facts(SHOT_TEXT_BINDING_REBIND_COMMAND_KIND),
+            )
             mutation = UnitOfWork(self._writer).run(
                 lambda uow: self._text_bindings.rebind(
                     uow,
@@ -488,6 +522,8 @@ class ShotsService:
                     shot_ref=shot_ref,
                     kind=kind,
                     slot=slot,
+                    prepared=prepared,
+                    canonical_request_hash=request_digest,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping

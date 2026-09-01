@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.events.service import ACTOR_KINDS, EventAppendService
+from astrid.core.events.service import EventAppendService
 from astrid.core.io.media_import import (
     PreparedMedia,
     managed_media_path,
@@ -29,11 +29,11 @@ from astrid.core.io.media_import import (
 )
 from astrid.core.receipts.canonical import canonical_json, request_hash
 from astrid.core.receipts.service import ReceiptService
+from astrid.core.repositories.errors import RepositoryError
 from astrid.core.repositories.media import (
     MediaReadModel,
     MediaRepository,
 )
-from astrid.core.repositories.errors import RepositoryError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.core.util.time import utc_now_iso
@@ -210,6 +210,50 @@ class FrozenTextBytes:
 
 
 @dataclass(frozen=True, slots=True)
+class _PreparedTextBindingCommand:
+    """Canonical facts prepared before a binding writer transaction."""
+
+    project_id: str
+    natural_tuple: tuple[str, str, str, str | None]
+    binding_id: str
+    event_stream_id: str
+    expected_head: int
+    desired_content_hash: str
+    desired_media_id: str | None = None
+
+    @property
+    def shot_id(self) -> str:
+        return self.natural_tuple[1]
+
+    @property
+    def kind(self) -> str:
+        return self.natural_tuple[2]
+
+    @property
+    def slot(self) -> str | None:
+        return self.natural_tuple[3]
+
+    def request_facts(self, command_kind: str) -> dict[str, Any]:
+        """Return only canonical identity/media facts for request hashing."""
+        facts: dict[str, Any] = {
+            "project_id": self.project_id,
+            "shot_id": self.shot_id,
+            "kind": self.kind,
+            "slot": self.slot,
+            "binding_id": self.binding_id,
+            "event_stream_id": self.event_stream_id,
+            "expected_head": self.expected_head,
+            "desired_content_hash": self.desired_content_hash,
+        }
+        if command_kind == SHOT_TEXT_BINDING_REBIND_COMMAND_KIND:
+            facts.pop("shot_id")
+            facts.pop("kind")
+            facts.pop("slot")
+            facts["desired_media_id"] = self.desired_media_id
+        return facts
+
+
+@dataclass(frozen=True, slots=True)
 class _VerifiedMedia:
     media: MediaReadModel
     path: Path
@@ -314,6 +358,20 @@ def _require_head(head: object) -> int:
     return head
 
 
+def _reader_query_one(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> Any:
+    query_one = getattr(reader, "query_one", None)
+    if query_one is not None:
+        return query_one(sql, parameters)
+    return reader.execute(sql, parameters).fetchone()
+
+
+def _reader_query(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> list[Any]:
+    query = getattr(reader, "query", None)
+    if query is not None:
+        return list(query(sql, parameters))
+    return list(reader.execute(sql, parameters).fetchall())
+
+
 class ShotTextBindingRepository:
     """Focused Shots-pack repository for binding projection and commands."""
 
@@ -335,19 +393,20 @@ class ShotTextBindingRepository:
     def _resolve_shot(uow: UnitOfWork, project_id: str, shot_ref: str) -> Any:
         if not isinstance(shot_ref, str) or not shot_ref:
             raise ShotTextBindingValidationError("shot_ref must be a non-empty string")
-        row = uow.query_one(
+        row = _reader_query_one(uow,
             "SELECT id, name, sort_key FROM shots WHERE id = ? AND project_id = ?",
             (shot_ref, project_id),
         )
         if row is not None:
             return row
-        row = uow.query_one(
+        row = _reader_query_one(uow,
             "SELECT id, name, sort_key FROM shots WHERE sort_key = ? AND project_id = ?",
             (shot_ref, project_id),
         )
         if row is not None:
             return row
-        rows = uow.query(
+        rows = _reader_query(
+            uow,
             "SELECT id, name, sort_key FROM shots WHERE name = ? AND project_id = ? "
             "ORDER BY id ASC",
             (shot_ref, project_id),
@@ -380,12 +439,13 @@ class ShotTextBindingRepository:
                 raise ShotTextBindingValidationError(
                     "binding_id cannot be combined with friendly selectors"
                 )
-            row = uow.query_one(
+            row = _reader_query_one(uow,
                 "SELECT * FROM shot_text_bindings WHERE id = ? AND project_id = ?",
                 (binding_id, project_id),
             )
             if row is None:
                 raise ShotTextBindingNotFoundError(binding_id=binding_id, project_id=project_id)
+            self._validate_binding_authority(uow, row, project_id=project_id)
             return row
         if shot_ref is None or kind is None:
             raise ShotTextBindingValidationError(
@@ -410,16 +470,66 @@ class ShotTextBindingRepository:
             # slots; an ambiguous result is intentionally not guessed.
             pass
         sql += " ORDER BY slot IS NOT NULL ASC, slot ASC, id ASC"
-        rows = uow.query(sql, tuple(params))
+        rows = _reader_query(uow, sql, tuple(params))
         if not rows:
             raise ShotTextBindingNotFoundError(
                 shot_id=str(shot["id"]), project_id=project_id
             )
+        for row in rows:
+            self._validate_binding_authority(uow, row, project_id=project_id)
         if len(rows) > 1:
             raise ShotTextBindingAmbiguousError(
                 candidates=[self._candidate(uow, dict(row), project_id) for row in rows]
             )
         return rows[0]
+
+    def _validate_binding_authority(
+        self,
+        reader: Any,
+        row: Mapping[str, Any],
+        *,
+        project_id: str,
+    ) -> Any:
+        """Validate every persisted fact that gives a binding its authority."""
+        if str(row["project_id"]) != project_id:
+            raise ShotTextBindingIntegrityError(detail="binding_project_mismatch")
+        shot = _reader_query_one(reader,
+            "SELECT id FROM shots WHERE id = ? AND project_id = ?",
+            (row["shot_id"], project_id),
+        )
+        if shot is None:
+            raise ShotTextBindingIntegrityError(detail="binding_shot_project_mismatch")
+        try:
+            kind = validate_text_binding_kind(row["kind"])
+            slot = validate_text_binding_slot(row["slot"], kind=kind)
+            expected_id = derive_text_binding_id(
+                project_id=project_id,
+                shot_id=str(row["shot_id"]),
+                kind=kind,
+                slot=slot,
+            )
+        except ShotTextBindingValidationError as exc:
+            raise ShotTextBindingIntegrityError(detail="binding_natural_tuple_invalid") from exc
+        binding_id = str(row["id"])
+        if expected_id != binding_id:
+            raise ShotTextBindingIntegrityError(detail="binding_natural_tuple_mismatch")
+        expected_stream_id = derive_text_binding_stream_id(binding_id)
+        if str(row["event_stream_id"]) != expected_stream_id:
+            raise ShotTextBindingIntegrityError(detail="binding_stream_id_mismatch")
+        stream = _reader_query_one(reader,
+            "SELECT project_id, stream_type, aggregate_id, head_seq "
+            "FROM event_streams WHERE id = ?",
+            (row["event_stream_id"],),
+        )
+        if stream is None:
+            raise ShotTextBindingIntegrityError(detail="binding_stream_missing")
+        if str(stream["project_id"]) != project_id:
+            raise ShotTextBindingIntegrityError(detail="binding_stream_project_mismatch")
+        if str(stream["stream_type"]) != SHOT_TEXT_BINDING_STREAM_TYPE:
+            raise ShotTextBindingIntegrityError(detail="binding_stream_type_mismatch")
+        if str(stream["aggregate_id"]) != binding_id:
+            raise ShotTextBindingIntegrityError(detail="binding_stream_aggregate_mismatch")
+        return stream
 
     def _candidate(
         self, uow: UnitOfWork, row: Mapping[str, Any], project_id: str
@@ -432,7 +542,7 @@ class ShotTextBindingRepository:
             if self._media is not None
             else None
         )
-        stream = uow.query_one(
+        stream = _reader_query_one(uow,
             "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
             (row["event_stream_id"], project_id),
         )
@@ -447,12 +557,9 @@ class ShotTextBindingRepository:
     def _binding_row(self, uow: UnitOfWork, row: Mapping[str, Any]) -> ShotTextBinding:
         if self._media is None:
             raise ShotTextBindingValidationError("a Core MediaRepository is required")
-        stream = uow.query_one(
-            "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
-            (row["event_stream_id"], row["project_id"]),
+        stream = self._validate_binding_authority(
+            uow, row, project_id=str(row["project_id"])
         )
-        if stream is None:
-            raise ShotTextBindingIntegrityError(detail="binding_stream_missing")
         media = self._media.read_project_media(
             uow, project_id=str(row["project_id"]), media_id=str(row["media_id"])
         )
@@ -506,20 +613,7 @@ class ShotTextBindingRepository:
                 raise ShotTextBindingIntegrityError(detail="bound_media_missing", media_id=str(row["media_id"]))
             verified = self._verify_managed_text(media, current=True)
             self._verify_fingerprint(verified)
-            stream = conn.execute(
-                "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
-                (row["event_stream_id"], project_id),
-            ).fetchone()
-            if stream is None:
-                raise ShotTextBindingIntegrityError(detail="binding_stream_missing")
-            return ShotTextBinding(
-                binding_id=str(row["id"]), project_id=project_id,
-                shot_id=str(row["shot_id"]), kind=str(row["kind"]), slot=row["slot"],
-                media_id=media.id, event_stream_id=str(row["event_stream_id"]),
-                head=int(stream["head_seq"]), content_hash=media.content_hash,
-                mime_type=media.mime_type, byte_size=media.byte_size,
-                created_at=str(row["created_at"]), updated_at=str(row["updated_at"]),
-            )
+            return self._binding_row(conn, row)
 
     def list(
         self,
@@ -586,20 +680,7 @@ class ShotTextBindingRepository:
                     raise ShotTextBindingIntegrityError(detail="bound_media_missing", media_id=str(row["media_id"]))
                 verified = self._verify_managed_text(media, current=True)
                 self._verify_fingerprint(verified)
-                stream = conn.execute(
-                    "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
-                    (row["event_stream_id"], project_id),
-                ).fetchone()
-                if stream is None:
-                    raise ShotTextBindingIntegrityError(detail="binding_stream_missing")
-                result.append(ShotTextBinding(
-                    binding_id=str(row["id"]), project_id=project_id,
-                    shot_id=str(row["shot_id"]), kind=str(row["kind"]), slot=row["slot"],
-                    media_id=media.id, event_stream_id=str(row["event_stream_id"]),
-                    head=int(stream["head_seq"]), content_hash=media.content_hash,
-                    mime_type=media.mime_type, byte_size=media.byte_size,
-                    created_at=str(row["created_at"]), updated_at=str(row["updated_at"]),
-                ))
+                result.append(self._binding_row(conn, row))
             return result
 
     def resolve(
@@ -727,6 +808,145 @@ class ShotTextBindingRepository:
         self._verify_managed_text(media, current=current)
         return media
 
+    def _prepared_target(
+        self,
+        reader: Any,
+        *,
+        project_id: str,
+        expected_head: int,
+        binding_id: str | None,
+        shot_ref: str | None,
+        kind: str | None,
+        slot: str | None,
+    ) -> tuple[str, str, str, str | None, Any | None]:
+        """Resolve a selector to canonical natural and stream facts."""
+        if isinstance(reader, sqlite3.Connection):
+            reader.row_factory = sqlite3.Row
+        project_id = _require_project(project_id)
+        expected_head = _require_head(expected_head)
+        if expected_head == 0 and binding_id is None:
+            if shot_ref is None or kind is None:
+                raise ShotTextBindingValidationError(
+                    "head 0 set requires a complete friendly selector"
+                )
+            kind = validate_text_binding_kind(kind)
+            slot = validate_text_binding_slot(slot, kind=kind)
+            shot = self._resolve_shot(reader, project_id, shot_ref)
+            natural = (project_id, str(shot["id"]), kind, slot)
+            derived_id = derive_text_binding_id(
+                project_id=project_id, shot_id=natural[1], kind=kind, slot=slot
+            )
+            existing = _reader_query_one(reader,
+                "SELECT * FROM shot_text_bindings WHERE id = ?", (derived_id,)
+            )
+            if existing is not None:
+                self._validate_binding_authority(reader, existing, project_id=project_id)
+            return natural[1], kind, slot, derived_id, existing
+
+        target = self._resolve_binding(
+            reader,
+            project_id=project_id,
+            binding_id=binding_id,
+            shot_ref=shot_ref,
+            kind=kind,
+            slot=slot,
+        )
+        natural = (
+            project_id,
+            str(target["shot_id"]),
+            str(target["kind"]),
+            target["slot"],
+        )
+        return natural[1], natural[2], natural[3], str(target["id"]), target
+
+    def prepare_set(
+        self,
+        reader: Any,
+        *,
+        project_id: str,
+        frozen: FrozenTextBytes,
+        expected_head: int,
+        binding_id: str | None = None,
+        shot_ref: str | None = None,
+        kind: str | None = None,
+        slot: str | None = None,
+    ) -> _PreparedTextBindingCommand:
+        """Prepare canonical set facts on a read-only snapshot."""
+        if not isinstance(frozen, FrozenTextBytes):
+            raise ShotTextBindingValidationError("frozen text bytes are required")
+        shot_id, kind, slot, resolved_id, target = self._prepared_target(
+            reader,
+            project_id=project_id,
+            expected_head=expected_head,
+            binding_id=binding_id,
+            shot_ref=shot_ref,
+            kind=kind,
+            slot=slot,
+        )
+        stream_id = derive_text_binding_stream_id(resolved_id)
+        desired = (
+            self._media.read_project_media(
+                reader, project_id=project_id, content_hash=frozen.digest
+            )
+            if self._media is not None
+            else None
+        )
+        return _PreparedTextBindingCommand(
+            project_id=project_id,
+            natural_tuple=(project_id, shot_id, kind, slot),
+            binding_id=resolved_id,
+            event_stream_id=stream_id,
+            expected_head=expected_head,
+            desired_content_hash=frozen.digest,
+            desired_media_id=desired.id if desired is not None else None,
+        )
+
+    def prepare_rebind(
+        self,
+        reader: Any,
+        *,
+        project_id: str,
+        media_id: str,
+        expected_head: int,
+        binding_id: str | None = None,
+        shot_ref: str | None = None,
+        kind: str | None = None,
+        slot: str | None = None,
+    ) -> _PreparedTextBindingCommand:
+        """Prepare canonical rebind facts on a read-only snapshot."""
+        if expected_head == 0:
+            raise ShotTextBindingValidationError(
+                "rebind requires a positive expected_head", detail="expected_head"
+            )
+        media_id = str(media_id) if isinstance(media_id, str) else media_id
+        if not isinstance(media_id, str) or not media_id:
+            raise ShotTextBindingValidationError("media_id must be a non-empty string")
+        shot_id, kind, slot, resolved_id, _target = self._prepared_target(
+            reader,
+            project_id=project_id,
+            expected_head=expected_head,
+            binding_id=binding_id,
+            shot_ref=shot_ref,
+            kind=kind,
+            slot=slot,
+        )
+        desired = (
+            self._media.read_project_media(reader, project_id=project_id, media_id=media_id)
+            if self._media is not None
+            else None
+        )
+        if desired is None:
+            raise ShotTextBindingNotFoundError(binding_id=media_id, project_id=project_id)
+        return _PreparedTextBindingCommand(
+            project_id=project_id,
+            natural_tuple=(project_id, shot_id, kind, slot),
+            binding_id=resolved_id,
+            event_stream_id=derive_text_binding_stream_id(resolved_id),
+            expected_head=expected_head,
+            desired_content_hash=desired.content_hash,
+            desired_media_id=desired.id,
+        )
+
     # -- delayed prepared media -----------------------------------------
 
     def _prepared_media(
@@ -817,38 +1037,53 @@ class ShotTextBindingRepository:
         slot: str | None,
         idempotency_key: str,
         actor_kind: str,
+        prepared: _PreparedTextBindingCommand | None = None,
     ) -> _MutationOutcome:
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
         idempotency_key = _require_key(idempotency_key)
         if self._media is None:
             raise ShotTextBindingValidationError("a Core MediaRepository is required")
+        if prepared is None:
+            prepared = self.prepare_set(
+                uow, project_id=project_id, frozen=frozen,
+                expected_head=expected_head, binding_id=binding_id,
+                shot_ref=shot_ref, kind=kind, slot=slot,
+            )
         if expected_head == 0:
-            if binding_id is not None or shot_ref is None or kind is None:
-                raise ShotTextBindingValidationError("head 0 set requires a complete friendly selector")
-            kind = validate_text_binding_kind(kind)
-            slot = validate_text_binding_slot(slot, kind=kind)
-            shot = self._resolve_shot(uow, project_id, shot_ref)
-            binding_id = derive_text_binding_id(
-                project_id=project_id, shot_id=str(shot["id"]), kind=kind, slot=slot
-            )
-            row = uow.query_one(
-                "SELECT * FROM shot_text_bindings WHERE id = ?", (binding_id,)
-            )
+            if binding_id is not None:
+                row = self._resolve_binding(
+                    uow, project_id=project_id, binding_id=binding_id
+                )
+                shot = uow.query_one(
+                    "SELECT id FROM shots WHERE id = ? AND project_id = ?",
+                    (row["shot_id"], project_id),
+                )
+                if shot is None:
+                    raise ShotTextBindingIntegrityError(detail="binding_shot_project_mismatch")
+                kind = str(row["kind"])
+                slot = row["slot"]
+                binding_id = str(row["id"])
+            else:
+                if shot_ref is None or kind is None:
+                    raise ShotTextBindingValidationError("head 0 set requires a complete friendly selector")
+                kind = validate_text_binding_kind(kind)
+                slot = validate_text_binding_slot(slot, kind=kind)
+                shot = self._resolve_shot(uow, project_id, shot_ref)
+                binding_id = derive_text_binding_id(
+                    project_id=project_id, shot_id=str(shot["id"]), kind=kind, slot=slot
+                )
+                row = uow.query_one(
+                    "SELECT * FROM shot_text_bindings WHERE id = ?", (binding_id,)
+                )
             if row is not None:
-                if not (
-                    str(row["project_id"]) == project_id
-                    and str(row["shot_id"]) == str(shot["id"])
-                    and str(row["kind"]) == kind
-                    and row["slot"] == slot
-                ):
-                    raise ShotTextBindingConflictError(
-                        reason="binding_id_collision", binding_id=binding_id
-                    )
+                self._validate_binding_authority(uow, row, project_id=project_id)
+                if not (str(row["shot_id"]) == str(shot["id"])
+                        and str(row["kind"]) == kind and row["slot"] == slot):
+                    raise ShotTextBindingConflictError(reason="binding_id_collision", binding_id=binding_id)
                 stream = uow.query_one(
-                    "SELECT head_seq FROM event_streams "
-                    "WHERE id = ? AND project_id = ?",
-                    (row["event_stream_id"], project_id),
+                    "SELECT head_seq FROM event_streams WHERE id = ?",
+                    (row["event_stream_id"],),
                 )
                 actual = int(stream["head_seq"]) if stream is not None else 1
                 raise ShotTextBindingStaleError(
@@ -860,6 +1095,12 @@ class ShotTextBindingRepository:
             ) is not None:
                 raise ShotTextBindingConflictError(reason="binding_id_collision", binding_id=binding_id)
             target = None
+            if (str(shot["id"]) != prepared.shot_id
+                    or binding_id != prepared.binding_id
+                    or event_stream_id != prepared.event_stream_id
+                    or kind != prepared.kind
+                    or slot != prepared.slot):
+                raise ShotTextBindingIntegrityError(detail="prepared_binding_mismatch")
         else:
             target = self._resolve_binding(
                 uow, project_id=project_id, binding_id=binding_id,
@@ -867,6 +1108,12 @@ class ShotTextBindingRepository:
             )
             binding_id = str(target["id"])
             event_stream_id = str(target["event_stream_id"])
+            if (binding_id != prepared.binding_id
+                    or event_stream_id != prepared.event_stream_id
+                    or str(target["shot_id"]) != prepared.shot_id
+                    or str(target["kind"]) != prepared.kind
+                    or target["slot"] != prepared.slot):
+                raise ShotTextBindingIntegrityError(detail="prepared_binding_mismatch")
             stream = uow.query_one(
                 "SELECT head_seq FROM event_streams "
                 "WHERE id = ? AND project_id = ?",
@@ -910,7 +1157,10 @@ class ShotTextBindingRepository:
             )
             if materialized_event is None:
                 raise ShotTextBindingIntegrityError(detail="materialized_event_missing")
-        self._verify_fingerprint(self._verify_managed_text(desired, current=False))
+        desired_verified = self._verify_managed_text(desired, current=False)
+        self._verify_fingerprint(desired_verified)
+        if desired_verified.digest != prepared.desired_content_hash:
+            raise ShotTextBindingIntegrityError(detail="prepared_media_mismatch", media_id=desired.id)
         stamp = utc_now_iso()
         txn_id = uuid.uuid4().hex
         event_ids: list[str] = []
@@ -938,6 +1188,7 @@ class ShotTextBindingRepository:
             )
             event_ids.append(event.event_id)
             project_seqs.append(event.project_seq)
+            self._verify_fingerprint(desired_verified)
             uow.execute(
                 "INSERT INTO shot_text_bindings "
                 "(id, project_id, shot_id, kind, slot, media_id, event_stream_id, created_at, updated_at) "
@@ -966,6 +1217,8 @@ class ShotTextBindingRepository:
             )
             event_ids.append(event.event_id)
             project_seqs.append(event.project_seq)
+            self._verify_fingerprint(current_verified)
+            self._verify_fingerprint(desired_verified)
             uow.execute(
                 "UPDATE shot_text_bindings SET media_id = ?, updated_at = ? WHERE id = ? AND project_id = ?",
                 (desired.id, stamp, binding_id, project_id),
@@ -988,7 +1241,7 @@ class ShotTextBindingRepository:
         uow: UnitOfWork,
         *,
         project_id: str,
-        text: bytes,
+        text: bytes | FrozenTextBytes | None = None,
         expected_head: int,
         idempotency_key: str,
         binding_id: str | None = None,
@@ -996,18 +1249,31 @@ class ShotTextBindingRepository:
         kind: str | None = None,
         slot: str | None = None,
         actor_kind: str = "local",
+        frozen: FrozenTextBytes | None = None,
+        prepared: _PreparedTextBindingCommand | None = None,
+        canonical_request_hash: str | None = None,
     ) -> ShotTextBindingMutation:
         """Set complete text; caller bytes are frozen before UoW in normal use."""
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
         idempotency_key = _require_key(idempotency_key)
-        frozen = freeze_text_bytes(text)
-        request = {
-            "project_id": project_id, "text_digest": frozen.digest,
-            "text_size": frozen.byte_size, "expected_head": expected_head,
-            "binding_id": binding_id, "shot_ref": shot_ref, "kind": kind, "slot": slot,
-        }
-        digest = request_hash(SHOT_TEXT_BINDING_SET_COMMAND_KIND, request)
+        if frozen is None:
+            if isinstance(text, FrozenTextBytes):
+                frozen = text
+            else:
+                frozen = freeze_text_bytes(text)
+        elif text is not None and not isinstance(text, FrozenTextBytes):
+            raise ShotTextBindingValidationError("text and frozen text bytes cannot be combined")
+        if prepared is None:
+            prepared = self.prepare_set(
+                uow, project_id=project_id, frozen=frozen,
+                expected_head=expected_head, binding_id=binding_id,
+                shot_ref=shot_ref, kind=kind, slot=slot,
+            )
+        digest = canonical_request_hash or request_hash(
+            SHOT_TEXT_BINDING_SET_COMMAND_KIND,
+            prepared.request_facts(SHOT_TEXT_BINDING_SET_COMMAND_KIND),
+        )
         replay = self._receipts.check(
             uow, project_id=project_id, idempotency_key=idempotency_key,
             request_hash=digest, command_kind=SHOT_TEXT_BINDING_SET_COMMAND_KIND,
@@ -1017,7 +1283,7 @@ class ShotTextBindingRepository:
         result = self._write_set(
             uow, project_id=project_id, frozen=frozen, expected_head=expected_head,
             binding_id=binding_id, shot_ref=shot_ref, kind=kind, slot=slot,
-            idempotency_key=idempotency_key, actor_kind=actor_kind,
+            idempotency_key=idempotency_key, actor_kind=actor_kind, prepared=prepared,
         )
         if not result.mutation.changed:
             return result.mutation
@@ -1050,6 +1316,8 @@ class ShotTextBindingRepository:
         kind: str | None = None,
         slot: str | None = None,
         actor_kind: str = "local",
+        prepared: _PreparedTextBindingCommand | None = None,
+        canonical_request_hash: str | None = None,
     ) -> ShotTextBindingMutation:
         """Rebind an existing binding to already-materialized text media."""
         project_id = _require_project(project_id)
@@ -1059,16 +1327,16 @@ class ShotTextBindingRepository:
                 "rebind requires a positive expected_head", detail="expected_head"
             )
         idempotency_key = _require_key(idempotency_key)
-        request = {
-            "project_id": project_id,
-            "media_id": media_id,
-            "expected_head": expected_head,
-            "binding_id": binding_id,
-            "shot_ref": shot_ref,
-            "kind": kind,
-            "slot": slot,
-        }
-        digest = request_hash(SHOT_TEXT_BINDING_REBIND_COMMAND_KIND, request)
+        if prepared is None:
+            prepared = self.prepare_rebind(
+                uow, project_id=project_id, media_id=media_id,
+                expected_head=expected_head, binding_id=binding_id,
+                shot_ref=shot_ref, kind=kind, slot=slot,
+            )
+        digest = canonical_request_hash or request_hash(
+            SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
+            prepared.request_facts(SHOT_TEXT_BINDING_REBIND_COMMAND_KIND),
+        )
         replay = self._receipts.check(
             uow,
             project_id=project_id,
@@ -1082,6 +1350,12 @@ class ShotTextBindingRepository:
             uow, project_id=project_id, binding_id=binding_id,
             shot_ref=shot_ref, kind=kind, slot=slot,
         )
+        if (str(target["id"]) != prepared.binding_id
+                or str(target["event_stream_id"]) != prepared.event_stream_id
+                or str(target["shot_id"]) != prepared.shot_id
+                or str(target["kind"]) != prepared.kind
+                or target["slot"] != prepared.slot):
+            raise ShotTextBindingIntegrityError(detail="prepared_binding_mismatch")
         stream = uow.query_one(
             "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
             (target["event_stream_id"], project_id),
@@ -1107,6 +1381,9 @@ class ShotTextBindingRepository:
             raise ShotTextBindingNotFoundError(binding_id=media_id, project_id=project_id)
         desired_verified = self._verify_managed_text(desired, current=False)
         self._verify_fingerprint(desired_verified)
+        if (desired.id != prepared.desired_media_id
+                or desired.content_hash != prepared.desired_content_hash):
+            raise ShotTextBindingIntegrityError(detail="prepared_media_mismatch", media_id=desired.id)
         if desired.id == current.id:
             return ShotTextBindingMutation(changed=False, binding=self._binding_row(uow, target))
         stamp = utc_now_iso()
@@ -1127,6 +1404,8 @@ class ShotTextBindingRepository:
             command_kind=SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
             expected_head_seq=expected_head, created_at=stamp,
         )
+        self._verify_fingerprint(current_verified)
+        self._verify_fingerprint(desired_verified)
         uow.execute(
             "UPDATE shot_text_bindings SET media_id = ?, updated_at = ? WHERE id = ? AND project_id = ?",
             (desired.id, stamp, target["id"], project_id),

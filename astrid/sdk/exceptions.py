@@ -826,6 +826,11 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         ShotTextBindingIntegrityError,
     )
 
+    if isinstance(exc, ShotTextBindingValidationError) and exc.detail is not None:
+        return ServiceValidationError(
+            _SERVICE_ERROR_MESSAGES["validation_error"],
+            details={"entity": "text_binding", "reason": exc.detail},
+        )
     if isinstance(exc, ShotTextBindingMediaCandidateError):
         if exc.detail == "content_hash_media_kind_collision":
             return ServiceConflictError(

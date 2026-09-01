@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from astrid.application import compose_standard_application
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs.shots.repository import ShotRepository
 from astrid.packs.shots.text_bindings import ShotTextBindingRepository
-
 
 ENVELOPE_KEYS = {"ok", "data", "error", "receipt", "idempotency_key"}
 BINDING_KEYS = {
@@ -235,3 +235,97 @@ def test_list_supports_friendly_and_exact_modes(tmp_path: Path) -> None:
         assert friendly.receipt is None and friendly.idempotency_key == ""
         assert exact.data == friendly.data
         assert exact.data[0]["slot"] == "regen-glitch"
+
+
+def test_friendly_and_exact_set_replay_share_canonical_receipt(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        first = app.shots_service.set_text_binding(
+            project_id, shot_ref="Opening", kind="transcript", text=b"same",
+            expected_head=0, idempotency_key="canonical-set",
+        )
+        replay = app.shots_service.set_text_binding(
+            project_id, binding_id=first.data["binding"]["binding_id"], text=b"same",
+            expected_head=0, idempotency_key="canonical-set",
+        )
+        assert replay.as_dict() == first.as_dict()
+        assert replay.receipt.request_hash == first.receipt.request_hash
+        assert replay.data["binding"]["binding_id"] != shot_id
+
+
+def test_friendly_and_exact_rebind_replay_share_canonical_receipt(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, _shot_id = _seed(app)
+        first = app.shots_service.set_text_binding(
+            project_id, shot_ref="Opening", kind="transcript", text=b"first",
+            expected_head=0, idempotency_key="canonical-first",
+        )
+        second = app.shots_service.set_text_binding(
+            project_id, binding_id=first.data["binding"]["binding_id"], text=b"second",
+            expected_head=1, idempotency_key="canonical-second",
+        )
+        friendly = app.shots_service.rebind_text_binding(
+            project_id, shot_ref="Opening", kind="transcript",
+            media_id=first.data["binding"]["media_id"], expected_head=2,
+            idempotency_key="canonical-rebind",
+        )
+        exact = app.shots_service.rebind_text_binding(
+            project_id, binding_id=first.data["binding"]["binding_id"],
+            media_id=first.data["binding"]["media_id"], expected_head=2,
+            idempotency_key="canonical-rebind",
+        )
+        assert friendly.ok and exact.ok
+        assert exact.as_dict() == friendly.as_dict()
+        assert exact.receipt.request_hash == friendly.receipt.request_hash
+        assert second.data["binding"]["media_id"] != first.data["binding"]["media_id"]
+
+
+def test_invalid_utf8_is_public_detail_and_opens_no_uow_or_temp(tmp_path: Path, monkeypatch) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, _shot_id = _seed(app)
+        calls = 0
+        original_run = __import__("astrid.sdk.shots", fromlist=["UnitOfWork"]).UnitOfWork.run
+
+        def counted(self, callback):
+            nonlocal calls
+            calls += 1
+            return original_run(self, callback)
+
+        monkeypatch.setattr("astrid.sdk.shots.UnitOfWork.run", counted)
+        temp_root = Path(tempfile.gettempdir())
+        before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+        result = app.shots_service.set_text_binding(
+            project_id, shot_ref="Opening", kind="transcript", text=b"\xff",
+            expected_head=0, idempotency_key="invalid",
+        )
+        after = set(temp_root.glob(".astrid-shot-text-*.txt"))
+        assert result.error.code == "validation_error"
+        assert result.error.details["reason"] == "invalid_utf8"
+        assert calls == 0
+        assert after == before
+
+
+def test_sdk_freezes_once_and_passes_immutable_bytes_into_uow(tmp_path: Path, monkeypatch) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, _shot_id = _seed(app)
+        import astrid.packs.shots.text_bindings as bindings_module
+        import astrid.sdk.shots as shots_module
+        calls = 0
+        original_freeze = shots_module.freeze_text_bytes
+
+        def counted(value):
+            nonlocal calls
+            calls += 1
+            return original_freeze(value)
+
+        monkeypatch.setattr(shots_module, "freeze_text_bytes", counted)
+        monkeypatch.setattr(
+            bindings_module, "freeze_text_bytes",
+            lambda value: (_ for _ in ()).throw(AssertionError("in-UoW freeze")),
+        )
+        result = app.shots_service.set_text_binding(
+            project_id, shot_ref="Opening", kind="transcript", text=b"frozen",
+            expected_head=0, idempotency_key="freeze-once",
+        )
+        assert result.ok
+        assert calls == 1
