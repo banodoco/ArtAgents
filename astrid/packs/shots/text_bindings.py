@@ -22,6 +22,7 @@ from typing import Any
 
 from astrid.core.events.service import EventAppendService
 from astrid.core.io.media_import import (
+    MediaDigestError,
     PreparedMedia,
     managed_media_path,
     managed_root,
@@ -733,7 +734,12 @@ class ShotTextBindingRepository:
                 "projects_root is required for media verification"
             )
         root = managed_root(projects_root)
-        expected = managed_media_path(projects_root, media.content_hash)
+        try:
+            expected = managed_media_path(projects_root, media.content_hash)
+        except MediaDigestError as exc:
+            raise ShotTextBindingIntegrityError(
+                detail="managed_hash_mismatch", media_id=media.id
+            ) from exc
         try:
             resolved_locator = locator.resolve(strict=False)
             resolved_expected = expected.resolve(strict=False)

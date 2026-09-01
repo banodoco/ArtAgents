@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,116 @@ def test_bound_media_corruption_is_integrity_failure(text_env) -> None:
             text_env["writer"], project_id=project.id, binding_id=result.binding.binding_id
         )
     assert exc_info.value.detail == "managed_size_mismatch"
+
+
+def _persisted_binding_snapshot(env, *, project_id: str, binding_id: str) -> dict[str, object]:
+    def capture(session):
+        return {
+            "binding_pointer_timestamp": tuple(
+                session.query_one(
+                    "SELECT media_id, updated_at FROM shot_text_bindings WHERE id = ?",
+                    (binding_id,),
+                )
+            ),
+            "project_heads": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT id, event_head_seq FROM projects WHERE id = ?",
+                    (project_id,),
+                )
+            ),
+            "stream_heads": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT id, head_seq FROM event_streams "
+                    "WHERE project_id = ? ORDER BY id",
+                    (project_id,),
+                )
+            ),
+            "events": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM events WHERE project_id = ? "
+                    "ORDER BY project_seq, event_id",
+                    (project_id,),
+                )
+            ),
+            "receipts": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM command_receipts WHERE project_id = ? "
+                    "ORDER BY idempotency_key",
+                    (project_id,),
+                )
+            ),
+            "media": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM media WHERE project_id = ? ORDER BY id",
+                    (project_id,),
+                )
+            ),
+            "media_locations": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT ml.* FROM media_locations ml "
+                    "JOIN media m ON m.id = ml.media_id "
+                    "WHERE m.project_id = ? ORDER BY ml.media_id, ml.realm, ml.locator",
+                    (project_id,),
+                )
+            ),
+        }
+
+    return env["writer"].submit(capture)
+
+
+def test_malformed_bound_hash_is_typed_zero_write_and_no_temp(text_env, monkeypatch) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    created = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript",
+        text=b"stable", expected_head=0, idempotency_key="malformed-hash-create",
+    )
+    media_id = created.binding.media_id
+    text_env["writer"].submit(
+        lambda s: s.execute(
+            "UPDATE media SET content_hash = ? WHERE id = ?",
+            ("malformed", media_id),
+        )
+    )
+    before = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    temp_root = Path(tempfile.gettempdir())
+    temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+    materialize_calls = 0
+
+    def forbidden_materialization(*args, **kwargs):
+        nonlocal materialize_calls
+        materialize_calls += 1
+        raise AssertionError("malformed current hash must fail before materialization")
+
+    monkeypatch.setattr(text_env["bindings"], "materialize_absent_text", forbidden_materialization)
+    monkeypatch.setattr(
+        tempfile,
+        "NamedTemporaryFile",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("malformed current hash must create no temp")
+        ),
+    )
+    with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
+        _set_binding(
+            text_env, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"next", expected_head=1, idempotency_key="malformed-hash-set",
+        )
+    after = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=created.binding.binding_id
+    )
+    assert exc_info.value.detail == "managed_hash_mismatch"
+    assert exc_info.value.media_id == media_id
+    assert after == before
+    assert materialize_calls == 0
+    assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
 
 
 def test_canonical_request_hash_vectors_include_binding_stream_and_desired_hash() -> None:

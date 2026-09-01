@@ -361,6 +361,131 @@ def test_invalid_utf8_is_public_detail_and_opens_no_uow_or_temp(tmp_path: Path, 
         assert after == before
 
 
+def _sdk_persisted_binding_snapshot(app, *, project_id: str, binding_id: str) -> dict[str, object]:
+    def capture(session):
+        return {
+            "binding_pointer_timestamp": tuple(
+                session.query_one(
+                    "SELECT media_id, updated_at FROM shot_text_bindings WHERE id = ?",
+                    (binding_id,),
+                )
+            ),
+            "project_heads": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT id, event_head_seq FROM projects WHERE id = ?",
+                    (project_id,),
+                )
+            ),
+            "stream_heads": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT id, head_seq FROM event_streams "
+                    "WHERE project_id = ? ORDER BY id",
+                    (project_id,),
+                )
+            ),
+            "events": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM events WHERE project_id = ? "
+                    "ORDER BY project_seq, event_id",
+                    (project_id,),
+                )
+            ),
+            "receipts": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM command_receipts WHERE project_id = ? "
+                    "ORDER BY idempotency_key",
+                    (project_id,),
+                )
+            ),
+            "media": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT * FROM media WHERE project_id = ? ORDER BY id",
+                    (project_id,),
+                )
+            ),
+            "media_locations": tuple(
+                tuple(row)
+                for row in session.query(
+                    "SELECT ml.* FROM media_locations ml "
+                    "JOIN media m ON m.id = ml.media_id "
+                    "WHERE m.project_id = ? ORDER BY ml.media_id, ml.realm, ml.locator",
+                    (project_id,),
+                )
+            ),
+        }
+
+    return app.writer.submit(capture)
+
+
+def test_malformed_bound_hash_is_public_integrity_zero_write_and_no_temp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id,
+            shot_ref=shot_id,
+            kind="transcript",
+            text=b"stable",
+            expected_head=0,
+            idempotency_key="malformed-hash-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        media_id = created.data["binding"]["media_id"]
+        app.writer.submit(
+            lambda s: s.execute(
+                "UPDATE media SET content_hash = ? WHERE id = ?",
+                ("malformed", media_id),
+            )
+        )
+        before = _sdk_persisted_binding_snapshot(
+            app, project_id=project_id, binding_id=binding_id
+        )
+        temp_root = Path(tempfile.gettempdir())
+        temp_before = set(temp_root.glob(".astrid-shot-text-*.txt"))
+        materialize_calls = 0
+
+        def forbidden_materialization(*args, **kwargs):
+            nonlocal materialize_calls
+            materialize_calls += 1
+            raise AssertionError("malformed current hash must fail before materialization")
+
+        monkeypatch.setattr(app.text_bindings, "materialize_absent_text", forbidden_materialization)
+        monkeypatch.setattr(
+            tempfile,
+            "NamedTemporaryFile",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("malformed current hash must create no temp")
+            ),
+        )
+        result = app.shots_service.set_text_binding(
+            project_id,
+            binding_id=binding_id,
+            text=b"next",
+            expected_head=1,
+            idempotency_key="malformed-hash-set",
+        )
+        after = _sdk_persisted_binding_snapshot(
+            app, project_id=project_id, binding_id=binding_id
+        )
+        assert result.ok is False
+        assert result.error.code == "integrity_error"
+        assert result.error.code != "internal_error"
+        assert result.error.details == {
+            "entity": "text_binding_media",
+            "reason": "managed_hash_mismatch",
+        }
+        assert result.receipt is None
+        assert after == before
+        assert materialize_calls == 0
+        assert set(temp_root.glob(".astrid-shot-text-*.txt")) == temp_before
+
+
 def test_sdk_freezes_once_and_passes_immutable_bytes_into_uow(tmp_path: Path, monkeypatch) -> None:
     with compose_standard_application(projects_root=tmp_path) as app:
         project_id, _shot_id = _seed(app)
