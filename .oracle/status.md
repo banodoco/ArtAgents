@@ -26,9 +26,9 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 10 — cumulative gate 2**
-- Active batch: **review integrated B1–B4 strict-v2 activation before B5
-  source/wheel closure**
+- Current Megado phase: **Phase 11 — B5 closure**
+- Active batch: **legacy absence, package-data/docs closure, clean-wheel proof,
+  focused/full suites, evidence matrix, final reviews, and push**
 - Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
   normal implementation, validation, and bounded independent certification.
   Segment Sol review requires a recorded high-risk reason; final independent
@@ -78,7 +78,7 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Run cumulative gate 2 over B1–B4, then begin B5 only if it passes.
+Execute B5 source/wheel/docs/test closure; cumulative gate 2 passed.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

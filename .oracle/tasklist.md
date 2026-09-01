@@ -280,6 +280,12 @@ zero finite blockers. Reviewed B4 checkpoint:
 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`. Run cumulative gate 2 over
 B1–B4 before B5 begins.
 
+Cumulative gate 2: **PASS**. One bounded independent Luna integration review
+confirmed linear B1–B4 ancestry, 81/81 B4 identities, strict-v2-only
+authority, canonical composition/consumers, and external trust boundaries.
+Its 279-pass command left only finite B5 packaging closure and the recorded
+unavailable-`banodoco_timeline_schema` baseline lane.
+
 ## B5 — closure, wheel proof, and final review
 
 Goal criteria: 3, 8, 10, 11, 12, 14, 15.
@@ -355,4 +361,4 @@ independent pass.
 - Frozen final criteria satisfied end to end: **0/15**; B1–B4 provide accepted
   implementation evidence, and production now uses canonical v2 only.
 
-Next action: run cumulative gate 2 over B1–B4.
+Next action: execute B5 source/wheel/docs/test closure.

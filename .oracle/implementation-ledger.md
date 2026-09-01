@@ -567,6 +567,12 @@ composes; all declared docs/resources resolve; final tests and review pass.
   81/81 identities matched. Candidate 2 findings 1, 2, 3, 4, and 6 passed;
   the bounded finding-5 correction passed 32 plus 43 focused tests, and its
   independent delta passed with `AUTHORITY LINT OK` and no blockers.
+- Cumulative gate 2 independently confirmed exact B1–B4/control ancestry,
+  B4 digest plus 81/81 identities, strict-v2-only authority, canonical default
+  and Runaway composition, operation-owned consumers, and external trust
+  boundaries. Its bounded command passed 279 tests plus 78 subtests; two
+  installed-artifact failures are finite B5 packaging work and the SDK
+  rendering failure is the recorded unavailable dependency lane.
 
 ## Honest progress assessment
 
@@ -582,7 +588,7 @@ composes; all declared docs/resources resolve; final tests and review pass.
   truth.
 - **Frozen final criteria:** 0/15 complete end to end; B1–B4 provide accepted
   implementation evidence, while B5 final closure remains.
-- **Remaining sequence:** cumulative gate 2, then B5.
+- **Remaining sequence:** B5 closure.
 
-The correct next action is cumulative gate 2 over B1–B4, then B5 closure.
+The correct next action is B5 source/wheel/docs/test/evidence closure.
 Cloud capacity and tooling preflight are green.

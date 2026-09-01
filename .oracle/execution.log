@@ -1653,3 +1653,10 @@
   `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785` activates canonical v2 and
   deletes alternate schema-pack authority. Cumulative gate 2 over B1–B4 is the
   only next action before B5.
+- Cumulative gate 2 returned `PASS`: exact linear B1–B4/control ancestry,
+  B4 manifest digest and 81/81 identities, strict-v2-only authority, canonical
+  default plus explicit Runaway composition, operation-owned consumers, and
+  external trust boundaries all passed. The bounded integration command
+  reported 279 passed, 78 subtests passed, and three finite B5-only conditions:
+  two installed packaging-closure failures and the inherited unavailable
+  `banodoco_timeline_schema` SDK lane. B5 may begin.

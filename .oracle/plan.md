@@ -84,7 +84,7 @@ is in `.oracle/implementation-ledger.md`.
   B4 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`; 4/5 committed.
 - Frozen end-to-end criteria: 0/15 complete; B1–B4 provide accepted
   implementation evidence, and production now uses canonical v2 only.
-- Cumulative gate 1: PASS; next action is cumulative gate 2 before B5.
+- Cumulative gates 1 and 2: PASS; next action is B5 closure.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database
