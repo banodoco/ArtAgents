@@ -18,7 +18,6 @@ description: "Use for the Astrid repo: a file-based toolkit for agents to make a
 | foley | Spatial Foley pipeline: tile a video into a grid, generate Foley audio per tile via fal.ai, review and flag bad tiles... | `astrid/packs/foley/skill/SKILL.md` |
 | generation | Generate images and videos from text prompts using the elegant `astrid.generate` facade.  Image, audio, and video gen... | `astrid/packs/generation/skill/SKILL.md` |
 | generation.generate_image | Generate images from text prompts using local (vibecomfy) or cloud (fal) backends.  Uses the model → mode → backend t... | `astrid/packs/generation/executors/generate_image/skill/SKILL.md` |
-| hivemind | Search the Banodoco knowledge corpus — a public PostgREST endpoint combining a Discord message feed, external resourc... | `/Users/peteromalley/.astrid/packs/hivemind/revisions/hivemind/skill/SKILL.md` |
 | iteration | Iteration pack — builds iteration videos from thread provenance by gathering candidate runs, scoring quality, and ass... | `astrid/packs/iteration/skill/SKILL.md` |
 | media |  | `astrid/packs/media/skill/SKILL.md` |
 | moirae | Moirae pack — renders YAML screenplays into terminal-as-cinema videos via asciinema, agg, and ffmpeg.  External pack ... | `astrid/packs/moirae/skill/SKILL.md` |
@@ -168,7 +167,7 @@ Use `python3 -m astrid timelines shots ...` to discover reusable shots and
 set, or rebind their `prompt`, `voiceover_script`, and `transcript` bindings.
 There is no timeline filter: the binding belongs to its project and shot.
 The full workflow is documented in
-[`astrid/packs/timeline/skill/SKILL.md`](../timeline/skill/SKILL.md).
+[`astrid/packs/timeline/skill/SKILL.md`](../../timeline/skill/SKILL.md).
 
 Text commands are receipt-backed domain commands in the active UnitOfWork,
 not capability invocations. Checkout files and manifests are bounded,

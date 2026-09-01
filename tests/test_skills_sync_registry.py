@@ -84,6 +84,24 @@ class BaseHelperTest(unittest.TestCase):
 
 
 class RegistryBlockTest(unittest.TestCase):
+    def test_committed_registry_is_source_tree_current_and_has_portable_links(self) -> None:
+        """The committed registry never records installed host paths."""
+        source_descriptors = discovery.list_skills(discovery.PACKS_DIR)
+        self.assertTrue(
+            registry.is_current(
+                skill_md_path=registry.CORE_SKILL_MD,
+                descriptors=source_descriptors,
+            )
+        )
+        text = registry.CORE_SKILL_MD.read_text(encoding="utf-8")
+        self.assertIn("| timeline |", text)
+        self.assertNotRegex(text, r"`/Users/[^`]+/skill/SKILL\.md`")
+
+        timeline_skill = (
+            registry.CORE_SKILL_MD.parent / "../../timeline/skill/SKILL.md"
+        ).resolve()
+        self.assertTrue(timeline_skill.is_file(), timeline_skill)
+
     def test_insert_when_markers_absent_preserves_outside_content(self) -> None:
         with TemporaryDirectory() as tmp:
             path = _write_skill_md(Path(tmp))
