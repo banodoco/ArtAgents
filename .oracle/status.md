@@ -4,12 +4,13 @@
 - Execution contract: **FROZEN**
 - Huge-run policy: **active — 4–6 engineer-weeks**
 - Existing Astrid package/product foundation: **substantial and mostly built**
-- Canonical-v2 implementation batches: **B1 COMMITTED; B2 GATE PASS —
-  1/5 checkpoints committed**
+- Canonical-v2 implementation batches: **B1–B2 COMPLETE —
+  2/5 checkpoints committed**
 - Frozen final criteria: **0/15 end to end; B1–B2 evidence accepted**
-- Product candidate: **B2 frozen 35-path delta over B1 control HEAD**
+- Product state: **22 v2 manifests prepared; production legacy-active**
 - Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
 - B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
+- B2 checkpoint: `a293e4c416c0e716154c392c0dd43165344f870d`
 - Branch: `megado/canonical-pack-beta`
 - Worktree:
   `/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid`
@@ -22,10 +23,10 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 6 — B2 checkpoint preparation**
-- Active batch: **independent Luna certification PASS: 22 strict v2 packs,
-  64/12/10 census, four database declarations, 22 skills, confined resources,
-  zero-unclassified coverage, production legacy-active**
+- Current Megado phase: **Phase 7 — B3 implementation dispatch**
+- Active batch: **project canonical database declarations through existing
+  collision/migration machinery by explicit injection; preserve legacy
+  production builders until B4**
 - Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
   normal implementation, validation, and bounded independent certification.
   Segment Sol review requires a recorded high-risk reason; final independent
@@ -74,8 +75,8 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Commit the reviewed B2 checkpoint, record its SHA and receipt set, then begin
-B3 database projection without activating production authority.
+Dispatch independent exact-Luna B3 implementation units only where paths and
+dependencies are safe, then run integrated database-projection closure.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

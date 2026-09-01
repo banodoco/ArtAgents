@@ -1506,3 +1506,7 @@
   confined resources, zero-unclassified coverage, 106 tests plus 78 subtests,
   and legacy-active isolation. No findings or recorded high-risk reason require
   another segment review; B2 proceeds to checkpoint.
+- Reviewed B2 checkpoint committed as
+  `a293e4c416c0e716154c392c0dd43165344f870d` (`packs: convert bundled catalog
+  to v2`): 35-path reviewed candidate plus B2 briefs/receipts/control evidence.
+  Production remains legacy-active; B3 is next.

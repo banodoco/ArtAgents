@@ -26,8 +26,8 @@ All 22 packs have direct skills; `_core` routes a deterministic 22-pack census.
 Five standalone Blender resources are confined, the offline 22-row coverage
 ledger has zero unclassified surfaces, and production remains legacy-active
 with four byte-unchanged schema manifests. One independent Luna certification
-passed 106 focused tests plus 78 subtests with no findings. B2 checkpoint
-commit is pending.
+passed 106 focused tests plus 78 subtests with no findings. B2 checkpoint:
+`a293e4c416c0e716154c392c0dd43165344f870d`.
 
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-canonical-pack-beta`
 
@@ -382,7 +382,7 @@ useful beta dispositions are:
 | 12. External capability works; external DB fails | **B1 isolated behavior complete** | External capability admission and pre-resolution external database rejection have focused evidence; production hard cut remains later |
 | 13. Three golden pack forms validate | **B1 complete in isolated roots** | Capability-only, database-only, and combined fixtures validate under the strict path |
 | 14. Focused and broad tests pass after cutover | **B1–B2 focused evidence green; later suites pending** | B2 integrated and independent certification each passed 106 focused tests plus 78 subtests; full cutover suites remain later |
-| 15. Final evidence and independent review | **B1 checkpoint complete; B2 bounded certification PASS; final matrix pending B5** | B2 35-path identity and independent Luna certification have no findings; B2 checkpoint commit pending |
+| 15. Final evidence and independent review | **B1–B2 checkpoints complete; final matrix pending B5** | B2 35-path identity and independent Luna certification have no findings; B2 checkpoint `a293e4c4` |
 
 ## Direct execution plan
 
@@ -542,7 +542,7 @@ composes; all declared docs/resources resolve; final tests and review pass.
 - **Clarity/reconciliation:** complete; control documents reflect B1–B2.
 - **Frozen final criteria:** 0/15 complete end to end; B1–B2 provide accepted
   isolated/unshipped evidence.
-- **Remaining sequence:** B2 checkpoint, then B3–B5 under the frozen gates.
+- **Remaining sequence:** B3–B5 under the frozen gates.
 
-The correct product action is the reviewed B2 checkpoint, then B3 database
-projection. Cloud capacity and tooling preflight are green.
+The correct product action is B3 database projection. Cloud capacity and
+tooling preflight are green.

@@ -67,10 +67,10 @@ is in `.oracle/implementation-ledger.md`.
   Luna certification passed the 35-path candidate with 106 focused tests plus
   78 subtests; production remains legacy-active.
 - Checkpoints: B1 `14f1f7d5f77cb6bd384749941cff6e522b696590`;
-  B2 commit pending; 1/5 committed.
+  B2 `a293e4c416c0e716154c392c0dd43165344f870d`; 2/5 committed.
 - Frozen end-to-end criteria: 0/15 complete; B1–B2 provide accepted isolated
   and unshipped evidence.
-- Next action: commit B2, then begin B3.
+- Next action: begin B3 database projection.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

@@ -192,7 +192,8 @@ certification verified the 35-path frozen candidate, exact 22-pack/64/12/10
 census, four database declarations, 22 direct skills, confined resources,
 zero-unclassified coverage, 106 focused tests plus 78 subtests, and
 legacy-active isolation. No blocking finding or recorded high-risk reason
-requires another segment review. Commit the reviewed B2 checkpoint.
+requires another segment review. Reviewed B2 checkpoint:
+`a293e4c416c0e716154c392c0dd43165344f870d`.
 
 ## B3 — project canonical databases through the existing engine
 
@@ -336,11 +337,11 @@ independent pass.
 - Clarity/reconciliation control work: **P0 9/9 complete**.
 - B1 implementation: **10/10 complete; checkpoint
   `14f1f7d5f77cb6bd384749941cff6e522b696590`**.
-- B2 implementation: **9/9 complete; bounded certification PASS; checkpoint
-  commit pending**.
-- Canonical-v2 implementation checkpoints: **1/5 committed**.
+- B2 implementation: **9/9 complete; checkpoint
+  `a293e4c416c0e716154c392c0dd43165344f870d`**.
+- Canonical-v2 implementation checkpoints: **2/5 committed**.
 - Frozen final criteria satisfied end to end: **0/15**; B1–B2 provide accepted
   isolated/unshipped evidence without activating production.
 
-Next action: commit the reviewed B2 checkpoint, record its SHA, then execute B3
-database projection. Production remains legacy-active.
+Next action: execute B3 database projection while production remains
+legacy-active.
