@@ -4,14 +4,15 @@
 - Execution contract: **FROZEN**
 - Huge-run policy: **active — 4–6 engineer-weeks**
 - Existing Astrid package/product foundation: **substantial and mostly built**
-- Canonical-v2 implementation batches: **B1–B2 COMPLETE; B3 GATE PASS —
-  2/5 checkpoints committed, B3 checkpoint pending**
+- Canonical-v2 implementation batches: **B1–B3 COMPLETE —
+  3/5 checkpoints committed**
 - Frozen final criteria: **0/15 end to end; B1–B3 evidence accepted**
 - Product state: **22 v2 manifests and canonical database projection prepared;
   production legacy-active**
 - Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
 - B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
 - B2 checkpoint: `a293e4c416c0e716154c392c0dd43165344f870d`
+- B3 checkpoint: `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`
 - Branch: `megado/canonical-pack-beta`
 - Worktree:
   `/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid`
@@ -24,9 +25,9 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 7 — B3 checkpoint preparation**
-- Active batch: **frozen six-path B3 candidate independently certified; commit
-  the reviewed checkpoint, then run cumulative gate 1 before B4**
+- Current Megado phase: **Phase 8 — cumulative gate 1**
+- Active batch: **integrated B1–B3 contract/manifest/database-projection and
+  cutover-readiness certification before B4**
 - Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
   normal implementation, validation, and bounded independent certification.
   Segment Sol review requires a recorded high-risk reason; final independent
@@ -75,8 +76,7 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Commit the reviewed B3 checkpoint, record its SHA, then run cumulative gate 1
-over B1–B3 while production remains legacy-active.
+Run cumulative gate 1 over B1–B3 while production remains legacy-active.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

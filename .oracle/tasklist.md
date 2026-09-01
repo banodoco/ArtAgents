@@ -231,8 +231,9 @@ Gate B3: **PASS under bounded gate control**. Integrated closure and one
 independent Luna certification verified the frozen six-path identity and each
 passed 122 focused projection/registry/migration/Runaway tests. Production
 remains legacy-active; there are no findings or recorded high-risk reasons for
-an extra segment Sol review. Commit the reviewed B3 checkpoint, then run
-cumulative gate 1 over B1–B3 before B4 begins.
+an extra segment Sol review. Reviewed B3 checkpoint:
+`cd4dc91a31e4c7127b4023a87dabfdebea276ff1`. Run cumulative gate 1 over
+B1–B3 before B4 begins.
 
 ## B4 — converge consumers and activate the atomic hard cut
 
@@ -340,11 +341,10 @@ independent pass.
   `14f1f7d5f77cb6bd384749941cff6e522b696590`**.
 - B2 implementation: **9/9 complete; checkpoint
   `a293e4c416c0e716154c392c0dd43165344f870d`**.
-- B3 implementation: **9/9 complete; frozen six-path gate PASS, checkpoint
-  commit pending**.
-- Canonical-v2 implementation checkpoints: **2/5 committed; B3 gate passed**.
+- B3 implementation: **9/9 complete; checkpoint
+  `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`**.
+- Canonical-v2 implementation checkpoints: **3/5 committed**.
 - Frozen final criteria satisfied end to end: **0/15**; B1–B3 provide accepted
   isolated/unshipped evidence without activating production.
 
-Next action: commit the reviewed B3 checkpoint, then run cumulative gate 1
-while production remains legacy-active.
+Next action: run cumulative gate 1 while production remains legacy-active.

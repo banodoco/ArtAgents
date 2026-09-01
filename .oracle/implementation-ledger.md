@@ -39,7 +39,8 @@ and confined owner-relative migration handles. The deterministic Runaway
 fixture replaces the absent historical demo without packaging it. Integrated
 closure and one independent Luna certification each passed 122 focused tests;
 all six hashes matched and there were no findings. Production remains
-legacy-active until B4. The reviewed B3 checkpoint commit is the next action.
+legacy-active until B4. B3 checkpoint:
+`cd4dc91a31e4c7127b4023a87dabfdebea276ff1`.
 
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-canonical-pack-beta`
 
@@ -394,7 +395,7 @@ useful beta dispositions are:
 | 12. External capability works; external DB fails | **B1 isolated behavior complete** | External capability admission and pre-resolution external database rejection have focused evidence; production hard cut remains later |
 | 13. Three golden pack forms validate | **B1 complete in isolated roots** | Capability-only, database-only, and combined fixtures validate under the strict path |
 | 14. Focused and broad tests pass after cutover | **B1–B3 focused evidence green; later suites pending** | B3 integrated closure and independent certification each passed 122 focused tests; full cutover suites remain later |
-| 15. Final evidence and independent review | **B1–B2 checkpoints complete; B3 gate passed; final matrix pending B5** | B3 six-path identity matched and independent Luna certification passed with no findings |
+| 15. Final evidence and independent review | **B1–B3 checkpoints complete; final matrix pending B5** | B3 checkpoint `cd4dc91a` contains the matched six-path candidate and independent Luna pass |
 
 ## Direct execution plan
 
@@ -562,8 +563,8 @@ composes; all declared docs/resources resolve; final tests and review pass.
   truth.
 - **Frozen final criteria:** 0/15 complete end to end; B1–B3 provide accepted
   isolated/unshipped evidence.
-- **Remaining sequence:** commit B3, run cumulative gate 1, then B4–B5 under
-  the frozen cutover gates.
+- **Remaining sequence:** run cumulative gate 1, then B4–B5 under the frozen
+  cutover gates.
 
-The correct product action is the reviewed B3 checkpoint followed by cumulative
-gate 1. Cloud capacity and tooling preflight are green.
+The correct product action is cumulative gate 1 over B1–B3. Cloud capacity and
+tooling preflight are green.

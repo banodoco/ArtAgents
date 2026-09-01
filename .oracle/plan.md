@@ -73,11 +73,11 @@ is in `.oracle/implementation-ledger.md`.
   independent certification each passed 122 focused tests with no findings;
   production remains legacy-active.
 - Checkpoints: B1 `14f1f7d5f77cb6bd384749941cff6e522b696590`;
-  B2 `a293e4c416c0e716154c392c0dd43165344f870d`; 2/5 committed, with
-  B3 gate passed and its checkpoint pending.
+  B2 `a293e4c416c0e716154c392c0dd43165344f870d`;
+  B3 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`; 3/5 committed.
 - Frozen end-to-end criteria: 0/15 complete; B1–B3 provide accepted isolated
   and unshipped evidence.
-- Next action: commit B3, then run cumulative gate 1 before B4 activation.
+- Next action: run cumulative gate 1 before B4 activation.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

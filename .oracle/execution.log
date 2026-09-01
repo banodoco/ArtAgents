@@ -1548,3 +1548,8 @@
 - The owner accepted B3 candidate 1 under the current bounded-gate control.
   No high-risk reason requires an extra segment Sol review. Control documents
   were reconciled to B3 gate truth before the reviewed checkpoint commit.
+- Reviewed B3 checkpoint committed as
+  `cd4dc91a31e4c7127b4023a87dabfdebea276ff1` (`packs: project canonical
+  databases`): six frozen product/test paths plus accepted B3 briefs, receipts,
+  evidence, and control state. Production remains legacy-active; cumulative
+  gate 1 is next.
