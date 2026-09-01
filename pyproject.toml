@@ -78,7 +78,7 @@ runpod = [
 include-package-data = false
 
 [tool.setuptools.packages.find]
-include = ["astrid*"]
+include = ["astrid*", "banodoco_workspace_client*"]
 exclude = [
     # Tests are not part of the installed product.  Keeping this exclusion
     # explicit prevents a future in-tree pack test package from becoming a

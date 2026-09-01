@@ -14,7 +14,6 @@ from astrid.sdk.workspace_client import WorkspaceClientError
 def _runtime_checkout(tmp_path: Path) -> Path:
     checkout = tmp_path / "runtime"
     (checkout / "banodoco_local").mkdir(parents=True)
-    (checkout / "packages" / "python").mkdir(parents=True)
     return checkout
 
 
@@ -33,7 +32,7 @@ def test_neutral_launcher_is_invoked_with_ephemeral_profile(monkeypatch, tmp_pat
         seen["command"] = command
         manifest = Path(command[command.index("--source-manifest") + 1])
         seen["manifest"] = json.loads(manifest.read_text(encoding="utf-8"))
-        return subprocess.CompletedProcess(command, 0, '{"status":"started","realm_id":"realm-1"}\n', "")
+        return subprocess.CompletedProcess(command, 0, '{"status":"started","realm_id":"realm-1","endpoint":"http://127.0.0.1:1","actor_id":"owner"}\n', "")
 
     monkeypatch.setattr(autobootstrap.subprocess, "run", fake_run)
     result = autobootstrap.ensure_runtime()
@@ -65,7 +64,7 @@ def test_configured_manifest_does_not_require_editable_source_inference(monkeypa
         autobootstrap.subprocess,
         "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
-            command, 0, '{"status":"reconnected","realm_id":"realm-1"}', ""
+            command, 0, '{"status":"reconnected","realm_id":"realm-1","endpoint":"http://127.0.0.1:1","actor_id":"owner"}', ""
         ),
     )
 
@@ -96,17 +95,32 @@ def test_sdk_open_uses_explicit_context_without_bootstrap(monkeypatch):
 
         def health(self):
             calls.append("health")
-            return {"status": "ok"}
+            return {
+                "status": "ok",
+                "protocol": "workspace.v1",
+                "schema_digest": "sha256:eaae72871d29f70687d0aa2bde2e2026d5c37c48effe103e97c3c43e034bb25a",
+                "runtime_epoch": 1,
+            }
 
         def handshake(self, *args):
             calls.append("handshake")
-            return {"realm_id": "realm", "actor_id": "actor"}
+            return {
+                "protocol": "workspace.v1",
+                "schema_digest": "sha256:eaae72871d29f70687d0aa2bde2e2026d5c37c48effe103e97c3c43e034bb25a",
+                "session_id": "session",
+                "realm_id": "realm",
+                "actor_id": "actor",
+                "scopes": [
+                    "projects:read", "projects:write", "objects:read",
+                    "objects:write", "tasks:read", "tasks:write",
+                ],
+            }
 
     monkeypatch.setattr("astrid.sdk.workspace_client.resolve_runtime_connection", resolve)
     monkeypatch.setattr("astrid.sdk.workspace_client.WorkspaceClient", FakeWorkspace)
     monkeypatch.setattr("astrid.sdk.autobootstrap.ensure_runtime", lambda: pytest.fail("ordinary SDK bootstrapped runtime"))
 
-    client = AstridClient.open(endpoint="http://127.0.0.1:1", credential="token", realm_id="realm", actor_id="actor", client_name="test", client_version="1", protocol_version="workspace.v1")
+    AstridClient.open(endpoint="http://127.0.0.1:1", credential="token", realm_id="realm", actor_id="actor", client_name="test", client_version="1", protocol_version="workspace.v1")
     assert calls == ["health", "handshake"]
 
 

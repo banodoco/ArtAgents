@@ -163,7 +163,10 @@ def sdk_import_asset(
         # The workspace runtime is the sole product authority.  ``root`` is
         # only used for compiler output/fixture paths; it must not be passed to
         # the client composition root as a local-storage escape hatch.
-        _SHARED_CLIENT = AstridClient.open()
+        # This helper is reached from an explicit CLI invocation.  Bootstrap
+        # is therefore owned by the launcher boundary, never guessed from a
+        # local projects root.
+        _SHARED_CLIENT = AstridClient.open_from_launcher()
         _SHARED_CLIENT_ROOT = root
     return _client_import(_SHARED_CLIENT, project, path)
 
@@ -172,7 +175,9 @@ def close_shared_client() -> None:
     """Close the lazily opened shared client (idempotent)."""
     global _SHARED_CLIENT, _SHARED_CLIENT_ROOT
     if _SHARED_CLIENT is not None:
-        _SHARED_CLIENT.close()
+        close = getattr(_SHARED_CLIENT, "close", None)
+        if callable(close):
+            close()
         _SHARED_CLIENT = None
         _SHARED_CLIENT_ROOT = None
 
@@ -1090,7 +1095,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
         render_name = args.output_name if args.render == "" else args.render
         from astrid.sdk.client import AstridClient
 
-        with AstridClient.open(args.projects_root) as client:
+        with AstridClient.open_from_launcher() as client:
             importer = make_client_importer(client, project=args.project)
             config, registry, report = compile_storyboard(
                 story,
@@ -1114,7 +1119,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     if args.shots:
         from astrid.sdk.client import AstridClient
 
-        with AstridClient.open(args.projects_root) as client:
+        with AstridClient.open_from_launcher() as client:
             import_asset = make_client_importer(client, project=args.project)
             shots_result = _compile_with_shots(
                 story,

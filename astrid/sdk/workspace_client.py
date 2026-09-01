@@ -7,17 +7,96 @@ contract. Endpoint and credential values are supplied by the caller.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
+
+from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
+from banodoco_workspace_client.contract_metadata import PROTOCOL, SCHEMA_DIGEST
 
 from .pagination import page_pair, paged_rows
 
-try:
-    from banodoco_workspace_client import WorkspaceClient as GeneratedWorkspaceClient
-except ImportError:  # The SDK remains importable when the runtime package is absent.
-    GeneratedWorkspaceClient = None  # type: ignore[assignment,misc]
+__all__ = [
+    "GeneratedWorkspaceClient",
+    "PROTOCOL",
+    "SCHEMA_DIGEST",
+    "WorkspaceClient",
+    "WorkspaceClientError",
+    "paged_rows",
+    "resolve_runtime_connection",
+]
+
+RECONFIGURE_ACTION = "reconfigure the Astrid runtime with `banodoco-local up --profile astrid`"
+
+
+def _reconfigure(field: str, message: str) -> "WorkspaceClientError":
+    return WorkspaceClientError(
+        0,
+        "reconfigure_required",
+        message,
+        {"field": field, "next_action": RECONFIGURE_ACTION},
+    )
+
+
+def _safe_local_path(value: str | Path, *, field: str) -> Path:
+    """Return a regular local path, rejecting symlinked discovery inputs.
+
+    Launcher result paths are security-sensitive: resolving a symlink before
+    checking it would let a changed manifest or credential path silently point
+    at an unrelated file.  Check the lexical path and every existing parent
+    first, then let the caller check the file type/content.
+    """
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = Path(path.absolute())
+    current = path
+    while True:
+        try:
+            if current.is_symlink():
+                raise _reconfigure(field, f"{field} path must not be a symlink; {RECONFIGURE_ACTION}")
+        except OSError as exc:
+            raise _reconfigure(field, f"cannot inspect {field} path; {RECONFIGURE_ACTION}") from exc
+        if current == current.parent:
+            break
+        current = current.parent
+    return path
+
+
+def validate_runtime_endpoint(endpoint: str) -> str:
+    """Validate an explicit runtime URL without permitting network pivots."""
+    value = str(endpoint).strip()
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        # Accessing port validates malformed values such as ``:not-a-port``.
+        _ = parsed.port
+    except ValueError as exc:
+        raise _reconfigure("endpoint", f"runtime endpoint is malformed; {RECONFIGURE_ACTION}") from exc
+    host = hostname.rstrip(".").lower() if hostname else ""
+    is_loopback = host == "localhost"
+    if host and not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not is_loopback
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or value.rstrip("/") in {"http:", "https:"}
+    ):
+        raise _reconfigure(
+            "endpoint",
+            "runtime endpoint must be an explicit loopback http(s) URL; " + RECONFIGURE_ACTION,
+        )
+    return value.rstrip("/")
 
 
 class WorkspaceClientError(RuntimeError):
@@ -28,34 +107,35 @@ class WorkspaceClientError(RuntimeError):
 
 
 def _read_credential(path: Path) -> str:
+    path = _safe_local_path(path, field="credential")
     try:
         raw = path.read_text(encoding="utf-8").strip()
     except OSError as exc:
-        raise WorkspaceClientError(0, "unavailable", "runtime credential is unavailable") from exc
+        raise _reconfigure("credential", f"runtime credential is unavailable; {RECONFIGURE_ACTION}") from exc
     if not raw:
-        raise WorkspaceClientError(0, "unavailable", "runtime credential is unavailable")
+        raise _reconfigure("credential", f"runtime credential is empty; {RECONFIGURE_ACTION}")
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
         return raw
     token = value.get("token") if isinstance(value, dict) else None
     if not isinstance(token, str) or not token:
-        raise WorkspaceClientError(0, "unavailable", "runtime credential is unavailable")
+        raise _reconfigure("credential", f"runtime credential is invalid; {RECONFIGURE_ACTION}")
     return token
 
 
 def resolve_runtime_connection(endpoint: str, credential: str | Path) -> tuple[str, str]:
     """Validate an explicitly supplied endpoint and credential."""
-    endpoint = str(endpoint).strip()
-    if not endpoint.startswith(("http://", "https://")) or endpoint.rstrip("/") in {"http:", "https:"}:
-        raise WorkspaceClientError(0, "validation_error", "runtime endpoint must be an explicit http(s) URL")
+    endpoint = validate_runtime_endpoint(endpoint)
+    if not isinstance(credential, (str, Path)):
+        raise _reconfigure("credential", f"runtime credential must be explicit and non-empty; {RECONFIGURE_ACTION}")
     if isinstance(credential, Path):
         token = _read_credential(Path(credential))
     else:
         token = str(credential).removeprefix("Bearer ").strip()
     if not token:
-        raise WorkspaceClientError(0, "validation_error", "runtime credential must be explicit and non-empty")
-    return endpoint.rstrip("/"), token
+        raise _reconfigure("credential", f"runtime credential must be explicit and non-empty; {RECONFIGURE_ACTION}")
+    return endpoint, token
 
 
 class WorkspaceClient:
@@ -66,14 +146,8 @@ class WorkspaceClient:
     """
 
     def __init__(self, endpoint: str, token: str):
-        if GeneratedWorkspaceClient is None:
-            raise WorkspaceClientError(
-                0,
-                "unavailable",
-                "generated workspace client is unavailable; run `banodoco-local up --profile astrid`",
-            )
         self.endpoint, self.token = resolve_runtime_connection(endpoint, token)
-        self._generated = GeneratedWorkspaceClient(self.endpoint, token)
+        self._generated = GeneratedWorkspaceClient(self.endpoint, self.token)
 
     def _call_generated(self, operation: str, *args: Any, **kwargs: Any) -> Any:
         """Invoke one generated operation and normalize its typed value."""

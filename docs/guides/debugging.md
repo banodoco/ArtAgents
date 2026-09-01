@@ -6,10 +6,10 @@ renderer wire details live in [render-backend-v1.md](../contracts/render-backend
 
 ## 1. Project health and recovery
 
-Use the read-only doctor first, with a disposable or explicit projects root:
+Use the read-only doctor first through the explicit runtime launcher:
 
 ```bash
-python3 -m astrid doctor --json --projects-root ./projects
+python3 -m astrid doctor --json
 ```
 
 On a pristine root, `state: "uninitialized"` with `ok: true` is expected and
@@ -38,7 +38,7 @@ state.
 ```bash
 python3 -m astrid media verify M_01ABC --project demo \
   --realm managed_local --json
-python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
+python3 -m astrid backup restore ./backup --destination ./restore-target --json
 ```
 
 ## 2. Local renderer debugging

@@ -114,7 +114,6 @@ def _dispatch_backup(args: list[str]) -> int:
     restore.add_argument("backup")
     restore.add_argument("destination", nargs="?")
     restore.add_argument("--destination", dest="destination_flag", default=None)
-    restore.add_argument("--projects-root", dest="projects_root", default=None)
     restore.add_argument("--json", action="store_true")
     export = sub.add_parser("export", add_help=False)
     export.add_argument("--out", dest="out", default=None)
@@ -152,11 +151,13 @@ def _dispatch_backup(args: list[str]) -> int:
         with AstridClient.open_from_launcher() as client:
             if parsed.operation == "create":
                 destination = parsed.destination or parsed.out
-                if not destination: parser.error("backup create requires DESTINATION or --out")
+                if not destination:
+                    parser.error("backup create requires DESTINATION or --out")
                 result = client.create_backup(destination)
             elif parsed.operation == "restore":
-                destination = parsed.destination_flag or parsed.destination or parsed.projects_root
-                if not destination: parser.error("backup restore requires DESTINATION or --destination")
+                destination = parsed.destination_flag or parsed.destination
+                if not destination:
+                    parser.error("backup restore requires DESTINATION or --destination")
                 result = client.restore_backup(parsed.backup, destination)
             elif parsed.operation == "export":
                 result = client.export_realm()

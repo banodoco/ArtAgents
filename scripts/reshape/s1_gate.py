@@ -14,7 +14,7 @@ Usage::
     python3 scripts/reshape/s1_gate.py [--out-dir DIR] [--work-dir DIR]
         [--python PY] [--lanes manifest,catalog,...]
 
-Exit status is 0 when every selected lane passes (skips are not failures)
+Exit status is 0 when every selected lane passes (required-test skips fail)
 and 1 otherwise; the summary and every log are retained in both cases so
 CI can upload passes and failures alike.
 """
@@ -186,10 +186,11 @@ def _parse_junit(junit_path: Path) -> tuple[int, int, int]:
 
 
 def _lane_status(passed: int, failed: int, skipped: int) -> str:
-    if failed > 0:
+    # S1 lanes are required acceptance evidence. A skipped test is not proof
+    # of the behavior and therefore cannot count as a passing lane, including
+    # when another test in the same lane passed.
+    if failed > 0 or skipped > 0 or passed == 0:
         return "fail"
-    if passed == 0 and skipped > 0:
-        return "skip"
     return "pass"
 
 

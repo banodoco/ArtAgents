@@ -8,10 +8,109 @@ local application. Runtime discovery and credentials are resolved by
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Self
 
+from banodoco_workspace_client.contract_metadata import PROTOCOL, SCHEMA_DIGEST
+
 __all__ = ["AstridClient"]
+
+
+_REQUIRED_SCOPES = frozenset(
+    {
+        "projects:read",
+        "projects:write",
+        "objects:read",
+        "objects:write",
+        "tasks:read",
+        "tasks:write",
+    }
+)
+_HEALTH_KEYS = frozenset({"status", "protocol", "schema_digest", "runtime_epoch"})
+_HANDSHAKE_KEYS = frozenset(
+    {"protocol", "schema_digest", "session_id", "actor_id", "realm_id", "scopes"}
+)
+
+
+def _protocol_error(field: str, message: str) -> Any:
+    from astrid.sdk.workspace_client import WorkspaceClientError
+
+    return WorkspaceClientError(
+        0,
+        "protocol_error",
+        message,
+        {
+            "field": field,
+            "next_action": "reconfigure the Astrid runtime with `banodoco-local up --profile astrid`",
+        },
+    )
+
+
+def _identity_error(field: str, message: str) -> Any:
+    from astrid.sdk.workspace_client import WorkspaceClientError
+
+    return WorkspaceClientError(
+        0,
+        "identity_mismatch",
+        message,
+        {
+            "field": field,
+            "next_action": "reconfigure the Astrid runtime with `banodoco-local up --profile astrid`",
+        },
+    )
+
+
+def _require_mapping(value: Any, *, field: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise _protocol_error(field, f"runtime {field} response must be an object")
+    return value
+
+
+def _validate_health(value: Any, *, expected_protocol: str, expected_digest: str) -> None:
+    health = _require_mapping(value, field="health")
+    if frozenset(health) != _HEALTH_KEYS:
+        raise _protocol_error("health", "runtime health response has an unexpected schema")
+    if health.get("status") != "ok":
+        raise _protocol_error("health.status", "runtime health status is not ok")
+    if health.get("protocol") != expected_protocol:
+        raise _protocol_error("health.protocol", "runtime health protocol does not match workspace.v1")
+    if health.get("schema_digest") != expected_digest:
+        raise _protocol_error("health.schema_digest", "runtime health schema digest does not match the client")
+    epoch = health.get("runtime_epoch")
+    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+        raise _protocol_error("health.runtime_epoch", "runtime health runtime_epoch is invalid")
+
+
+def _validate_handshake(
+    value: Any,
+    *,
+    expected_protocol: str,
+    expected_digest: str,
+    expected_realm: str,
+    expected_actor: str,
+) -> None:
+    handshake = _require_mapping(value, field="handshake")
+    if frozenset(handshake) != _HANDSHAKE_KEYS:
+        raise _protocol_error("handshake", "runtime handshake response has an unexpected schema")
+    if handshake.get("protocol") != expected_protocol:
+        raise _protocol_error("handshake.protocol", "runtime handshake protocol does not match workspace.v1")
+    if handshake.get("schema_digest") != expected_digest:
+        raise _protocol_error("handshake.schema_digest", "runtime handshake schema digest does not match the client")
+    session_id = handshake.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise _protocol_error("handshake.session_id", "runtime handshake session_id is missing")
+    if handshake.get("realm_id") != expected_realm:
+        raise _identity_error("handshake.realm_id", "runtime handshake realm_id does not match the explicit client context")
+    if handshake.get("actor_id") != expected_actor:
+        raise _identity_error("handshake.actor_id", "runtime handshake actor_id does not match the explicit client context")
+    scopes = handshake.get("scopes")
+    if not isinstance(scopes, (list, tuple)) or any(
+        not isinstance(scope, str) or not scope.strip() for scope in scopes
+    ):
+        raise _protocol_error("handshake.scopes", "runtime handshake scopes must be non-empty strings")
+    if len(set(scopes)) != len(scopes) or frozenset(scopes) != _REQUIRED_SCOPES:
+        raise _protocol_error("handshake.scopes", "runtime handshake did not grant exactly the required scopes")
 
 
 class AstridClient:
@@ -41,11 +140,10 @@ class AstridClient:
         from astrid.sdk.remote import RemoteAstridClient
         from astrid.sdk.workspace_client import (
             WorkspaceClient,
-            WorkspaceClientError,
             resolve_runtime_connection,
         )
 
-        if protocol_version != "workspace.v1":
+        if protocol_version != PROTOCOL:
             raise ServiceUnavailableError(
                 "unsupported runtime protocol; run `banodoco-local up --profile astrid`",
                 details={"next_action": "banodoco-local up --profile astrid"},
@@ -57,17 +155,20 @@ class AstridClient:
             )
 
         def unavailable(exc: Exception) -> ServiceUnavailableError:
+            fields = getattr(exc, "details", {})
+            reason = getattr(exc, "code", "unavailable")
             return ServiceUnavailableError(
-                "runtime unavailable; run `banodoco-local up --profile astrid`",
+                "runtime rejected the explicit client context; reconfigure the Astrid runtime with `banodoco-local up --profile astrid`",
                 details={
+                    "reason": reason,
+                    **(fields if isinstance(fields, dict) else {}),
                     "next_action": "banodoco-local up --profile astrid",
-                    "reason": exc.__dict__.get("code", "unavailable"),
                 },
             )
 
         def connect(endpoint_value: str, token: str) -> Any:
             workspace = WorkspaceClient(endpoint_value, token)
-            workspace.health()
+            _validate_health(workspace.health(), expected_protocol=PROTOCOL, expected_digest=SCHEMA_DIGEST)
             handshake = workspace.handshake(
                 client_name,
                 client_version,
@@ -80,15 +181,20 @@ class AstridClient:
                     "tasks:write",
                 ],
             )
-            if handshake is None or handshake.get("realm_id") != realm_id or handshake.get("actor_id") != actor_id:
-                raise WorkspaceClientError(0, "identity_mismatch", "runtime realm or actor identity does not match the explicit client context")
+            _validate_handshake(
+                handshake,
+                expected_protocol=PROTOCOL,
+                expected_digest=SCHEMA_DIGEST,
+                expected_realm=realm_id,
+                expected_actor=actor_id,
+            )
             return workspace
 
         try:
             endpoint_value, token = resolve_runtime_connection(endpoint, credential)
             workspace = connect(endpoint_value, token)
             return cls(remote=RemoteAstridClient(workspace))
-        except WorkspaceClientError as exc:
+        except Exception as exc:
             raise unavailable(exc) from exc
 
     @classmethod
@@ -118,11 +224,14 @@ class AstridClient:
             raise ServiceUnavailableError(
                 str(exc), details={"next_action": "banodoco-local up --profile astrid"}
             ) from exc
-        credential_value: str | Path = (
-            credential
-            if credential is not None
-            else os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "")
-        )
+        if credential is not None:
+            credential_value: str | Path = credential
+        else:
+            # The environment variable is a launcher-issued path, not an
+            # ambient bearer token. Keep it typed as a Path so the explicit
+            # credential boundary rejects symlinks before reading it.
+            credential_env = os.environ.get("BANODOCO_RUNTIME_CREDENTIAL", "").strip()
+            credential_value = Path(credential_env) if credential_env else ""
         if not credential_value:
             # `up --json` deliberately hands off a file path, not the secret.
             # Let the explicit client boundary read that owner-only file.

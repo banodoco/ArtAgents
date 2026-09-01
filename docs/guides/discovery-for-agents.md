@@ -15,11 +15,11 @@ owned by the neutral workspace runtime. Do not add a schema manifest or a
 local migration directory to a capability pack.
 
 There is no session binding and no `next`/`status`/`attach` bootstrap: the
-gateway CLI (`python3 -m astrid`) owns exactly the eight families (projects,
-timelines, media, tasks, runs, serve, doctor, backup), and capability
-discovery is an SDK call. `--json` on the product families is the machine
-surface for kernel data (projects, timelines, media, tasks, runs); capability
-metadata comes from `astrid.sdk.discover()`.
+gateway CLI (`python3 -m astrid`) owns exactly the seven families (projects,
+timelines, media, tasks, runs, doctor, backup), and capability discovery is an
+SDK call. `--json` on the product families is the machine surface for kernel
+data (projects, timelines, media, tasks, runs); capability metadata comes from
+`astrid.sdk.discover()`.
 
 ```python
 import astrid.sdk as sdk

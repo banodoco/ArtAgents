@@ -259,7 +259,7 @@ def test_run_gate_failing_lane_retains_evidence_and_exits_nonzero(
     assert "=== gate: FAIL" in gate_log_text
 
 
-def test_run_gate_skipped_lane_is_not_a_failure(tmp_path: Path) -> None:
+def test_run_gate_skipped_required_lane_is_a_failure(tmp_path: Path) -> None:
     test_file = _skip_test(tmp_path)
     summary = run_gate(
         lanes=(Lane("fake-skip", (str(test_file),)),),
@@ -267,10 +267,10 @@ def test_run_gate_skipped_lane_is_not_a_failure(tmp_path: Path) -> None:
         work_dir=tmp_path / "fresh-root-skip",
         python=sys.executable,
     )
-    assert summary.ok is True
-    assert summary.exit == 0
+    assert summary.ok is False
+    assert summary.exit == 1
     result = summary.lanes["fake-skip"]
-    assert result.status == "skip"
+    assert result.status == "fail"
     assert result.skipped == 1
     assert result.failed == 0
 

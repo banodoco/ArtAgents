@@ -231,7 +231,7 @@ def _runtime_client_context(client: Any | None = None):
         return nullcontext(client)
     from astrid.sdk.client import AstridClient
 
-    return AstridClient.open()
+    return AstridClient.open_from_launcher()
 
 
 def _resolve_runtime_project(client: Any, project_slug: str | None) -> str:

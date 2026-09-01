@@ -60,7 +60,7 @@ try:
     assert version.stdout.strip() == "astrid", version.stdout
 
     help_record = harness.run_module("help", "astrid", ["help"], check=True)
-    assert "Family census (exactly eight families):" in help_record.stdout
+    assert "Family census (exactly seven families):" in help_record.stdout
     assert "timelines shots       [pack: shots]" in help_record.stdout
     assert "media references      [pack: references]" in help_record.stdout
 
@@ -72,8 +72,14 @@ try:
     if doctor.returncode not in (0, 1):
         raise RuntimeError(doctor.error or doctor.output)
     doctor_payload = json.loads(doctor.stdout)
-    assert isinstance(doctor_payload.get("checks"), list)
     assert isinstance(doctor_payload.get("ok"), bool)
+    if doctor.returncode == 0:
+        assert isinstance(doctor_payload.get("checks"), list)
+    else:
+        # An unconfigured clean workspace is a valid fail-closed product
+        # result; it must still carry the typed launcher recovery contract.
+        assert doctor_payload.get("state") == "unavailable", doctor_payload
+        assert doctor_payload.get("next_action") == "banodoco-local up --profile astrid", doctor_payload
 
     resource_probe = harness.run_lane(
         "resources",
@@ -89,6 +95,19 @@ try:
         check=True,
     )
     assert "package resources: OK" in resource_probe.stdout
+
+    runtime_client = harness.run_lane(
+        "runtime-client",
+        [
+            "-c",
+            "from pathlib import Path; import banodoco_workspace_client as c; "
+            "from banodoco_workspace_client.contract_metadata import PROTOCOL, SCHEMA_DIGEST; "
+            "assert PROTOCOL == 'workspace.v1'; assert SCHEMA_DIGEST.startswith('sha256:'); "
+            "assert Path(c.__file__).is_file(); print('generated runtime client: OK')",
+        ],
+        check=True,
+    )
+    assert "generated runtime client: OK" in runtime_client.stdout
 
     # Adversarial lanes prove that a missing resource and a checkout import
     # cannot be mistaken for a passing installed-artifact result.
@@ -118,6 +137,7 @@ try:
         "version": harness.installed_version,
         "doctor_ok": doctor_payload["ok"],
         "resource_lane": resource_probe.as_dict(),
+        "runtime_client_lane": runtime_client.as_dict(),
         "missing_resource_lane": missing.as_dict(),
         "checkout_import_lane": checkout.as_dict(),
     }, sort_keys=True))

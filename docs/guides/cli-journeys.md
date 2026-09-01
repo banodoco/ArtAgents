@@ -13,19 +13,19 @@ Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6
 
 ## Runtime preamble
 
-Configure the separate editable local workspace runtime before issuing product
-commands. The first product command starts or reconnects it automatically:
+Configure the installed local workspace runtime before issuing product
+commands. The first product command starts or reconnects it through the
+explicit launcher boundary:
 
 ```bash
-export BANODOCO_RUNTIME_CHECKOUT=/path/to/banodoco-workspace-runtime
+export BANODOCO_LOCAL_SOURCE_MANIFEST=/path/to/astrid-source-profile.json
 python3 -m astrid projects list --json
 ```
 
-If a direct endpoint is used, configure `BANODOCO_RUNTIME_ENDPOINT`,
-`BANODOCO_RUNTIME_DISCOVERY`, and `BANODOCO_RUNTIME_CREDENTIAL`. Run commands
-from the repository root; project, object, receipt, and event state remains in
-the runtime. `astrid doctor` is read-only and does not trigger first-run
-bootstrap.
+The SDK's explicit `AstridClient.open(...)` accepts a loopback endpoint and
+credential directly; it does not discover or infer either value. Run commands
+from any directory; project, object, receipt, and event state remains in the
+runtime. `astrid doctor` is read-only and does not trigger first-run bootstrap.
 
 ```bash
 # 1. Confirm the CLI is reachable (prints the product census).

@@ -620,8 +620,7 @@ class RuntimeProtocolClient:
             from banodoco_workspace_client import WorkspaceClient
         except ImportError as exc:
             raise HostError(
-                "generated banodoco_workspace_client is unavailable; install the "
-                "workspace runtime client or set PYTHONPATH to its packages/python"
+                "generated banodoco_workspace_client is unavailable; reinstall the Astrid package"
             ) from exc
         self.generated = WorkspaceClient(self.endpoint, self.credential)
         self._runtime_epoch: int | None = None
@@ -1195,14 +1194,11 @@ class GenericPackHost:
         return tuple(old[key] if key in removed else self.capabilities[key] for key in changed)
 
     def _runtime_compatibility(self) -> dict[str, Any]:
-        """Read and validate protocol/schema/runtime epoch when available."""
-        expected_protocol = "workspace.v1"
-        expected_schema = None
-        try:
-            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
-            expected_schema = SCHEMA_DIGEST
-        except ImportError:
-            pass
+        """Read and validate protocol/schema/runtime epoch."""
+        from banodoco_workspace_client.contract_metadata import PROTOCOL, SCHEMA_DIGEST
+
+        expected_protocol = PROTOCOL
+        expected_schema = SCHEMA_DIGEST
         health: Any = None
         if self.client is not None and hasattr(self.client, "health"):
             # RuntimeProtocolClient subclasses used by unit tests may omit the

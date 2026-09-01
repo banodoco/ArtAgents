@@ -14,18 +14,12 @@ RUNTIME = Path(
     or "/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence"
 )
 sys.path.insert(0, str(RUNTIME))
-sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
 pytest.importorskip("runtime_protocol.daemon")
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
-from banodoco_workspace_client import WorkspaceClient as GeneratedRuntimeClient  # noqa: E402
 
 from astrid.core.gateway import main as gateway_main  # noqa: E402
 from astrid.sdk.client import AstridClient  # noqa: E402
-import astrid.sdk.workspace_client as workspace_client  # noqa: E402
-
-
-workspace_client.GeneratedWorkspaceClient = GeneratedRuntimeClient
 
 
 def _launcher_result(daemon: RuntimeDaemon) -> dict[str, str]:

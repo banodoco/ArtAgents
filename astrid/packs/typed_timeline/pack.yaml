@@ -18,13 +18,11 @@ description: Generic typed-row to timeline mapper with Runaway colour and text m
 keywords: [timeline, mapper, typed, runaway, colour]
 capabilities:
   - typed_timeline.map
-  - typed_timeline.render
 agent:
-  purpose: Map typed DB rows to validated timelines and render via ffmpeg.
+  purpose: Map typed DB rows to validated timelines for the runtime render task.
   do_not_use_for: Direct timeline hand-editing.
   normal_entrypoints:
     - typed_timeline.map
-    - typed_timeline.render
 content:
   executors: executors
   orchestrators: orchestrators

@@ -21,7 +21,6 @@ from astrid.core.execution.network_broker import ObservableNetworkBroker
 
 RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
 if RUNTIME.is_dir():
-    sys.path.insert(0, str(RUNTIME / "packages/python"))
     sys.path.insert(0, str(RUNTIME))
 from banodoco_workspace_client import ApiError, WorkspaceClient
 from runtime_protocol.daemon import RuntimeDaemon

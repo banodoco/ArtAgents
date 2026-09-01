@@ -12,7 +12,6 @@ import pytest
 
 RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
 if RUNTIME.is_dir():
-    sys.path.insert(0, str(RUNTIME / "packages/python"))
     sys.path.insert(0, str(RUNTIME))
 
 runtime_protocol = pytest.importorskip("runtime_protocol")

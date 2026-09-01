@@ -511,13 +511,7 @@ def test_registration_carries_epochs_and_runtime_epoch_change_is_deterministic(t
             self.epoch = 7
 
         def health(self):
-            try:
-                from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
-            except ImportError:
-                # The host's protocol/epoch checks remain deterministic in
-                # the lightweight unit-test environment without the optional
-                # generated client package.
-                SCHEMA_DIGEST = ""
+            from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
 
             return {"protocol": "workspace.v1", "schema_digest": SCHEMA_DIGEST, "runtime_epoch": self.epoch}
 

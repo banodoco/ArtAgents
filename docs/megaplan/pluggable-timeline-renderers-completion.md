@@ -43,8 +43,9 @@ are conveniences over the same language-neutral wire contract.
 - Remotion, FFmpeg, Three.js, temporal hybrid planning, layer-stack planning,
   FFmpeg finalization, and compositor finalization use shared registries and
   `RenderService`.
-- The public Python author surface is `astrid.render`, `astrid.support`,
-  `astrid.renderer_main`, and `astrid.RenderContext`.
+- The public Python author surface is `astrid.support`,
+  `astrid.renderer_main`, and `astrid.RenderContext`; product rendering is
+  admitted only through the runtime's `rendering.render` task.
 - Renderer authoring utilities use the internal module CLI
   `python3 -m astrid.core.rendering.cli`; they are not a ninth top-level
   product family.

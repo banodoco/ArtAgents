@@ -10,19 +10,14 @@ does not select a project root or open a local database/CAS.
 
 | Variable | Who sets | Effect |
 |---|---|---|
-| `BANODOCO_RUNTIME_ENDPOINT` | Runtime launcher / operator | Runtime HTTP endpoint. Overrides discovery when set. |
-| `BANODOCO_RUNTIME_DISCOVERY` | Runtime launcher / operator | Path to the runtime discovery JSON used when no endpoint is set. |
 | `BANODOCO_RUNTIME_CREDENTIAL` | Runtime launcher / operator | Path to the credential/token file used by the generated workspace client. |
-| `BANODOCO_RUNTIME_CHECKOUT` | Astrid launcher / operator | Editable neutral runtime checkout used for automatic first launch. |
-| `BANODOCO_LOCAL_RUNTIME_CHECKOUT` | Runtime launcher / operator | Compatibility alias for the editable neutral runtime checkout. |
 | `BANODOCO_LOCAL_SOURCE_MANIFEST` | Astrid launcher / operator | Existing Astrid source-profile manifest passed to neutral bootstrap. |
-| `BANODOCO_ASTRID_SOURCE_CHECKOUT` | Astrid launcher / operator | Astrid editable source checkout when the package is not running from an editable checkout. |
-| `BANODOCO_ASTRID_AUTO_BOOTSTRAP` | User / CI | Set to `0` to make `AstridClient.open()` fail closed without launching the neutral runtime. |
 
 These are runtime composition variables, not project-store overrides. Product
-commands use the configured checkout/manifest to invoke
+commands use the configured manifest to invoke
 `banodoco-local up --profile astrid` automatically; the explicit command
-remains available for operator lifecycle work.
+remains available for operator lifecycle work. `AstridClient.open(...)` takes
+all connection values explicitly and does not read these variables.
 
 The `ASTRID_*` registry below remains useful for pack subprocesses, tests, and
 authoring tools. Variables marked **historical/internal** are not live workspace
