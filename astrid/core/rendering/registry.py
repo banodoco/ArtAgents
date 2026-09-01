@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -494,21 +494,88 @@ class FinalizerRegistry(_RenderingRegistry[FinalizerManifest]):
     error_type = FinalizerRegistryError
 
 
+def _discovered_from_catalog(catalog: Any) -> tuple[DiscoveredPack, ...]:
+    """Project canonical catalog entries into the typed registry DTO shape."""
+    from astrid.core.pack.canonical import _thaw
+    from astrid.core.pack.definition import PackPermission
+    entries = tuple(catalog.ordered_entries)
+    discovered: list[DiscoveredPack] = []
+    for priority_index, entry in enumerate(entries):
+        definition = entry.definition
+        pack = PackDefinition(
+            id=definition.id,
+            name=definition.name,
+            version=definition.version,
+            root=entry.root,
+            manifest_path=entry.manifest.resolved,
+            metadata={"capabilities": list(definition.capabilities)},
+            description=definition.description,
+            content=dict(_thaw(definition.content)),
+            agent=dict(_thaw(definition.agent)),
+            status=definition.status,
+            visibility=definition.visibility,
+            schema_version=str(definition.schema_version),
+            aliases=tuple(dict(_thaw(alias)) for alias in definition.aliases),
+            permissions=tuple(
+                PackPermission(
+                    id=permission.id,
+                    reason=permission.reason,
+                    access=permission.access,
+                    services=permission.services,
+                )
+                for permission in definition.permissions
+            ),
+            extensions=dict(_thaw(definition.extensions)),
+            origin="bundled",
+            install_tier="default",
+            pack_type="capability",
+            domain=definition.domain,
+            stability=definition.stability,
+            support=definition.support,
+        )
+        discovered.append(
+            DiscoveredPack(
+                pack=pack,
+                source_kind="source",
+                priority_index=priority_index,
+            )
+        )
+    return tuple(discovered)
+
+
 def load_default_registries(
     project_root: str | Path | None = None,
     *,
+    catalog: Any | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> tuple[RendererRegistry, PlannerRegistry, FinalizerRegistry]:
-    """Discover static rendering manifests and build the three registries."""
+    """Discover rendering manifests from one operation-owned pack catalog."""
 
     root = REPO_ROOT if project_root is None else Path(project_root).resolve()
-    discovered = discover_pack_metadata(
-        project_root=root,
-        extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
-        discover_packs_fn=discover_packs,
-    )
+    if catalog is None:
+        discovered = discover_pack_metadata(
+            project_root=root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            discover_packs_fn=discover_packs,
+        )
+    else:
+        discovered = _discovered_from_catalog(catalog)
+        if extra_pack_roots or include_installed:
+            external = discover_pack_metadata(
+                project_root=root,
+                extra_pack_roots=extra_pack_roots,
+                include_installed=include_installed,
+                discover_packs_fn=discover_packs,
+            )
+            known = {item.id for item in discovered}
+            offset = len(discovered)
+            discovered = discovered + tuple(
+                replace(item, priority_index=offset + index)
+                for index, item in enumerate(external)
+                if item.id not in known
+            )
     pack_trust = {
         item.priority_index: _derive_pack_trust(item)
         for item in discovered

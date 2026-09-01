@@ -16,11 +16,18 @@ from typing import Any, Iterator
 
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.kernel.database import resolve_kernel_database_path
+from astrid.core.migrations.runner import MigrationError, probe_database
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 _ACTIVE_SCHEMA_REGISTRY: ContextVar[FrozenSchemaPackRegistry | None] = ContextVar(
     "astrid_active_schema_registry", default=None
 )
+
+
+def current_schema_registry() -> FrozenSchemaPackRegistry | None:
+    """Return the registry bound to the current operation, if any."""
+
+    return _ACTIVE_SCHEMA_REGISTRY.get()
 
 
 def _db_path(projects_root: Path) -> Path | None:
@@ -32,24 +39,44 @@ def _db_path(projects_root: Path) -> Path | None:
 def _read_registry(
     registry: FrozenSchemaPackRegistry | None,
 ) -> FrozenSchemaPackRegistry:
-    """Return the database composition used by this read.
+    """Return the exact registry supplied by this operation.
 
-    Project databases are the standard Astrid composition, not core-only
-    stores: their migration ledger includes the in-tree timeline, shots, and
-    references packs.  Core-only readers therefore fail with
-    ``MigrationTooNewError`` as soon as one of those packs has been used.  A
-    caller handling an explicitly extended composition can still provide its
-    already-composed registry; the default only chooses the standard in-tree
-    composition and never weakens migration validation.
+    Kernel reads may run inside :func:`schema_registry_context`, but they
+    never construct or discover a standard registry themselves.  A missing
+    registry is an invalid operation composition and fails closed.
     """
 
-    if registry is None:
-        registry = _ACTIVE_SCHEMA_REGISTRY.get()
-    if registry is not None:
-        return registry
-    from astrid.core.schema_packs.standard import build_standard_registry
+    effective = registry if registry is not None else current_schema_registry()
+    if effective is None:
+        raise MigrationError(
+            "kernel read requires an operation-bound FrozenSchemaPackRegistry"
+        )
+    return effective
 
-    return build_standard_registry()
+
+def _open_complete_read_only(
+    db_path: Path,
+    registry: FrozenSchemaPackRegistry,
+) -> sqlite3.Connection:
+    """Open a read-only database only after its migration head is complete."""
+
+    probe = probe_database(db_path, registry)
+    if not probe.exists:
+        raise FileNotFoundError(
+            f"cannot open database read-only: {db_path} does not exist"
+        )
+    expected = {(migration.pack, migration.version) for migration in registry.migrations}
+    applied = {(migration.pack, migration.version) for migration in probe.applied}
+    if applied != expected:
+        missing = sorted(expected - applied)
+        unexpected = sorted(applied - expected)
+        raise MigrationError(
+            "kernel read refused incomplete migration state"
+            f" (missing={missing!r}, unexpected={unexpected!r})"
+        )
+    from astrid.core.store.database import open_database
+
+    return open_database(db_path, registry, read_only=True)
 
 
 @contextmanager
@@ -103,9 +130,7 @@ def kernel_run_info(
     if db_path is None or not db_path.is_file():
         return None
     try:
-        from astrid.core.store.database import open_database
-
-        conn = open_database(db_path, _read_registry(registry), read_only=True)
+        conn = _open_complete_read_only(db_path, _read_registry(registry))
     except (sqlite3.Error, FileNotFoundError, OSError):
         return None
     try:
@@ -182,9 +207,7 @@ def kernel_runs_for_project(
     if db_path is None or not db_path.is_file():
         return []
     try:
-        from astrid.core.store.database import open_database
-
-        conn = open_database(db_path, _read_registry(registry), read_only=True)
+        conn = _open_complete_read_only(db_path, _read_registry(registry))
     except (sqlite3.Error, FileNotFoundError, OSError):
         return []
     try:

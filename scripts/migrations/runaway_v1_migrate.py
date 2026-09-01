@@ -14,9 +14,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from astrid.core.events.registry import register_core_vocabulary
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.packs.runaway.prompts import prompts_for_manifest
 
 RUN_KIND = "runaway:timing-v1"
@@ -106,15 +103,11 @@ def manifest_to_transitions(
 
 
 def _build_registry():
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    packs_root = _REPO_ROOT / "astrid" / "packs"
-    for pack_id in ("timeline", "shots", "references"):
-        manifest = load_schema_pack_manifest(packs_root / pack_id / "schema-pack.yaml")
-        registry.register_pack(manifest)
-    manifest = load_schema_pack_manifest(packs_root / "runaway" / "schema-pack.yaml")
-    registry.register_pack(manifest)
-    return registry.freeze()
+    from astrid.packs import compose_standard_pack_database
+
+    return compose_standard_pack_database(
+        additional_pack_ids=("runaway",),
+    ).registry
 
 
 def migrate(

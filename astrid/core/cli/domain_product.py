@@ -1,40 +1,18 @@
-"""Product-family CLI registry (m4 plan step 24, task T25).
+"""Product-family CLI registry and canonical mount adapters.
 
-This module is the ownership authority for the product command census and
-manifest mounts. It declares **exactly** the five product families —
-``projects``, ``media``, ``tasks``, ``runs``, and the manifest-owned
-``timelines`` — and attaches the two manifest-declared nested mounts
-(``shots`` beneath ``timelines`` and ``references`` beneath ``media``)
-from the explicit in-tree schema-pack manifests (``cli_mounts``).
-
-Rules enforced before any dispatch (sense check SC25):
-
-- **Missing mounts** — a required manifest declaration (timelines, shots,
-  references) that the shipped manifests do not declare is rejected.
-- **Duplicate mounts** — two declarations for the same family or the same
-  mount path are rejected.
-- **Unexpected mounts** — a manifest declaring a family outside the frozen
-  declarations, or a declared family at a different path, is rejected.
-- **Dynamic mounts** — the loader reads only the three fixed in-tree
-  manifests (``astrid/packs/{timeline,shots,references}/schema-pack.yaml``);
-  there is no discovery, no scanning, and no injection point, so a mount
-  from any other source is impossible by construction.
-
-The product census also excludes the operational commands (``serve``,
-``doctor``, ``backup``): they are never part of the five-family product
-registry, help, or product dispatch.
-
-The dispatch boundary (:func:`run_product_family`) composes one
-``AstridClient`` and passes it to the family's in-tree parser builder, so
-every product handler is a rule-free SDK adapter (m4 plan step 24).
+Runtime mount ownership comes from the operation's frozen canonical registry.
+Help construction uses the static mount grammar and never opens a session or
+database.
 """
 
 from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 __all__ = [
     "FAMILY_PARSER_MODULES",
@@ -49,9 +27,9 @@ __all__ = [
     "is_product_family",
     "is_registered_family",
     "product_top_level_commands",
-    "read_manifest_cli_mounts",
     "run_product_family",
 ]
+
 
 PRODUCT_FAMILIES: tuple[str, ...] = (
     "projects",
@@ -83,27 +61,7 @@ REQUIRED_MANIFEST_MOUNTS: dict[str, tuple[str, ...]] = {
     # The references pack declares its nested mount beneath media.
     "references": ("media", "references"),
 }
-"""The frozen manifest-declared mounts (family -> mount path).
-
-Every entry must be declared by the corresponding shipped schema-pack
-manifest's ``cli_mounts``; a missing, duplicate, or unexpected
-declaration is a registry error.
-"""
-
-# The manifest-declared families that are not core families: exactly the
-# two nested mounts (sense check SC25: only the two declared nested mounts).
-NESTED_FAMILIES: frozenset[str] = frozenset(
-    family
-    for family in REQUIRED_MANIFEST_MOUNTS
-    if family not in PRODUCT_FAMILY_SET
-)
-
-_PACKS_ROOT = Path(__file__).resolve().parents[2] / "packs"
-"""The fixed in-tree packs directory (never discovered dynamically)."""
-
-_STANDARD_PACK_DIRS: tuple[str, ...] = ("timeline", "shots", "references")
-"""Exactly the three in-tree schema packs consulted for ``cli_mounts``."""
-
+"""The canonical CLI mount contract used by static help and projection checks."""
 
 class ProductRegistryError(ValueError):
     """Raised when the product mount registry is invalid.
@@ -144,34 +102,14 @@ class ProductMount:
 
 @dataclass(frozen=True, slots=True)
 class ManifestMount:
-    """One ``cli_mounts`` entry read from an in-tree schema-pack manifest."""
+    """One CLI mount entry projected from canonical registry data."""
 
     family: str
     token: str
     pack_id: str
 
 
-def read_manifest_cli_mounts() -> tuple[ManifestMount, ...]:
-    """Read ``cli_mounts`` from the three fixed in-tree pack manifests.
-
-    Only ``astrid/packs/{timeline,shots,references}/schema-pack.yaml`` is
-    consulted — the same explicit paths :func:`register_standard_schema_packs`
-    uses. There is no scanning, no loader, and no injection point: mounts
-    sourced anywhere else are impossible by construction (reject dynamic
-    mounts).
-    """
-    from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-
-    mounts: list[ManifestMount] = []
-    for pack_id in _STANDARD_PACK_DIRS:
-        manifest = load_schema_pack_manifest(
-            _PACKS_ROOT / pack_id / "schema-pack.yaml"
-        )
-        for family, token in manifest.cli_mounts.items():
-            mounts.append(
-                ManifestMount(family=str(family), token=str(token), pack_id=pack_id)
-            )
-    return tuple(mounts)
+    
 
 
 def _validate_mounts(
@@ -257,13 +195,53 @@ def _validate_mounts(
     return tuple(mounts)
 
 
-def build_product_mounts() -> tuple[ProductMount, ...]:
-    """Validate and return the complete product mount registry.
+def _static_manifest_mounts() -> tuple[ManifestMount, ...]:
+    """Return the frozen mount grammar for session-free help construction."""
+    owners = {"timelines": "timeline", "shots": "shots", "references": "references"}
+    return tuple(
+        ManifestMount(family, " ".join(path), owners[family])
+        for family, path in REQUIRED_MANIFEST_MOUNTS.items()
+    )
 
-    Exactly the five core families plus the two manifest-declared nested
-    mounts (shots, references) — seven mounts total (sense check SC25).
+def _projection_mounts(
+    registry: "FrozenSchemaPackRegistry",
+) -> tuple[ManifestMount, ...]:
+    """Adapt the operation-owned registry's CLI projection to mount records."""
+    cli_mounts = getattr(registry, "cli_mounts", None)
+    if not isinstance(cli_mounts, Mapping):
+        raise ProductRegistryError("canonical registry has no CLI mount projection")
+    mounts: list[ManifestMount] = []
+    for family, value in sorted(cli_mounts.items()):
+        if (
+            not isinstance(family, str)
+            or not isinstance(value, tuple)
+            or len(value) != 2
+            or not isinstance(value[0], str)
+            or not isinstance(value[1], str)
+        ):
+            raise ProductRegistryError(
+                f"canonical CLI mount {family!r} must project to "
+                "(pack id, mount path)"
+            )
+        mounts.append(ManifestMount(family, value[1], value[0]))
+    return tuple(mounts)
+
+
+def _build_product_mounts_from_registry(
+    registry: "FrozenSchemaPackRegistry",
+) -> tuple[ProductMount, ...]:
+    """Validate mounts from the exact operation-owned registry."""
+    return _validate_mounts(PRODUCT_FAMILIES, _projection_mounts(registry))
+
+
+def build_product_mounts() -> tuple[ProductMount, ...]:
+    """Validate the static product mount grammar for help and parsers.
+
+    Runtime dispatch uses :func:`_build_product_mounts_from_registry` so the
+    bound operation's canonical projection remains authoritative.  This
+    public no-argument helper preserves the session-free parser/help seam.
     """
-    return _validate_mounts(PRODUCT_FAMILIES, read_manifest_cli_mounts())
+    return _validate_mounts(PRODUCT_FAMILIES, _static_manifest_mounts())
 
 
 def product_top_level_commands() -> frozenset[str]:
@@ -277,22 +255,22 @@ def is_product_family(name: object) -> bool:
 
 
 def is_registered_family(name: object) -> bool:
-    """True for a core family or a manifest-declared nested family.
-
-    Nested families (shots, references) are not top-level product
-    commands but are registered parsers beneath their parents.
-    """
+    """True for a core family or a manifest-declared nested family."""
     if not isinstance(name, str):
         return False
     return name in PRODUCT_FAMILY_SET or name in REQUIRED_MANIFEST_MOUNTS
 
 
-def family_mount(family: str) -> ProductMount:
-    """Return the validated mount for one registered family.
-
-    Raises :class:`ProductRegistryError` for an unregistered family.
-    """
-    for mount in build_product_mounts():
+def family_mount(
+    family: str, *, registry: "FrozenSchemaPackRegistry | None" = None
+) -> ProductMount:
+    """Return the validated mount for one registered family."""
+    mounts = (
+        build_product_mounts()
+        if registry is None
+        else _build_product_mounts_from_registry(registry)
+    )
+    for mount in mounts:
         if mount.family == family:
             return mount
     raise ProductRegistryError(f"{family!r} is not a registered product family")
@@ -324,17 +302,24 @@ def run_product_family(
 
     The family's in-tree parser builder is resolved from the static
     :data:`FAMILY_PARSER_MODULES` mapping (never discovered) and receives
-    the shared ``AstridClient``; the configured handler then runs with
-    zero domain rules in this module. Only the five core families dispatch
-    here — nested families (shots, references) are routed by their parent
-    family parsers. ``_parser_modules`` is a test seam that replaces the
-    module-name mapping with module objects.
+    the shared ``AstridClient``. Normal dispatch validates the client's exact
+    ``app.registry.cli_mounts`` projection before the parser exposes nested
+    routes; help and isolated parser tests use only the static grammar.
     """
     if family not in PRODUCT_FAMILY_SET:
         raise ProductRegistryError(
             f"{family!r} is not a product family; product dispatch accepts "
             f"exactly {sorted(PRODUCT_FAMILY_SET)}"
         )
+    # Normal dispatch validates the exact operation projection before a
+    # parser can expose a nested mount. Static parser tests and help remain
+    # session-free when no application is supplied.
+    app = getattr(client, "app", None) if client is not None else None
+    operation_registry = getattr(app, "registry", None)
+    if operation_registry is None:
+        build_product_mounts()
+    else:
+        _build_product_mounts_from_registry(operation_registry)
     modules = FAMILY_PARSER_MODULES if _parser_modules is None else _parser_modules
     module_name = modules.get(family)
     if not module_name:

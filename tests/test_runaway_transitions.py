@@ -8,14 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
-from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts.service import ReceiptService
-from astrid.core.repositories.runs import RunRepository
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.uow import UnitOfWork
+from astrid.core.ids import generate_lowercase_ulid
+from astrid.core.repositories.runs import RunRepository
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.runaway.prompts import build_prompt, prompts_for_manifest
 from astrid.packs.runaway.repository import (
@@ -66,13 +63,11 @@ def timing_fixture(tmp_path: Path) -> tuple[Path, Path]:
     return manifest_path, audio_reactive_path
 
 def _build_registry():
-    reg = SchemaPackRegistry()
-    register_core_vocabulary(reg)
-    packs_root = REPO_ROOT / "astrid" / "packs"
-    for pid in ("timeline", "shots", "references"):
-        reg.register_pack(load_schema_pack_manifest(packs_root / pid / "schema-pack.yaml"))
-    reg.register_pack(load_schema_pack_manifest(packs_root / "runaway" / "schema-pack.yaml"))
-    return reg.freeze()
+    from astrid.packs import compose_standard_pack_database
+
+    return compose_standard_pack_database(
+        additional_pack_ids=("runaway",),
+    ).registry
 
 
 @pytest.fixture

@@ -47,6 +47,7 @@ from astrid.core.rendering.contracts import (
     SupportReport,
     VideoArtifact,
 )
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.rendering.errors import (
     RendererException,
     make_renderer_error,
@@ -383,7 +384,12 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
     )
 
 
-def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult:
+def _protocol_render(
+    request: RenderRequest,
+    *,
+    workspace: Path,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> RenderResult:
     # Render re-validates everything itself; it never trusts a prior support
     # verdict.
     if request.window is not None:
@@ -502,6 +508,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             composition_id=THREE_COMPOSITION_ID,
             theme_path=settings.theme_path,
             min_free_gb=settings.min_free_gb,
+            registry=registry,
         )
         output_path.unlink(missing_ok=True)
         os.replace(staged_video, output_path)

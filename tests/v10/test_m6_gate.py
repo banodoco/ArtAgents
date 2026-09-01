@@ -36,7 +36,7 @@ from astrid.core.gateway.help import _product_help_text
 from astrid.core.integrations.reigh.local_bridge_server import (
     create_local_bridge_server,
 )
-from astrid.packs import STANDARD_SCHEMA_PACKS, compose_standard_bridge
+from astrid.packs import compose_standard_bridge
 from scripts.reshape.authority_lint import run_authority_lint
 
 EXPECTED_FAMILIES: frozenset[str] = frozenset(
@@ -129,9 +129,8 @@ def _stop_server(server, thread: threading.Thread) -> None:
 def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
     composition = compose_standard_bridge(tmp_path)
     try:
-        # Exactly the three in-tree schema packs are registered.
-        assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
-        assert set(STANDARD_SCHEMA_PACKS) <= set(composition.registry.packs)
+        # The canonical projection owns the three default database packs.
+        assert {"timeline", "shots", "references"} <= set(composition.registry.packs)
         assert "core" in composition.registry.packs
         assert composition.database_path.is_file()
 

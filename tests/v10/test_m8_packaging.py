@@ -12,9 +12,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from astrid.core.migrations.runner import MigrationTooNewError, probe_database
-from astrid.core.schema_packs.standard import build_standard_registry
+from astrid.packs import compose_standard_pack_database
 from scripts.reshape.installed_artifact import build_once
 
 
@@ -29,11 +28,7 @@ EXPECTED_RUNTIME_MODULES = {
     "astrid/core/cli/domain_product.py",
     "astrid/core/migrations/catalog.py",
     "astrid/core/migrations/runner.py",
-    "astrid/core/schema_packs/manifest.py",
     "astrid/core/schema_packs/registry.py",
-    "astrid/core/schema_packs/standard.py",
-    "astrid/core/integrations/reigh/local_bridge.py",
-    "astrid/core/integrations/reigh/local_bridge_server.py",
     "astrid/packs/__init__.py",
     "astrid/packs/timeline/__init__.py",
     "astrid/packs/timeline/bridge.py",
@@ -45,11 +40,11 @@ EXPECTED_RUNTIME_MODULES = {
 }
 EXPECTED_RESOURCES = {
     "astrid/core/migrations/sql/core/0001_initial.sql",
-    "astrid/packs/timeline/schema-pack.yaml",
+    "astrid/packs/timeline/pack.yaml",
     "astrid/packs/timeline/migrations/0001_initial.sql",
-    "astrid/packs/shots/schema-pack.yaml",
+    "astrid/packs/shots/pack.yaml",
     "astrid/packs/shots/migrations/0001_initial.sql",
-    "astrid/packs/references/schema-pack.yaml",
+    "astrid/packs/references/pack.yaml",
     "astrid/packs/references/migrations/0001_initial.sql",
     "astrid/core/rendering/schemas/v1/request.json",
     "astrid/core/rendering/fixtures/renderer_parity/remotion_backend_wrapper.py",
@@ -214,9 +209,9 @@ def test_wheel_contains_complete_resource_matrix_and_excludes_authoring_material
     assert not forbidden, forbidden[:20]
     assert any(name.endswith("/pack.yaml") for name in names)
     assert {
-        "astrid/packs/timeline/schema-pack.yaml",
-        "astrid/packs/shots/schema-pack.yaml",
-        "astrid/packs/references/schema-pack.yaml",
+        "astrid/packs/timeline/pack.yaml",
+        "astrid/packs/shots/pack.yaml",
+        "astrid/packs/references/pack.yaml",
     } <= names
 
 
@@ -296,7 +291,7 @@ def test_too_new_core_and_pack_migrations_refuse_without_mutation(
     _too_new_database(database, pack)
     before = database.read_bytes()
     with pytest.raises(MigrationTooNewError):
-        probe_database(database, build_standard_registry())
+        probe_database(database, compose_standard_pack_database().registry)
     assert database.read_bytes() == before
 
 
@@ -339,8 +334,8 @@ def test_shared_harness_smoke_checks_installed_basics_and_failure_boundaries(
                 "-c",
                 "from importlib import resources; "
                 "required=('core/migrations/sql/core/0001_initial.sql',"
-                "'packs/timeline/schema-pack.yaml','packs/shots/schema-pack.yaml',"
-                "'packs/references/schema-pack.yaml'); "
+                "'packs/timeline/pack.yaml','packs/shots/pack.yaml',"
+                "'packs/references/pack.yaml'); "
                 "root=resources.files('astrid'); "
                 "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "
                 "assert not missing, missing; print('resources: OK')",

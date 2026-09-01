@@ -1,8 +1,8 @@
 """Canonical v2 pack contract.
 
-This module is deliberately isolated from the active v1 loader.  It parses one
-explicit ``pack.yaml`` into immutable declarations and is used by B1 fixture
-catalogs only; production discovery remains on the v1 path until cutover.
+Every bundled and external pack is admitted through one explicit ``pack.yaml``
+read-normalize-validate path. Operation composition uses the bundled catalog
+and its typed capability/database/resource/documentation projections.
 """
 
 from __future__ import annotations
@@ -1021,7 +1021,7 @@ def _read_normalize_validate(
     resolve_resources: bool,
     expected_pack_id: str | None = None,
 ) -> CanonicalPackEntry:
-    """Read one manifest after the caller's admission authority is established."""
+    """Read one canonical manifest after admission authority is established."""
     path = _validate_canonical_manifest_path(manifest_path)
     root = path.parent.resolve()
     _validate_pack_tree(root)
@@ -1171,11 +1171,11 @@ class BundledCatalog:
 
             present = {item.name for item in child.iterdir()}
             legacy = present & LEGACY_MANIFEST_NAMES
-            if legacy or CANONICAL_MANIFEST_NAME in present:
-                if legacy:
-                    raise CanonicalPackValidationError(
-                        f"legacy/alternate manifest(s) in {child}: {', '.join(sorted(legacy))}"
-                    )
+            if legacy:
+                raise CanonicalPackValidationError(
+                    f"legacy/alternate manifest(s) in {child}: {', '.join(sorted(legacy))}"
+                )
+            if CANONICAL_MANIFEST_NAME in present:
                 entries.append(
                     _read_normalize_validate(
                         child / CANONICAL_MANIFEST_NAME,
@@ -1372,6 +1372,12 @@ def _normalise_projection_ids(value: Sequence[str]) -> tuple[str, ...]:
         result.append(pack_id)
     return tuple(result)
 
+def core_database_projection() -> tuple[
+    str, DatabaseContribution, Path, tuple[ResourceHandle, ...]
+]:
+    """Return the irreducible kernel database projection."""
+    return _core_database_projection()
+
 
 @dataclass(frozen=True, slots=True)
 class DatabasePackProjection:
@@ -1501,6 +1507,7 @@ __all__ = [
     "CatalogProvenance",
     "DatabaseContribution",
     "DatabasePackProjection",
+    "core_database_projection",
     "DatabaseProjection",
     "Documentation",
     "DocumentationProjection",

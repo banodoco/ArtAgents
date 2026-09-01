@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-
 from ._module import _sdk_module
 from .exceptions import (
     CapabilityAmbiguousError,
@@ -32,6 +31,220 @@ def _registry_load_kwargs(
     if project_root is not None:
         kwargs["project_root"] = project_root
     return kwargs
+
+
+def _canonical_entries(
+    catalog: Any,
+    *,
+    project_root: str | Path | None,
+    extra_pack_roots: tuple[str, ...],
+    include_installed: bool,
+) -> tuple[Any, ...]:
+    entries: dict[str, Any] = {entry.id: entry for entry in catalog.ordered_entries}
+    if extra_pack_roots or include_installed:
+        from astrid.core.foundation.paths import REPO_ROOT
+        from astrid.core.pack.discovery import discover_canonical_packs_ordered
+
+        for entry in discover_canonical_packs_ordered(
+            project_root=project_root or REPO_ROOT,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        ):
+            entries.setdefault(entry.id, entry)
+    return tuple(entries.values())
+
+
+def _canonical_aliases(entries: tuple[Any, ...], kind: str) -> dict[str, list[dict[str, object]]]:
+    aliases: dict[str, list[dict[str, object]]] = {}
+    for entry in entries:
+        matching = [
+            dict(alias)
+            for alias in entry.definition.aliases
+            if alias.get("kind") == kind
+        ]
+        if matching:
+            aliases[entry.id] = matching
+    return aliases
+
+
+def _canonical_executor_registry(
+    entries: tuple[Any, ...],
+    *,
+    project_root: str | Path | None,
+    banodoco_config: Any | None,
+) -> Any:
+    from astrid.core.execution.executor.folder import load_folder_executors
+    from astrid.core.execution.executor.registry import (
+        ExecutorRegistry,
+        _attach_pack_metadata,
+    )
+    from astrid.core.execution.executor.banodoco_catalog import (
+        load_banodoco_catalog_executors,
+    )
+    from astrid.core.execution.executor.schema import ExecutorValidationError
+    from astrid.core.pack import validate_content_id_in_pack
+    from astrid.core.pack.alias_resolver import (
+        _register_pack_aliases,
+        create_shared_alias_resolver,
+    )
+    from astrid.core.pack.manifest import ManifestParseError
+    from astrid.core.pack.override import OverrideStore
+    from astrid.core.foundation.paths import REPO_ROOT
+
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, _canonical_aliases(entries, "executor"))
+    registry = ExecutorRegistry(
+        alias_resolver=resolver,
+        override_store=OverrideStore(project_root or REPO_ROOT),
+    )
+    for entry in entries:
+        relative_root = entry.definition.content.get("executors")
+        if not isinstance(relative_root, str):
+            continue
+        try:
+            definitions = load_folder_executors(entry.root / relative_root)
+            for definition in definitions:
+                validate_content_id_in_pack(
+                    definition.id, entry, content_type="executor"
+                )
+                registry.register(
+                    _attach_pack_metadata(
+                        definition,
+                        entry.id,
+                        pack_root=entry.root,
+                        content_root=entry.root / relative_root,
+                    )
+                )
+        except (ExecutorValidationError, ManifestParseError) as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "skipping canonical pack %r: executor manifests failed validation: %s",
+                entry.id,
+                exc,
+            )
+    if banodoco_config is not None and banodoco_config.enabled:
+        for definition in load_banodoco_catalog_executors(banodoco_config):
+            registry.register(definition)
+    registry.validate_all()
+    return registry
+
+
+def _canonical_orchestrator_registry(
+    entries: tuple[Any, ...],
+    *,
+    project_root: str | Path | None,
+    executor_registry: Any,
+) -> Any:
+    from astrid.core.execution.orchestrator.folder import load_folder_orchestrators
+    from astrid.core.execution.orchestrator.registry import (
+        OrchestratorRegistry,
+        _attach_pack_metadata,
+    )
+    from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
+    from astrid.core.foundation.paths import REPO_ROOT
+    from astrid.core.pack import validate_content_id_in_pack
+    from astrid.core.pack.alias_resolver import (
+        _register_pack_aliases,
+        create_shared_alias_resolver,
+    )
+    from astrid.core.pack.manifest import ManifestParseError
+    from astrid.core.pack.override import OverrideStore
+
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, _canonical_aliases(entries, "orchestrator"))
+    registry = OrchestratorRegistry(
+        executor_registry=executor_registry,
+        alias_resolver=resolver,
+        override_store=OverrideStore(project_root or REPO_ROOT),
+    )
+    for entry in entries:
+        relative_root = entry.definition.content.get("orchestrators")
+        if not isinstance(relative_root, str):
+            continue
+        try:
+            definitions = load_folder_orchestrators(entry.root / relative_root)
+            for definition in definitions:
+                validate_content_id_in_pack(
+                    definition.id, entry, content_type="orchestrator"
+                )
+                registry.register(
+                    _attach_pack_metadata(
+                        definition,
+                        entry.id,
+                        content_root=entry.root / relative_root,
+                    )
+                )
+        except (OrchestratorValidationError, ManifestParseError) as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "skipping canonical pack %r: orchestrator manifests failed validation: %s",
+                entry.id,
+                exc,
+            )
+    registry.validate_all(executor_registry=executor_registry)
+    return registry
+
+
+def _canonical_element_registry(
+    entries: tuple[Any, ...],
+    *,
+    active_theme: str | Path | None,
+    include_missing_roots: bool,
+    project_root: str | Path | None,
+) -> Any:
+    from astrid.core.element.registry import ElementRegistry
+    from astrid.core.element.schema import (
+        ElementValidationError,
+        load_element_definition,
+    )
+    from astrid.core.foundation.paths import REPO_ROOT
+    from astrid.core.pack import ELEMENT_KIND_REGISTRY, validate_element_pack_id
+    from astrid.core.pack.override import OverrideStore
+    from astrid.core.theme import resolve_theme_dir
+
+    registry = ElementRegistry(
+        override_store=OverrideStore(project_root or REPO_ROOT),
+        element_kind_registry=ELEMENT_KIND_REGISTRY,
+    )
+    for entry in entries:
+        relative_root = entry.definition.content.get("elements")
+        if not isinstance(relative_root, str):
+            continue
+        root = entry.root / relative_root
+        for kind in ELEMENT_KIND_REGISTRY.canonical_kinds():
+            kind_root = root / kind
+            if not kind_root.is_dir():
+                continue
+            for element_root in sorted(kind_root.iterdir(), key=lambda path: path.name):
+                if not element_root.is_dir():
+                    continue
+                try:
+                    definition = load_element_definition(
+                        element_root,
+                        kind=kind,
+                        source=entry.source,
+                        editable=False,
+                        priority=30,
+                        element_kind_registry=ELEMENT_KIND_REGISTRY,
+                    )
+                    validate_element_pack_id(
+                        definition.metadata.get("pack_id"),
+                        entry,
+                        element_root=element_root,
+                    )
+                    registry.register(definition)
+                except ElementValidationError:
+                    continue
+    if active_theme is not None:
+        # Canonical pack loading does not replace the explicit theme seam.
+        resolve_theme_dir(active_theme)
+    if include_missing_roots:
+        return registry
+    return registry
+
+
 
 
 def _load_executor_registry(
@@ -104,7 +317,37 @@ def _load_registries(
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
     include_elements: bool = False,
+    catalog: Any | None = None,
 ) -> tuple[Any, Any, Any | None]:
+    if catalog is not None:
+        entries = _canonical_entries(
+            catalog,
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        executor_registry = _canonical_executor_registry(
+            entries,
+            project_root=project_root,
+            banodoco_config=banodoco_config,
+        )
+        orchestrator_registry = _canonical_orchestrator_registry(
+            entries,
+            project_root=project_root,
+            executor_registry=executor_registry,
+        )
+        element_registry = (
+            _canonical_element_registry(
+                entries,
+                active_theme=active_theme,
+                include_missing_roots=include_missing_roots,
+                project_root=project_root,
+            )
+            if include_elements
+            else None
+        )
+        return executor_registry, orchestrator_registry, element_registry
+
     sdk_module = _sdk_module()
     executor_registry = sdk_module._load_executor_registry(
         project_root=project_root,
@@ -136,7 +379,56 @@ def _discover_pack_inventory(
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
+    catalog: Any | None = None,
 ) -> tuple[Any, ...]:
+    if catalog is not None:
+        from astrid.core.pack.canonical import _thaw
+        from astrid.core.pack.definition import PackDefinition, PackPermission
+        from astrid.core.pack.discovery import DiscoveredPack
+
+        discovered: list[Any] = []
+        for priority_index, entry in enumerate(catalog.ordered_entries):
+            definition = entry.definition
+            pack = PackDefinition(
+                id=definition.id,
+                name=definition.name,
+                version=definition.version,
+                root=entry.root,
+                manifest_path=entry.manifest.resolved,
+                metadata={"capabilities": list(definition.capabilities)},
+                description=definition.description,
+                content=dict(_thaw(definition.content)),
+                agent=dict(_thaw(definition.agent)),
+                status=definition.status,
+                visibility=definition.visibility,
+                schema_version=str(definition.schema_version),
+                aliases=tuple(dict(_thaw(alias)) for alias in definition.aliases),
+                permissions=tuple(
+                    PackPermission(
+                        id=permission.id,
+                        reason=permission.reason,
+                        access=permission.access,
+                        services=permission.services,
+                    )
+                    for permission in definition.permissions
+                ),
+                extensions=dict(_thaw(definition.extensions)),
+                origin="bundled",
+                install_tier="default",
+                pack_type="capability",
+                domain=definition.domain,
+                stability=definition.stability,
+                support=definition.support,
+            )
+            discovered.append(
+                DiscoveredPack(
+                    pack=pack,
+                    source_kind="source",
+                    priority_index=priority_index,
+                )
+            )
+        return tuple(discovered)
+
     from astrid.core.pack.discovery import discover_pack_metadata
 
     return discover_pack_metadata(
@@ -150,15 +442,20 @@ def _discover_pack_inventory(
 
 def _pack_record(discovered_pack: Any) -> dict[str, Any]:
     payload = discovered_pack.pack.to_dict()
-    from astrid.core.pack.validate import extract_trust_summary
-
-    trust_summary = extract_trust_summary(discovered_pack.pack.root)
-    if "permissions" in trust_summary:
-        payload["permissions"] = trust_summary["permissions"]
-    if "permission_ids" in trust_summary:
-        payload["permission_ids"] = trust_summary["permission_ids"]
-    if "trust" in trust_summary:
-        payload["trust"] = trust_summary["trust"]
+    permissions = payload.get("permissions", [])
+    if not isinstance(permissions, list):
+        permissions = list(permissions) if isinstance(permissions, tuple) else []
+    payload["permissions"] = permissions
+    payload["permission_ids"] = [
+        item.get("id")
+        for item in permissions
+        if isinstance(item, Mapping) and item.get("id")
+    ]
+    payload["trust"] = {
+        "sandbox": "none",
+        "runs_with_user_process_permissions": True,
+        "permission_enforcement": "disclosure_only",
+    }
     payload["source_kind"] = discovered_pack.source_kind
     payload["priority_index"] = discovered_pack.priority_index
     return _json_safe_mapping(payload)

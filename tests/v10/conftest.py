@@ -11,22 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from astrid.core.events.registry import (
-    core_only_registry,
-    register_core_vocabulary,
-)
-from astrid.core.schema_packs.registry import SchemaPackRegistry
+from astrid.core.events.registry import core_only_registry
 from astrid.core.store.database import open_database
-from astrid.packs import register_standard_schema_packs
+
 
 
 def build_standard_registry():
-    """Compose core + exactly timeline, shots, and references, then freeze."""
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    return registry.freeze()
+    """Compose the canonical bundled default database projection."""
+    from astrid.packs import compose_standard_pack_database
+
+    return compose_standard_pack_database().registry
 
 
 @pytest.fixture

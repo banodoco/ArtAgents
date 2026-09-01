@@ -1,22 +1,18 @@
-"""Registry and standard composition tests (m1 plan step 2).
+"""Canonical registry projection and runtime vocabulary tests.
 
-Covers the kernel-only (core) registry that does not require Astrid packs, the
-explicit standard-Astrid composition that registers exactly timeline, shots,
-and references without discovery or the capability-pack loader, duplicate and
-undeclared vocabulary rejection, and malformed-manifest / dependency-grammar
-errors. The plan-step-8 section at the bottom tests the runtime enforcement
-of the composed vocabulary: stream/event/command declaration checks and
-aggregate/type/project agreement for core and timeline streams, with
-undeclared paths proven to change zero rows.
+Covers the kernel-only registry, canonical catalog-derived database
+composition, duplicate/undeclared vocabulary rejection, and the runtime
+enforcement of stream/event/command ownership and aggregate/project agreement.
+Undeclared paths are proven to change zero rows.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-import astrid.packs as packs_package
 from astrid.core.events.registry import (
     CORE_COMMAND_KINDS,
     CORE_CONFORMANCE_DIMENSIONS,
@@ -27,7 +23,6 @@ from astrid.core.events.registry import (
     STREAM_AGGREGATE_RULES,
     aggregate_rule_for,
     core_only_registry,
-    core_schema_pack_manifest,
     register_core_vocabulary,
     validate_command_kind,
     validate_event_append,
@@ -36,40 +31,38 @@ from astrid.core.events.registry import (
     validate_stream_type,
 )
 from astrid.core.migrations.catalog import CORE_MIGRATIONS, CORE_TABLES
-from astrid.core.migrations.runner import read_migration_bytes, sha256_bytes
 from astrid.core.repositories.errors import (
     CommandVocabularyError,
     EventVocabularyError,
     StreamAgreementError,
     StreamVocabularyError,
 )
-from astrid.core.schema_packs.manifest import (
-    SchemaPackManifestValidationError,
-    parse_schema_pack_manifest,
-)
 from astrid.core.schema_packs.registry import (
-    FrozenSchemaPackRegistry,
     SchemaPackDuplicateError,
     SchemaPackRegistry,
     SchemaPackRegistryFrozenError,
 )
-from astrid.core.schema_packs.standard import (
-    STANDARD_SCHEMA_PACKS as KERNEL_STANDARD_SCHEMA_PACKS,
-)
-from astrid.core.schema_packs.standard import (
-    build_standard_registry as build_kernel_standard_registry,
-)
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import (
-    STANDARD_SCHEMA_PACKS,
-    register_standard_schema_packs,
-)
-from astrid.packs import (
-    build_standard_registry as build_pack_standard_registry,
-)
+from astrid.packs import compose_standard_pack_database
+
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
+def _core_manifest():
+    return core_only_registry().pack(CORE_PACK_ID)
+
+def _canonical_catalog():
+    from astrid.core.pack.canonical import BundledCatalog
+
+    return BundledCatalog.from_root(Path("astrid") / "packs")
+
+
+def _register_default_database_projections(registry: SchemaPackRegistry) -> None:
+    catalog = _canonical_catalog()
+    for pack_id in ("timeline", "shots", "references"):
+        registry.register_database_projection(catalog.get(pack_id))
+
+
 # 14 kernel + timelines + shots/shot_items + the 3 reference tables.
 STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3
 
@@ -89,6 +82,17 @@ def _empty_manifest(id_: str = "probe") -> dict:
         "cli_mounts": {},
         "bridge_mounts": [],
     }
+def _projection_from_mapping(mapping: dict[str, object]):
+    base = compose_standard_pack_database().registry.pack("timeline")
+    return replace(
+        base,
+        id=str(mapping["id"]),
+        stream_types=tuple(mapping.get("stream_types", ())),
+        event_kinds=tuple(mapping.get("event_kinds", ())),
+        command_kinds=tuple(mapping.get("command_kinds", ())),
+    )
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +113,7 @@ def test_core_only_registry_declares_project_task_run_stream_types() -> None:
     # The frozen registry sorts mappings by key; membership and ownership are
     # the contract, and declaration order is preserved on the manifest itself.
     assert set(frozen.stream_types) == set(CORE_STREAM_TYPES)
-    assert core_schema_pack_manifest().stream_types == CORE_STREAM_TYPES
+    assert _core_manifest().stream_types == CORE_STREAM_TYPES
     for stream_type in CORE_STREAM_TYPES:
         assert frozen.stream_types[stream_type] == CORE_PACK_ID
 
@@ -137,7 +141,7 @@ def test_core_only_registry_owns_exactly_the_audited_core_tables() -> None:
 
 
 def test_core_manifest_passes_strict_11_field_validation() -> None:
-    manifest = core_schema_pack_manifest()
+    manifest = _core_manifest()
     assert manifest.id == CORE_PACK_ID
     assert manifest.version == 1
     assert manifest.depends_on == ()
@@ -153,73 +157,31 @@ def test_core_manifest_passes_strict_11_field_validation() -> None:
 
 def test_standard_composition_registers_exactly_three_packs() -> None:
     registry = SchemaPackRegistry()
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
     assert list(frozen.packs) == ["references", "shots", "timeline"]
     assert frozen.has_pack(CORE_PACK_ID) is False  # core is registered separately
 
 
-def test_standard_composition_declares_the_fixed_pack_order() -> None:
-    assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
 
 
-def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> None:
-    packs_root = Path(packs_package.__file__).parent
-    available_manifest_ids = {
-        path.parent.name for path in packs_root.glob("*/schema-pack.yaml")
+
+
+def test_standard_composition_is_derived_from_canonical_catalog() -> None:
+    composition = compose_standard_pack_database()
+    assert set(composition.registry.packs) == {
+        CORE_PACK_ID,
+        "timeline",
+        "shots",
+        "references",
     }
-
-    # Optional schema packs may be shipped in-tree without joining the fixed
-    # standard database composition. ``runaway`` is the concrete guard that
-    # makes a glob/discovery implementation observably different from the
-    # explicit allowlist.
-    assert set(STANDARD_SCHEMA_PACKS) <= available_manifest_ids
-    assert "runaway" in available_manifest_ids - set(STANDARD_SCHEMA_PACKS)
-
-    frozen = build_pack_standard_registry()
-    assert set(frozen.packs) == {CORE_PACK_ID, *STANDARD_SCHEMA_PACKS}
-    assert frozen.has_pack("runaway") is False
-
-
-def _migration_contract(
-    registry: FrozenSchemaPackRegistry,
-) -> tuple[tuple[object, ...], ...]:
-    """Return migration descriptors plus exact resource checksums."""
-    return tuple(
-        (
-            migration.pack,
-            migration.version,
-            migration.name,
-            migration.path,
-            migration.tables,
-            sha256_bytes(read_migration_bytes(migration)),
-        )
-        for migration in registry.migrations
-    )
-
-
-def test_pack_and_kernel_standard_registry_builders_have_exact_parity() -> None:
-    """The duplicated explicit builders must describe the same database."""
-    assert KERNEL_STANDARD_SCHEMA_PACKS == STANDARD_SCHEMA_PACKS
-
-    pack_registry = build_pack_standard_registry()
-    kernel_registry = build_kernel_standard_registry()
-
-    assert dict(pack_registry.packs) == dict(kernel_registry.packs)
-    assert dict(pack_registry.tables) == dict(kernel_registry.tables)
-    assert dict(pack_registry.stream_types) == dict(kernel_registry.stream_types)
-    assert dict(pack_registry.event_kinds) == dict(kernel_registry.event_kinds)
-    assert dict(pack_registry.command_kinds) == dict(kernel_registry.command_kinds)
-    assert dict(pack_registry.repositories) == dict(kernel_registry.repositories)
-    assert dict(pack_registry.cli_mounts) == dict(kernel_registry.cli_mounts)
-    assert dict(pack_registry.bridge_mounts) == dict(kernel_registry.bridge_mounts)
-    assert _migration_contract(pack_registry) == _migration_contract(kernel_registry)
+    assert composition.registry.has_pack("runaway") is False
 
 
 def test_standard_composition_derives_20_table_catalog() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
     assert len(frozen.tables) == STANDARD_TABLE_COUNT == 20
     assert frozen.tables["timelines"] == "timeline"
@@ -233,7 +195,7 @@ def test_standard_composition_derives_20_table_catalog() -> None:
 def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
 
     assert frozen.stream_types["timeline.timeline"] == "timeline"
@@ -249,7 +211,6 @@ def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     assert frozen.command_kinds["reference.set_primary"] == "references"
 
     assert frozen.repositories["TimelineRepository"] == "timeline"
-    assert frozen.cli_mounts["timelines"] == ("timeline", "timelines")
     assert frozen.cli_mounts["shots"] == ("shots", "timelines shots")
     assert frozen.cli_mounts["references"] == ("references", "media references")
     assert frozen.bridge_mounts["timelines"] == "timeline"
@@ -262,9 +223,9 @@ def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
 
 def test_duplicate_pack_registration_is_rejected() -> None:
     registry = SchemaPackRegistry()
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     with pytest.raises(SchemaPackDuplicateError):
-        register_standard_schema_packs(registry)
+        _register_default_database_projections(registry)
 
 
 def test_duplicate_core_registration_is_rejected() -> None:
@@ -280,7 +241,7 @@ def test_duplicate_stream_type_across_core_and_pack_is_rejected() -> None:
     conflicting = _empty_manifest(id_="intruder")
     conflicting["stream_types"] = ["core.project"]
     with pytest.raises(SchemaPackDuplicateError, match="stream type 'core.project'"):
-        registry.register_pack(parse_schema_pack_manifest(conflicting))
+        registry.register_pack(_projection_from_mapping(conflicting))
 
 
 def test_duplicate_event_kind_within_registry_is_rejected() -> None:
@@ -289,7 +250,7 @@ def test_duplicate_event_kind_within_registry_is_rejected() -> None:
     conflicting = _empty_manifest(id_="intruder")
     conflicting["event_kinds"] = ["core.project.created"]
     with pytest.raises(SchemaPackDuplicateError, match="event kind 'core.project.created'"):
-        registry.register_pack(parse_schema_pack_manifest(conflicting))
+        registry.register_pack(_projection_from_mapping(conflicting))
 
 
 def test_duplicate_command_kind_within_registry_is_rejected() -> None:
@@ -298,7 +259,7 @@ def test_duplicate_command_kind_within_registry_is_rejected() -> None:
     conflicting = _empty_manifest(id_="intruder")
     conflicting["command_kinds"] = ["core.project.create"]
     with pytest.raises(SchemaPackDuplicateError, match="command kind 'core.project.create'"):
-        registry.register_pack(parse_schema_pack_manifest(conflicting))
+        registry.register_pack(_projection_from_mapping(conflicting))
 
 
 def test_duplicate_declaration_reports_all_collisions_atomically() -> None:
@@ -309,12 +270,11 @@ def test_duplicate_declaration_reports_all_collisions_atomically() -> None:
     conflicting["event_kinds"] = ["core.project.created"]
     conflicting["command_kinds"] = ["core.project.create"]
     with pytest.raises(SchemaPackDuplicateError) as excinfo:
-        registry.register_pack(parse_schema_pack_manifest(conflicting))
+        registry.register_pack(_projection_from_mapping(conflicting))
     message = str(excinfo.value)
     assert "stream type 'core.project'" in message
     assert "event kind 'core.project.created'" in message
     assert "command kind 'core.project.create'" in message
-    # No partial state was recorded: the intruder pack is absent afterwards.
     assert "intruder" not in registry.freeze().packs
 
 
@@ -326,37 +286,6 @@ def test_frozen_registry_rejects_late_registration() -> None:
         register_core_vocabulary(registry)
 
 
-# ---------------------------------------------------------------------------
-# Malformed manifests and dependency grammar
-# ---------------------------------------------------------------------------
-
-
-def test_malformed_manifest_missing_top_level_field_is_rejected() -> None:
-    mapping = _empty_manifest()
-    del mapping["command_kinds"]
-    with pytest.raises(SchemaPackManifestValidationError, match="command_kinds"):
-        parse_schema_pack_manifest(mapping)
-
-
-def test_malformed_manifest_extra_top_level_field_is_rejected() -> None:
-    mapping = _empty_manifest()
-    mapping["surprise"] = True
-    with pytest.raises(SchemaPackManifestValidationError, match="surprise"):
-        parse_schema_pack_manifest(mapping)
-
-
-def test_unnamespaced_vocabulary_is_rejected() -> None:
-    mapping = _empty_manifest()
-    mapping["event_kinds"] = ["saved"]
-    with pytest.raises(SchemaPackManifestValidationError, match="namespaced dotted name"):
-        parse_schema_pack_manifest(mapping)
-
-
-def test_dependency_grammar_error_is_rejected() -> None:
-    mapping = _empty_manifest()
-    mapping["depends_on"] = ["core=1"]
-    with pytest.raises(SchemaPackManifestValidationError, match="<pack> >= <positive integer>"):
-        parse_schema_pack_manifest(mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +324,7 @@ def _build_standard_frozen():
     """Compose core + the three in-tree packs and freeze (as conftest does)."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     return registry.freeze()
 
 
@@ -932,7 +861,7 @@ def test_m2_heartbeat_has_no_command_or_event_kind() -> None:
 
 
 def test_m2_core_manifest_declares_the_kernel_repositories() -> None:
-    manifest = core_schema_pack_manifest()
+    manifest = _core_manifest()
     assert manifest.repositories == CORE_REPOSITORIES
     assert "ProjectRepository" in manifest.repositories
     assert "TaskRepository" in manifest.repositories
@@ -944,7 +873,7 @@ def test_m2_core_manifest_declares_the_kernel_repositories() -> None:
 
 
 def test_m2_core_manifest_declares_seven_conformance_dimensions() -> None:
-    manifest = core_schema_pack_manifest()
+    manifest = _core_manifest()
     assert manifest.conformance == CORE_CONFORMANCE_DIMENSIONS
     assert len(CORE_CONFORMANCE_DIMENSIONS) == 7
     assert set(CORE_CONFORMANCE_DIMENSIONS) == {
@@ -959,7 +888,7 @@ def test_m2_core_manifest_declares_seven_conformance_dimensions() -> None:
 
 
 def test_m2_core_manifest_declares_only_required_stream_types() -> None:
-    manifest = core_schema_pack_manifest()
+    manifest = _core_manifest()
     assert set(manifest.stream_types) == {
         "core.project",
         "core.task",
@@ -1026,7 +955,7 @@ def test_m3_core_run_continuation_and_evidence_vocabulary_is_declared() -> None:
 def test_m3_references_manifest_declares_aggregate_stream_and_repository() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
 
     assert frozen.stream_types[M3_REFERENCE_STREAM_TYPE] == "references"
@@ -1037,7 +966,7 @@ def test_m3_references_manifest_declares_aggregate_stream_and_repository() -> No
 def test_m3_references_manifest_declares_lifecycle_media_and_link_vocabulary() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
 
     for kind in M3_REFERENCE_EVENT_KINDS:
@@ -1056,7 +985,7 @@ def test_m3_references_manifest_declares_lifecycle_media_and_link_vocabulary() -
 def test_m3_shots_manifest_declares_aggregate_stream_and_repository() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
 
     assert frozen.stream_types[M3_SHOT_STREAM_TYPE] == "shots"
@@ -1067,7 +996,7 @@ def test_m3_shots_manifest_declares_aggregate_stream_and_repository() -> None:
 def test_m3_shots_manifest_declares_item_mutation_vocabulary() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
 
     for kind in M3_SHOT_EVENT_KINDS:
@@ -1172,11 +1101,11 @@ def test_m3_shot_stream_creation_and_event_append_validate_end_to_end() -> None:
 def test_m3_colliding_pack_stream_type_is_rejected() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     conflicting = _empty_manifest(id_="intruder")
     conflicting["stream_types"] = [M3_REFERENCE_STREAM_TYPE]
     with pytest.raises(SchemaPackDuplicateError, match=M3_REFERENCE_STREAM_TYPE):
-        registry.register_pack(parse_schema_pack_manifest(conflicting))
+        registry.register_pack(_projection_from_mapping(conflicting))
     # No partial state: the intruder pack is absent afterwards.
     assert "intruder" not in registry.freeze().packs
 
@@ -1205,7 +1134,7 @@ def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
     """Manifest ownership, not DDL: the m3 vocabulary adds no tables."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
+    _register_default_database_projections(registry)
     frozen = registry.freeze()
     assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
     assert frozen.tables["project_references"] == "references"

@@ -36,7 +36,10 @@ from astrid.core.env_vars import (
 )
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.kernel.database import resolve_kernel_database_authority
+from astrid.core.kernel.read import current_schema_registry
 from astrid.core.rendering import asset_cache
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+from astrid.core.store.database import open_database
 
 AssetKind = Literal["local", "cached", "remote"]
 
@@ -123,6 +126,7 @@ def _owned_managed_locators(
     *,
     projects_root: Path,
     project_slug: str | None,
+    registry: FrozenSchemaPackRegistry,
 ) -> dict[Path, str]:
     """Return exact managed locators owned by the active project.
 
@@ -131,20 +135,25 @@ def _owned_managed_locators(
     exact absolute paths are intersected with the kernel's ``media`` ownership
     rows for the active project.  The content hash is retained so the source
     can be checked again immediately before staging.
+
+    The database is opened through the caller-owned frozen projection in
+    read-only mode.  In particular, an incomplete, newer, or drifted schema
+    is an operation failure rather than an empty allowlist.
     """
 
     if not requested or not project_slug:
         return {}
+    if not isinstance(registry, FrozenSchemaPackRegistry):
+        raise TypeError("registry must be a FrozenSchemaPackRegistry")
     database = _kernel_database_path(projects_root)
     if database is None:
         return {}
     managed_root = (projects_root / ".astrid" / "media").resolve(strict=False)
     try:
-        from astrid.core.schema_packs.standard import build_standard_registry
-        from astrid.core.store.database import open_database
-
-        connection = open_database(database, build_standard_registry(), read_only=True)
-    except (OSError, sqlite3.Error, ValueError):
+        connection = open_database(database, registry, read_only=True)
+    except FileNotFoundError:
+        # The authority can disappear between the existence probe and the
+        # read-only open.  This remains an unowned locator, not a read fallback.
         return {}
     try:
         connection.row_factory = sqlite3.Row
@@ -160,8 +169,6 @@ def _owned_managed_locators(
             "WHERE m.project_id = ? AND l.realm = 'managed_local'",
             (str(project["id"]),),
         ).fetchall()
-    except sqlite3.Error:
-        return {}
     finally:
         connection.close()
 
@@ -256,6 +263,7 @@ class AssetMaterializer:
         self,
         registry_path: str | Path,
         *,
+        registry: FrozenSchemaPackRegistry | None = None,
         allowed_root: str | Path | None = None,
         allowed_managed_paths: Mapping[str | Path, str] | None = None,
         staging_parent: str | Path | None = None,
@@ -265,6 +273,14 @@ class AssetMaterializer:
         requested_registry = Path(registry_path).expanduser()
         if not requested_registry.exists():
             raise FileNotFoundError("hype.assets.json missing — did you run cut.py first?")
+        operation_registry = (
+            registry if registry is not None else current_schema_registry()
+        )
+        if operation_registry is not None and not isinstance(
+            operation_registry, FrozenSchemaPackRegistry
+        ):
+            raise TypeError("registry must be a FrozenSchemaPackRegistry")
+        self.registry_projection = operation_registry
         self.registry_path = requested_registry.resolve(strict=True)
 
         if allowed_root is None:
@@ -502,14 +518,16 @@ class AssetMaterializer:
                 (raw if raw.is_absolute() else self.registry_path.parent / raw)
                 .resolve(strict=False)
             )
-        self.allowed_managed_paths.update(
-            _owned_managed_locators(
-                requested_managed_paths,
-                projects_root=resolve_projects_root(),
-                project_slug=os.environ.get(ASTRID_PROJECT_SLUG)
-                or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT),
+        if self.registry_projection is not None:
+            self.allowed_managed_paths.update(
+                _owned_managed_locators(
+                    requested_managed_paths,
+                    projects_root=resolve_projects_root(),
+                    project_slug=os.environ.get(ASTRID_PROJECT_SLUG)
+                    or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT),
+                    registry=self.registry_projection,
+                )
             )
-        )
         now = datetime.now(timezone.utc)
         for index, (key, entry) in enumerate(loaded["assets"].items()):
             descriptor = copy.deepcopy(entry)

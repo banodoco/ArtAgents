@@ -131,10 +131,7 @@ def _validate_first_party_packs_root_inventory(root: Path) -> list[str]:
     for pack_id in sorted(expected_pack_ids & set(child_dirs)):
         pack_dir = child_dirs[pack_id]
         if pack_manifest_path(pack_dir) is None:
-            errors.append(
-                f"{pack_id}: pack manifest not found "
-                f"(pack.yaml, pack.yml, or pack.json)"
-            )
+            errors.append(f"{pack_id}: canonical pack.yaml not found")
 
     core_dir = child_dirs.get("_core")
     if core_dir is None:

@@ -50,122 +50,60 @@ from scripts.reshape.authority_lint import (
     run_authority_lint,
 )
 
-# The real timeline schema-pack manifest shape (11 snake_case fields), used
-# by every fixture that needs a declared pack table/vocabulary.
+# Canonical v2 database projections used by the isolated lint fixtures.
 _TIMELINE_MANIFEST = """\
+schema_version: 2
 id: timeline
-version: 1
-depends_on:
-  - core >= 1
-migrations:
-  - version: 1
-    name: initial
-    path: migrations/0001_initial.sql
-    tables:
-      - timelines
-stream_types:
-  - timeline.timeline
-event_kinds:
-  - timeline.created
-  - timeline.saved
-  - timeline.config_replaced
-command_kinds:
-  - timeline.create
-  - timeline.save
-  - timeline.replace_config
-repositories:
-  - TimelineRepository
-conformance:
-  - replay
-cli_mounts:
-  timelines: timelines
-bridge_mounts:
-  - timelines
+name: Timeline
+version: 1.0.0
+database:
+  default_enabled: true
+  depends_on: [{pack: core, min_migration: 1}]
+  migrations:
+    - {version: 1, name: initial, path: migrations/0001_initial.sql, tables: [timelines]}
+  stream_types: [timeline.timeline]
+  event_kinds: [timeline.created, timeline.saved, timeline.config_replaced]
+  command_kinds: [timeline.create, timeline.save, timeline.replace_config]
+  repositories: [TimelineRepository]
+  conformance: [replay]
+  cli_mounts: {timelines: timelines}
+  bridge_mounts: [timelines]
 """
-
 _SHOTS_MANIFEST = """\
+schema_version: 2
 id: shots
-version: 1
-depends_on:
-  - core >= 1
-migrations:
-  - version: 1
-    name: initial
-    path: migrations/0001_initial.sql
-    tables:
-      - shots
-      - shot_items
-stream_types:
-  - shot.shot
-event_kinds:
-  - shot.created
-  - shot.item_added
-  - shot.item_removed
-  - shot.reordered
-command_kinds:
-  - shot.create
-  - shot.add_item
-  - shot.remove_item
-  - shot.reorder
-repositories:
-  - ShotRepository
-conformance:
-  - replay
-  - mismatch_before_mutation
-  - same_project
-  - vocabulary
-  - writer_ownership
-  - crash_atomicity
-  - hash_chain
-cli_mounts:
-  shots: timelines shots
-bridge_mounts: []
+name: Shots
+version: 1.0.0
+database:
+  default_enabled: true
+  depends_on: [{pack: core, min_migration: 1}]
+  migrations:
+    - {version: 1, name: initial, path: migrations/0001_initial.sql, tables: [shots, shot_items]}
+  stream_types: [shot.shot]
+  event_kinds: [shot.created, shot.item_added, shot.item_removed, shot.reordered]
+  command_kinds: [shot.create, shot.add_item, shot.remove_item, shot.reorder]
+  repositories: [ShotRepository]
+  conformance: [replay, mismatch_before_mutation, same_project, vocabulary, writer_ownership, crash_atomicity, hash_chain]
+  cli_mounts: {shots: timelines shots}
+  bridge_mounts: []
 """
-
-# The real references schema-pack manifest shape: the pack owns the three
-# project_references/media_references/reference_links tables, the pack-owned
-# ``reference.reference`` aggregate stream, and the receipt-backed lifecycle/
-# media/link commands and events (m3).
 _REFERENCES_MANIFEST = """\
+schema_version: 2
 id: references
-version: 1
-depends_on:
-  - core >= 1
-migrations:
-  - version: 1
-    name: initial
-    path: migrations/0001_initial.sql
-    tables:
-      - project_references
-      - media_references
-      - reference_links
-stream_types:
-  - reference.reference
-event_kinds:
-  - reference.created
-  - reference.archived
-  - reference.media_associated
-  - reference.primary_changed
-  - reference.linked
-command_kinds:
-  - reference.create
-  - reference.archive
-  - reference.associate
-  - reference.set_primary
-  - reference.link
-repositories:
-  - ReferenceRepository
-conformance:
-  - replay
-  - mismatch_before_mutation
-  - same_project
-  - vocabulary
-  - writer_ownership
-  - crash_atomicity
-  - hash_chain
-cli_mounts:
-  references: media references
-bridge_mounts: []
+name: References
+version: 1.0.0
+database:
+  default_enabled: true
+  depends_on: [{pack: core, min_migration: 1}]
+  migrations:
+    - {version: 1, name: initial, path: migrations/0001_initial.sql, tables: [project_references, media_references, reference_links]}
+  stream_types: [reference.reference]
+  event_kinds: [reference.created, reference.archived, reference.media_associated, reference.primary_changed, reference.linked]
+  command_kinds: [reference.create, reference.archive, reference.associate, reference.set_primary, reference.link]
+  repositories: [ReferenceRepository]
+  conformance: [replay, mismatch_before_mutation, same_project, vocabulary, writer_ownership, crash_atomicity, hash_chain]
+  cli_mounts: {references: media references}
+  bridge_mounts: []
 """
 
 
@@ -188,7 +126,7 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
     _write(root, "astrid/core/__init__.py", "")
     _write(root, "astrid/packs/__init__.py", "")
     _write(root, "astrid/packs/timeline/__init__.py", "")
-    _write(root, "astrid/packs/timeline/schema-pack.yaml", _TIMELINE_MANIFEST)
+    _write(root, "astrid/packs/timeline/pack.yaml", _TIMELINE_MANIFEST)
     _write(
         root,
         "astrid/packs/timeline/migrations/0001_initial.sql",
@@ -204,7 +142,7 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
         ");\n",
     )
     _write(root, "astrid/packs/references/__init__.py", "")
-    _write(root, "astrid/packs/references/schema-pack.yaml", _REFERENCES_MANIFEST)
+    _write(root, "astrid/packs/references/pack.yaml", _REFERENCES_MANIFEST)
     _write(
         root,
         "astrid/packs/references/migrations/0001_initial.sql",
@@ -237,7 +175,7 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
     )
     if with_shots:
         _write(root, "astrid/packs/shots/__init__.py", "")
-        _write(root, "astrid/packs/shots/schema-pack.yaml", _SHOTS_MANIFEST)
+        _write(root, "astrid/packs/shots/pack.yaml", _SHOTS_MANIFEST)
         _write(
             root,
             "astrid/packs/shots/migrations/0001_initial.sql",

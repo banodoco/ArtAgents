@@ -27,6 +27,7 @@ required.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -47,9 +48,10 @@ class AstridClient:
     """Context-managed lifecycle owner for the seven application services.
 
     A client is always bound to exactly one composed standard application:
-    one writer queue, one registry, the kernel and pack repositories, the
-    read-only ordered event repository, and the seven typed services. It is
-    a thin, stateless surface — all domain behavior lives in the services.
+    one catalog, one frozen registry, one writer queue, one owner lock, the
+    kernel and pack repositories, the read-only ordered event repository, and
+    the seven typed services. It is a thin, stateless surface — all domain
+    behavior lives in the services.
 
     Typical use::
 
@@ -80,24 +82,24 @@ class AstridClient:
         cls,
         projects_root: str | Path | None = None,
         *,
+        catalog: Any | None = None,
         registry: Any | None = None,
+        additional_pack_ids: Sequence[str] = (),
         database_path: str | Path | None = None,
     ) -> Self:
-        """Compose the standard application and return a bound client.
+        """Compose and bind one explicit catalog/database projection.
 
-        Resolves the projects root (argument, ``ASTRID_PROJECTS_ROOT``, or
-        the default), acquires the exclusive-owner lock, opens the single
-        standard writer, wires every repository and the seven typed
-        services, and binds them to the new client. A second owner fails
-        closed with the typed ``unavailable`` contract. The application
-        composition is imported here — never at module import time — so
-        importing this module opens nothing.
+        ``additional_pack_ids`` is forwarded to the standard composition
+        seam, so an explicitly selected bundled database pack such as
+        ``runaway`` remains part of this client's lifetime authority.
         """
         from astrid.application import compose_standard_application
 
         app = compose_standard_application(
             projects_root,
+            catalog=catalog,
             registry=registry,
+            additional_pack_ids=additional_pack_ids,
             database_path=database_path,
         )
         return cls(app)
@@ -174,26 +176,23 @@ class AstridClient:
         return str(self._app.projects_root)
 
     def discover(self, **kwargs: Any) -> Any:
-        """Lazy ``astrid.sdk.discover`` bound to the client's projects root.
-
-        The discovery machinery (registries, pack inventory) is imported
-        only when this method is actually called. An explicit
-        ``project_root`` keyword wins over the bound root.
-        """
+        """Lazy ``astrid.sdk.discover`` bound to the client's composition."""
         from astrid.sdk import discover
 
-        kwargs.setdefault("project_root", self._bound_root())
+        kwargs["project_root"] = self._bound_root()
+        kwargs["catalog"] = self._app.catalog
+        kwargs["extra_pack_roots"] = ()
+        kwargs["include_installed"] = False
         return discover(**kwargs)
 
     def get_capability(self, capability_id: str, **kwargs: Any) -> Any:
-        """Lazy ``astrid.sdk.get_capability`` bound to the client's root.
-
-        Raises the typed ``CapabilityNotFoundError`` /
-        ``CapabilityAmbiguousError`` family for failed lookups.
-        """
+        """Lazy ``astrid.sdk.get_capability`` bound to the client's composition."""
         from astrid.sdk import get_capability
 
-        kwargs.setdefault("project_root", self._bound_root())
+        kwargs["project_root"] = self._bound_root()
+        kwargs["catalog"] = self._app.catalog
+        kwargs["extra_pack_roots"] = ()
+        kwargs["include_installed"] = False
         return get_capability(capability_id, **kwargs)
 
     def invoke(self, capability_id: str, **kwargs: Any) -> Any:
@@ -209,12 +208,12 @@ class AstridClient:
         """
         from astrid.sdk import invoke
 
-        kwargs.setdefault("project_root", self._bound_root())
-        # Preserve the exact schema-pack composition that opened this client.
-        # A long-lived client may intentionally include migrations beyond the
-        # standard in-tree packs; rebuilding a standard registry at invoke
-        # time would make the canonical DB unreadable to its own client.
-        kwargs.setdefault("registry", self._app.registry)
+        kwargs["project_root"] = self._bound_root()
+        # The bound application owns the exact canonical pair and writer.
+        # Ignore per-call composition overrides to prevent split authority.
+        kwargs["catalog"] = self._app.catalog
+        kwargs["registry"] = self._app.registry
+        kwargs["application"] = self._app
         return invoke(capability_id, **kwargs)
 
     def invoke_result(self, capability_id: str, **kwargs: Any) -> Any:
@@ -227,8 +226,10 @@ class AstridClient:
         """
         from astrid.sdk import invoke_result
 
-        kwargs.setdefault("project_root", self._bound_root())
-        kwargs.setdefault("registry", self._app.registry)
+        kwargs["project_root"] = self._bound_root()
+        kwargs["catalog"] = self._app.catalog
+        kwargs["registry"] = self._app.registry
+        kwargs["application"] = self._app
         return invoke_result(capability_id, **kwargs)
 
     @property
@@ -244,9 +245,14 @@ class AstridClient:
         return generate
 
     def render(self, *args: Any, **kwargs: Any) -> Any:
-        """Lazy ``astrid.sdk.render``: render a timeline and return the path."""
+        """Lazy ``astrid.sdk.render`` bound to the client's composition."""
         from astrid.sdk import render
 
+        kwargs["project_root"] = self._bound_root()
+        kwargs["catalog"] = self._app.catalog
+        kwargs["registry"] = self._app.registry
+        kwargs["extra_pack_roots"] = ()
+        kwargs["include_installed"] = False
         return render(*args, **kwargs)
 
     def read_events(self, *args: Any, **kwargs: Any) -> Any:

@@ -1,48 +1,19 @@
-"""Astrid pack content and the explicit standard-Astrid schema-pack composition.
+"""Bundled canonical pack composition and bridge construction.
 
-(m1 plan step 2.) :func:`register_standard_schema_packs` is the single explicit
-composition function: it registers exactly the three in-tree schema packs
-(timeline, shots, references) through ``register_pack()``. There is no dynamic
-discovery, no install/uninstall path, and no reuse of the capability-pack
-loader or definition machinery (v10 section 2 "Boundary now, loader later";
-decision artifact section 4).
-
-Core vocabulary is registered independently by
-``astrid.core.events.registry.register_core_vocabulary``; this module registers
-only the three shipped packs. ``astrid.core.gateway.dispatch`` is the single
-application-composition boundary allowed to import this standard composition.
-
-(m1 plan step 18.) :func:`compose_standard_bridge` is the standard
-repository-backed bridge composition: standard registry + one
-``DatabaseWriter`` over ``${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`` +
-the kernel services + the project/timeline repositories + the timeline bridge
-adapter. It is invoked **only** at the gateway serve composition root
-(``astrid.core.gateway.dispatch._dispatch_serve``); constructing the database
-or the registered packs anywhere else is an architecture violation, and there
-is no legacy file/JSONL/FSA/Supabase authority fallback.
-
-(m2 plan step 3/4.) :func:`compose_standard_bridge` additionally runs the
-startup selective staging GC through the **single** already-constructed
-``DatabaseWriter``: :func:`collect_live_staging_txn_ids` reads the
-``execution_attempts`` rows that are live (``claimed``/``running``) on the
-writer's read-only connection and extracts each attempt's reserved
-``staging_txn_id`` from ``progress_json``, then
-:func:`run_startup_staging_gc` calls the pure filesystem
-``gc_unreferenced_staging`` so only staging directories unreferenced by live
-attempts are removed. No second writer, no new write authority, and the
-managed ``media/sha256`` digest tree is never touched (SD5).
+The bundled catalog is the only database ownership authority. This module
+provides operation-scoped catalog/registry composition and the single writer
+and bridge seams.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from astrid.core.backup.operations import recover_restore_staging
-from astrid.core.events.registry import register_core_vocabulary
-from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.io.media_import import (
@@ -51,13 +22,15 @@ from astrid.core.io.media_import import (
     gc_unreferenced_staging,
     validate_txn_id,
 )
+from astrid.core.pack.canonical import (
+    BundledCatalog,
+    CanonicalPackValidationError,
+    project_catalog_database,
+)
+from astrid.core.events.service import EventAppendService
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import (
-    FrozenSchemaPackRegistry,
-    SchemaPackRegistry,
-)
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.writer import DatabaseWriter
 from astrid.sdk.exceptions import ServiceUnavailableError
@@ -65,13 +38,46 @@ from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.projects import ProjectsService
 
-STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
-"""Exactly the in-tree schema packs the standard composition registers.
+@dataclass(frozen=True, slots=True)
+class StandardPackComposition:
+    """One operation-owned immutable catalog and database projection."""
 
-The literal tuple is required by the deterministic pack-factoring surgery
-(``scripts/reshape/check_pack_factoring.py`` patches this exact literal in
-temporary copies), so it must stay defined here verbatim.
-"""
+    catalog: BundledCatalog
+    registry: FrozenSchemaPackRegistry
+
+
+def compose_standard_pack_database(
+    *,
+    catalog: BundledCatalog | None = None,
+    registry: FrozenSchemaPackRegistry | None = None,
+    additional_pack_ids: Sequence[str] = (),
+) -> StandardPackComposition:
+    """Compose the standard bundled catalog and its typed database projection.
+
+    The pair is intentionally operation-scoped: callers retain it for the
+    operation lifetime and pass the exact frozen registry to their writer and
+    typed consumers.  No process-global cache or service locator is involved.
+    An injected registry is retained verbatim, which permits focused
+    compositions such as an explicitly selected ``runaway`` projection.
+    """
+    if catalog is None:
+        from astrid.core.pack.loader import DEFAULT_PACKS_ROOT
+
+        catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+    if not isinstance(catalog, BundledCatalog):
+        raise CanonicalPackValidationError("catalog must be a BundledCatalog")
+    if registry is None:
+        registry = project_catalog_database(catalog, additional_pack_ids)
+    elif additional_pack_ids:
+        raise CanonicalPackValidationError(
+            "additional_pack_ids cannot be combined with an injected registry"
+        )
+    if not isinstance(registry, FrozenSchemaPackRegistry):
+        raise CanonicalPackValidationError(
+            "registry must be a FrozenSchemaPackRegistry"
+        )
+    return StandardPackComposition(catalog=catalog, registry=registry)
+
 
 LIVE_ATTEMPT_STAGING_KEY = "staging_txn_id"
 """Reserved ``execution_attempts.progress_json`` key holding the staging txn id.
@@ -85,29 +91,6 @@ directories from orphaned ones.
 LIVE_ATTEMPT_STATUSES: tuple[str, ...] = ("claimed", "running")
 """The attempt statuses that own a live staging directory (lease held)."""
 
-_PACKS_ROOT = Path(__file__).parent
-
-
-def register_standard_schema_packs(registry: SchemaPackRegistry) -> SchemaPackRegistry:
-    """Register exactly timeline, shots, and references into ``registry``.
-
-    Each manifest is loaded from its in-tree ``schema-pack.yaml`` and passed to
-    the immutable registry's ``register_pack()``. Nothing is discovered and the
-    capability-pack loader is never consulted; core vocabulary must already be
-    registered (or be registered separately) for a complete standard registry.
-    """
-    for pack_id in STANDARD_SCHEMA_PACKS:
-        manifest = load_schema_pack_manifest(_PACKS_ROOT / pack_id / "schema-pack.yaml")
-        registry.register_pack(manifest)
-    return registry
-
-
-def build_standard_registry() -> FrozenSchemaPackRegistry:
-    """Compose and freeze the standard-Astrid registry (core + three packs)."""
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    return registry.freeze()
 
 
 def open_standard_writer(
@@ -126,7 +109,7 @@ def open_standard_writer(
     exist; the caller owns the writer lifecycle (``close()`` on shutdown).
     """
     if registry is None:
-        registry = build_standard_registry()
+        registry = compose_standard_pack_database().registry
     return DatabaseWriter(database_path, registry)
 
 
@@ -191,12 +174,13 @@ class StandardBridgeComposition:
 
     projects_root: Path
     database_path: Path
+    catalog: BundledCatalog
     registry: FrozenSchemaPackRegistry
     writer: DatabaseWriter
     projects: ProjectRepository
     timelines: TimelineRepository
     bridge: TimelineBridgeAdapter
-    owner_lock: DatabaseOwnerLock | None
+    owner_lock: DatabaseOwnerLock
     """The exclusive-owner lock held for the composition's lifetime."""
 
     def close(self) -> None:
@@ -211,41 +195,41 @@ class StandardBridgeComposition:
         if self.owner_lock is not None:
             self.owner_lock.release()
 
-
 def compose_standard_bridge(
     projects_root: str | Path | None = None,
     *,
+    catalog: BundledCatalog | None = None,
     registry: FrozenSchemaPackRegistry | None = None,
+    additional_pack_ids: Sequence[str] = (),
 ) -> StandardBridgeComposition:
-    """Construct the standard database and registered packs for the bridge.
+    """Construct the bridge over one operation-owned catalog/registry pair.
+
+    The pair is composed once (or retained from explicit injection), then the
+    exact frozen registry is passed to restore-adjacent writer startup, events,
+    repositories, services, and bridge construction.  Default selection is
+    core plus timeline, shots, and references; ``additional_pack_ids`` supports
+    explicit projections such as ``("runaway",)``.
 
     Resolves the projects root (argument, ``ASTRID_PROJECTS_ROOT``, or the
-    default), derives ``${root}/.astrid/astrid.sqlite3``, creates the
-    managed-data directory, composes the standard registry (unless one is
-    injected), acquires the exclusive-owner lock beside the database
-    **before** opening exactly one ``DatabaseWriter`` (the single write
-    authority — same m4 law as ``compose_standard_application``), wires the
-    kernel services and repositories, constructs the typed project/timeline
-    **services** over that one writer, and returns the frozen composition
-    whose bridge adapter is backed by those services (plan step 20) — the
-    adapter holds no SQL and never opens a writer of its own. A concurrent
-    standard-application / kernel-binding composition fails closed with the
-    SDK's typed ``unavailable`` error while the bridge is open.
-
-    Must be called only from the gateway serve composition root. The caller
-    owns the composition lifecycle: call
-    :meth:`StandardBridgeComposition.close` on shutdown (closes the writer,
-    then releases the owner lock).
+    default), derives ``${root}/.astrid/astrid.sqlite3``, recovers restore
+    staging before the writer opens, acquires the exclusive-owner lock, and
+    constructs one writable ``DatabaseWriter``. The caller owns the returned
+    composition lifecycle.
     """
     root = resolve_projects_root(projects_root)
+    pack_composition = compose_standard_pack_database(
+        catalog=catalog,
+        registry=registry,
+        additional_pack_ids=additional_pack_ids,
+    )
+    catalog = pack_composition.catalog
+    registry = pack_composition.registry
     # Restore recovery is a read-before-write filesystem decision. It must
     # resolve any journal left by a hard-dead restore before the database
     # writer can open and observe a mixed database/media pair.
-    recover_restore_staging(root)
+    recover_restore_staging(root, registry=registry)
     database_path = derive_database_path(root)
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    if registry is None:
-        registry = build_standard_registry()
     # Exclusive-owner lock (SD3-m4): acquired before any writable connection
     # or writer queue can open, exactly like compose_standard_application,
     # so a second writer for the same database fails closed with the typed
@@ -303,6 +287,7 @@ def compose_standard_bridge(
         return StandardBridgeComposition(
             projects_root=root,
             database_path=database_path,
+            catalog=catalog,
             registry=registry,
             writer=writer,
             projects=projects,
@@ -318,17 +303,15 @@ def compose_standard_bridge(
 
 
 __all__: list[str] = [
+    "BundledCatalog",
     "FrozenSchemaPackRegistry",
     "LIVE_ATTEMPT_STAGING_KEY",
     "LIVE_ATTEMPT_STATUSES",
-    "STANDARD_SCHEMA_PACKS",
-    "SchemaPackRegistry",
     "StandardBridgeComposition",
-    "TimelineBridgeAdapter",
-    "build_standard_registry",
+    "StandardPackComposition",
     "collect_live_staging_txn_ids",
     "compose_standard_bridge",
+    "compose_standard_pack_database",
     "open_standard_writer",
-    "register_standard_schema_packs",
     "run_startup_staging_gc",
 ]

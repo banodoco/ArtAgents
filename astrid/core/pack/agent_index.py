@@ -8,23 +8,10 @@ or doc file themselves.
 No LLM calls, no heuristics — purely deterministic assembly from structured
 manifest fields, component metadata, doc paths, and bounded STAGE.md excerpts.
 
-**Resolution strategy (dual-path):**
-
-1.  **Primary — pack-system canonical resolver** (``discover_packs()``):
-    Enumerates built-in packs via the pack-system's canonical discovery
-    mechanism (``packs_root()`` → ``discover_packs()``).  This is the
-    authoritative source and always runs first.  When a pack is also
-    installed, the installed entry overwrites the built-in entry on collision.
-
-2.  **Fallback — PR #8 installed-pack store** (``InstalledPackStore``):
-    After built-in packs are collected, installed packs are layered on
-    top.  An installed pack always wins over a built-in pack with the same
-    ``pack_id``.  This is the same behaviour as the original PR #8
-    implementation, but the discovery order is reversed: built-ins first,
-    then installed overlays.
-
-The dual-path design preserves backward compatibility with PR #8's index
-format while anchoring enumeration on the pack-system's canonical resolver.
+The index has one admission path: bundled entries come from
+``BundledCatalog`` and installed entries are custody-checked canonical
+projections. The resulting summaries are assembled from those normalized
+definitions; no pack manifest is reread as raw YAML/JSON.
 """
 
 from __future__ import annotations
@@ -39,11 +26,14 @@ import yaml
 from astrid.core.pack import (
     EXECUTOR_MANIFEST_NAMES,
     ORCHESTRATOR_MANIFEST_NAMES,
-    discover_packs,
-    pack_manifest_path,
     packs_root,
 )
-from astrid.core.pack.store import InstalledPackStore
+from astrid.core.pack.canonical import BundledCatalog
+from astrid.core.pack.store import (
+    InstalledPackStore,
+    validate_installed_manifest_custody,
+)
+
 
 # ---------------------------------------------------------------------------
 # STAGE.md excerpt helpers
@@ -254,31 +244,19 @@ def _scan_components(root: Path, content: dict[str, Any]) -> list[dict[str, Any]
 
 
 def _normalize_secrets(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return a structured secrets list from a pack manifest.
-
-    Handles both legacy ``{required:[...]}`` dict and new
-    ``[{name, required, description}]`` list formats.
-    """
+    """Return structured secrets from the normalized canonical definition."""
     secrets_raw = manifest.get("secrets")
-    if isinstance(secrets_raw, list):
-        result: list[dict[str, Any]] = []
-        for s_obj in secrets_raw:
-            if isinstance(s_obj, dict) and s_obj.get("name"):
-                result.append({
-                    "name": str(s_obj["name"]),
-                    "required": bool(s_obj.get("required", False)),
-                    "description": str(s_obj.get("description", "")),
-                })
-        return result
-    if isinstance(secrets_raw, dict):
-        # Legacy format
-        req_list = secrets_raw.get("required")
-        if isinstance(req_list, list):
-            return [
-                {"name": str(s), "required": True, "description": ""}
-                for s in req_list if s
-            ]
-    return []
+    if not isinstance(secrets_raw, list):
+        return []
+    return [
+        {
+            "name": str(item["name"]),
+            "required": bool(item.get("required", False)),
+            "description": str(item.get("description", "")),
+        }
+        for item in secrets_raw
+        if isinstance(item, dict) and item.get("name")
+    ]
 
 
 def _normalize_dependencies(manifest: dict[str, Any]) -> dict[str, list[str]]:
@@ -293,109 +271,107 @@ def _normalize_dependencies(manifest: dict[str, Any]) -> dict[str, list[str]]:
     return result
 
 
+def _canonical_trust(entry: Any) -> dict[str, Any]:
+    """Build index trust metadata from an admitted canonical entry."""
+    definition = entry.definition
+    permissions = [
+        {
+            "id": permission.id,
+            "reason": permission.reason,
+            **({"access": permission.access} if permission.access is not None else {}),
+            **({"services": list(permission.services)} if permission.services else {}),
+        }
+        for permission in definition.permissions
+    ]
+    content = definition.content
+    component_counts: dict[str, int] = {}
+    for key in ("executors", "orchestrators", "elements"):
+        relative = content.get(key)
+        component_root = entry.root / relative if isinstance(relative, str) else None
+        component_counts[key] = (
+            sum(
+                1
+                for child in component_root.iterdir()
+                if child.is_dir() and not child.name.startswith(".")
+            )
+            if component_root is not None and component_root.is_dir()
+            else 0
+        )
+    return {
+        "name": definition.name,
+        "version": definition.version,
+        "component_counts": component_counts,
+        "permissions": permissions,
+        "permission_ids": [item["id"] for item in permissions],
+        "trust": {
+            "sandbox": "none",
+            "runs_with_user_process_permissions": True,
+            "permission_enforcement": "disclosure_only",
+        },
+    }
+
+
 def build_agent_index(
     store: InstalledPackStore | None = None,
     *,
     pack_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build a deterministic agent-facing pack index.
-
-    Primary enumeration uses pack-system's canonical resolver
-    (``discover_packs()``).  Installed packs (via ``InstalledPackStore``)
-    are layered on top — an installed pack always wins over a built-in
-    pack with the same ``pack_id``.
-
-    Parameters:
-        store: Optional InstalledPackStore for installed packs.  Created with
-            defaults when ``None``.
-        pack_id: When set, return only the matching pack (or ``None``).
-
-    Returns:
-        A dict with key ``"packs"`` mapping to a list of pack-summary dicts
-        sorted by ``pack_id``.  Each pack dict includes:
-        pack_id, name, version, description, source_type, trust_tier, purpose,
-        normal_entrypoints, do_not_use_for, required_context, secrets,
-        dependencies, keywords, capabilities, component_counts, components,
-        docs_paths, warnings.
-
-        When *pack_id* is given and the pack is found the result is the
-        single pack dict; when not found, ``None``.
-    """
-    from astrid.core.pack.validate import extract_trust_summary
-
+    """Build a deterministic agent-facing pack index from canonical entries."""
     if store is None:
         store = InstalledPackStore()
 
-    # Collect packs from both sources.  Installed packs win on collision.
+    # Bundled entries are already normalized by the one catalog admission.
     pack_map: dict[str, dict[str, Any]] = {}
-
-    # ------------------------------------------------------------------
-    # Primary: built-in packs via pack-system canonical resolver
-    # ------------------------------------------------------------------
-    for pack_def in discover_packs(packs_root(), include_hidden=True):
-        pid = pack_def.id
+    catalog = BundledCatalog.from_root(packs_root())
+    for entry in catalog.ordered_entries:
+        pid = entry.id
         if pack_id is not None and pid != pack_id:
             continue
-
-        try:
-            trust = extract_trust_summary(pack_def.root)
-        except Exception:
-            trust = {}
-
-        manifest = _load_manifest(pack_def.root)
+        manifest = entry.definition.to_dict()
         pack_map[pid] = _assemble_pack_entry(
-            pack_def.root, pid, manifest, trust, source_type="built-in"
+            entry.root,
+            pid,
+            manifest,
+            _canonical_trust(entry),
+            source_type="built-in",
         )
 
-    # ------------------------------------------------------------------
-    # Fallback: installed packs (via InstalledPackStore) — overwrite built-in dupes
-    # ------------------------------------------------------------------
+    # Installed revisions are admitted and custody-checked through the same
+    # canonical parser before their normalized definition is consumed.
     for record in store.list_installed():
         pid = record.pack_id
         if pack_id is not None and pid != pack_id:
             continue
-
         rev_dir = store.active_revision_path(pid)
         if rev_dir is None:
             continue
-
         try:
-            trust = extract_trust_summary(rev_dir)
+            entry = validate_installed_manifest_custody(store, record, rev_dir)
         except Exception:
-            trust = {}
-
-        manifest = _load_manifest(rev_dir)
-        entry = _assemble_pack_entry(
-            rev_dir, pid, manifest, trust,
+            continue
+        pack_map[pid] = _assemble_pack_entry(
+            entry.root,
+            pid,
+            entry.definition.to_dict(),
+            _canonical_trust(entry),
             source_type=record.source_type or "installed",
         )
-        entry["source_type"] = record.source_type or "local"
-        entry["trust_tier"] = record.trust_tier or "local"
-        pack_map[pid] = entry
+        pack_map[pid]["source_type"] = record.source_type or "local"
+        pack_map[pid]["trust_tier"] = record.trust_tier or "local"
 
-    # ------------------------------------------------------------------
-    # Filter and sort
-    # ------------------------------------------------------------------
     if pack_id is not None:
         return pack_map.get(pack_id)
 
     sorted_packs = [pack_map[pid] for pid in sorted(pack_map)]
-
-    # Post-process: mark is_entrypoint on components
     for pack_entry in sorted_packs:
         normal_eps = set(pack_entry.get("normal_entrypoints", []))
         for comp in pack_entry.get("components", []):
             comp["is_entrypoint"] = comp["id"] in normal_eps
-
     return {"packs": sorted_packs}
 
 
-def _load_manifest(root: Path) -> dict[str, Any]:
-    """Load the pack manifest from *root*, returning an empty dict on failure."""
-    mf_path = pack_manifest_path(root)
-    if mf_path is None:
-        return {}
-    return _load_yaml_or_json(mf_path) or {}
+
+
 
 
 def _assemble_pack_entry(
@@ -414,12 +390,9 @@ def _assemble_pack_entry(
     purpose = agent_section.get("purpose", manifest.get("description", ""))
 
     # Entrypoints
-    normal_entrypoints: list[str] = []
-    if isinstance(agent_section.get("normal_entrypoints"), list):
-        normal_entrypoints = [str(ep) for ep in agent_section["normal_entrypoints"] if ep]
-    if not normal_entrypoints and isinstance(agent_section.get("entrypoints"), list):
-        # Fall back to legacy entrypoints
-        normal_entrypoints = [str(ep) for ep in agent_section["entrypoints"] if ep]
+    normal_entrypoints = [
+        str(ep) for ep in agent_section.get("normal_entrypoints", ()) if ep
+    ]
 
     # do_not_use_for
     do_not_use_for = str(agent_section.get("do_not_use_for", "")) or None
@@ -491,7 +464,7 @@ def _assemble_pack_entry(
         "components": components,
         "docs_paths": docs_paths,
         "warnings": warnings,
-        # Permissions and trust metadata — sourced from extract_trust_summary()
+        # Permissions and trust metadata come from the canonical definition.
         "permissions": trust.get("permissions", []),
         "permission_ids": trust.get("permission_ids", []),
         "trust": trust.get("trust", {}),

@@ -16,6 +16,8 @@ import pytest
 from astrid.core import timeline
 from astrid.core.rendering import assets as asset_service
 from astrid.core.rendering.assets import AssetMaterializer, InvocationAssetServer
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+from astrid.packs import compose_standard_pack_database
 
 
 def _write_registry(path: Path, assets: dict[str, dict[str, object]]) -> Path:
@@ -236,6 +238,74 @@ def test_owned_managed_locator_is_allowed_only_by_exact_hash(
             registry_path,
             allowed_root=project,
             allowed_managed_paths={managed: digest},
+        )
+
+
+def test_materializer_forwards_exact_operation_registry_to_managed_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    managed = projects_root / ".astrid" / "media" / "sha256" / "aa" / "bb" / "asset.bin"
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"operation registry asset")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    monkeypatch.setenv("ASTRID_PROJECT_SLUG", "project")
+    registry_path = _write_registry(
+        project / "hype.assets.json",
+        {"asset": {"file": str(managed)}},
+    )
+    operation_registry = compose_standard_pack_database().registry
+    assert isinstance(operation_registry, FrozenSchemaPackRegistry)
+    observed: list[FrozenSchemaPackRegistry] = []
+    digest = hashlib.sha256(managed.read_bytes()).hexdigest()
+
+    def owned(
+        requested: set[Path],
+        *,
+        projects_root: Path,
+        project_slug: str | None,
+        registry: FrozenSchemaPackRegistry,
+    ) -> dict[Path, str]:
+        assert requested == {managed.resolve()}
+        assert project_slug == "project"
+        observed.append(registry)
+        return {managed.resolve(): digest}
+
+    monkeypatch.setattr(asset_service, "_owned_managed_locators", owned)
+    with AssetMaterializer(
+        registry_path,
+        registry=operation_registry,
+        allowed_root=project,
+    ) as materializer:
+        assert materializer.assets["asset"].local_path is not None
+    assert observed == [operation_registry]
+
+
+def test_managed_read_does_not_hide_registry_schema_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation_registry = compose_standard_pack_database().registry
+    assert isinstance(operation_registry, FrozenSchemaPackRegistry)
+    monkeypatch.setattr(
+        asset_service,
+        "_kernel_database_path",
+        lambda _projects_root: tmp_path / "astrid.sqlite3",
+    )
+
+    def reject(*args: object, **kwargs: object) -> object:
+        raise ValueError("schema migration checksum drift")
+
+    monkeypatch.setattr(asset_service, "open_database", reject)
+    with pytest.raises(ValueError, match="checksum drift"):
+        asset_service._owned_managed_locators(
+            {tmp_path / "managed.bin"},
+            projects_root=tmp_path,
+            project_slug="project",
+            registry=operation_registry,
         )
 
 

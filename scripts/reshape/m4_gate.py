@@ -543,11 +543,11 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
 
 
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
-    """Reject schema/catalog drift from the frozen v10 20-table composition."""
+    """Reject canonical catalog/database projection drift."""
     violations: list[str] = []
     from astrid.core.migrations.catalog import CORE_TABLES, FORBIDDEN_TABLES
-    from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-    from astrid.packs import STANDARD_SCHEMA_PACKS, build_standard_registry
+    from astrid.core.pack.canonical import BundledCatalog
+    from astrid.packs import compose_standard_pack_database
 
     core_count = len(CORE_TABLES)
     if core_count != FROZEN_CORE_TABLE_COUNT:
@@ -556,20 +556,23 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
             f"{FROZEN_CORE_TABLE_COUNT}"
         )
 
-    packs_root = REPO_ROOT / "astrid" / "packs"
+    catalog = BundledCatalog.from_root(REPO_ROOT / "astrid" / "packs")
+    selected = tuple(
+        entry
+        for entry in catalog.entries
+        if entry.database is not None and entry.database.default_enabled
+    )
     declared: dict[str, str] = {}
-    manifest_pack_ids: list[str] = []
-    for pack_dir in sorted(p for p in packs_root.iterdir() if p.is_dir()):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if not manifest_path.is_file():
-            continue
-        manifest = load_schema_pack_manifest(manifest_path)
-        manifest_pack_ids.append(manifest.id)
-        declared.update({table: manifest.id for table in manifest.migrations[0].tables})
-    if tuple(sorted(manifest_pack_ids)) != tuple(sorted(STANDARD_SCHEMA_PACKS)):
+    for entry in selected:
+        assert entry.database is not None
+        for migration in entry.database.migrations:
+            declared.update({table: entry.id for table in migration.tables})
+    manifest_pack_ids = [entry.id for entry in selected]
+    expected_pack_ids = sorted(FROZEN_PACK_TABLES)
+    if sorted(manifest_pack_ids) != expected_pack_ids:
         violations.append(
-            f"schema-pack drift: found packs {sorted(manifest_pack_ids)} != "
-            f"standard {sorted(STANDARD_SCHEMA_PACKS)}"
+            f"canonical database drift: found packs {sorted(manifest_pack_ids)} != "
+            f"expected {expected_pack_ids}"
         )
     for pack_id, expected in FROZEN_PACK_TABLES.items():
         actual = frozenset(
@@ -584,24 +587,22 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
         violations.append(f"composition table count {total} != frozen 20")
     forbidden_hit = sorted(set(declared) & set(FORBIDDEN_TABLES))
     if forbidden_hit:
-        violations.append(
-            f"forbidden table(s) declared: {forbidden_hit}"
-        )
+        violations.append(f"forbidden table(s) declared: {forbidden_hit}")
 
     registry_ok = True
     registry_error = ""
     try:
-        registry = build_standard_registry()
+        registry = compose_standard_pack_database(catalog=catalog).registry
         pack_ids = set(registry.packs)
-        if pack_ids - {"core"} != set(STANDARD_SCHEMA_PACKS):
+        if pack_ids - {"core"} != set(expected_pack_ids):
             violations.append(
-                f"standard registry pack ids {sorted(pack_ids)} != "
-                f"{sorted(STANDARD_SCHEMA_PACKS)} plus core vocabulary"
+                f"canonical registry pack ids {sorted(pack_ids)} != "
+                f"{expected_pack_ids} plus core vocabulary"
             )
     except Exception as exc:  # noqa: BLE001 - registry construction failed
         registry_ok = False
         registry_error = f"{type(exc).__name__}: {exc}"
-        violations.append(f"standard registry failed to freeze: {registry_error}")
+        violations.append(f"canonical registry failed to freeze: {registry_error}")
 
     record: dict[str, object] = {
         "core_table_count": core_count,

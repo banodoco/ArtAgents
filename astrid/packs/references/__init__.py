@@ -1,9 +1,8 @@
 """References schema pack (in-tree, explicitly registered).
 
 The references pack owns the normative ``project_references``,
-``media_references``, and ``reference_links`` tables plus the namespaced
-``reference.*`` vocabulary declared in ``schema-pack.yaml`` next to this
-module. Every locked reference enum/check/index and kernel-currency
+``reference.*`` vocabulary declared by the canonical ``pack.yaml`` database
+projection. Every locked reference enum/check/index and kernel-currency
 association (``media_id``, ``context_task_id``) is preserved verbatim.
 
 m3 (plan step 7) ships the executable :class:`ReferenceRepository` in

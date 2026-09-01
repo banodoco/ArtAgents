@@ -1,28 +1,79 @@
-"""Pack-manifest loading/parsing, discovery, and the packs root."""
+"""Strict canonical pack admission and bundled discovery helpers."""
 
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
-
-import yaml
 
 from astrid.core.pack._common import (
     ELEMENT_MANIFEST_NAMES,
-    PACK_MANIFEST_NAMES,
     PackValidationError,
-    _optional_string,
-    _require_mapping,
-    _require_string,
-    _validate_pack_id,
+)
+from astrid.core.pack.canonical import (
+    BundledCatalog,
+    CanonicalPackEntry,
+    CanonicalPackValidationError,
+    ExternalPackSource,
+    canonical_manifest_path,
+    read_normalize_validate,
 )
 from astrid.core.pack.definition import PackDefinition
-from astrid.core.pack.permissions import (
-    _normalize_pack_permissions,
-    _optional_pack_aliases,
-    _optional_pack_extensions,
-)
+from astrid.core.pack.permissions import _normalize_pack_permissions
+
+
+def _materialize(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _materialize(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_materialize(item) for item in value]
+    return value
+
+
+def _pack_definition_from_entry(entry: CanonicalPackEntry) -> PackDefinition:
+    definition = entry.definition
+    return PackDefinition(
+        id=definition.id,
+        name=definition.name,
+        version=definition.version,
+        root=entry.root,
+        manifest_path=Path(entry.manifest.resolved),
+        metadata={},
+        description=definition.description,
+        content=_materialize(definition.content),
+        agent=_materialize(definition.agent),
+        status=definition.status,
+        visibility=definition.visibility,
+        schema_version=str(definition.schema_version),
+        aliases=tuple(_materialize(item) for item in definition.aliases),
+        permissions=tuple(
+            _normalize_pack_permissions(
+                [
+                    {
+                        "id": permission.id,
+                        "reason": permission.reason,
+                        **(
+                            {"access": permission.access}
+                            if permission.access is not None
+                            else {}
+                        ),
+                        **(
+                            {"services": list(permission.services)}
+                            if permission.services
+                            else {}
+                        ),
+                    }
+                    for permission in definition.permissions
+                ]
+            )
+        ),
+        extensions=_materialize(definition.extensions),
+        origin=definition.origin if hasattr(definition, "origin") else "unknown",
+        install_tier=definition.install_tier if hasattr(definition, "install_tier") else "default",
+        pack_type=definition.pack_type if hasattr(definition, "pack_type") else "capability",
+        domain=definition.domain,
+        stability=definition.stability,
+        support=definition.support,
+    )
 
 
 def packs_root() -> Path:
@@ -33,12 +84,7 @@ DEFAULT_PACKS_ROOT = packs_root()
 
 
 def ensure_local_pack(*, project_root: str | Path = None) -> Path:
-    """Create or return the ``local`` scratch pack under *project_root*.
-
-    When *project_root* is ``None``, the pack root is derived from
-    ``REPO_ROOT`` so the behaviour matches the old location in
-    ``element/registry.py``.
-    """
+    """Create or return the ``local`` scratch pack under *project_root*."""
     from astrid.core.foundation.paths import REPO_ROOT
 
     root = Path(project_root) if project_root is not None else REPO_ROOT
@@ -46,17 +92,19 @@ def ensure_local_pack(*, project_root: str | Path = None) -> Path:
     pack_root.mkdir(parents=True, exist_ok=True)
     manifest = pack_root / "pack.yaml"
     if not manifest.exists():
-        manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
+        manifest.write_text(
+            "schema_version: 2\n"
+            "id: local\n"
+            "name: Local Scratch Pack\n"
+            "version: 0.1.0\n"
+            "capabilities: [local]\n",
+            encoding="utf-8",
+        )
     return pack_root
 
 
 def ensure_local_pack_for_elements(*, project_root: str | Path = None) -> Path | None:
-    """Materialize the local pack manifest when local elements exist.
-
-    Local render elements can be authored directly under
-    ``astrid/packs/local/elements``. Discovery needs a pack manifest to load
-    them, but an empty local pack should not appear just because discovery ran.
-    """
+    """Materialize the local canonical manifest when local elements exist."""
     from astrid.core.foundation.paths import REPO_ROOT
 
     root = Path(project_root) if project_root is not None else REPO_ROOT
@@ -68,7 +116,14 @@ def ensure_local_pack_for_elements(*, project_root: str | Path = None) -> Path |
     if not _has_local_element_manifest(elements_root):
         return None
     pack_root.mkdir(parents=True, exist_ok=True)
-    manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
+    manifest.write_text(
+        "schema_version: 2\n"
+        "id: local\n"
+        "name: Local Scratch Pack\n"
+        "version: 0.1.0\n"
+        "capabilities: [local]\n",
+        encoding="utf-8",
+    )
     return pack_root
 
 
@@ -76,9 +131,30 @@ def _has_local_element_manifest(elements_root: Path) -> bool:
     if not elements_root.is_dir():
         return False
     for candidate in elements_root.glob("*/*"):
-        if candidate.is_dir() and any((candidate / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
+        if candidate.is_dir() and any(
+            (candidate / name).is_file() for name in ELEMENT_MANIFEST_NAMES
+        ):
             return True
     return False
+
+
+def _entry_for_manifest(manifest_path: str | Path) -> CanonicalPackEntry:
+    path = Path(manifest_path).expanduser()
+    if path.name != "pack.yaml":
+        raise PackValidationError(
+            f"canonical pack admission requires pack.yaml, got {path.name!r}"
+        )
+    try:
+        if path.resolve().parent.parent == DEFAULT_PACKS_ROOT.resolve():
+            catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+            return catalog.get(path.resolve().parent.name)
+        return read_normalize_validate(
+            path,
+            source=ExternalPackSource.LOCAL,
+            resolve_resources=True,
+        )
+    except CanonicalPackValidationError as exc:
+        raise PackValidationError(str(exc)) from exc
 
 
 def discover_packs(
@@ -86,176 +162,38 @@ def discover_packs(
     *,
     include_hidden: bool = False,
 ) -> tuple[PackDefinition, ...]:
-    source_root = Path(root) if root is not None else packs_root()
+    """Discover only strict canonical v2 ``pack.yaml`` entries."""
+    source_root = Path(root) if root is not None else DEFAULT_PACKS_ROOT
     if not source_root.is_dir():
         return ()
-    packs: list[PackDefinition] = []
-    seen: dict[str, Path] = {}
-    for child in sorted(source_root.iterdir(), key=lambda path: path.name):
-        if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
-            continue
-        manifest_path = pack_manifest_path(child)
-        if manifest_path is None:
-            continue
-        pack = load_pack_manifest(manifest_path)
-        if pack.visibility == "hidden" and not include_hidden:
-            continue
-        if pack.id in seen:
-            raise PackValidationError(f"duplicate pack id {pack.id!r}: {seen[pack.id]} and {manifest_path}")
-        seen[pack.id] = manifest_path
-        packs.append(pack)
+    if source_root.resolve() == DEFAULT_PACKS_ROOT.resolve():
+        entries = BundledCatalog.from_root(source_root).ordered_entries
+    else:
+        entries = []
+        for child in sorted(source_root.iterdir(), key=lambda path: path.name):
+            if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
+                continue
+            manifest = canonical_manifest_path(child)
+            if manifest is not None:
+                entries.append(_entry_for_manifest(manifest))
+    packs = [
+        _pack_definition_from_entry(entry)
+        for entry in entries
+        if include_hidden or entry.definition.visibility != "hidden"
+    ]
+    ids = [pack.id for pack in packs]
+    if len(ids) != len(set(ids)):
+        raise PackValidationError("duplicate canonical pack ID in discovery")
     return tuple(packs)
 
 
 def load_pack_manifest(path: str | Path) -> PackDefinition:
-    manifest_path = Path(path).expanduser().resolve()
-    raw = _load_manifest_payload(manifest_path)
-    data = _require_mapping(raw, "pack")
-    if data.get("schema_version") in (2, "2"):
-        raise PackValidationError(
-            "canonical v2 packs require canonical external admission; "
-            "legacy loading does not accept schema_version 2"
-        )
-    pack_id = _require_string(data, "id", "pack.id")
-    _validate_pack_id(pack_id, "pack.id")
-    root = manifest_path.parent
-    if root.name != pack_id:
-        raise PackValidationError(f"pack id {pack_id!r} must match folder name {root.name!r}")
-    metadata = data.get("metadata", {})
-    if not isinstance(metadata, dict):
-        raise PackValidationError("pack.metadata must be an object")
-    content = data.get("content", {})
-    if not isinstance(content, dict):
-        raise PackValidationError("pack.content must be an object")
-    agent = data.get("agent", {})
-    if not isinstance(agent, dict):
-        raise PackValidationError("pack.agent must be an object")
-    status = _optional_string(data, "status", "pack.status", default="active")
-    visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
-    schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
-    aliases = _optional_pack_aliases(data.get("aliases"), path="pack.aliases")
-    permissions = _normalize_pack_permissions(data.get("permissions"))
-    extensions = _optional_pack_extensions(data.get("extensions"), path="pack.extensions")
-    taxonomy = pack_taxonomy_from_manifest(data, status=status)
-    return PackDefinition(
-        id=pack_id,
-        name=_optional_string(data, "name", "pack.name", default=pack_id),
-        version=_optional_string(data, "version", "pack.version", default="0.1.0"),
-        root=root,
-        manifest_path=manifest_path,
-        metadata=dict(metadata),
-        description=_optional_string(data, "description", "pack.description", default=""),
-        content=dict(content),
-        agent=dict(agent),
-        status=status,
-        visibility=visibility,
-        schema_version=schema_version,
-        aliases=aliases,
-        permissions=permissions,
-        extensions=extensions,
-        **taxonomy,
-    )
-
-
-def pack_taxonomy_from_manifest(data: dict[str, Any], *, status: str) -> dict[str, str]:
-    """Return the deterministic taxonomy projection for a pack manifest.
-
-    These defaults are the M1 taxonomy baseline for manifests that do not yet
-    declare an explicit taxonomy block.
-    """
-    return {
-        "origin": _optional_string(data, "origin", "pack.origin", default="unknown"),
-        "install_tier": _optional_string(data, "install_tier", "pack.install_tier", default="default"),
-        "pack_type": _optional_string(data, "pack_type", "pack.pack_type", default="capability"),
-        "domain": _optional_string(data, "domain", "pack.domain", default="general"),
-        "stability": _optional_string(
-            data,
-            "stability",
-            "pack.stability",
-            default=_default_stability_for_status(status),
-        ),
-        "support": _optional_string(data, "support", "pack.support", default="project"),
-    }
-
-
-def _default_stability_for_status(status: str) -> str:
-    if status == "experimental":
-        return "experimental"
-    if status == "deprecated":
-        return "deprecated"
-    return "stable"
+    """Load one strict canonical v2 ``pack.yaml`` as a capability projection."""
+    return _pack_definition_from_entry(_entry_for_manifest(path))
 
 
 def pack_manifest_path(root: str | Path) -> Path | None:
-    pack_root = Path(root)
-    for name in PACK_MANIFEST_NAMES:
-        candidate = pack_root / name
-        if candidate.is_file():
-            return candidate
-    return None
+    """Return only the canonical ``pack.yaml`` path, if present."""
+    return canonical_manifest_path(root)
 
 
-def _load_manifest_payload(path: Path) -> Any:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise PackValidationError(f"pack manifest not found: {path}") from exc
-    if path.suffix.lower() == ".json":
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise PackValidationError(f"invalid JSON pack manifest {path}: {exc.msg}") from exc
-    # Try canonical YAML parsing first (handles both flat and nested manifests).
-    # Fall back to the legacy flat parser for manifests that yaml.safe_load cannot parse.
-    try:
-        data = yaml.safe_load(text)
-        if isinstance(data, dict):
-            if "schema_version" in data:
-                return data
-            try:
-                return _parse_flat_yaml(text, path=path)
-            except PackValidationError:
-                return data
-    except yaml.YAMLError:
-        pass
-    return _parse_flat_yaml(text, path=path)
-
-
-def _parse_flat_yaml(text: str, *, path: Path) -> dict[str, Any]:
-    data: dict[str, Any] = {}
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if raw_line[: len(raw_line) - len(raw_line.lstrip())].strip():
-            raise PackValidationError(f"{path}: invalid indentation at line {line_number}")
-        if ":" not in stripped:
-            raise PackValidationError(f"{path}: expected key: value at line {line_number}")
-        key, value = stripped.split(":", 1)
-        key = key.strip()
-        value = _strip_comment(value.strip())
-        if not key:
-            raise PackValidationError(f"{path}: empty key at line {line_number}")
-        if value in {"", "{}"}:
-            data[key] = {}
-        else:
-            data[key] = _unquote(value)
-    if not data:
-        raise PackValidationError(f"{path}: empty pack manifest")
-    return data
-
-
-def _strip_comment(value: str) -> str:
-    in_quote: str | None = None
-    for index, char in enumerate(value):
-        if char in {"'", '"'} and (index == 0 or value[index - 1] != "\\"):
-            in_quote = None if in_quote == char else char if in_quote is None else in_quote
-        if char == "#" and in_quote is None and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-    return value
-
-
-def _unquote(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value

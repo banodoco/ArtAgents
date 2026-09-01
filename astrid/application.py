@@ -49,7 +49,7 @@ Startup staging GC remains the serve composition root's concern
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
@@ -66,10 +66,14 @@ from astrid.core.repositories import (
     RunRepository,
     TaskRepository,
 )
+from astrid.core.pack.canonical import BundledCatalog
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import build_standard_registry, open_standard_writer
+from astrid.packs import (
+    compose_standard_pack_database,
+    open_standard_writer,
+)
 from astrid.packs.references.repository import ReferenceRepository
 from astrid.packs.shots.repository import ShotRepository
 from astrid.packs.timeline.repository import TimelineRepository
@@ -181,6 +185,8 @@ class StandardApplication(CoreApplication):
     """
 
     timelines: TimelineRepository
+    owner_lock: DatabaseOwnerLock
+    catalog: BundledCatalog
     shots: ShotRepository
     references: ReferenceRepository
     projects_service: ProjectsService
@@ -287,33 +293,42 @@ def _instrument_timeline_save(service: TimelinesService) -> list[TimelineSaveCal
 def compose_standard_application(
     projects_root: str | Path | None = None,
     *,
+    catalog: BundledCatalog | None = None,
     registry: FrozenSchemaPackRegistry | None = None,
+    additional_pack_ids: Sequence[str] = (),
     database_path: str | Path | None = None,
 ) -> StandardApplication:
-    """Compose the standard application: one writer, kernel + pack repos.
+    """Compose the standard application: one catalog, registry, and writer.
+
+    The operation-owned pack pair is composed from the bundled canonical
+    catalog (or retained from explicit injection).  The frozen registry is
+    passed unchanged to the writer, events, repositories, and services.
+    Default selection is core plus the default-enabled timeline, shots, and
+    references packs; ``additional_pack_ids`` supports explicit projections
+    such as ``("runaway",)``.
 
     Resolves the projects root (argument, ``ASTRID_PROJECTS_ROOT``, or the
     default), derives ``${root}/.astrid/astrid.sqlite3`` (unless a
-    ``database_path`` is supplied), composes the standard registry (core +
-    exactly timeline, shots, references) unless one is injected, acquires
-    the exclusive-owner lock beside the database **before** opening the
-    writer, opens exactly one ``DatabaseWriter`` through the standard writer
-    seam, and wires every kernel and pack repository plus the read-only
-    ordered event repository. If any wiring step fails, the writer is closed
-    and the lock is released before the exception propagates, so composition
-    never leaks an open writer or a held owner lock. A second owner (another
-    process, or another composition in this process) fails closed with the
-    SDK's typed ``unavailable`` error.
+    ``database_path`` is supplied), acquires the exclusive-owner lock beside
+    the database **before** opening the writer, and wires every kernel and pack
+    repository plus the read-only ordered event repository. If any wiring step
+    fails, the writer is closed and the lock is released before the exception
+    propagates.
     """
     root = resolve_projects_root(projects_root)
+    pack_composition = compose_standard_pack_database(
+        catalog=catalog,
+        registry=registry,
+        additional_pack_ids=additional_pack_ids,
+    )
+    catalog = pack_composition.catalog
+    registry = pack_composition.registry
     db_path = (
         Path(database_path)
         if database_path is not None
         else derive_database_path(root)
     )
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if registry is None:
-        registry = build_standard_registry()
     # Acquire the exclusive-owner lock before any writable connection or
     # writer queue can open (SD3-m4). A second owner fails closed with the
     # typed unavailable contract instead of leaking an OS/database error.
@@ -395,6 +410,7 @@ def compose_standard_application(
         return StandardApplication(
             projects_root=root,
             registry=registry,
+            catalog=catalog,
             writer=writer,
             events=events,
             receipts=receipts,

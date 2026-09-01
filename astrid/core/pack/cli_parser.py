@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.set_defaults(handler=_handle_list)
 
     inspect_parser = subparsers.add_parser(
-        "inspect", help="Show details for an installed pack."
+        "inspect", help="Show details for a canonical bundled or installed pack."
     )
     inspect_parser.add_argument("pack_id", help="Pack identifier to inspect.")
     inspect_parser.add_argument(

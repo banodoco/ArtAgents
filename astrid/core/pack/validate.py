@@ -1,8 +1,8 @@
-"""Static pack validation module.
+"""Static canonical pack and component validation.
 
-Uses yaml.safe_load for author-facing YAML, validates each manifest against its
-JSON Schema (v1), rejects unknown schema_version values, and normalizes errors
-into file-specific builder-facing messages.
+Pack admission uses the strict v2 ``pack.yaml`` schema. Component manifests
+retain their independent v1 component schemas, while normalized pack
+definitions, resources, and paths come only from canonical admission.
 
 Validation is static: checks declared content roots, docs, STAGE.md,
 runtime entrypoint files, and component manifests exist on disk without
@@ -37,9 +37,12 @@ from astrid.core.pack import (
     iter_orchestrator_roots,
     pack_manifest_path,
     pack_rendering_manifest_paths,
-    pack_taxonomy_from_manifest,
     validate_content_id_in_pack,
     validate_element_pack_id,
+)
+from astrid.core.pack.canonical import (
+    CanonicalPackValidationError,
+    validate_canonical_pack,
 )
 from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
 from astrid.core.pack.manifest import (
@@ -92,14 +95,16 @@ _PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
 
 KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
     1: {
-        "pack": _SCHEMAS_ROOT / "v1" / "pack.json",
         "executor": _SCHEMAS_ROOT / "v1" / "executor.json",
         "orchestrator": _SCHEMAS_ROOT / "v1" / "orchestrator.json",
         "element": _SCHEMAS_ROOT / "v1" / "element.json",
         "renderer": _RENDERING_SCHEMAS_ROOT / "v1" / "renderer-manifest.json",
         "planner": _RENDERING_SCHEMAS_ROOT / "v1" / "planner-manifest.json",
         "finalizer": _RENDERING_SCHEMAS_ROOT / "v1" / "finalizer-manifest.json",
-    }
+    },
+    2: {
+        "pack": _SCHEMAS_ROOT / "v2" / "pack.json",
+    },
 }
 
 KNOWN_VERSIONS_STR = ", ".join(str(v) for v in sorted(KNOWN_SCHEMA_VERSIONS))
@@ -257,24 +262,17 @@ class PackValidator:
         pack_yaml = pack_manifest_path(self.pack_root)
         if pack_yaml is None:
             self.errors.append(
-                f"{self._rel(self.pack_root)}: pack manifest not found "
-                f"(pack.yaml, pack.yml, or pack.json)"
+                f"{self._rel(self.pack_root)}: canonical pack.yaml not found"
             )
             return self.errors
 
-        # Parse pack.yaml
-        pack_data = self._load_yaml(pack_yaml)
-        if pack_data is None:
-            return self.errors  # parse error already recorded
-        self._pack_data = pack_data
-
-        # Check schema_version and validate against JSON Schema
-        version = self._validate_manifest(
-            pack_data, "pack", self._rel(pack_yaml)
-        )
-        if version is None:
-            return self.errors  # schema_version error already recorded
-
+        try:
+            entry = validate_canonical_pack(self.pack_root)
+        except CanonicalPackValidationError as exc:
+            self.errors.extend(str(exc).splitlines())
+            return self.errors
+        self._pack_data = entry.definition.to_dict()
+        pack_data = self._pack_data
         self._validate_pack_taxonomy()
 
         # Validate content roots exist
@@ -518,26 +516,30 @@ class PackValidator:
     def _pack_definition_for_discovery(self, content: dict[str, Any]) -> PackDefinition:
         data = self._pack_data or {}
         status = str(data.get("status") or "active")
-        taxonomy = pack_taxonomy_from_manifest(data, status=status)
         return PackDefinition(
             id=str(data.get("id") or self.pack_root.name),
             name=str(data.get("name") or data.get("id") or self.pack_root.name),
             version=str(data.get("version") or ""),
             root=self.pack_root,
             manifest_path=self.pack_root / "pack.yaml",
-            schema_version=data.get("schema_version"),
+            schema_version=str(data.get("schema_version") or ""),
             description=str(data.get("description") or ""),
+            content=dict(content),
+            metadata={},
+            agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
             status=status,
             visibility=str(data.get("visibility") or "visible"),
-            content=dict(content),
-            metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
-            agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
-            aliases=_optional_pack_aliases(data.get("aliases"), path="pack.aliases"),
+            aliases=tuple(data.get("aliases") or ()),
             permissions=_normalize_pack_permissions(data.get("permissions")),
-            extensions=_optional_pack_extensions(data.get("extensions"), path="pack.extensions"),
-            **taxonomy,
+            extensions=dict(data.get("extensions") or {}),
+            origin=str(data.get("origin") or "unknown"),
+            install_tier=str(data.get("install_tier") or "default"),
+            pack_type=str(data.get("pack_type") or "capability"),
+            domain=str(data.get("domain") or "general"),
+            stability=str(data.get("stability") or "stable"),
+            support=str(data.get("support") or "project"),
         )
-
+        
     def _validate_discovered_components(self, content: dict[str, Any]) -> None:
         pack = self._pack_definition_for_discovery(content)
         for comp_dir in iter_executor_roots(pack):
@@ -1026,22 +1028,18 @@ def _check_semantic_deps(data: dict[str, Any]) -> list[str]:
 
 
 def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
-    """Extract a lightweight trust summary for pack install dry-runs."""
+    """Extract trust metadata from one strictly admitted canonical entry."""
     root = Path(pack_root).resolve()
-    manifest_path = pack_manifest_path(root)
-    if manifest_path is None:
-        raise ValidationError(f"No pack manifest found in {root}")
-
     try:
-        data = load_manifest_mapping(manifest_path, manifest_kind="pack")
-    except ManifestParseError as exc:
-        raise ValidationError(f"Failed to parse {manifest_path}: {exc}") from exc
-
-    pack_id = data.get("id", root.name)
-    name = data.get("name", pack_id)
-    version = data.get("version", "0.0.0")
-    schema_version = data.get("schema_version", "unknown")
-
+        entry = validate_canonical_pack(root)
+    except CanonicalPackValidationError as exc:
+        raise ValidationError(str(exc)) from exc
+    data = entry.definition.to_dict()
+    definition = entry.definition
+    pack_id = definition.id
+    name = definition.name
+    version = definition.version
+    schema_version = definition.schema_version
     content = data.get("content", {}) if isinstance(data.get("content"), dict) else {}
     component_counts: dict[str, int] = {}
     for key in ("executors", "orchestrators", "elements"):

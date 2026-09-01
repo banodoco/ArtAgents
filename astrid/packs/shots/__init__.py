@@ -1,10 +1,10 @@
 """Shots schema pack (in-tree, explicitly registered).
 
 The shots pack owns the normative ``shots`` and ``shot_items`` tables plus
-the namespaced ``shot.*`` vocabulary declared in ``schema-pack.yaml`` next
-to this module. Every locked shot enum/check/index and kernel-currency
-association (``media_id``) is preserved verbatim; the pack never FK's to or
-imports the timeline pack.
+``shot.*`` vocabulary declared by the canonical ``pack.yaml`` database
+projection. Every locked shot enum/check/index and kernel-currency association
+(``media_id``) is preserved verbatim; the pack never FK's to or imports the
+timeline pack.
 
 m3 (plan step 10) ships the executable :class:`ShotRepository` in
 ``repository.py``: immutable shot/item read models, UoW-only

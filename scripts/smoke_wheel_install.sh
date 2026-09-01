@@ -80,8 +80,8 @@ try:
             "-c",
             "from importlib import resources; "
             "required=('core/migrations/sql/core/0001_initial.sql',"
-            "'packs/timeline/schema-pack.yaml','packs/shots/schema-pack.yaml',"
-            "'packs/references/schema-pack.yaml'); "
+            "'packs/timeline/pack.yaml','packs/shots/pack.yaml',"
+            "'packs/references/pack.yaml'); "
             "root=resources.files('astrid'); "
             "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "
             "assert not missing, missing; print('package resources: OK')",

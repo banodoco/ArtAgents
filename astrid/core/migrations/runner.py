@@ -111,30 +111,20 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def pack_resource_root(pack_id: str) -> Path:
-    """Return the filesystem root that a pack's migration paths are relative to.
-
-    The kernel (``core``) declares no ``schema-pack.yaml``; its migration
-    path ``sql/core/0001_initial.sql`` is relative to the
-    ``astrid/core/migrations`` package. In-tree packs declare paths relative
-    to ``astrid/packs/<pack_id>``. Both derive from this module's own
-    location so the runner never imports the capability-pack machinery.
-    """
+    """Return the kernel resource root for compatibility with diagnostics."""
     if pack_id == CORE_PACK:
         return Path(__file__).resolve().parent
     return Path(__file__).resolve().parents[2] / "packs" / pack_id
 
 
 def read_migration_bytes(registered: RegisteredMigration) -> bytes:
-    """Read exact migration bytes from its registered resource handle.
-
-    Canonical projections are already confined by the catalog and therefore
-    use ``resource.resolved`` directly. The fallback preserves the legacy
-    manifest adapter for callers that construct a descriptor by hand.
-    """
-    if registered.resource is not None:
-        path = Path(registered.resource.resolved)
-    else:
-        path = pack_resource_root(registered.pack) / registered.path
+    """Read exact migration bytes from its confined registered resource."""
+    if registered.resource is None:
+        raise MigrationError(
+            f"migration resource for {registered.pack}/{registered.version} "
+            f"({registered.name}) is not registered"
+        )
+    path = Path(registered.resource.resolved)
     if not path.is_file():
         raise MigrationError(
             f"migration resource for {registered.pack}/{registered.version} "

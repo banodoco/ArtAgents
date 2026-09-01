@@ -47,16 +47,12 @@ from astrid.core.conformance import (
     run_all,
     standard_command_specs,
 )
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService, EventChainError
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.errors import CommandVocabularyError
 from astrid.core.repositories.projects import ProjectRepository
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter, WriterError
-from astrid.packs import register_standard_schema_packs
 from astrid.packs.timeline.repository import TimelineRepository
 
 TS = "2026-08-15T00:00:00.000000+00:00"
@@ -78,11 +74,10 @@ database; any other failure propagates immediately.
 
 
 def _build_registry():
-    """Compose core + exactly timeline, shots, and references, then freeze."""
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    return registry.freeze()
+    """Compose core plus default-enabled canonical database packs."""
+    from astrid.packs import compose_standard_pack_database
+
+    return compose_standard_pack_database().registry
 
 
 def _build_context(db_path: Path) -> ConformanceContext:
@@ -202,10 +197,12 @@ def test_reference_and_shot_commands_are_executable_through_pack_factories(
         "reference.set_primary",
         "reference.link",
     }
-    references_manifest = load_schema_pack_manifest(
-        Path("astrid") / "packs" / "references" / "schema-pack.yaml"
-    )
-    assert "ReferenceRepository" in references_manifest.repositories
+    from astrid.core.pack.canonical import BundledCatalog
+
+    catalog = BundledCatalog.from_root(Path("astrid") / "packs")
+    references_database = catalog.get("references").database
+    assert references_database is not None
+    assert "ReferenceRepository" in references_database.repositories
 
     shot_specs = shot_command_specs(conformance_context)
     assert set(shot_specs) == {
@@ -214,17 +211,16 @@ def test_reference_and_shot_commands_are_executable_through_pack_factories(
         "shot.remove_item",
         "shot.reorder",
     }
-    shots_manifest = load_schema_pack_manifest(
-        Path("astrid") / "packs" / "shots" / "schema-pack.yaml"
-    )
-    assert "ShotRepository" in shots_manifest.repositories
+    shots_database = catalog.get("shots").database
+    assert shots_database is not None
+    assert "ShotRepository" in shots_database.repositories
     for kind in (
         "shot.create",
         "shot.add_item",
         "shot.remove_item",
         "shot.reorder",
     ):
-        assert kind in shots_manifest.command_kinds, kind
+        assert kind in shots_database.command_kinds, kind
         assert kind in shot_specs, f"{kind} must be executable through the pack factory"
 
     # Pack commands never enter the kernel executable set (no kernel->pack

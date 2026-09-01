@@ -32,13 +32,10 @@ Verbs (exactly these six, one SDK call each):
   ``variant_of``, ``uses_as_input``, ``mask_for``, ``audio_for``) plus
   optional ``--ordinal``/``--metadata``.
 
-The parser also mounts the manifest-declared nested ``references`` family
-beneath ``media`` (``astrid/packs/references/schema-pack.yaml`` declares
-``references: media references``): ``astrid media references <verb>``
-embeds the references product parser (``astrid/packs/references/cli.py``)
-so reference ``create/update/archive/associate/link/set-primary/list/show`` are
-executable only beneath media (plan step 27, task T30). There is **no
-top-level references family** (sense check SC30).
+The parser also mounts the canonical ``references`` family beneath ``media``
+(``astrid/packs/references/pack.yaml`` owns that declaration): ``astrid media
+references <verb>`` embeds the references product parser
+(``astrid/packs/references/cli.py``) so reference operations remain pack-owned.
 
 This module contains **no SQL**, **no repository logic**, and **no domain
 rules**: it parses argv, makes one SDK call, and renders the returned

@@ -36,7 +36,7 @@ from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.rendering.artifacts import validate_render_result
+from astrid.core.kernel.read import current_schema_registry
 from astrid.core.rendering.assets import (
     AssetMaterializer,
     InvocationAssetServer,
@@ -50,6 +50,7 @@ from astrid.core.rendering.contracts import (
     SupportReport,
     VideoArtifact,
 )
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.rendering.errors import (
     RendererException,
     make_renderer_error,
@@ -119,6 +120,14 @@ class _ExecutionDetails:
     active_theme: dict[str, Any]
     registry_state: dict[str, Any]
     stage_summary: dict[str, Any]
+
+
+def _operation_registry(
+    registry: FrozenSchemaPackRegistry | None,
+) -> FrozenSchemaPackRegistry | None:
+    """Resolve the registry bound to the current operation, without rebuilding."""
+
+    return registry if registry is not None else current_schema_registry()
 
 
 def _validate_project_dir(project_dir: Path) -> None:
@@ -588,9 +597,10 @@ def _execute_remotion(
     composition_id: str,
     theme_path: Path | None,
     min_free_gb: float | None,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> _ExecutionDetails:
     """Render one private video and return the data needed for provenance."""
-
+    operation_registry = _operation_registry(registry)
     with remotion_lock.remotion_render_lock():
         return _execute_remotion_locked(
             timeline_path,
@@ -601,9 +611,8 @@ def _execute_remotion(
             composition_id=composition_id,
             theme_path=theme_path,
             min_free_gb=min_free_gb,
+            registry=operation_registry,
         )
-
-
 def _execute_remotion_locked(
     timeline_path: Path,
     assets_path: Path,
@@ -614,8 +623,10 @@ def _execute_remotion_locked(
     composition_id: str,
     theme_path: Path | None,
     min_free_gb: float | None,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> _ExecutionDetails:
     """Execute one render while the caller owns the non-recursive outer lock."""
+    operation_registry = _operation_registry(registry)
 
     _validate_project_dir(project_dir)
     _regenerate_element_registries(project_dir, theme_path)
@@ -629,9 +640,14 @@ def _execute_remotion_locked(
     )
     staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
     with ExitStack() as asset_lifecycle:
+        asset_server = None
         try:
-            materializer = asset_lifecycle.enter_context(AssetMaterializer(assets_path))
-            asset_server = None
+            materializer_kwargs = (
+                {} if operation_registry is None else {"registry": operation_registry}
+            )
+            materializer = asset_lifecycle.enter_context(
+                AssetMaterializer(assets_path, **materializer_kwargs)
+            )
             if materializer.needs_server:
                 try:
                     asset_server = asset_lifecycle.enter_context(
@@ -748,6 +764,7 @@ def render(
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
     previous_outputs: Sequence[Path] = (),
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> Path:
     """Render privately, then publish the legacy video/provenance pair."""
 
@@ -775,6 +792,7 @@ def render(
             composition_id=composition_id,
             theme_path=theme_path,
             min_free_gb=min_free_gb,
+            registry=registry,
         )
         provenance = _render_provenance_payload(
             out_path,
@@ -878,8 +896,14 @@ def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSe
     )
 
 
-def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
+def support(
+    request: RenderRequest,
+    *,
+    workspace: Path,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> SupportReport:
     """Return request-specific evidence for the timeline Remotion can render."""
+    registry = _operation_registry(registry)
 
     reasons: list[str] = []
     features: dict[str, bool | str] = {
@@ -928,7 +952,8 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         # boundary plus the exact kernel-owned managed-media allowlist; it
         # stages only in its disposable probe directory and closes immediately.
         try:
-            with AssetMaterializer(assets_path):
+            materializer_kwargs = {} if registry is None else {"registry": registry}
+            with AssetMaterializer(assets_path, **materializer_kwargs):
                 pass
         except Exception as exc:
             reasons.append(f"local assets are not renderable: {exc}")
@@ -1025,8 +1050,14 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
     )
 
 
-def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult:
-    report = support(request, workspace=workspace)
+def _protocol_render(
+    request: RenderRequest,
+    *,
+    workspace: Path,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> RenderResult:
+    registry = _operation_registry(registry)
+    report = support(request, workspace=workspace, registry=registry)
     if not report.supported:
         raise_unsupported_error(
             backend=BACKEND_ID,
@@ -1088,6 +1119,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             composition_id=settings.composition_id,
             theme_path=settings.theme_path,
             min_free_gb=settings.min_free_gb,
+            registry=registry,
         )
         output_path.unlink(missing_ok=True)
         os.replace(staged_video, output_path)

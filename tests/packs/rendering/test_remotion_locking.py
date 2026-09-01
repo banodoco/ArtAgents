@@ -11,6 +11,7 @@ import pytest
 
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion
+from astrid.packs import compose_standard_pack_database
 from scripts import gen_effect_registry, gen_remotion_types
 
 
@@ -269,6 +270,31 @@ def test_remotion_render_lock_releases_after_failure(
     assert not remotion_lock.remotion_render_lock_held()
     with remotion_lock.remotion_render_lock():
         assert remotion_lock.remotion_render_lock_held()
+
+def test_execute_remotion_forwards_exact_operation_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        remotion_lock,
+        "REMOTION_LOCK_PATH",
+        tmp_path / "remotion" / ".astrid-registry.lock",
+    )
+    operation_registry = compose_standard_pack_database().registry
+    observed: list[object] = []
+
+    def fake_locked(*args: object, **kwargs: object) -> remotion._ExecutionDetails:
+        observed.append(kwargs["registry"])
+        return remotion._ExecutionDetails({}, {}, {})
+
+    monkeypatch.setattr(remotion, "_execute_remotion_locked", fake_locked)
+    args, kwargs = _execute_args(tmp_path, "registry.mp4")
+    kwargs["registry"] = operation_registry
+
+    remotion._execute_remotion(*args, **kwargs)
+
+    assert observed == [operation_registry]
+
 
 
 def test_remotion_render_lock_rejects_recursive_acquisition(

@@ -1,8 +1,8 @@
 """Runaway schema pack (in-tree, explicitly registered).
 
 The runaway pack owns the ``runaway_transitions`` table plus the namespaced
-``runaway.*`` command vocabulary declared in ``schema-pack.yaml`` next to
-this module. The table FK-integrates with the kernel run table
+``runaway.*`` command vocabulary declared by the canonical ``pack.yaml``
+database projection. The table FK-integrates with the kernel run table
 (``runs.id`` RESTRICT, ``projects.id`` CASCADE, ``tasks.id`` SET NULL) and
 handles sharding for >256 transitions via ``continue_run`` (ordinal
 contiguous globally, ``run_id`` per shard).

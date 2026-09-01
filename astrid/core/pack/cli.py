@@ -58,17 +58,14 @@ from .cli_basic import (  # noqa: E402, F401
     cmd_validate,
 )
 from .cli_inspect import (  # noqa: E402, F401
-    _INSPECT_COMPONENT_MANIFEST_NAMES,
-    _build_agent_view,
-    _build_full_inspect,
-    _find_component_manifest,
+    _build_canonical_agent_view,
+    _build_canonical_inspect,
     _handle_inspect,
     _inspect_discovered_pack,
     _inspect_installed_pack,
     _print_agent_view,
     _print_full_inspect,
     _read_stage_excerpt,
-    _scan_inspect_components,
     cmd_inspect,
 )
 

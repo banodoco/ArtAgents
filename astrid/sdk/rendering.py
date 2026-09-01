@@ -381,6 +381,8 @@ def render(
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
+    catalog: Any | None = None,
+    registry: Any | None = None,
     service: Any = None,
     transport: Any = None,
     transport_factory: Any = None,
@@ -422,23 +424,41 @@ def render(
         backend_config=_json_safe(dict(backend_config or {})),
         metadata=_json_safe(dict(metadata or {})),
     )
-    if destination is None:
-        raise ValueError("out_path is required")
-
+    resolved_registries = _resolve_registries(
+        registries=None,
+        service=service,
+        catalog=catalog,
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    )
     selected_service = service or RenderService(
+        registries=resolved_registries,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
         **_service_injection(transport=transport, transport_factory=transport_factory, validator=validator, publisher=publisher),
     )
-    return selected_service.render(
-        request,
-        out_path=destination,
-        selector=selector,
-        engine=engine,
-        backend=backend,
-        sidecar_path=sidecar_path,
-    )
+    if registry is None:
+        return selected_service.render(
+            request,
+            out_path=destination,
+            selector=selector,
+            engine=engine,
+            backend=backend,
+            sidecar_path=sidecar_path,
+        )
+    from astrid.core.kernel.read import schema_registry_context
+
+    with schema_registry_context(registry):
+        return selected_service.render(
+            request,
+            out_path=destination,
+            selector=selector,
+            engine=engine,
+            backend=backend,
+            sidecar_path=sidecar_path,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +481,8 @@ def support(
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
+    catalog: Any | None = None,
+    registry: Any | None = None,
     service: Any = None,
     registries: Any = None,
     transport: Any = None,
@@ -499,25 +521,25 @@ def support(
     # convention raw backends use (the request file's parent).  Sibling
     # assets resolve relative to it.
     workspace = Path(parsed.timeline_path).expanduser().resolve().parent
-    return _support_report(
-        parsed,
-        backend=backend,
-        service=service,
-        registries=registries,
-        transport=transport,
-        transport_factory=transport_factory,
-        project_root=project_root,
-        extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
-        workspace=workspace,
-    )
+    support_kwargs = {
+        "request": parsed,
+        "backend": backend,
+        "service": service,
+        "registries": registries,
+        "catalog": catalog,
+        "transport": transport,
+        "transport_factory": transport_factory,
+        "project_root": project_root,
+        "extra_pack_roots": extra_pack_roots,
+        "include_installed": include_installed,
+        "workspace": workspace,
+    }
+    if registry is None:
+        return _support_report(**support_kwargs)
+    from astrid.core.kernel.read import schema_registry_context
 
-
-# ---------------------------------------------------------------------------
-# Shared dispatch helpers
-# ---------------------------------------------------------------------------
-
-
+    with schema_registry_context(registry):
+        return _support_report(**support_kwargs)
 def _support_report(
     request: RenderRequest,
     *,
@@ -525,6 +547,7 @@ def _support_report(
     workspace: Path | None = None,
     service: Any = None,
     registries: Any = None,
+    catalog: Any | None = None,
     transport: Any = None,
     transport_factory: Any = None,
     project_root: str | Path | None = None,
@@ -543,6 +566,7 @@ def _support_report(
     resolved_registries = _resolve_registries(
         registries=registries,
         service=service,
+        catalog=catalog,
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
@@ -578,40 +602,36 @@ def _resolve_registries(
     *,
     registries: Any = None,
     service: Any = None,
+    catalog: Any | None = None,
     project_root: str | Path | None = None,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> Any:
-    """Return ``(renderers, planners, finalizers)`` registries lazily.
+    """Return the operation's rendering registries lazily.
 
-    When no registries/service are injected, the owning pack root is added as
-    an explicit extra pack root: the command transport executes manifest
-    commands from the owning pack's root, and that pack must be
-    execution-eligible (the same trust an explicit ``extra_pack_roots`` entry
-    grants).  ``ASTRID_PACKS_PATH``-discovered packs alone are inspectable but
-    not executable.
+    An injected service or registry tuple is authoritative. Otherwise the
+    registries are composed from the supplied canonical catalog and explicit
+    discovery roots; no current-working-directory pack root is inferred.
     """
-    if registries is not None:
-        return registries
-    if service is not None:
-        return (service.renderers, service.planners, service.finalizers)
+    if catalog is None:
+        from astrid.core.pack.canonical import BundledCatalog
+        from astrid.core.pack.loader import DEFAULT_PACKS_ROOT
+
+        catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
     from astrid.core.rendering.registry import load_default_registries
 
     return load_default_registries(
         project_root,
-        extra_pack_roots=(*extra_pack_roots, *_owning_pack_roots()),
+        catalog=catalog,
+        extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
     )
 
 
-_PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
-
-
 def _owning_pack_roots() -> tuple[str, ...]:
-    """Return the owning pack collection root when the process runs from a
-    pack root (the command-transport convention for manifest commands)."""
+    """Return the owning pack collection root for a pack-root cwd."""
     cwd = Path.cwd().resolve()
-    if any((cwd / name).is_file() for name in _PACK_MANIFEST_NAMES):
+    if (cwd / "pack.yaml").is_file():
         return (str(cwd.parent),)
     return ()
 

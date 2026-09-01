@@ -161,12 +161,14 @@ def test_installed_scan_catches_combined_adversarial_sources(
         "astrid/packs/timeline/evil_writer.py",
         "import sqlite3\n\nsqlite3.connect('/tmp/timeline.sqlite3')\n",
     )
+    pack_manifest = root / "astrid/packs/timeline/pack.yaml"
     _write(
         root,
-        "astrid/packs/timeline/schema-pack.yaml",
-        (root / "astrid/packs/timeline/schema-pack.yaml")
-        .read_text(encoding="utf-8")
-        .replace("  - core >= 1", "  - timeline >= 1"),
+        "astrid/packs/timeline/pack.yaml",
+        pack_manifest.read_text(encoding="utf-8").replace(
+            "{pack: core, min_migration: 1}",
+            "{pack: timeline, min_migration: 1}",
+        ),
     )
     _write(
         root,

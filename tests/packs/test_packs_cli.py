@@ -1,9 +1,7 @@
-"""Library-surface tests for the surviving pack CLI module (astrid.core.pack.cli).
+"""Focused tests for the canonical bundled-pack CLI surface.
 
-Proves:
-1. packs_cli main/build_parser/cmd_new still work as library functions
-2. inspect output surfaces pack permissions and v1 trust metadata
-3. agent-index entry assembly carries permissions/trust
+The suite exercises parser/scaffold behavior and canonical agent-index output;
+legacy inspect builders are intentionally absent after activation.
 """
 
 from __future__ import annotations
@@ -164,199 +162,19 @@ class TestCLIBackwardCompat(unittest.TestCase):
         self.assertNotEqual(exit_code, 0)
 
 
-class TestInspectPermissionsAndTrust(unittest.TestCase):
-    """T10: Verify inspect output surfaces pack permissions and v1 trust metadata
-    with disclosure-only/no-sandbox wording."""
+class TestCanonicalInspect(unittest.TestCase):
+    def test_canonical_inspect_json_has_identity_database_and_resources(self) -> None:
+        from astrid.core.pack.canonical import BundledCatalog
+        from astrid.core.pack.cli_inspect import _build_canonical_inspect
 
-    def setUp(self) -> None:
-        self._gen_root = _REPO_ROOT / "astrid" / "packs" / "generation"
-        self._trust = extract_trust_summary(str(self._gen_root))
-        self._manifest = {
-            "id": "generation",
-            "name": "Astrid Generation",
-            "version": "1.0.0",
-            "description": "Test pack",
-            "agent": {"purpose": "Generate images and videos"},
-        }
-        self._record = InstallRecord(
-            pack_id="generation",
-            name="Astrid Generation",
-            version="1.0.0",
-            schema_version=1,
-            source_path=str(self._gen_root),
-            installed_at="2025-01-01T00:00:00Z",
-            revision="generation",
-            install_root=str(self._gen_root),
-        )
-
-    # ── _build_full_inspect JSON structure ──────────────────────────
-
-    def test_full_inspect_json_has_permissions(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        self.assertIn("permissions", data)
-        self.assertIsInstance(data["permissions"], list)
-        self.assertGreater(len(data["permissions"]), 0)
-        for p in data["permissions"]:
-            self.assertIsInstance(p, dict)
-            self.assertIn("id", p)
-            self.assertIn("reason", p)
-
-    def test_full_inspect_json_has_permission_ids(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        self.assertIn("permission_ids", data)
-        self.assertIsInstance(data["permission_ids"], list)
-        self.assertGreater(len(data["permission_ids"]), 0)
-        for pid in data["permission_ids"]:
-            self.assertIsInstance(pid, str)
-
-    def test_full_inspect_json_has_trust_block(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        self.assertIn("trust", data)
-        trust = data["trust"]
-        self.assertIsInstance(trust, dict)
-        self.assertEqual(trust.get("sandbox"), "none")
-        self.assertEqual(trust.get("runs_with_user_process_permissions"), True)
-        self.assertEqual(trust.get("permission_enforcement"), "disclosure_only")
-
-    def test_full_inspect_json_permission_ids_match_permissions(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        perm_ids = {p["id"] for p in data["permissions"]}
-        list_ids = set(data["permission_ids"])
-        self.assertEqual(perm_ids, list_ids)
-
-    # ── _print_full_inspect plain-text output ────────────────────────
-
-    def test_full_inspect_plain_has_permissions_section(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_full_inspect(data)
-        out = buf.getvalue()
-        self.assertIn("Permissions:", out)
-        self.assertIn("subprocess", out)
-
-    def test_full_inspect_plain_has_permission_ids_line(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_full_inspect(data)
-        out = buf.getvalue()
-        self.assertIn("Permission IDs:", out)
-        self.assertIn("subprocess", out)
-
-    def test_full_inspect_plain_has_trust_section(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_full_inspect(data)
-        out = buf.getvalue()
-        self.assertIn("Trust:", out)
-        self.assertIn("sandbox: none", out)
-        self.assertIn("runs_with_user_process_permissions: True", out)
-        self.assertIn("permission_enforcement: disclosure_only", out)
-
-    def test_full_inspect_plain_has_disclosure_only_notice(self) -> None:
-        data = packs_cli._build_full_inspect(self._record, self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_full_inspect(data)
-        out = buf.getvalue()
-        self.assertIn("disclosure-only", out)
-        self.assertIn("No sandboxing", out)
-
-    def test_full_inspect_plain_empty_permissions(self) -> None:
-        empty_trust = dict(self._trust, permissions=[], permission_ids=[])
-        data = packs_cli._build_full_inspect(self._record, self._manifest, empty_trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_full_inspect(data)
-        out = buf.getvalue()
-        self.assertNotIn("Permissions:", out)
-
-    # ── _build_agent_view JSON structure ─────────────────────────────
-
-    def test_agent_view_json_has_permissions(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        self.assertIn("permissions", view)
-        self.assertIsInstance(view["permissions"], list)
-        self.assertGreater(len(view["permissions"]), 0)
-        for p in view["permissions"]:
-            self.assertIsInstance(p, dict)
-            self.assertIn("id", p)
-            self.assertIn("reason", p)
-
-    def test_agent_view_json_has_permission_ids(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        self.assertIn("permission_ids", view)
-        self.assertIsInstance(view["permission_ids"], list)
-        self.assertGreater(len(view["permission_ids"]), 0)
-
-    def test_agent_view_json_has_trust_block(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        self.assertIn("trust", view)
-        trust = view["trust"]
-        self.assertIsInstance(trust, dict)
-        self.assertEqual(trust.get("sandbox"), "none")
-        self.assertEqual(trust.get("runs_with_user_process_permissions"), True)
-        self.assertEqual(trust.get("permission_enforcement"), "disclosure_only")
-
-    def test_agent_view_json_permission_ids_match_permissions(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        perm_ids = {p["id"] for p in view["permissions"]}
-        list_ids = set(view["permission_ids"])
-        self.assertEqual(perm_ids, list_ids)
-
-    # ── _print_agent_view plain-text output ──────────────────────────
-
-    def test_agent_view_plain_has_permissions_section(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_agent_view(view)
-        out = buf.getvalue()
-        self.assertIn("Permissions:", out)
-        self.assertIn("subprocess", out)
-
-    def test_agent_view_plain_has_permission_ids_line(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_agent_view(view)
-        out = buf.getvalue()
-        self.assertIn("Permission IDs:", out)
-
-    def test_agent_view_plain_has_trust_section(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_agent_view(view)
-        out = buf.getvalue()
-        self.assertIn("Trust:", out)
-        self.assertIn("sandbox: none", out)
-        self.assertIn("permission_enforcement: disclosure_only", out)
-
-    def test_agent_view_plain_has_disclosure_only_notice(self) -> None:
-        view = packs_cli._build_agent_view(self._manifest, self._trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_agent_view(view)
-        out = buf.getvalue()
-        self.assertIn("disclosure-only", out)
-        self.assertIn("No sandboxing", out)
-
-    def test_agent_view_plain_empty_permissions(self) -> None:
-        empty_trust = dict(self._trust, permissions=[], permission_ids=[])
-        view = packs_cli._build_agent_view(self._manifest, empty_trust)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            packs_cli._print_agent_view(view)
-        out = buf.getvalue()
-        self.assertNotIn("Permissions:", out)
-
+        catalog = BundledCatalog.from_root(_REPO_ROOT / "astrid" / "packs")
+        data = _build_canonical_inspect(catalog.get("references"))
+        self.assertEqual(data["identity"]["id"], "references")
+        self.assertTrue(data["database"]["owned"])
+        self.assertIn("resource_closure", data)
 
 class TestAgentIndexPermissionsAndTrust(unittest.TestCase):
-    """T10: Verify agent-index output surfaces pack permissions and v1 trust
-    metadata."""
+    """Agent-index output retains canonical trust and permission fields."""
 
     def setUp(self) -> None:
         self._gen_root = _REPO_ROOT / "astrid" / "packs" / "generation"
@@ -409,40 +227,7 @@ class TestAgentIndexPermissionsAndTrust(unittest.TestCase):
         self.assertEqual(entry["trust"]["sandbox"], "none")
 
 
-class TestAgentIndexAndInspectWiring(unittest.TestCase):
-    """Regression: agent-index and the installed-pack inspect path referenced
-    names that were never imported (PackResolver / extract_trust_summary) and
-    blew up on invocation. No CLI-level test exercised them."""
-
-    def test_extract_trust_summary_bound_in_cli_module(self) -> None:
-        # The installed-inspect path calls extract_trust_summary; it must be
-        # importable from the cli module (was previously unbound -> NameError).
-        self.assertTrue(callable(packs_cli.extract_trust_summary))
-
-    def test_inspect_installed_path_executes_without_nameerror(self) -> None:
-        gen_root = _REPO_ROOT / "astrid" / "packs" / "generation"
-        record = InstallRecord(
-            pack_id="generation", name="Astrid Generation", version="1.0.0",
-            schema_version=1, source_path=str(gen_root),
-            installed_at="2025-01-01T00:00:00Z", revision="generation",
-            install_root=str(gen_root),
-        )
-        with mock.patch(
-            "astrid.core.pack.store.InstalledPackStore.get_active",
-            return_value=record,
-        ), mock.patch(
-            "astrid.core.pack.store.InstalledPackStore.active_revision_path",
-            return_value=gen_root,
-        ):
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = packs_cli._inspect_installed_pack(
-                    pack_id="generation", agent=False, json_output=True,
-                )
-        self.assertEqual(rc, 0)
-        payload = json.loads(buf.getvalue())
-        self.assertEqual(payload["pack_id"], "generation")
-
+    
 
 if __name__ == "__main__":
     unittest.main()

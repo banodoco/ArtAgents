@@ -8,23 +8,13 @@ from pathlib import Path
 import pytest
 
 from astrid import AstridClient
-from astrid.core.events.registry import core_only_registry, register_core_vocabulary
+from astrid.core.events.registry import core_only_registry
 from astrid.core.migrations.runner import MigrationTooNewError
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
-from astrid.core.schema_packs.registry import SchemaPackRegistry
-from astrid.packs import register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 
 
 def _extended_registry() -> object:
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    registry.register_pack(
-        load_schema_pack_manifest(
-            Path(__file__).parents[2] / "astrid" / "packs" / "runaway" / "schema-pack.yaml"
-        )
-    )
-    return registry.freeze()
+    return compose_standard_pack_database(additional_pack_ids=("runaway",)).registry
 
 
 def test_long_lived_client_invokes_with_extended_registry(tmp_path: Path) -> None:
@@ -70,3 +60,41 @@ def test_explicit_incomplete_registry_still_rejects_pack_database(tmp_path: Path
         pass
     with pytest.raises(MigrationTooNewError):
         AstridClient.open(tmp_path, registry=core_only_registry())
+
+
+def test_client_forwards_exact_catalog_registry_and_application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pair = compose_standard_pack_database(additional_pack_ids=("runaway",))
+    captured: dict[str, object] = {}
+
+    import astrid.sdk as sdk
+
+    def fake_invoke(_capability_id: str, **kwargs: object) -> object:
+        captured["invoke"] = kwargs
+        return object()
+
+    def fake_invoke_result(_capability_id: str, **kwargs: object) -> object:
+        captured["invoke_result"] = kwargs
+        return object()
+
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+    monkeypatch.setattr(sdk, "invoke_result", fake_invoke_result)
+    with AstridClient.open(
+        tmp_path,
+        catalog=pair.catalog,
+        registry=pair.registry,
+    ) as client:
+        assert client.tasks._registry is pair.registry
+        assert client.tasks._writer is client.app.writer
+        assert client.runs._registry is pair.registry
+        assert client.runs._writer is client.app.writer
+        client.invoke("editorial.arrange", kind="executor")
+        client.invoke_result("editorial.arrange", kind="executor")
+        for key in ("invoke", "invoke_result"):
+            forwarded = captured[key]
+            assert isinstance(forwarded, dict)
+            assert forwarded["catalog"] is pair.catalog
+            assert forwarded["registry"] is pair.registry
+            assert forwarded["application"] is client.app
+            assert forwarded["application"].writer is client.app.writer

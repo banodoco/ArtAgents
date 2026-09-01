@@ -39,8 +39,6 @@ from astrid.core.pack.canonical import (
     canonical_manifest_path,
     read_normalize_validate,
 )
-from astrid.core.pack.loader import pack_manifest_path
-from astrid.core.pack.manifest import load_manifest_for_dispatch
 from astrid.core.session.paths import installed_packs_root
 from astrid.core.util.log_and_swallow import log_and_swallow
 try:
@@ -107,35 +105,30 @@ def _is_canonical_v2_record(record: InstallRecord) -> bool:
     return type(record.schema_version) is int and record.schema_version == 2
 
 
-def _is_legacy_v1_schema(value: object) -> bool:
-    return (
-        (type(value) is int and value == 1)
-        or (type(value) is float and value == 1.0)
-    )
-
-
 def _manifest_path_for_installed_record(
     record: InstallRecord,
     pack_root: Path,
 ) -> Path | None:
-    """Select the authoritative manifest without changing parser families."""
-    if _is_canonical_v2_record(record):
-        if not pack_root.is_absolute() or pack_root.name != record.revision:
-            raise CanonicalPackValidationError(
-                f"canonical pack source identity is not confined to {record.pack_id!r}: "
-                f"{pack_root}"
-            )
-        try:
-            confined_root = reject_symlinked_path(pack_root)
-        except SymlinkedPackPathError as exc:
-            raise CanonicalPackValidationError(
-                f"canonical pack source must not be a symlink or contain "
-                f"symlinked ancestors: {pack_root}"
-            ) from exc
-        if not confined_root.is_dir():
-            return None
-        return canonical_manifest_path(confined_root)
-    return canonical_manifest_path(pack_root) or pack_manifest_path(pack_root)
+    """Select the confined canonical manifest for an installed revision."""
+    if not _is_canonical_v2_record(record):
+        raise CanonicalPackValidationError(
+            f"installed record for pack {record.pack_id!r} is not canonical v2"
+        )
+    if not pack_root.is_absolute() or pack_root.name != record.revision:
+        raise CanonicalPackValidationError(
+            f"canonical pack source identity is not confined to {record.pack_id!r}: "
+            f"{pack_root}"
+        )
+    try:
+        confined_root = reject_symlinked_path(pack_root)
+    except SymlinkedPackPathError as exc:
+        raise CanonicalPackValidationError(
+            f"canonical pack source must not be a symlink or contain "
+            f"symlinked ancestors: {pack_root}"
+        ) from exc
+    if not confined_root.is_dir():
+        return None
+    return canonical_manifest_path(confined_root)
 
 
 def _validate_canonical_record_custody_metadata(
@@ -241,18 +234,19 @@ def validate_installed_manifest_custody(
     manifest_path: Path | None = None,
     propagate_canonical_errors: bool = False,
     read_validate_fn=None,
-) -> CanonicalPackEntry | None:
-    """Bind an installed record to its confined manifest and recorded custody."""
+) -> CanonicalPackEntry:
+    """Bind a canonical installed record to its manifest and custody."""
+    if not _is_canonical_v2_record(record):
+        raise store._active_corrupt(
+            f"installed record for pack {record.pack_id!r} is not canonical v2"
+        )
     if pack_root is None:
         pack_root = store.active_revision_path(record.pack_id)
     if pack_root is None:
         raise store._active_corrupt(
             f"active revision for pack {record.pack_id!r} is unavailable"
         )
-
-    if _is_canonical_v2_record(record):
-        _validate_canonical_record_custody_metadata(store, record)
-
+    _validate_canonical_record_custody_metadata(store, record)
     if manifest_path is None:
         try:
             manifest_path = _manifest_path_for_installed_record(record, pack_root)
@@ -260,89 +254,41 @@ def validate_installed_manifest_custody(
             raise store._active_corrupt(
                 f"installed manifest custody for pack {record.pack_id!r} is invalid"
             ) from exc
-        if manifest_path is None:
-            # Canonical records always require the exact canonical manifest.
-            # Missing custody metadata must not turn an absent or alternate
-            # manifest into a legacy-shaped, unverifiable install.
-            required = "pack.yaml" if _is_canonical_v2_record(record) else "pack manifest"
-            raise store._active_corrupt(
-                f"installed pack {record.pack_id!r} has no {required}"
-            )
-
-
-    if manifest_path.name == "pack.yaml":
-        try:
-            entry = (read_validate_fn or read_normalize_validate)(
-                manifest_path,
-                source=ExternalPackSource.INSTALLED,
-                resolve_resources=True,
-                expected_pack_id=record.pack_id,
-            )
-        except Exception as exc:
-            if _is_canonical_v2_record(record):
-                if propagate_canonical_errors and isinstance(
-                    exc, CanonicalPackValidationError
-                ):
-                    raise
-                raise store._active_corrupt(
-                    f"installed canonical manifest for pack {record.pack_id!r} "
-                    "failed strict validation"
-                ) from exc
-        else:
-            if _is_canonical_v2_record(record):
-                _validate_canonical_record_identity(
-                    store,
-                    record,
-                    entry,
-                    propagate_canonical_errors=propagate_canonical_errors,
-                )
-                _validate_installed_manifest_digest(
-                    store,
-                    record,
-                    manifest_path,
-                    canonical=propagate_canonical_errors,
-                )
-                return entry
-            if propagate_canonical_errors:
-                raise CanonicalPackValidationError(
-                    f"legacy install record for pack {record.pack_id!r} "
-                    "does not match its installed canonical manifest"
-                )
-            raise store._active_corrupt(
-                f"legacy install record for pack {record.pack_id!r} "
-                "does not match its installed canonical manifest"
-            )
-
+    if manifest_path is None:
+        raise store._active_corrupt(
+            f"installed pack {record.pack_id!r} has no canonical pack.yaml"
+        )
     try:
-        raw = load_manifest_for_dispatch(manifest_path, manifest_kind="pack")
+        entry = (read_validate_fn or read_normalize_validate)(
+            manifest_path,
+            source=ExternalPackSource.INSTALLED,
+            resolve_resources=True,
+            expected_pack_id=record.pack_id,
+        )
+        _validate_canonical_record_identity(
+            store,
+            record,
+            entry,
+            propagate_canonical_errors=propagate_canonical_errors,
+        )
+        _validate_installed_manifest_digest(
+            store,
+            record,
+            manifest_path,
+            canonical=propagate_canonical_errors,
+        )
+        return entry
     except Exception as exc:
+        if propagate_canonical_errors and isinstance(
+            exc, CanonicalPackValidationError
+        ):
+            raise
+        if isinstance(exc, AstridError):
+            raise
         raise store._active_corrupt(
-            f"installed manifest for pack {record.pack_id!r} is malformed"
+            f"installed canonical manifest for pack {record.pack_id!r} "
+            "failed strict validation"
         ) from exc
-    manifest_schema = raw.get("schema_version")
-    if "schema_version" in raw and not _is_legacy_v1_schema(manifest_schema):
-        raise store._active_corrupt(
-            f"legacy install record for pack {record.pack_id!r} "
-            "does not match its installed manifest schema"
-        )
-    if _is_canonical_v2_record(record):
-        raise store._active_corrupt(
-            f"canonical install record for pack {record.pack_id!r} "
-            "does not match its installed legacy manifest"
-        )
-    for key in ("id", "name", "version"):
-        if key in raw and raw[key] != getattr(record, "pack_id" if key == "id" else key):
-            raise store._active_corrupt(
-                f"installed manifest metadata for pack {record.pack_id!r} "
-                "does not match its install record"
-            )
-    _validate_installed_manifest_digest(
-        store,
-        record,
-        manifest_path,
-        canonical=False,
-    )
-    return None
 
 
 
@@ -668,53 +614,22 @@ class InstalledPackStore:
         data: dict,
         pack_id: str,
     ) -> None:
-        """Validate the stored schema discriminator before lifecycle dispatch.
-
-        ``schema_version`` is custody metadata, not a parser hint.  Legacy
-        records retain their inherited exact v1 representations (integer
-        ``1`` or float ``1.0``); canonical records require the exact integer
-        ``2``.  Canonical records written by this store also carry the v2
-        trust-summary discriminator.  When present, the two discriminators
-        must agree so changing either one cannot downgrade the record.
-        """
+        """Require exact canonical v2 discriminators and agreement."""
         schema_version = data["schema_version"]
         summary = data.get("trust_summary")
         if summary is not None and not isinstance(summary, dict):
             raise TypeError("trust_summary must be an object")
         summary_present = isinstance(summary, dict) and bool(summary)
-        summary_version = None
-        if summary_present:
-            if "schema_version" not in summary:
-                raise TypeError("trust_summary is missing schema_version")
-            summary_version = summary["schema_version"]
-
-        is_v2 = type(schema_version) is int and schema_version == 2
-        is_v1 = (
-            (type(schema_version) is int and schema_version == 1)
-            or (type(schema_version) is float and schema_version == 1.0)
-        )
-        summary_is_v2 = type(summary_version) is int and summary_version == 2
-        summary_is_v1 = (
-            (type(summary_version) is int and summary_version == 1)
-            or (type(summary_version) is float and summary_version == 1.0)
-        )
-
-        if not (is_v2 or is_v1):
+        summary_version = summary.get("schema_version") if summary_present else None
+        if type(schema_version) is not int or schema_version != 2:
             raise TypeError(
-                f"schema_version for pack {pack_id!r} must be exactly integer "
-                "2 or an inherited legacy v1 value"
+                f"schema_version for pack {pack_id!r} must be exactly integer 2"
             )
-        if summary_present and not (summary_is_v2 or summary_is_v1):
+        if summary_present and (
+            type(summary_version) is not int or summary_version != 2
+        ):
             raise TypeError(
-                f"trust_summary schema_version for pack {pack_id!r} is invalid"
-            )
-        if is_v2 and summary_present and not summary_is_v2:
-            raise TypeError(
-                f"install record for pack {pack_id!r} has contradictory canonical metadata"
-            )
-        if is_v1 and summary_is_v2:
-            raise TypeError(
-                f"install record for pack {pack_id!r} has contradictory legacy metadata"
+                f"trust_summary schema_version for pack {pack_id!r} must be exactly integer 2"
             )
 
     def _validate_install_record(
@@ -953,19 +868,14 @@ class InstalledPackStore:
                     record = self._validate_install_record(
                         child.name, rev, expected_active=True
                     )
-                    has_manifest = any(
-                        (rev / name).exists() or (rev / name).is_symlink()
-                        for name in ("pack.yaml", "pack.yml", "pack.json", "schema-pack.yaml")
-                    )
-                    if _is_canonical_v2_record(record) and not has_manifest:
+                    if canonical_manifest_path(rev) is None:
                         continue
-                    if has_manifest:
-                        validate_installed_manifest_custody(
-                            self,
-                            record,
-                            rev,
-                            propagate_canonical_errors=True,
-                        )
+                    validate_installed_manifest_custody(
+                        self,
+                        record,
+                        rev,
+                        propagate_canonical_errors=True,
+                    )
                 except AstridError:
                     continue
                 roots.append(rev)
@@ -1187,10 +1097,11 @@ class InstalledPackStore:
             return None
         try:
             record = InstallRecord.from_dict(data)
-            if _is_canonical_v2_record(record):
-                if canonical_manifest_path(rev) is None:
-                    return None
-                _validate_canonical_record_custody_metadata(self, record)
+            if not _is_canonical_v2_record(record):
+                return None
+            if canonical_manifest_path(rev) is None:
+                return None
+            _validate_canonical_record_custody_metadata(self, record)
             return record
         except TypeError:  # noqa: BLE001
             return None
@@ -1220,11 +1131,7 @@ class _NoOpLock:
 
 
 def installed_pack_roots() -> tuple[Path, ...]:
-    """Convenience: return active revision directories for all installed packs.
-
-    Uses the default ``InstalledPackStore`` (``installed_packs_root()``).
-    Gracefully returns an empty tuple when the packs directory is missing.
-    """
+    """Return active canonical revision directories for installed packs."""
     store = InstalledPackStore()
     return store.active_pack_roots()
 

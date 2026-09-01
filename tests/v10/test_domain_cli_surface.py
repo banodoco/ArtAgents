@@ -37,7 +37,6 @@ from astrid.core.cli.domain_product import (
     is_product_family,
     is_registered_family,
     product_top_level_commands,
-    read_manifest_cli_mounts,
     run_product_family,
 )
 from astrid.core.cli.registration import CommandSpec, register_product_commands
@@ -118,14 +117,6 @@ def test_mounts_include_core_and_the_two_nested_mounts() -> None:
     assert by_family["references"].declared_by == "manifest:references"
 
 
-def test_manifest_mounts_come_from_in_tree_declarations() -> None:
-    """The loader reads only the three fixed in-tree pack manifests."""
-    declared = {mount.family: mount.token for mount in read_manifest_cli_mounts()}
-    assert declared == {
-        "timelines": "timelines",
-        "shots": "timelines shots",
-        "references": "media references",
-    }
 
 
 def test_family_mount_resolves_and_rejects() -> None:
@@ -218,21 +209,6 @@ def test_core_family_re_mounted_at_other_path_is_rejected() -> None:
         )
 
 
-def test_no_dynamic_mount_source_exists() -> None:
-    """Mounts can only come from the fixed in-tree manifest declarations.
-
-    ``build_product_mounts`` has no injection point and the loader accepts
-    no root argument: a mount from any other directory is impossible by
-    construction, so the registry can never discover a dynamic mount.
-    """
-    import inspect
-
-    from astrid.core.cli import domain_product
-
-    loader = inspect.signature(domain_product.read_manifest_cli_mounts)
-    assert loader.parameters == {}
-    builder = inspect.signature(domain_product.build_product_mounts)
-    assert builder.parameters == {}
 
 
 # ---------------------------------------------------------------------------

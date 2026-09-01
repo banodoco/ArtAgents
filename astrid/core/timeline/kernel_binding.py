@@ -90,6 +90,7 @@ def gateway_kernel_kwargs(binding: KernelTimelineBinding | None) -> dict:
     if binding is None:
         return {}
     return {
+        "registry": binding.app.registry,
         "writer": binding.writer,
         "timeline_repository": binding.repository,
         "timeline_stream_type": binding.stream_type,

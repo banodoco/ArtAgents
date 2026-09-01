@@ -48,8 +48,12 @@ from astrid.core.migrations.runner import (
     sha256_bytes,
     topological_migration_order,
 )
-from astrid.core.schema_packs.manifest import parse_schema_pack_manifest
+from astrid.core.pack.canonical import (
+    MigrationDescriptor,
+    PackDependency,
+)
 from astrid.core.schema_packs.registry import (
+    DatabasePackProjection,
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
@@ -706,21 +710,23 @@ def _assert_database_unchanged(path: Path, before: tuple[bytes, dict[str, bytes]
 
 
 def _empty_pack_manifest(pack_id: str, depends_on: list[str]):
-    """Build a minimal migration-less manifest for ordering/cycle tests."""
-    return parse_schema_pack_manifest(
-        {
-            "id": pack_id,
-            "version": 1,
-            "depends_on": depends_on,
-            "migrations": [],
-            "stream_types": [],
-            "event_kinds": [],
-            "command_kinds": [],
-            "repositories": [],
-            "conformance": [],
-            "cli_mounts": {},
-            "bridge_mounts": [],
-        }
+    """Build a typed projection for dependency ordering tests."""
+    dependencies = tuple(
+        PackDependency(item.split(">=", 1)[0].strip(), int(item.split(">=", 1)[1]))
+        for item in depends_on
+    )
+    return DatabasePackProjection(
+        id=pack_id,
+        version=1,
+        depends_on=dependencies,
+        migrations=(),
+        stream_types=(),
+        event_kinds=(),
+        command_kinds=(),
+        repositories=(),
+        conformance=(),
+        cli_mounts={},
+        bridge_mounts=(),
     )
 
 

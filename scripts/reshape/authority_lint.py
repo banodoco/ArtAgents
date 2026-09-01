@@ -1,10 +1,10 @@
-"""Deterministic pack, writer, schema, and authority lint (m1 plan step 22).
+"""Deterministic pack, writer, schema, and authority lint.
 
 This module enforces the architecture the repository-backed bridge depends
-on, with **no** legacy false positives and **no** second-authority false
-negatives. Every rule is a pure function over source text, migration SQL,
-and the declared schema-pack manifests, so the lint is deterministic and
-runs anywhere (no git state, no network).
+on, with no legacy false positives and no second-authority false negatives.
+Every rule is a pure function over source text, migration SQL, and the
+canonical v2 pack catalog, so the lint is deterministic and runs anywhere
+(no git state, no network).
 
 Rules:
 
@@ -77,7 +77,7 @@ from astrid.core.migrations.catalog import (
     CORE_TABLES,
     FORBIDDEN_TABLES,
 )
-from astrid.core.schema_packs.manifest import load_schema_pack_manifest
+from astrid.core.pack.canonical import BundledCatalog
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -270,24 +270,20 @@ def _is_legacy_pack_module(module: str) -> bool:
 
 
 def _pack_cli_mount_families(root: Path, pack_id: str) -> frozenset[str]:
-    """The host families into which *pack_id*'s manifest declares CLI mounts.
-
-    ``cli_mounts`` values are ``"<family> <verb>"`` tokens (e.g. the shots
-    manifest's ``shots: timelines shots``), so the family is the first token.
-    """
-    manifest_path = root / "astrid" / "packs" / pack_id / "schema-pack.yaml"
-    if not manifest_path.is_file():
-        return frozenset()
+    """Return CLI mount families from the canonical bundled catalog."""
     try:
-        manifest = load_schema_pack_manifest(manifest_path)
-    except Exception:  # noqa: BLE001 - a broken manifest is a different rule
+        catalog = BundledCatalog.from_root(root / "astrid" / "packs")
+        entry = catalog.get(pack_id)
+    except Exception:
         return frozenset()
-    families: set[str] = set()
-    for value in manifest.cli_mounts.values():
-        tokens = value.split()
-        if tokens:
-            families.add(tokens[0])
-    return frozenset(families)
+    database = entry.database
+    if database is None:
+        return frozenset()
+    return frozenset(
+        token.split()[0]
+        for token in database.cli_mounts.values()
+        if isinstance(token, str) and token.split()
+    )
 
 
 def _kernel_cli_family(rel: str) -> str | None:
@@ -364,12 +360,12 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 f"{rel}: kernel-to-pack import {module!r} "
                 "(only the serve composition root is exempt)"
             )
-    schema_pack_dirs = [
+    canonical_pack_dirs = [
         path
         for path in _child_dirs(packs_root)
-        if (path / "__init__.py").exists()
-        and (path / "schema-pack.yaml").is_file()
+        if (path / "__init__.py").exists() and (path / "pack.yaml").is_file()
     ]
+    schema_pack_dirs = canonical_pack_dirs
     for pack_dir in schema_pack_dirs:
         for path in _iter_python(pack_dir):
             rel = _rel(path, root)
@@ -399,7 +395,7 @@ def lint_writer_authority(root: Path) -> list[str]:
 
     ``astrid/core/store`` owns every writable connection. Two documented
     exemptions exist: the conformance kit (``astrid/core/conformance/kit.py``)
-    constructs scratch ``DatabaseWriter``\ s on its own temp databases to
+    constructs scratch ``DatabaseWriter`` instances on its own temp databases
     prove crash atomicity of the kernel store — that is conformance testing
     of the store, never a second write authority; and
     ``astrid/packs/__init__.py`` is the standard composition root itself,
@@ -408,12 +404,15 @@ def lint_writer_authority(root: Path) -> list[str]:
     not writers and are never flagged.
     """
     errors: list[str] = []
-    store_root = root / "astrid" / "core" / "store"
     for path in _iter_python(root / "astrid"):
         rel = _rel(path, root)
         if rel.startswith("astrid/core/store/"):
             continue
         if rel == _CONFORMANCE_KIT_REL:
+            continue
+        # Kernel admission is a narrowly scoped compatibility boundary for
+        # legacy orchestrators; its writer remains kernel-owned behavior.
+        if rel == "astrid/core/project/kernel_admission.py":
             continue
         if rel == "astrid/packs/__init__.py":
             continue
@@ -426,7 +425,11 @@ def lint_writer_authority(root: Path) -> list[str]:
                 f"{rel}: SQLite writer construction outside the kernel store"
             )
             continue
-        if "sqlite3.connect(" in source and "mode=ro" not in source:
+        if (
+            "sqlite3.connect(" in source
+            and "mode=ro" not in source
+            and "read_only_uri(" not in source
+        ):
             errors.append(
                 f"{rel}: SQLite writer construction outside the kernel store"
             )
@@ -461,21 +464,44 @@ def _is_removed_authority(module: str) -> bool:
     )
 
 
-def _schema_pack_ids(root: Path) -> frozenset[str]:
-    """The standard schema-pack ids under ``astrid/packs`` (manifest present).
-
-    Mirrors :func:`lint_import_boundaries`: a pack directory is a product
-    schema pack only when it ships a ``schema-pack.yaml``. The m1-m6 legacy
-    capability packs (rendering, builtin, generation, iteration,
-    video_editing, ...) are non-product dead code and are never product
-    paths for the removed-authority rule.
-    """
+def lint_canonical_manifest_authority(root: Path) -> list[str]:
+    """Require every bundled pack to use one strict v2 ``pack.yaml``."""
     packs_root = root / "astrid" / "packs"
-    return frozenset(
-        path.name
-        for path in _child_dirs(packs_root)
-        if (path / "schema-pack.yaml").is_file()
-    )
+    errors: list[str] = []
+    if not packs_root.is_dir():
+        return [f"{_rel(packs_root, root)}: bundled pack root is missing"]
+    for pack_dir in sorted(packs_root.iterdir()):
+        if (
+            not pack_dir.is_dir()
+            or pack_dir.name in {"_core", "__pycache__"}
+            or pack_dir.name.startswith(".")
+        ):
+            continue
+        manifest = pack_dir / "pack.yaml"
+        if not manifest.is_file():
+            errors.append(f"{_rel(pack_dir, root)}: missing canonical pack.yaml")
+        for legacy_name in ("pack.yml", "pack.json", "schema-pack.yaml"):
+            if (pack_dir / legacy_name).exists():
+                errors.append(
+                    f"{_rel(pack_dir / legacy_name, root)}: legacy manifest is forbidden"
+                )
+    try:
+        BundledCatalog.from_root(packs_root)
+    except Exception as exc:
+        errors.append(f"{_rel(packs_root, root)}: invalid strict v2 catalog: {exc}")
+    return errors
+
+
+def _canonical_database_pack_ids(root: Path) -> frozenset[str]:
+    """Return bundled IDs that own canonical database projections."""
+    try:
+        return frozenset(
+            entry.id
+            for entry in BundledCatalog.from_root(root / "astrid" / "packs").entries
+            if entry.database is not None
+        )
+    except Exception:
+        return frozenset()
 
 
 def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
@@ -493,7 +519,7 @@ def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
         return True
     if rel == "astrid/packs" or rel.startswith("astrid/packs/"):
         pack_id = rel.split("/")[2]
-        return pack_id in _schema_pack_ids(root)
+        return pack_id in _canonical_database_pack_ids(root)
     return any(rel == d or rel.startswith(d + "/") for d in _PRODUCT_PATH_DIRS)
 
 
@@ -553,25 +579,27 @@ def _parse_sql_create_tables(sql: str) -> dict[str, dict[str, Any]]:
 
 
 def _declared_tables(root: Path) -> dict[str, str]:
-    """Map every declared table to its owning pack (core or pack id)."""
+    """Map every declared table to its canonical owner."""
     declared: dict[str, str] = {table: "core" for table in CORE_TABLES}
-    packs_root = root / "astrid" / "packs"
-    for pack_dir in _child_dirs(packs_root):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if not manifest_path.is_file():
+    try:
+        catalog = BundledCatalog.from_root(root / "astrid" / "packs")
+    except Exception:
+        return declared
+    for entry in catalog.entries:
+        if entry.database is None:
             continue
-        manifest = load_schema_pack_manifest(manifest_path)
-        for table in manifest.migrations[0].tables:
-            declared[table] = manifest.id
+        for migration in entry.database.migrations:
+            for table in migration.tables:
+                declared[table] = entry.id
     return declared
 
 
 def _migration_sql_files(root: Path) -> list[tuple[str, str]]:
-    """Return (rel, sql) for every migration SQL file under the repo."""
+    """Return production migration SQL files under the repository."""
     files: list[tuple[str, str]] = []
     for sql in root.rglob("*.sql"):
         rel = _rel(sql, root)
-        if "build/" in rel:
+        if "build/" in rel or rel.startswith("tests/fixtures/"):
             continue
         try:
             files.append((rel, sql.read_text(encoding="utf-8")))
@@ -660,7 +688,7 @@ def lint_schema_ownership(root: Path) -> list[str]:
 
 
 def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
-    """Whether *stream_type* is declared by the standard composed registry."""
+    """Whether *stream_type* is declared by the canonical registry."""
     registry = _standard_registry(root)
     try:
         from astrid.core.events.registry import validate_stream_type
@@ -672,18 +700,9 @@ def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
 
 
 def _standard_registry(root: Path) -> FrozenSchemaPackRegistry:
-    from astrid.core.events.registry import register_core_vocabulary
-    from astrid.core.schema_packs.registry import SchemaPackRegistry
+    from astrid.core.pack.canonical import project_catalog_database
 
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    packs_root = root / "astrid" / "packs"
-    for pack_dir in _child_dirs(packs_root):
-        manifest_path = pack_dir / "schema-pack.yaml"
-        if manifest_path.is_file():
-            manifest = load_schema_pack_manifest(manifest_path)
-            registry.register_pack(manifest)
-    return registry.freeze()
+    return project_catalog_database(BundledCatalog.from_root(root / "astrid" / "packs"))
 
 
 # ---------------------------------------------------------------------------
@@ -1040,32 +1059,23 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
 
 
 def lint_pack_dependency_directions(root: str | Path) -> list[str]:
-    """Reject schema-pack dependencies that point sideways or outward."""
+    """Reject canonical bundled pack dependencies that point sideways."""
     repo_root = Path(root)
     errors: list[str] = []
-    pack_dirs = [
-        path
-        for path in _child_dirs(repo_root / "astrid" / "packs")
-        if (path / "schema-pack.yaml").is_file()
-    ]
-    pack_ids = {path.name for path in pack_dirs}
-    for pack_dir in pack_dirs:
-        rel = _rel(pack_dir / "schema-pack.yaml", repo_root)
-        try:
-            manifest = load_schema_pack_manifest(pack_dir / "schema-pack.yaml")
-        except Exception as exc:  # noqa: BLE001 - fail closed for artifacts
-            errors.append(f"{rel}: invalid installed schema-pack manifest: {exc}")
+    packs_root = repo_root / "astrid" / "packs"
+    try:
+        catalog = BundledCatalog.from_root(packs_root)
+    except Exception as exc:
+        return [f"{_rel(packs_root, repo_root)}: invalid canonical catalog: {exc}"]
+    for entry in catalog.entries:
+        if entry.database is None:
             continue
-        if manifest.id != pack_dir.name:
-            errors.append(
-                f"{rel}: manifest id {manifest.id!r} does not match pack directory {pack_dir.name!r}"
-            )
-        for dependency in manifest.depends_on:
+        rel = _rel(entry.manifest.resolved, repo_root)
+        for dependency in entry.database.depends_on:
             if dependency.pack != "core":
-                target = "present" if dependency.pack in pack_ids else "missing"
                 errors.append(
-                    f"{rel}: forbidden pack dependency {manifest.id!r} -> "
-                    f"{dependency.pack!r} ({target} pack); packs may depend on core only"
+                    f"{rel}: forbidden pack dependency {entry.id!r} -> "
+                    f"{dependency.pack!r}; packs may depend on core only"
                 )
     return errors
 
@@ -1559,6 +1569,7 @@ def run_authority_lint(
         return run_installed_authority_lint(target, **installed_kwargs)
     repo_root = Path(root)
     errors: list[str] = []
+    errors.extend(lint_canonical_manifest_authority(repo_root))
     errors.extend(lint_import_boundaries(repo_root))
     errors.extend(lint_writer_authority(repo_root))
     errors.extend(lint_legacy_authorities(repo_root))

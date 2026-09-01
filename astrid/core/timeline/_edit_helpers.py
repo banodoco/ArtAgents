@@ -41,6 +41,7 @@ from typing import Any
 from astrid.core._shared.jsonio import read_json
 from astrid.core.contracts.errors import AstridError
 from astrid.core.events.registry import validate_event_kind
+from astrid.core.kernel.read import current_schema_registry
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.core.store.writer import DatabaseWriter
 
@@ -53,23 +54,7 @@ from .paths import (
 )
 from .projection import regenerate_projection
 
-_composed_registry: FrozenSchemaPackRegistry | None = None
-"""Process-wide composed standard registry cache for the pack write gateway.
 
-Built once via the kernel-side composition (``astrid.core.schema_packs.
-standard``) so this core module never imports ``astrid.packs``; validated
-event kinds must be declared by the same composed registry the runtime
-writer uses.
-"""
-
-
-def _composed_registry_or_build() -> FrozenSchemaPackRegistry:
-    global _composed_registry
-    if _composed_registry is None:
-        from astrid.core.schema_packs.standard import build_standard_registry
-
-        _composed_registry = build_standard_registry()
-    return _composed_registry
 
 # ---------------------------------------------------------------------------
 # Shared exception base
@@ -303,6 +288,7 @@ def pack_write_gateway(
     actor_via: TimelineActor | None = None,
     root: str | Path | None = None,
     supabase_options: SupabaseEventLogOptions | None = None,
+    registry: FrozenSchemaPackRegistry | None = None,
     writer: DatabaseWriter | None = None,
     timeline_repository: Any | None = None,
     timeline_stream_type: str | None = None,
@@ -311,8 +297,8 @@ def pack_write_gateway(
 
     Accepts the **managed binding tuple** produced by
     ``bind_managed_timeline()``, resolves an identity-backed event-log backend,
-    appends every event, materializes compatibility outputs synchronously, and returns a
-    normalised ``PackWriteResult``.
+    appends every event, materializes compatibility outputs synchronously, and
+    returns a normalised ``PackWriteResult``.
 
     Scope note
     ----------
@@ -351,6 +337,11 @@ def pack_write_gateway(
         provenance (e.g. the human or agent that launched the pack).
     root:
         Project root override.
+    registry:
+        Exact frozen database projection owned by the current operation.
+        When omitted, the registry bound by
+        :func:`astrid.core.kernel.read.schema_registry_context` is used.
+        No registry is constructed by this gateway.
     writer:
         Optional kernel :class:`~astrid.core.store.writer.DatabaseWriter`.
         When supplied, every ``timeline.config_replaced`` event is
@@ -382,10 +373,15 @@ def pack_write_gateway(
         registry (raised before any backend or append work).
     """
     # 0. Registry vocabulary gate (m8): every emitted kind must be declared
-    # by the composed standard registry before any backend resolution,
+    # by the exact operation composition before any backend resolution,
     # bootstrap, or append — an undeclared kind rejects the whole batch
     # with zero side effects.
-    registry = _composed_registry_or_build()
+    registry = registry if registry is not None else current_schema_registry()
+    if registry is None:
+        raise TimelineEditError(
+            "pack_write_gateway requires an injected or operation-bound "
+            "FrozenSchemaPackRegistry"
+        )
     for event_spec in events:
         validate_event_kind(registry, event_spec["kind"])
 

@@ -1,18 +1,9 @@
-"""Shared pack discovery across executor, orchestrator, and element registries.
+"""Shared strict-v2 pack discovery across capability registries.
 
-Each registry previously re-implemented the same four-layer discovery walk
-(source-tree packs, the project-scoped ``local`` scratch pack, extra pack
-roots, and installed packs). The duplication made it easy for the layers or
-their ordering to drift apart. This module centralizes the walk and exposes a
-``DiscoveredPack`` metadata shape so every registry — and, ahead of Step 13,
-skills discovery — consumes one ordered list with identical priority semantics.
-
-Fault tolerance: the ``extra`` / ``env`` / ``installed`` layers are
-external by definition. A pack whose manifest fails to load — or an
-installed pack that fails validation — is skipped individually with a
-logged warning so one broken external pack cannot hide its valid
-neighbors. The source-tree scan stays strict: first-party packs must
-always load.
+Discovery centralizes the source, local, extra, environment, and installed
+layers. Every layer admits only a confined canonical ``pack.yaml`` through
+the canonical loader; failures in external layers skip only the affected
+pack, while the bundled source catalog remains strict.
 """
 
 from __future__ import annotations
@@ -318,12 +309,10 @@ def discover_canonical_pack_metadata(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> tuple[CanonicalDiscoveredPack, ...]:
-    """Admit canonical v2 packs through external discovery seams only.
+    """Admit canonical v2 packs through the external discovery seams.
 
-    This is intentionally separate from :func:`discover_pack_metadata`, whose
-    legacy source-tree behavior remains active during B1.  Unlike the
-    fault-tolerant legacy walk, canonical admission propagates validation
-    failures so an external database declaration cannot be silently dropped.
+    External validation failures propagate here so an external database
+    declaration cannot be silently dropped.
     """
     project_root = Path(project_root).expanduser()
     project_pack_root = project_root / "astrid" / "packs"
@@ -333,12 +322,12 @@ def discover_canonical_pack_metadata(
         reject_symlinked_path(local_candidate)
     except SymlinkedPackPathError as exc:
         raise CanonicalPackValidationError(
-            f"local pack root must not be a symlink or contain symlinked ancestors: "
+            "local pack root must not be a symlink or contain symlinked ancestors: "
             f"{project_pack_root}"
         ) from exc
     project_pack_root = project_pack_root.resolve()
     # Canonical discovery is strictly read-only: inspect an existing local
-    # pack only and never materialize the legacy element-only manifest.
+    # pack only and never materialize an element-only manifest.
     local_pack_root = project_pack_root / "local"
     discovered: list[CanonicalDiscoveredPack] = []
     scanned_roots: set[Path] = set()

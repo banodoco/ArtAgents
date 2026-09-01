@@ -1,70 +1,8 @@
-"""Deterministic packaged and temporary-copy factoring checks.
+"""Deterministic canonical catalog factoring checks.
 
-Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``)
-can be removed **only inside a temporary source copy** -- both the pack
-directory and the explicit standard registration tuple
-(``astrid.packs.STANDARD_SCHEMA_PACKS``, which drives
-``register_standard_schema_packs``) -- while the complete enumerated kernel
-test lane stays green and the remaining manifest-derived catalog is
-unchanged.
-
-The original source-composition proof remains available for the v10 regression
-floor. The packaged mode starts from one unpacked wheel, removes one standard
-schema pack at a time, patches only the explicit registration tuple, and runs
-the same complete kernel lane against that artifact root. Both modes are
-throwaway checks: the real repository and the supplied wheel are never mutated.
-
-Lane completeness
------------------
-The enumerated :data:`KERNEL_LANE` is the fixed, complete set of kernel test
-files under ``tests/v10`` that import no domain schema pack at module level
-and whose assertions hold under *any* subset of the three packs:
-
-- kernel repositories/execution: fanout (run creation/continuation), the
-  multi-task journey, task races, evidence, media, projects, receipts/events,
-  writer/UoW, task lifecycle, task admission, task executor;
-- capability adapters that stay kernel-owned (generation roundtrip,
-  capability roundtrip, understanding repository);
-- the deterministic authority lint (pure text fixtures under ``tmp_path``).
-
-Deliberately excluded suites (asserted separately, see below):
-
-- ``test_registry.py`` / ``test_catalog_migrations.py`` assert the exact
-  *standard* 3-pack composition (e.g. the 20-table catalog), so they cannot
-  run under a reduced composition; the check's own catalog verification step
-  re-derives the remaining manifest-derived catalog from the modified
-  registration instead.
-- ``test_timeline_repository.py``, ``test_reference_*``, ``test_shot_*`` and
-  the three conformance files import the domain packs at module level.
-- ``test_contention.py`` / ``test_crash_atomicity.py`` import the timeline
-  repository at module level.
-- ``test_media_pipeline.py`` exercises the standard bridge composition
-  (``compose_standard_bridge`` / startup staging GC) which legitimately
-  requires the timeline pack.
-
-The remaining catalog is verified deterministically for every removal:
-core + the two remaining packs compose to exactly
-``CORE_TABLES | (all pack tables - the removed pack's tables)``, the removed
-pack is absent from the frozen registry and the registration tuple, and a
-fresh database opened from the modified composition contains exactly the
-remaining tables (never the removed pack's).
-
-Packaged mode additionally checks that the removed pack's stream, event,
-command, repository, CLI, and bridge vocabulary is absent, every foreign key
-stays within the kernel or its owning pack, and every remaining SDK service
-uses the one writer supplied by the composition.
-
-Sketch verification
--------------------
-The check also locks the software-engineering-agent composition sketch
-(:data:`SKETCH_DOC`): the sketch's declared kernel inventory is parsed from
-the document and compared for exact equality against the inventory derived
-from ``CORE_MIGRATIONS`` (:data:`CORE_KERNEL_TABLES`). The sketch therefore
-cannot silently add a kernel table, and its own in-tree packs
-(:data:`SKETCH_PACKS`) stay disjoint from the Astrid standard packs. Like the
-removal proof, this is a read-only source-composition check: no database is
-opened, no runtime discovery or loader exists, and nothing is installed or
-uninstalled.
+Each lane removes one bundled ``pack.yaml`` directory inside a temporary
+source or wheel copy. The canonical catalog then derives the reduced database
+projection without patching a fixed registration list.
 """
 
 from __future__ import annotations
@@ -89,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 """The repository root the check copies from (read-only)."""
 
 DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
-"""Exactly the in-tree schema packs the standard composition registers."""
+"""Exactly the default-enabled bundled database packs in the canonical catalog."""
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
     "timeline": ("timelines",),
@@ -151,12 +89,11 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "bridge_mounts": (),
     },
 }
-"""The complete vocabulary owned by each fixed schema pack.
+"""The complete vocabulary owned by each default-enabled bundled database pack.
 
 This is an explicit audit input, not a discovery result. It is compared with
-the installed registry after each pack is removed so a surviving namespace
-cannot masquerade as a reduced composition.
-"""
+the canonical registry after each pack is removed so surviving namespaces
+cannot masquerade as a reduced composition."""
 
 SKETCH_DOC = "docs/architecture/software-engineering-pack-sketch.md"
 """Repo-root-relative path of the software-engineering-agent composition
@@ -198,18 +135,6 @@ KERNEL_LANE: tuple[str, ...] = (
 )
 """The complete enumerated kernel test lane (see module docstring)."""
 
-_STANDARD_TUPLE_RE = re.compile(
-    r"STANDARD_SCHEMA_PACKS: tuple\[str, \.\.\.\] = \(([^)]*)\)"
-)
-"""The one-line explicit registration tuple in ``astrid/packs/__init__.py``."""
-
-_TIMELINE_IMPORT_LINES = (
-    "from astrid.packs.timeline.bridge import TimelineBridgeAdapter\n",
-    "from astrid.packs.timeline.repository import TimelineRepository\n",
-)
-"""Module-level timeline imports in ``astrid/packs/__init__.py`` that the
-standard bridge composition needs; they are removed only in the temporary
-copy when the timeline pack is the one under removal."""
 
 # Paths the lane needs besides ``astrid/``, ``tests/v10`` and ``pyproject.toml``.
 _LANE_CONFTEST_FILES = ("tests/conftest.py", "tests/__init__.py")
@@ -223,40 +148,26 @@ _LANE_FIXTURES = ("tests/fixtures/timeline_visualize/desert_slice",)
 _COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
 
 
-def _patch_packs_init(packs_init: Path, removed_pack: str) -> None:
-    """Rewrite a temporary copy of ``astrid/packs/__init__.py``.
 
-    Removes ``removed_pack`` from the explicit :data:`STANDARD_SCHEMA_PACKS`
-    registration tuple (so ``register_standard_schema_packs`` registers only
-    the remaining packs) and, when the timeline pack is removed, drops the
-    two module-level timeline imports so ``import astrid.packs`` still
-    succeeds in the reduced composition. Raises if the expected literals are
-    missing, keeping the surgery deterministic instead of silently drifting.
-    """
+
+def _remove_deleted_pack_imports(packs_init: Path, removed_pack: str) -> None:
+    """Remove static imports for a deleted temporary pack only."""
+    if removed_pack != "timeline":
+        return
     text = packs_init.read_text(encoding="utf-8")
-    remaining = tuple(pack for pack in DOMAIN_PACKS if pack != removed_pack)
-    rendered = "(" + ", ".join(f'"{pack}"' for pack in remaining) + ")"
-    new_text, count = _STANDARD_TUPLE_RE.subn(
-        lambda _match: f"STANDARD_SCHEMA_PACKS: tuple[str, ...] = {rendered}",
-        text,
-    )
-    if count != 1:
-        raise RuntimeError(
-            f"STANDARD_SCHEMA_PACKS tuple not found in {packs_init}"
-        )
-    if removed_pack == "timeline":
-        for line in _TIMELINE_IMPORT_LINES:
-            if line not in new_text:
-                raise RuntimeError(f"expected timeline import line missing: {line!r}")
-            new_text = new_text.replace(line, "")
-    packs_init.write_text(new_text, encoding="utf-8")
+    for line in (
+        "from astrid.packs.timeline.bridge import TimelineBridgeAdapter\n",
+        "from astrid.packs.timeline.repository import TimelineRepository\n",
+    ):
+        text = text.replace(line, "")
+    packs_init.write_text(text, encoding="utf-8")
 
 
 def build_temp_source_copy(
     removed_pack: str, *, base_dir: Path | None = None
 ) -> Path:
-    """Copy the repository source into a fresh temp dir, then remove
-    ``removed_pack`` from source and from the explicit registration tuple.
+    """Copy the repository source into a fresh temp dir, then remove one
+    bundled pack directory; canonical composition derives the remainder.
 
     The copy contains only what the enumerated lane needs: the ``astrid``
     package (without bytecode caches), the v10 lane files plus their conftest
@@ -296,9 +207,9 @@ def build_temp_source_copy(
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
         shutil.copy2(REPO_ROOT / "pyproject.toml", work / "pyproject.toml")
-
-        # Remove the pack from the explicit registration tuple.
-        _patch_packs_init(work / "astrid" / "packs" / "__init__.py", removed_pack)
+        _remove_deleted_pack_imports(
+            work / "astrid" / "packs" / "__init__.py", removed_pack
+        )
         return work
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
@@ -372,11 +283,12 @@ def build_temp_artifact_copy(
         pack_root = root / "astrid" / "packs" / removed_pack
         if not pack_root.is_dir():
             raise ValueError(
-                f"artifact root is missing the {removed_pack!r} schema pack: {pack_root}"
+                f"artifact root is missing the {removed_pack!r} canonical pack: {pack_root}"
             )
         shutil.rmtree(pack_root)
-        _patch_packs_init(root / "astrid" / "packs" / "__init__.py", removed_pack)
-        return root
+        _remove_deleted_pack_imports(
+            root / "astrid" / "packs" / "__init__.py", removed_pack
+        )
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
@@ -456,12 +368,9 @@ from pathlib import Path
 
 import astrid
 
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.migrations.catalog import CORE_TABLES
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.database import open_database
-from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 
 
 removed_pack = sys.argv[1]
@@ -469,11 +378,8 @@ expected = json.loads(sys.argv[2])
 artifact_root = Path(sys.argv[3]).resolve()
 assert Path(astrid.__file__).resolve().is_relative_to(artifact_root), astrid.__file__
 
-registry = SchemaPackRegistry()
-register_core_vocabulary(registry)
-register_standard_schema_packs(registry)
-frozen = registry.freeze()
-remaining = {pack for pack in STANDARD_SCHEMA_PACKS}
+frozen = compose_standard_pack_database().registry
+remaining = set(frozen.packs) - {"core"}
 assert removed_pack not in remaining
 assert removed_pack not in frozen.packs
 
@@ -807,25 +713,15 @@ def check_artifact_factoring(
 _CATALOG_SNIPPET = r"""
 import sys
 
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.migrations.catalog import CORE_TABLES
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.database import open_database
-from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 
 removed_pack = sys.argv[1]
 removed_tables = {t for t in sys.argv[2].split(",") if t}
 remaining_tables = {t for t in sys.argv[3].split(",") if t}
 
-registry = SchemaPackRegistry()
-register_core_vocabulary(registry)
-register_standard_schema_packs(registry)
-frozen = registry.freeze()
-
-# The removed pack is gone from the explicit registration tuple and registry.
-assert removed_pack not in STANDARD_SCHEMA_PACKS, (
-    f"{removed_pack} still in the registration tuple: {STANDARD_SCHEMA_PACKS}"
-)
+frozen = compose_standard_pack_database().registry
 assert removed_pack not in frozen.packs, (
     f"{removed_pack} still registered: {sorted(frozen.packs)}"
 )
@@ -860,7 +756,7 @@ assert names == tables, (
 )
 print(
     f"catalog-ok tables={len(tables)} "
-    f"packs={sorted(STANDARD_SCHEMA_PACKS)}"
+    f"packs={sorted(set(frozen.packs) - {'core'})}"
 )
 """
 
@@ -1050,10 +946,9 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point: ``python scripts/reshape/check_pack_factoring.py``."""
     parser = argparse.ArgumentParser(
         description=(
-            "Prove each in-tree schema pack is removable from a temporary "
-            "source composition while the enumerated kernel lane and the "
-            "remaining manifest-derived catalog stay green, and prove the "
-            "software-engineering-agent sketch reuses exactly the "
+            "Prove each default-enabled bundled database pack is removable from "
+            "a temporary source composition while the enumerated kernel lane and "
+            "the remaining canonical catalog stay green, and prove the "
             "CORE_MIGRATIONS kernel inventory."
         )
     )

@@ -1,19 +1,27 @@
 """Read-only data diagnostics for Astrid (m6 v10 doctor rewrite).
 
 This module replaces the old environment checks (executor/orchestrator
-registries, element catalog, vibecomfy/remotion/runpod probing) with exactly
-six read-only v10 checks over the managed database and media tree:
+registries, element catalog, vibecomfy/remotion/runpod probing) with eight
+read-only v10 checks over the managed database, media tree, and canonical
+bundled-pack catalog:
 
 1. ``sqlite_quick_check`` — open the database ``mode=ro`` and run
    ``PRAGMA quick_check`` (page-level integrity);
 2. ``fk_integrity`` — ``PRAGMA foreign_key_check`` (referential integrity);
 3. ``schema_versions`` — the ``schema_migrations`` rows (core + installed
-   pack versions) compared against the current standard registry;
+   pack versions) compared against the supplied frozen registry, including
+   expected and pending migrations;
 4. ``media_paths`` — the managed-media root and ``sha256/`` digest tree are
    accessible, managed and external locators resolve to the recorded bytes,
    and any orphaned ``.staging`` directories are reported;
 5. ``data_paths`` — the projects root and ``.astrid/`` are accessible;
-6. ``python_version`` — the Python 3.10+ floor.
+6. ``python_version`` — the Python 3.10+ floor;
+7. ``bundled_census`` — the canonical bundled product-pack inventory;
+8. ``pack_resources`` — documentation and declared resource closure health.
+
+The catalog and registry are one operation-owned pair. A caller may inject
+the pair, while the public no-injection path creates one short-lived canonical
+standard composition.
 
 The doctor is **strictly read-only**: it never runs ``VACUUM``, ``REINDEX``,
 or any repair, and it never opens a writable connection. On a missing or
@@ -41,12 +49,17 @@ from pathlib import Path
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
 from astrid.core.kernel.database import resolve_kernel_database_authority
-from astrid.core.migrations.runner import MigrationError, probe_database
+from astrid.core.migrations.runner import (
+    MigrationError,
+    probe_database,
+    topological_migration_order,
+)
+from astrid.core.pack.canonical import BundledCatalog, CanonicalPackError
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 Status = str
 
 MIN_PYTHON = (3, 10)
-
 MANAGED_DIR_NAME = ".astrid"
 MEDIA_DIR_NAME = "media"
 SHA256_DIR_NAME = "sha256"
@@ -88,18 +101,53 @@ class DoctorCheck:
         return strict_optional and not self.required and self.status == "warn"
 
 
+def _compose_doctor_pack_pair(
+    catalog: BundledCatalog | None,
+    registry: FrozenSchemaPackRegistry | None,
+) -> tuple[BundledCatalog, FrozenSchemaPackRegistry]:
+    """Return the one catalog/registry pair used by this doctor operation."""
+    if catalog is None and registry is None:
+        from astrid.core.pack.canonical import project_catalog_database
+        from astrid.core.pack.loader import DEFAULT_PACKS_ROOT
+
+        catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+        return catalog, project_catalog_database(catalog)
+    if catalog is None or registry is None:
+        raise CanonicalPackError(
+            "doctor requires both catalog and registry when injecting pack composition"
+        )
+    if not isinstance(catalog, BundledCatalog):
+        raise CanonicalPackError("doctor catalog must be a BundledCatalog")
+    if not isinstance(registry, FrozenSchemaPackRegistry):
+        raise CanonicalPackError(
+            "doctor registry must be a FrozenSchemaPackRegistry"
+        )
+    return catalog, registry
+
+
 def run_checks(
-    *, projects_root: str | Path | None = None
+    *,
+    projects_root: str | Path | None = None,
+    catalog: BundledCatalog | None = None,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> tuple[DoctorCheck, ...]:
-    """Run the six read-only v10 checks against the resolved projects root."""
+    """Run read-only diagnostics over one canonical pack composition.
+
+    The no-injection path owns a short-lived standard composition. Injected
+    callers must pass the exact operation-owned catalog and frozen registry
+    pair; doctor never rebuilds either object or rereads pack manifests.
+    """
     root = resolve_projects_root(projects_root)
+    catalog, registry = _compose_doctor_pack_pair(catalog, registry)
     return (
         _check_python_version(),
         _check_data_paths(root),
         _check_media_paths(root),
         _check_sqlite_quick_check(root),
         _check_fk_integrity(root),
-        _check_schema_versions(root),
+        _check_schema_versions(root, registry),
+        _check_bundled_census(catalog),
+        _check_pack_resources(catalog),
     )
 
 
@@ -633,12 +681,114 @@ def _check_fk_integrity(root: Path) -> DoctorCheck:
 # ---------------------------------------------------------------------------
 
 
-def _check_schema_versions(root: Path) -> DoctorCheck:
-    from astrid.core.schema_packs.standard import build_standard_registry
+def _check_bundled_census(catalog: BundledCatalog) -> DoctorCheck:
+    """Report the deterministic product-pack inventory from the catalog."""
+    pack_ids = tuple(entry.id for entry in catalog.ordered_entries)
+    detail = f"{len(pack_ids)} product packs"
+    if pack_ids:
+        detail += ": " + ", ".join(pack_ids)
+    if len(pack_ids) == 22:
+        return DoctorCheck(name="bundled_census", status="ok", detail=detail)
+    return DoctorCheck(
+        name="bundled_census",
+        status="warn",
+        detail=detail + " (canonical beta expects 22)",
+        required=False,
+    )
 
+
+def _check_pack_resources(catalog: BundledCatalog) -> DoctorCheck:
+    """Check documentation and every catalog resource handle without writes."""
+    documentation_total = len(catalog.entries)
+    documentation_healthy = 0
+    missing_documentation: list[str] = []
+    resource_total = 0
+    resource_errors: list[str] = []
+
+    for entry in catalog.ordered_entries:
+        documentation = entry.documentation
+        documentation_handle = (
+            None
+            if documentation is None or documentation.kind == "none"
+            else next(
+                (
+                    handle
+                    for handle in entry.resource_handles
+                    if handle.path == documentation.path
+                ),
+                None,
+            )
+        )
+        if documentation_handle is not None:
+            documentation_healthy += 1
+        else:
+            missing_documentation.append(entry.id)
+
+        handles = (entry.manifest,) + entry.resource_handles
+        resource_total += len(handles)
+        owner_root = entry.root.resolve()
+        for handle in handles:
+            path = Path(handle.resolved)
+            problem: str | None = None
+            try:
+                if path.is_symlink():
+                    problem = "symlink"
+                elif not path.resolve(strict=False).is_relative_to(owner_root):
+                    problem = "escapes owner root"
+                elif handle.file_kind == "file" and not path.is_file():
+                    problem = "missing file"
+                elif handle.file_kind == "directory" and not path.is_dir():
+                    problem = "missing directory"
+            except OSError as exc:
+                problem = f"unreadable: {exc}"
+            if problem is not None:
+                resource_errors.append(f"{entry.id}:{handle.path} ({problem})")
+
+    detail = (
+        f"documentation={documentation_healthy}/{documentation_total}; "
+        f"resources={resource_total} handle(s)"
+    )
+    if missing_documentation:
+        detail += "; missing documentation: " + ", ".join(missing_documentation)
+    if resource_errors:
+        detail += "; invalid resources: " + ", ".join(resource_errors[:8])
+        if len(resource_errors) > 8:
+            detail += f" (truncated, {len(resource_errors)} total)"
+    status = "ok" if not missing_documentation and not resource_errors else "fail"
+    return DoctorCheck(name="pack_resources", status=status, detail=detail)
+
+
+def _migration_label(pack: str, version: int) -> str:
+    return f"{pack}/{version}"
+
+
+
+def _migration_state_detail(
+    expected: tuple[tuple[str, int], ...],
+    applied: tuple[tuple[str, int], ...],
+) -> str:
+    applied_set = set(applied)
+    pending = tuple(item for item in expected if item not in applied_set)
+
+    def render(items: tuple[tuple[str, int], ...]) -> str:
+        return ", ".join(_migration_label(pack, version) for pack, version in items) or "none"
+
+    return (
+        f"expected ({len(expected)}): {render(expected)}; "
+        f"applied ({len(applied)}): {render(applied)}; "
+        f"pending ({len(pending)}): {render(pending)}"
+    )
+
+
+def _check_schema_versions(
+    root: Path, registry: FrozenSchemaPackRegistry
+) -> DoctorCheck:
     db_path = _database_path(root)
-    registry = build_standard_registry()
     try:
+        expected = tuple(
+            (migration.pack, migration.version)
+            for migration in topological_migration_order(registry)
+        )
         probe = probe_database(db_path, registry)
     except MigrationError as exc:
         return DoctorCheck(
@@ -646,37 +796,40 @@ def _check_schema_versions(root: Path) -> DoctorCheck:
             status="fail",
             detail=str(exc),
         )
-    except sqlite3.Error as exc:
+    except (OSError, sqlite3.Error) as exc:
         # Fail closed on a corrupt/unreadable database file: a doctor that
         # raises out of `run_checks` would crash the CLI instead of returning
-        # the stable `{"ok": false}` envelope, so surface the read failure as
-        # a failed check (matching sqlite_quick_check / fk_integrity).
+        # the stable `{"ok": false}` envelope.
         return DoctorCheck(
             name="schema_versions",
             status="fail",
             detail=f"cannot read database schema: {exc}",
         )
     if not probe.exists:
+        missing_detail = _migration_state_detail(expected, ())
         if _is_uninitialized_root(root):
             return _uninitialized_check(
                 "schema_versions",
-                f"database not initialized: {db_path} ({NEW_ROOT_GUIDANCE})",
+                f"database not initialized: {db_path} ({NEW_ROOT_GUIDANCE}); "
+                f"{missing_detail}",
             )
         return DoctorCheck(
             name="schema_versions",
             status="fail",
-            detail=f"database missing: {db_path} ({NEW_ROOT_GUIDANCE})",
+            detail=(
+                f"database missing: {db_path} ({NEW_ROOT_GUIDANCE}); "
+                f"{missing_detail}"
+            ),
         )
-    by_pack: dict[str, int] = {}
-    for applied in probe.applied:
-        by_pack[applied.pack] = applied.version
-    detail = ", ".join(
-        f"{pack}={version}" for pack, version in sorted(by_pack.items())
-    )
+
+    applied = tuple((row.pack, row.version) for row in probe.applied)
+    detail = _migration_state_detail(expected, applied)
+    pending = set(expected) - set(applied)
     return DoctorCheck(
         name="schema_versions",
-        status="ok",
-        detail=detail or "no applied migrations",
+        status="warn" if pending else "ok",
+        detail=detail,
+        required=not pending,
     )
 
 

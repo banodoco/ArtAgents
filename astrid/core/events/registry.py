@@ -1,41 +1,8 @@
-"""Core stream, event, and command vocabulary with independent registration.
+"""Core stream, event, and command vocabulary with canonical projection.
 
-(m1 plan step 2; m2 plan step 1.) The kernel registers its own vocabulary
-independently of any Astrid pack: core declares the ``core.project``,
-``core.task``, ``core.run``, and ``core.media`` stream types plus the m1/m2
-core event/command kinds, and only then may the explicit standard-Astrid
-composition in ``astrid/packs/__init__.py`` register the three in-tree schema
-packs (v10 section 2.3 law 5; decision artifact section 4).
-
-Rules kept here:
-
-- Vocabulary names are namespaced dotted names; the composed registry rejects
-  missing, duplicate, or non-namespaced declarations before any database opens.
-- The kernel has no ``schema-pack.yaml`` file: its manifest is code-declared by
-  :func:`core_schema_pack_manifest` and reuses
-  ``astrid.core.migrations.catalog.CORE_MIGRATIONS`` as the single audited
-  source for the core migration descriptor, so registry table ownership and the
-  migration runner can never drift.
-- This module never opens a database and never imports the capability-pack
-  loader, discovery, or definition machinery (v10 section 2 "Boundary now,
-  loader later").
-- Heartbeat deliberately gets no command or event kind: it is the narrow
-  non-event attempt-liveness exception (v10 section 5.1), so no heartbeat name
-  may ever appear in the core vocabulary.
-
-``core.task``, ``core.run``, and ``core.media`` stream types are registered now
-because v10 section 2.3 requires core to register its stream types; m1
-implements the project vertical only, so m1 core event/command kinds are the
-project ones. m2 (plan step 1) registers the exact task lifecycle (admission,
-claim, start, expiry, cancellation, failure, retry, completion), run fan-out
-and group, and media (import, location replacement, relations) command/event
-kinds the m2 repositories consume. m3 (plan step 1) adds the receipt-linked
-run continuation vocabulary (``core.run.continue``/``core.run.continued``),
-the kernel evidence event (``core.evidence.recorded``) and its receipt
-command kind (``core.evidence.record``), and registers
-aggregate agreement rules for the references and shots packs' own stream
-types (``reference.reference``, ``shot.shot``) so pack-owned repositories
-can create and write their aggregate streams without kernel DDL changes.
+The kernel remains irreducible code-owned behavior. Its database and
+vocabulary are projected directly into the same frozen registry used by
+bundled canonical packs.
 """
 
 from __future__ import annotations
@@ -46,15 +13,12 @@ from types import MappingProxyType
 from typing import Mapping
 
 from astrid.core.migrations.catalog import CORE_MIGRATIONS
+from astrid.core.pack.canonical import core_database_projection
 from astrid.core.repositories.errors import (
     CommandVocabularyError,
     EventVocabularyError,
     StreamAgreementError,
     StreamVocabularyError,
-)
-from astrid.core.schema_packs.manifest import (
-    SchemaPackManifest,
-    parse_schema_pack_manifest,
 )
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
@@ -64,8 +28,6 @@ from astrid.core.schema_packs.registry import (
 CORE_PACK_ID = "core"
 """Pack id used for the code-declared kernel manifest and migration rows."""
 
-CORE_MANIFEST_VERSION = 1
-"""Independent forward-only version of the code-declared core manifest."""
 
 CORE_STREAM_TYPES: tuple[str, ...] = (
     "core.project",
@@ -82,11 +44,10 @@ CORE_REPOSITORIES: tuple[str, ...] = (
     "MediaRepository",
     "RunRepository",
 )
-"""The kernel repository implementations the code-declared core manifest
-declares. m1 implements the project vertical; m2 adds the task, media, and run
-repositories. Packs declare their own repositories through ``schema-pack.yaml``;
-core declares its surface here so the composed registry owns every repository
-name exactly once."""
+"""The kernel repository implementations owned by irreducible core code.
+
+The composed registry owns this vocabulary exactly once.
+"""
 
 CORE_CONFORMANCE_DIMENSIONS: tuple[str, ...] = (
     "replay",
@@ -182,51 +143,24 @@ pack commands (``timeline.save``, ``shot.add_item``,
 command kind."""
 
 
-def core_schema_pack_manifest() -> SchemaPackManifest:
-    """Build the strict, validated kernel (core) manifest without any YAML.
-
-    The kernel pack is code-declared: the single migration descriptor mirrors
-    ``astrid.core.migrations.catalog.CORE_MIGRATIONS`` so the registry's owned
-    tables are exactly the audited 14 kernel tables.
-    """
-    core_migration = CORE_MIGRATIONS[0]
-    return parse_schema_pack_manifest(
-        {
-            "id": CORE_PACK_ID,
-            "version": CORE_MANIFEST_VERSION,
-            "depends_on": [],
-            "migrations": [
-                {
-                    "version": core_migration.version,
-                    "name": core_migration.name,
-                    "path": core_migration.path,
-                    "tables": sorted(core_migration.owned_tables),
-                }
-            ],
-            "stream_types": list(CORE_STREAM_TYPES),
-            "event_kinds": list(CORE_EVENT_KINDS),
-            "command_kinds": list(CORE_COMMAND_KINDS),
-            "repositories": list(CORE_REPOSITORIES),
-            "conformance": list(CORE_CONFORMANCE_DIMENSIONS),
-            "cli_mounts": {},
-            "bridge_mounts": [],
-        },
-        source_path=None,
+def register_core_vocabulary(registry: SchemaPackRegistry) -> SchemaPackRegistry:
+    """Register the irreducible kernel database/vocabulary projection."""
+    pack_id, database, owner_root, resources = core_database_projection()
+    return registry.register_database_projection(
+        pack_id,
+        database,
+        owner_root=owner_root,
+        resources=resources,
+        name="Astrid kernel",
+        version=1,
     )
 
 
-def register_core_vocabulary(registry: SchemaPackRegistry) -> SchemaPackRegistry:
-    """Register the kernel vocabulary into ``registry`` independently.
-
-    This is the core-only composition path: it never touches Astrid packs, so a
-    kernel-only registry builds without any in-tree pack present.
-    """
-    return registry.register_pack(core_schema_pack_manifest())
-
-
 def core_only_registry() -> FrozenSchemaPackRegistry:
-    """Compose the frozen kernel-only registry (no Astrid packs)."""
+    """Compose the frozen kernel-only canonical registry."""
     return register_core_vocabulary(SchemaPackRegistry()).freeze()
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +511,6 @@ __all__ = [
     "CORE_COMMAND_KINDS",
     "CORE_CONFORMANCE_DIMENSIONS",
     "CORE_EVENT_KINDS",
-    "CORE_MANIFEST_VERSION",
     "CORE_PACK_ID",
     "CORE_REPOSITORIES",
     "CORE_STREAM_TYPES",
@@ -585,7 +518,6 @@ __all__ = [
     "StreamAggregateRule",
     "aggregate_rule_for",
     "core_only_registry",
-    "core_schema_pack_manifest",
     "register_core_vocabulary",
     "validate_command_kind",
     "validate_event_append",

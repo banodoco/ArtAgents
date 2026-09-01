@@ -31,7 +31,7 @@ def reject_symlinked_path(path: str | Path) -> Path:
 if TYPE_CHECKING:
     from astrid.core.pack.definition import PackDefinition
 
-PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
+PACK_MANIFEST_NAMES = ("pack.yaml",)
 EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
 ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")

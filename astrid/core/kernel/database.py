@@ -1,10 +1,8 @@
-"""Canonical-versus-legacy kernel database authority resolution.
+"""Canonical kernel database authority resolution.
 
 The v10 application owns ``<projects_root>/.astrid/astrid.sqlite3``. Older
-entrypoints may still leave a separate ``kernel.sqlite3`` ledger behind.
-Readers must never select that legacy ledger merely because it appears first
-on disk: canonical wins whenever it exists, while legacy fallback remains
-available only for roots that have not yet acquired the canonical store.
+entrypoints may leave separate historical ledgers behind, but those paths are
+diagnostic evidence only and are never selected for reads or writes.
 
 This module resolves paths only. It never opens, creates, migrates, renames,
 or deletes a database, making it safe for doctor and read-only consumers.
@@ -38,16 +36,12 @@ class KernelDatabaseAuthority:
 def resolve_kernel_database_authority(
     projects_root: str | Path,
 ) -> KernelDatabaseAuthority:
-    """Resolve the sole read authority without mutating either ledger.
+    """Resolve the canonical read authority without mutating any ledger.
 
-    Precedence is deliberately asymmetric:
-
-    1. canonical ``.astrid/astrid.sqlite3`` whenever it exists;
-    2. the first existing historical layout only when canonical is absent;
-    3. canonical path as the not-yet-created default when no database exists.
-
-    Existing legacy paths are always reported so doctor can make coexistence
-    visible while normal readers continue deterministically on canonical.
+    The canonical ``.astrid/astrid.sqlite3`` path is always authoritative,
+    whether it exists yet or not. Existing historical paths are reported so
+    doctor can make stale files visible, but they never become an active
+    fallback.
     """
 
     root = Path(projects_root)
@@ -58,28 +52,12 @@ def resolve_kernel_database_authority(
         root / "astrid.sqlite3",
     )
     existing_legacy = tuple(path for path in legacy_candidates if path.is_file())
-    if canonical.is_file():
-        return KernelDatabaseAuthority(
-            projects_root=root,
-            canonical_path=canonical,
-            selected_path=canonical,
-            mode="canonical",
-            existing_legacy_paths=existing_legacy,
-        )
-    if existing_legacy:
-        return KernelDatabaseAuthority(
-            projects_root=root,
-            canonical_path=canonical,
-            selected_path=existing_legacy[0],
-            mode="legacy",
-            existing_legacy_paths=existing_legacy,
-        )
     return KernelDatabaseAuthority(
         projects_root=root,
         canonical_path=canonical,
         selected_path=canonical,
-        mode="missing",
-        existing_legacy_paths=(),
+        mode="canonical" if canonical.is_file() else "missing",
+        existing_legacy_paths=existing_legacy,
     )
 
 

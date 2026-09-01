@@ -1,23 +1,9 @@
-"""Immutable composed schema-pack registry with deterministic collision rejection.
+"""Immutable typed database projection registry.
 
-(m1 plan step 2; decision artifact section 4.) Startup composes exactly the
-shipped in-tree packs through one explicit :meth:`SchemaPackRegistry.register_pack`
-call per pack, then :meth:`SchemaPackRegistry.freeze` produces the immutable
-:class:`FrozenSchemaPackRegistry` that migrations, repositories, and lint consume.
-
-The registry is a startup correctness boundary: every collision class (pack id,
-owned table, migration version and name, stream type, event kind, command kind,
-repository, CLI mount key, and bridge mount) is rejected deterministically
-*before* any database is opened. This module is pure in-memory configuration:
-
-- it never opens a database and never imports store/writer/sqlite modules;
-- it never imports the capability-pack loader or definition machinery;
-- it consumes only validated :class:`SchemaPackManifest` models produced by
-  :func:`astrid.core.schema_packs.manifest.parse_schema_pack_manifest`.
-
-Registration is atomic per pack: all collisions for one manifest are collected
-and reported together (sorted, so identical input always produces the identical
-error), and no partial state is recorded when any collision exists.
+Canonical pack database declarations enter through
+``register_database_projection``. This module retains only the reusable
+collision, dependency, ordering, resource, and freeze mechanics; it has no
+manifest parser or alternate identity authority.
 """
 
 from __future__ import annotations
@@ -26,8 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, TYPE_CHECKING
-
-from astrid.core.schema_packs.manifest import SchemaPackManifest
 
 if TYPE_CHECKING:
     from astrid.core.pack.canonical import ResourceHandle
@@ -78,9 +62,8 @@ class RegisteredMigration:
 class DatabasePackProjection:
     """Immutable database-only projection consumed by collision/freeze logic.
 
-    This deliberately is not a :class:`SchemaPackManifest`: canonical packs
-    have one source of truth and must not be converted back into the legacy
-    manifest grammar merely to enter the runtime registry.
+    Canonical packs have one source of truth and enter the runtime registry
+    directly; this projection is never converted into another manifest form.
     """
 
     id: str
@@ -197,8 +180,8 @@ class SchemaPackRegistry:
 
     # -- public API --------------------------------------------------------
 
-    def register_pack(self, manifest: SchemaPackManifest) -> SchemaPackRegistry:
-        """Register one validated manifest, rejecting every collision class.
+    def register_pack(self, manifest: Any) -> SchemaPackRegistry:
+        """Register a typed database projection for collision testing.
 
         The check is atomic: collisions are collected across all classes and
         reported sorted before any registry state changes.
@@ -232,8 +215,7 @@ class SchemaPackRegistry:
         """Register one immutable canonical database projection.
 
         ``pack_or_id`` may be a canonical pack entry or an id string used by
-        the explicit kernel projection. This adapter does not construct a
-        legacy :class:`SchemaPackManifest`.
+        the explicit kernel projection. No alternate manifest object is built.
         """
         if self._frozen:
             pack_id = getattr(pack_or_id, "id", pack_or_id)
@@ -378,18 +360,11 @@ class SchemaPackRegistry:
             for descriptor in manifest.migrations:
                 key = (pack_id, descriptor.version)
                 resource = self._migration_resources.get(key)
-                if resource is not None:
-                    owner_root = Path(resource.root)
-                else:
-                    source_path = getattr(manifest, "source_path", None)
-                    if source_path is not None:
-                        owner_root = Path(source_path).parent.resolve()
-                    elif pack_id == "core":
-                        owner_root = Path(__file__).resolve().parents[1] / "migrations"
-                    else:
-                        owner_root = Path(__file__).resolve().parents[2] / "packs" / pack_id
-                    owner_root = owner_root.resolve()
-                    resource = self._legacy_resource_handle(owner_root, descriptor.path)
+                if resource is None:
+                    raise SchemaPackRegistryError(
+                        f"database migration {pack_id!r}/{descriptor.version} "
+                        "has no confined resource"
+                    )
                 migrations.append(
                     RegisteredMigration(
                         pack=pack_id,
@@ -397,35 +372,12 @@ class SchemaPackRegistry:
                         name=descriptor.name,
                         path=descriptor.path,
                         tables=descriptor.tables,
-                        owner_root=owner_root,
+                        owner_root=Path(resource.root),
                         resource=resource,
                     )
                 )
         return migrations
 
-    @staticmethod
-    def _legacy_resource_handle(owner_root: Path, relative_path: str) -> ResourceHandle:
-        """Create a compatibility handle for an old schema-pack manifest."""
-        from astrid.core.pack.canonical import ResourceHandle
-
-        candidate = owner_root.joinpath(*relative_path.split("/"))
-        resolved = candidate.resolve(strict=False)
-        if candidate.is_file():
-            size = candidate.stat().st_size
-            import hashlib
-
-            digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
-        else:
-            size, digest = 0, ""
-        return ResourceHandle(
-            relative_path,
-            owner_root,
-            resolved,
-            "legacy database.migration",
-            "file",
-            size,
-            digest,
-        )
 
     def _collect_collisions(self, manifest: Any) -> list[str]:
         """Return every deterministic collision between ``manifest`` and the registry."""

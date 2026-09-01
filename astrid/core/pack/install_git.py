@@ -12,10 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from astrid.core.pack import pack_manifest_path
 from astrid.core.pack._common import SymlinkedPackPathError, reject_symlinked_path
 from astrid.core.pack.gitignore import gitignore_filter
-from astrid.core.pack.manifest import load_manifest_for_dispatch
 from astrid.core.pack.canonical import (
     CanonicalPackValidationError,
     ExternalPackSource,
@@ -286,9 +284,9 @@ def _strict_canonical_manifest_for_root(root: str | Path) -> Path | None:
 def _find_pack_root_in_checkout(
     checkout: str | Path,
     *,
-    canonical_only: bool = False,
+    canonical_only: bool = True,
 ) -> Path:
-    """Auto-detect a confined pack root directory inside a Git checkout."""
+    """Auto-detect a confined canonical pack root in a Git checkout."""
     try:
         checkout_path = reject_symlinked_path(checkout).resolve()
     except SymlinkedPackPathError as exc:
@@ -299,18 +297,14 @@ def _find_pack_root_in_checkout(
     root_manifest = _strict_canonical_manifest_for_root(checkout_path)
     if root_manifest is not None:
         return checkout_path
-    if not canonical_only and pack_manifest_path(checkout_path) is not None:
-        return checkout_path
-
+    
     candidates: list[Path] = []
     try:
         for child in checkout_path.iterdir():
             if child.name.startswith(".") or not child.is_dir():
                 continue
-            child_manifest = _strict_canonical_manifest_for_root(child)
-            if child_manifest is None:
-                if canonical_only or pack_manifest_path(child) is None:
-                    continue
+            if _strict_canonical_manifest_for_root(child) is None:
+                continue
             try:
                 candidate = reject_symlinked_path(child)
             except SymlinkedPackPathError as exc:
@@ -324,10 +318,9 @@ def _find_pack_root_in_checkout(
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
-        expected = "pack.yaml" if canonical_only else "pack.yaml, pack.yml, or pack.json"
         raise RuntimeError(
-            f"No {'canonical ' if canonical_only else ''}pack manifest found in "
-            f"{checkout_path} or its immediate subdirectories. Expected {expected}."
+            f"No canonical pack manifest found in "
+            f"{checkout_path} or its immediate subdirectories. Expected pack.yaml."
         )
     candidate_names = ", ".join(f"'{candidate.name}'" for candidate in candidates)
     raise RuntimeError(
@@ -426,9 +419,6 @@ def _update_git_pack(
         _diff_component_inventories,
         _is_canonical_v2_record,
     )
-    from astrid.core.pack.validate import extract_trust_summary
-
-    canonical_required = _is_canonical_v2_record(existing)
 
     git_url = existing.git_url
     if not git_url:
@@ -468,36 +458,20 @@ def _update_git_pack(
             else:
                 checkout_path, clone_sha = _clone_git_pack(git_url)
             _verify_git_checkout_commit(remote_sha, clone_sha)
-            pack_root = _find_pack_root_in_checkout(
-                checkout_path, canonical_only=canonical_required
-            )
-            if canonical_required:
-                manifest_path = _strict_canonical_manifest_for_root(pack_root)
-            else:
-                manifest_path = (
-                    canonical_manifest_path(pack_root) or pack_manifest_path(pack_root)
-                )
+            pack_root = _find_pack_root_in_checkout(checkout_path)
+            manifest_path = _strict_canonical_manifest_for_root(pack_root)
             if manifest_path is None:
                 raise RuntimeError(
                     "Git checkout does not contain the required canonical pack.yaml"
-                    if canonical_required
-                    else "Git checkout does not contain a pack manifest"
                 )
-            if canonical_required:
-                new_entry = read_normalize_validate(
-                    manifest_path,
-                    source=ExternalPackSource.GIT,
-                    resolve_resources=True,
-                    expected_pack_id=pack_id,
-                )
-                new_summary = _canonical_trust_summary(new_entry, pack_root)
-                new_version = new_entry.definition.version
-            else:
-                raw = load_manifest_for_dispatch(
-                    manifest_path, manifest_kind="pack"
-                )
-                new_summary = extract_trust_summary(pack_root)
-                new_version = str(raw.get("version", ""))
+            new_entry = read_normalize_validate(
+                manifest_path,
+                source=ExternalPackSource.GIT,
+                resolve_resources=True,
+                expected_pack_id=pack_id,
+            )
+            new_summary = _canonical_trust_summary(new_entry, pack_root)
+            new_version = new_entry.definition.version
             print("═══ Currently Installed ═══")
             print(f"  Version:  {old_version}")
             print(f"  Source:   {git_url}")
@@ -533,29 +507,19 @@ def _update_git_pack(
             checkout_path, new_commit_sha = _clone_git_pack(git_url)
         _verify_git_checkout_commit(remote_sha, new_commit_sha)
         pack_root = reject_symlinked_path(
-            _find_pack_root_in_checkout(
-                checkout_path, canonical_only=canonical_required
-            )
+            _find_pack_root_in_checkout(checkout_path)
         )
-        if canonical_required:
-            manifest_path = _strict_canonical_manifest_for_root(pack_root)
-            if manifest_path is None:
-                raise RuntimeError(
-                    "Git checkout does not contain the required canonical pack.yaml"
-                )
-            # Admit the complete v2 tree before creating an update staging
-            # copy; canonical records never downgrade to legacy parsing.
-            read_normalize_validate(
-                manifest_path,
-                source=ExternalPackSource.GIT,
-                resolve_resources=True,
-                expected_pack_id=pack_id,
+        manifest_path = _strict_canonical_manifest_for_root(pack_root)
+        if manifest_path is None:
+            raise RuntimeError(
+                "Git checkout does not contain the required canonical pack.yaml"
             )
-        else:
-            try:
-                canonical_manifest_path(pack_root)
-            except CanonicalPackValidationError as exc:
-                raise RuntimeError(str(exc)) from exc
+        read_normalize_validate(
+            manifest_path,
+            source=ExternalPackSource.GIT,
+            resolve_resources=True,
+            expected_pack_id=pack_id,
+        )
         pack_root_copy = tempfile.mkdtemp(prefix="astrid_update_")
         target_copy = Path(pack_root_copy) / pack_id
         shutil.copytree(

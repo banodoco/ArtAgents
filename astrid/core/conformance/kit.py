@@ -108,11 +108,10 @@ NON_EXECUTABLE_COMMAND_KINDS: tuple[str, ...] = (
 )
 """Declared-but-unimplemented command kinds that must never be executable.
 
-The shots and references packs declare their normative future vocabulary in
-``schema-pack.yaml`` but ship no executable repository in m1. The kit's
-executable set must never contain them (``repositories: []`` in both
-manifests), while the registry still declares them so a would-be caller
-gets a typed error, never an allowlist hole.
+The shots and references packs declare their normative vocabulary in their
+canonical ``pack.yaml`` database projections but ship no executable repository
+in this kit (``repositories: []``); the registry still declares them so a
+would-be caller gets a typed error, never an allowlist hole.
 """
 
 # Every kernel mutation table the kit snapshots (the frozen 14-table kernel

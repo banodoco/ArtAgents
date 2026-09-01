@@ -14,7 +14,6 @@ from pathlib import Path
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.pack._common import SymlinkedPackPathError, reject_symlinked_path
-from astrid.core.pack import pack_manifest_path
 from astrid.core.pack.gitignore import gitignore_filter
 from astrid.core.pack.install_git import (
     _install_from_git,
@@ -43,21 +42,14 @@ from astrid.core.pack.canonical import (
     canonical_manifest_path,
     read_normalize_validate,
 )
-from astrid.core.pack.manifest import (
-    ManifestParseError,
-    load_manifest_for_dispatch,
-    load_manifest_mapping,
-)
 from astrid.core.pack.store import (
     InstalledPackStore,
     InstallRecord,
     _is_canonical_v2_record,
-    _is_legacy_v1_schema,
     _manifest_path_for_installed_record,
     _revision_timestamp,
     validate_installed_manifest_custody as _validate_installed_manifest_custody_impl,
 )
-from astrid.core.pack.validate import extract_trust_summary, validate_pack
 from astrid.core.util.time import utc_now_seconds
 
 
@@ -159,182 +151,33 @@ def install_pack(
             f"{source_path}"
         ) from exc
     source = source.resolve()
-    manifest_path = canonical_manifest_path(source) or pack_manifest_path(source)
-    if manifest_path is None:
-        print(
-            f"install: no pack manifest found in {source} "
-            f"(expected pack.yaml, pack.yml, or pack.json)",
-            file=sys.stderr,
-        )
-        return 2
-    try:
-        raw = load_manifest_for_dispatch(manifest_path, manifest_kind="pack")
-    except ManifestParseError as exc:
-        print(f"install: failed to parse pack manifest: {exc}", file=sys.stderr)
-        return 2
-    schema_version = raw.get("schema_version")
-    if "schema_version" in raw and not (
-        (type(schema_version) is int and schema_version == 1)
-        or (type(schema_version) is float and schema_version == 1.0)
-    ):
+    canonical_expected_pack_id = expected_pack_id
+    if canonical_expected_pack_id is None and skip_name_check:
         try:
-            load_manifest_mapping(
-                manifest_path, manifest_kind="pack", reject_duplicate_keys=True
+            candidate = read_normalize_validate(
+                source / "pack.yaml",
+                source=ExternalPackSource.GIT if source_type == "git" else ExternalPackSource.LOCAL,
+                resolve_resources=False,
             )
-        except ManifestParseError as exc:
-            print(f"install: failed to parse pack manifest: {exc}", file=sys.stderr)
+        except CanonicalPackValidationError as exc:
+            print(f"install: failed strict pack admission: {exc}", file=sys.stderr)
             return 2
-        canonical_expected_pack_id = expected_pack_id
-        if canonical_expected_pack_id is None and skip_name_check:
-            manifest_id = raw.get("id")
-            if isinstance(manifest_id, str):
-                canonical_expected_pack_id = manifest_id
-        return install_canonical_pack(
-            source,
-            store=store,
-            dry_run=dry_run,
-            skip_confirm=skip_confirm,
-            trust_acknowledged=trust_acknowledged,
-            trust_method=trust_method,
-            trust_actor=trust_actor,
-            force=force,
-            git_url=git_url,
-            commit_sha=commit_sha,
-            requested_ref=requested_ref,
-            source_type=source_type,
-            expected_pack_id=canonical_expected_pack_id,
-        )
-
-    pack_id = raw.get("id")
-    if not isinstance(pack_id, str) or not pack_id:
-        print(
-            "install: pack manifest missing required 'id' field",
-            file=sys.stderr,
-        )
-        return 2
-
-    # ------------------------------------------------------------------
-    # 3. Source directory name must match pack id (PackResolver invariant)
-    # ------------------------------------------------------------------
-    if not skip_name_check and source.name != pack_id:
-        print(
-            f"install: source directory name {source.name!r} must match "
-            f"pack id {pack_id!r} declared in pack manifest.",
-            file=sys.stderr,
-        )
-        return 2
-
-    # ------------------------------------------------------------------
-    # 4. Check collision
-    # ------------------------------------------------------------------
-    existing = store.get_active_strict(pack_id)
-    if existing is not None and not force:
-        print(
-            f"install: pack {pack_id!r} is already installed.\n"
-            f"  Installed at: {existing.installed_at}\n"
-            f"  Source:       {existing.source_path}\n"
-            f"  Use --force to overwrite (old revision will be preserved).",
-            file=sys.stderr,
-        )
-        return 1
-
-    # ------------------------------------------------------------------
-    # 5. Extract trust summary
-    # ------------------------------------------------------------------
-    try:
-        trust_summary = extract_trust_summary(source)
-    except Exception as e:
-        print(f"install: cannot extract trust summary: {e}", file=sys.stderr)
-        return 2
-
-    # ------------------------------------------------------------------
-    # 6. Dry-run: print trust summary and exit
-    # ------------------------------------------------------------------
-    if dry_run:
-        print(
-            _format_trust_summary(
-                trust_summary,
-                git_url=git_url,
-                commit_sha=commit_sha,
-                astrid_version=str(raw.get("astrid_version", "")),
-                trust_tier=source_type,
-            )
-        )
-        return 0
-
-    # ------------------------------------------------------------------
-    # 7. Validate source pack
-    # ------------------------------------------------------------------
-    errors, warnings = validate_pack(source)
-    if warnings:
-        for w in warnings:
-            print(f"warning: {w}", file=sys.stderr)
-
-    if errors:
-        print(
-            f"install: source pack validation failed with {len(errors)} error(s):",
-            file=sys.stderr,
-        )
-        for err in errors:
-            print(f"  {err}", file=sys.stderr)
-        print(
-            "install: refusing to install an invalid pack.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # ------------------------------------------------------------------
-    # 8. Trust acknowledgement and ordinary confirmation
-    # ------------------------------------------------------------------
-    if not trust_acknowledged:
-        if skip_confirm:
-            _trust_missing_error("install", pack_id)
-            return 1
-        if not _confirm_trust(
-            pack_id,
-            {
-                **trust_summary,
-                "source_path": trust_summary.get("source_path", str(source)),
-            },
-        ):
-            print("Cancelled.", file=sys.stderr)
-            return 1
-        trust_acknowledged = True
-        trust_method = trust_method or "interactive"
-        trust_actor = trust_actor or "cli"
-    else:
-        trust_method = trust_method or "api"
-        trust_actor = trust_actor or "api"
-
-    if not skip_confirm:
-        action = "overwrite" if existing else "install"
-        if not _confirm(f"Proceed with {action}?"):
-            print("Cancelled.", file=sys.stderr)
-            return 1
-
-    # ------------------------------------------------------------------
-    # 9. Acquire lock
-    # ------------------------------------------------------------------
-    lock = store._acquire_lock(pack_id)
-
-    try:
-        with lock:
-            return _do_install(
-                source, pack_id, trust_summary, store, force, existing,
-                manifest_raw=raw,
-                trust_method=trust_method,
-                trust_actor=trust_actor,
-                git_url=git_url,
-                commit_sha=commit_sha,
-                requested_ref=requested_ref,
-                source_type=source_type,
-            )
-    except Exception:
-        # Ensure no broken state — clean up staging if it exists
-        staging = store.staging_path_for(pack_id)
-        if staging.is_dir():
-            shutil.rmtree(staging, ignore_errors=True)
-        raise
+        canonical_expected_pack_id = candidate.id
+    return install_canonical_pack(
+        source,
+        store=store,
+        dry_run=dry_run,
+        skip_confirm=skip_confirm,
+        trust_acknowledged=trust_acknowledged,
+        trust_method=trust_method,
+        trust_actor=trust_actor,
+        force=force,
+        git_url=git_url,
+        commit_sha=commit_sha,
+        requested_ref=requested_ref,
+        source_type=source_type,
+        expected_pack_id=canonical_expected_pack_id,
+    )
 
 
 
@@ -595,13 +438,11 @@ def _do_install(
     # Derive trust_tier from source_type
     trust_tier = source_type  # "local" or "git"
 
-    # Compute the digest from the manifest admission selected above.
-    manifest_path = (
-        canonical_manifest_path(source)
-        if canonical_entry is not None
-        else pack_manifest_path(source)
-    )
-    manifest_digest = ""
+    manifest_path = canonical_manifest_path(source)
+    if manifest_path is None:
+        raise CanonicalPackValidationError(
+            f"canonical pack.yaml missing from install source {source}"
+        )
     if manifest_path is not None and manifest_path.is_file():
         manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     # Derive astrid_version from manifest raw dict
@@ -642,29 +483,17 @@ def _do_install(
         publication_snapshot.cleanup()
         return 1
 
-    # ------------------------------------------------------------------
-    # 11. Validate staging
-    # ------------------------------------------------------------------
     if canonical_entry is None:
-        errors, _warnings = validate_pack(staging)
-        if errors:
-            print(
-                f"install: staging validation failed with {len(errors)} error(s):",
-                file=sys.stderr,
-            )
-            for err in errors:
-                print(f"  {err}", file=sys.stderr)
-            restore_previous_install()
-            publication_snapshot.cleanup()
-            return 1
-    else:
-        try:
-            _validate_staged_canonical_pack(staging, pack_id)
-        except Exception as exc:
-            print(f"install: staging validation failed: {exc}", file=sys.stderr)
-            restore_previous_install()
-            publication_snapshot.cleanup()
-            return 1
+        raise CanonicalPackValidationError(
+            f"canonical pack admission missing for install {pack_id!r}"
+        )
+    try:
+        _validate_staged_canonical_pack(staging, pack_id)
+    except Exception as exc:
+        print(f"install: staging validation failed: {exc}", file=sys.stderr)
+        restore_previous_install()
+        publication_snapshot.cleanup()
+        return 1
 
     # ------------------------------------------------------------------
     # 12–15. Publish the revision and its custody atomically.
@@ -1146,75 +975,6 @@ def update_pack(
             force=True,
         )
 
-    if not source_path.is_dir():
-        print(
-            f"update: source directory {source_path} no longer exists. "
-            f"Cannot update.",
-            file=sys.stderr,
-        )
-        return 1
-    manifest_path = _manifest_path_for_installed_record(existing, source_path)
-    if manifest_path is None:
-        print(
-            f"update: no pack manifest found in source {source_path}",
-            file=sys.stderr,
-        )
-        return 2
-    try:
-        raw = load_manifest_for_dispatch(manifest_path, manifest_kind="pack")
-    except ManifestParseError as e:
-        print(f"update: failed to parse pack manifest: {e}", file=sys.stderr)
-        return 2
-    schema_version = raw.get("schema_version")
-    is_legacy_v1 = _is_legacy_v1_schema(schema_version)
-    if "schema_version" in raw and not is_legacy_v1:
-        return install_pack(
-            source_path,
-            store=store,
-            dry_run=dry_run,
-            skip_confirm=skip_confirm,
-            trust_acknowledged=trust_acknowledged,
-            trust_method=trust_method,
-            trust_actor=trust_actor,
-            force=True,
-        )
-    # Extract trust summary for display
-    try:
-        trust_summary = extract_trust_summary(source_path)
-    except Exception as e:
-        print(f"update: cannot extract trust summary: {e}", file=sys.stderr)
-        return 2
-
-    # Dry-run: print diff
-    if dry_run:
-        print("═══ Currently Installed ═══")
-        print(f"  Version:  {existing.version}")
-        print(f"  Source:   {existing.source_path}")
-        print(f"  Installed:{existing.installed_at}")
-        print()
-        print("═══ Source (would install) ═══")
-        print(
-            _format_trust_summary(
-                trust_summary,
-                git_url=existing.git_url,
-                commit_sha=existing.commit_sha,
-                astrid_version=str(raw.get("astrid_version", "")),
-                trust_tier=existing.trust_tier or existing.source_type,
-            )
-        )
-        return 0
-
-    # Real update: same flow as install with force
-    return install_pack(
-        source_path,
-        store=store,
-        dry_run=False,
-        skip_confirm=skip_confirm,
-        trust_acknowledged=trust_acknowledged,
-        trust_method=trust_method,
-        trust_actor=trust_actor,
-        force=True,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1374,29 +1134,20 @@ def rollback_pack(
     _assert_canonical_rollback_target_compatibility(current_record, target_record)
     target_path = store.revisions_dir(pack_id) / target_rev_name
     try:
-        if _is_canonical_v2_record(target_record):
-            target_manifest = _canonical_manifest_path_for_revision_target(
-                target_record,
-                target_path,
-                store.assert_revisions_root(pack_id),
-            )
-        else:
-            target_manifest = _manifest_path_for_installed_record(
-                target_record, target_path
-            )
+        target_manifest = _canonical_manifest_path_for_revision_target(
+            target_record,
+            target_path,
+            store.assert_revisions_root(pack_id),
+        )
     except CanonicalPackValidationError as exc:
         print(f"rollback: canonical target custody rejected: {exc}", file=sys.stderr)
         return 1
     if target_manifest is None:
-        try:
-            _validate_installed_manifest_custody(
-                store, target_record, target_path
-            )
-        except AstridError as exc:
-            print(f"rollback: target pack validation failed: {exc}", file=sys.stderr)
-            return 1
+        print(
+            f"rollback: canonical pack.yaml missing for {target_rev_name!r}",
+            file=sys.stderr,
+        )
         return 1
-
     try:
         target_entry = _validate_installed_manifest_custody(
             store,
@@ -1407,39 +1158,13 @@ def rollback_pack(
     except AstridError as exc:
         print(f"rollback: target pack validation failed: {exc}", file=sys.stderr)
         return 1
-
     if target_entry is None:
-        # Legacy records retain the v1 dispatch and validation behavior.
-        try:
-            target_raw = load_manifest_for_dispatch(
-                target_manifest, manifest_kind="pack"
-            )
-            target_schema = target_raw.get("schema_version")
-            target_is_v1 = _is_legacy_v1_schema(target_schema)
-        except Exception as exc:
-            print(f"rollback: target pack validation failed: {exc}", file=sys.stderr)
-            return 1
-
-        if target_entry is None:
-            errors, _warnings = validate_pack(target_path)
-            if errors:
-                print(
-                    f"rollback: target pack validation failed with {len(errors)} error(s) "
-                    "— the revision may be incompatible with the current Astrid version.",
-                    file=sys.stderr,
-                )
-                for error in errors:
-                    print(f"  {error}", file=sys.stderr)
-                print(
-                    "rollback: the rollback has been applied, but the pack may not "
-                    "function correctly.",
-                    file=sys.stderr,
-                )
-    target_summary = (
-        _canonical_trust_summary(target_entry, target_path)
-        if target_entry is not None
-        else extract_trust_summary(target_path)
-    )
+        print(
+            f"rollback: target revision {target_rev_name!r} is not canonical v2",
+            file=sys.stderr,
+        )
+        return 1
+    target_summary = _canonical_trust_summary(target_entry, target_path)
 
     old_summary = existing.trust_summary if existing.trust_summary else {}
     target_version = target_record.version
@@ -1497,32 +1222,11 @@ def rollback_pack(
 
     new_active = store.active_revision_path(pack_id)
     if new_active is not None:
-        if target_entry is not None:
-            try:
-                _validate_staged_canonical_pack(new_active, pack_id)
-            except Exception as exc:
-                print(f"rollback: rolled-back pack validation failed: {exc}", file=sys.stderr)
-                return 1
-        else:
-            errors, warnings = validate_pack(new_active)
-            if warnings:
-                for warning in warnings:
-                    print(f"warning: {warning}", file=sys.stderr)
-            if errors:
-                print(
-                    f"rollback: rolled-back pack validation failed with "
-                    f"{len(errors)} error(s) — the revision may be incompatible "
-                    "with the current Astrid version.",
-                    file=sys.stderr,
-                )
-                for error in errors:
-                    print(f"  {error}", file=sys.stderr)
-                print(
-                    "rollback: the rollback has been applied, but the pack may "
-                    "not function correctly.",
-                    file=sys.stderr,
-                )
-                return 1
+        try:
+            _validate_staged_canonical_pack(new_active, pack_id)
+        except Exception as exc:
+            print(f"rollback: rolled-back pack validation failed: {exc}", file=sys.stderr)
+            return 1
 
     print(f"✓ Pack {pack_id!r} rolled back to revision {target_rev_name!r}.")
     print(f"  Location: {store.install_root_for(pack_id)}")

@@ -102,6 +102,8 @@ class CapabilityTaskHandler:
         capability_id: str,
         projects_root: str | Path | None = None,
         invocation: str = "sdk",
+        executor_registry: Any | None = None,
+        orchestrator_registry: Any | None = None,
     ) -> None:
         if capability_kind not in ("executor", "orchestrator"):
             raise ValueError(f"capability_kind must be executor/orchestrator, got {capability_kind!r}")
@@ -111,7 +113,8 @@ class CapabilityTaskHandler:
         self._capability_id = capability_id
         self._projects_root = Path(projects_root).expanduser().resolve() if projects_root is not None else None
         self._invocation = invocation
-
+        self._executor_registry = executor_registry
+        self._orchestrator_registry = orchestrator_registry
     def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
         staging_dir = Path(staging_dir)
         out_dir = staging_dir / "out"
@@ -202,7 +205,7 @@ class CapabilityTaskHandler:
                 # envelope.  Capture both child streams at this boundary;
                 # artifacts are discovered from the staging contract below.
                 with redirect_stdout(child_stdout), redirect_stderr(child_stderr):
-                    result = executor_runner.run_executor(req, None)
+                    result = executor_runner.run_executor(req, self._executor_registry)
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     msg = getattr(result, "payload", {}) or {}
@@ -236,7 +239,7 @@ class CapabilityTaskHandler:
                     invocation=self._invocation,
                     projects_root=self._projects_root,
                 )
-                result = run_orchestrator(req, None)
+                result = run_orchestrator(req, self._orchestrator_registry)
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     raise RuntimeError(f"orchestrator {self._capability_id!r} failed: {result}")

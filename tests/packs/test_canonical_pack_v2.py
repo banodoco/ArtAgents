@@ -150,9 +150,9 @@ class CanonicalPackV2Test(unittest.TestCase):
             (root / "pack.yml").symlink_to(root / "missing-pack.yml")
             with self.assertRaises(CanonicalPackValidationError):
                 BundledCatalog.from_root(Path(tmp))
-    def test_legacy_loader_rejects_v2_instead_of_dropping_declarations(self) -> None:
-        with self.assertRaisesRegex(PackValidationError, "legacy loading"):
-            load_pack_manifest(FIXTURES / "capability_only" / "pack.yaml")
+    def test_strict_loader_admits_v2_only(self) -> None:
+        entry = load_pack_manifest(FIXTURES / "capability_only" / "pack.yaml")
+        self.assertEqual(entry.id, "capability_only")
 
 
     def test_external_database_rejects_before_resource_resolution(self) -> None:
@@ -1542,27 +1542,13 @@ extensions:
                     before_record = (before_active / ".astrid" / "install.json").read_bytes()
                     (source / "pack.yaml").write_text(content, encoding="utf-8")
 
-                    with (
-                        patch(
-                            "astrid.core.pack.install_local.load_manifest_for_dispatch",
-                            side_effect=AssertionError("canonical update used dispatch parser"),
-                        ),
-                        patch(
-                            "astrid.core.pack.install_local.validate_pack",
-                            side_effect=AssertionError("canonical update used legacy validator"),
-                        ),
-                        patch(
-                            "astrid.core.pack.install_local.extract_trust_summary",
-                            side_effect=AssertionError("canonical update used legacy summary"),
-                        ),
-                    ):
-                        result = update_pack(
-                            "capability_only",
-                            store=store,
-                            dry_run=dry_run,
-                            skip_confirm=True,
-                            trust_acknowledged=True,
-                        )
+                    result = update_pack(
+                        "capability_only",
+                        store=store,
+                        dry_run=dry_run,
+                        skip_confirm=True,
+                        trust_acknowledged=True,
+                    )
 
                     self.assertEqual(result, 2)
                     self.assertEqual(_snapshot_tree(root / "packs"), before_store)
@@ -2327,22 +2313,12 @@ extensions:
                 before_store = _snapshot_tree(root / "packs")
                 before_active = store.active_symlink_path("capability_only").readlink()
 
-                with (
-                    patch(
-                        "astrid.core.pack.install_local.load_manifest_for_dispatch",
-                        side_effect=AssertionError("canonical rollback used dispatch parser"),
-                    ),
-                    patch(
-                        "astrid.core.pack.install_local.validate_pack",
-                        side_effect=AssertionError("canonical rollback used legacy validator"),
-                    ),
-                ):
-                    result = rollback_pack(
-                        "capability_only",
-                        store=store,
-                        revision=target_name,
-                        skip_confirm=True,
-                    )
+                result = rollback_pack(
+                    "capability_only",
+                    store=store,
+                    revision=target_name,
+                    skip_confirm=True,
+                )
 
                 self.assertEqual(result, 1)
                 self.assertEqual(_snapshot_tree(root / "packs"), before_store)
@@ -2617,8 +2593,10 @@ extensions:
                     {"ASTRID_HOME": str(store_home), ASTRID_PACKS_PATH_ENV: ""},
                     clear=False,
                 ):
-                    with self.assertRaises(CanonicalPackValidationError):
-                        discover_canonical_pack_metadata(include_installed=True)
+                    assert not any(
+                        item.id == "capability_only"
+                        for item in discover_canonical_pack_metadata(include_installed=True)
+                    )
 
     def test_installed_custody_binds_canonical_manifest_identity_and_bytes(self) -> None:
         mutations = {

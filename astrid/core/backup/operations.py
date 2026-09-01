@@ -23,8 +23,8 @@ single-writer rule, kept through m6).
 Restore is staged and validated read-only before any live byte is touched: the
 backup is staged under ``.astrid/.restore-staging/``, validated with
 ``PRAGMA quick_check`` + ``PRAGMA foreign_key_check`` + a schema-version probe
-against the current standard registry, and only then atomically swapped into
-place. A corrupt/incompatible backup raises :class:`RestoreValidationError`
+against the operation's injected frozen registry, and only then atomically
+swapped into place. A corrupt/incompatible backup raises :class:`RestoreValidationError`
 and leaves the live database and media tree untouched.
 """
 
@@ -50,13 +50,31 @@ from astrid.core.io.media_import import (
     validate_digest,
 )
 from astrid.core.project.workspace import materialize_project_workspace
+from astrid.core.store.ownership import DatabaseOwnerLock
 from astrid.core.migrations.runner import (
     MigrationError,
     probe_database,
     read_only_uri,
     read_schema_migrations,
 )
-from astrid.core.store.ownership import DatabaseOwnerLock
+from astrid.core.pack.canonical import (
+    BundledCatalog,
+    project_catalog_database,
+)
+from astrid.core.pack.loader import DEFAULT_PACKS_ROOT
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+
+
+def _resolve_restore_registry(
+    registry: FrozenSchemaPackRegistry | None,
+) -> FrozenSchemaPackRegistry:
+    """Return the caller's registry or the operation's canonical projection."""
+    if registry is not None:
+        if not isinstance(registry, FrozenSchemaPackRegistry):
+            raise TypeError("registry must be a FrozenSchemaPackRegistry")
+        return registry
+    catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+    return project_catalog_database(catalog)
 
 BACKUP_FORMAT_VERSION = 1
 """Backup envelope format version written into ``backup.json``."""
@@ -1005,10 +1023,15 @@ def _restore_old_state(state: _RestoreJournal) -> None:
     _finish_restore_transaction(state)
 
 
-def _restore_new_state(state: _RestoreJournal, mode: str) -> None:
+def _restore_new_state(
+    state: _RestoreJournal,
+    mode: str,
+    *,
+    registry: FrozenSchemaPackRegistry,
+) -> None:
     """Complete the journal-authorized replacement state."""
     if mode == "staged":
-        _validate_staged_database(state.staged_database)
+        _validate_staged_database(state.staged_database, registry=registry)
         _remove_restore_path(state.database_path)
         for suffix in _RESTORE_DATABASE_SIDECARS:
             _remove_restore_path(Path(f"{state.database_path}{suffix}"))
@@ -1018,12 +1041,12 @@ def _restore_new_state(state: _RestoreJournal, mode: str) -> None:
         os.replace(state.staged_media, state.media_path)
         state = _write_restore_journal(state, phase="media_published")
     elif mode == "database_published":
-        _validate_staged_database(state.database_path)
+        _validate_staged_database(state.database_path, registry=registry)
         _remove_restore_path(state.media_path)
         os.replace(state.staged_media, state.media_path)
         state = _write_restore_journal(state, phase="media_published")
     elif mode == "published":
-        _validate_staged_database(state.database_path)
+        _validate_staged_database(state.database_path, registry=registry)
     else:
         raise BackupError(f"unknown complete restore mode: {mode!r}")
     _finish_restore_transaction(state)
@@ -1033,6 +1056,7 @@ def _recover_restore_transaction(
     journal_path: str | Path,
     *,
     expected_database: str | Path,
+    registry: FrozenSchemaPackRegistry,
 ) -> None:
     """Resolve one interrupted restore using only its durable journal."""
     state = _read_restore_journal(
@@ -1047,7 +1071,7 @@ def _recover_restore_transaction(
     if state.had_database and old_available:
         _restore_old_state(state)
     elif new_mode is not None:
-        _restore_new_state(state, new_mode)
+        _restore_new_state(state, new_mode, registry=registry)
     elif old_available:
         _restore_old_state(state)
     else:
@@ -1056,13 +1080,18 @@ def _recover_restore_transaction(
         )
 
 
-def recover_restore_staging(projects_root: str | Path | None = None) -> int:
+def recover_restore_staging(
+    projects_root: str | Path | None = None,
+    *,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> int:
     """Recover journaled restore transactions before opening a writer.
 
     Only a directory containing the exact :data:`RESTORE_JOURNAL_NAME` is a
     restore transaction. Arbitrary files and directories under
     ``.astrid/.restore-staging`` are ignored and never treated as semantic
-    database or media state.
+    database or media state. When no registry is injected, one canonical
+    standard composition is created only if recovery finds a journal.
     """
     root = resolve_projects_root(projects_root)
     database_path = derive_database_path(root)
@@ -1070,25 +1099,42 @@ def recover_restore_staging(projects_root: str | Path | None = None) -> int:
     if not _restore_is_dir(staging_root):
         return 0
     recovered = 0
+    resolved_registry = (
+        _resolve_restore_registry(registry) if registry is not None else None
+    )
     for transaction_dir in sorted(staging_root.iterdir(), key=lambda path: path.name):
         if transaction_dir.is_symlink() or not transaction_dir.is_dir():
             continue
         journal = transaction_dir / RESTORE_JOURNAL_NAME
         if journal.is_symlink() or not journal.is_file():
             continue
-        _recover_restore_transaction(journal, expected_database=database_path)
+        if resolved_registry is None:
+            resolved_registry = _resolve_restore_registry(None)
+        _recover_restore_transaction(
+            journal,
+            expected_database=database_path,
+            registry=resolved_registry,
+        )
         recovered += 1
     return recovered
 
 
-def recover_interrupted_restore(projects_root: str | Path | None = None) -> int:
+def recover_interrupted_restore(
+    projects_root: str | Path | None = None,
+    *,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> int:
     """Compatibility-named entry point for startup restore recovery."""
-    return recover_restore_staging(projects_root)
+    return recover_restore_staging(projects_root, registry=registry)
 
 
-def recover_interrupted_restores(projects_root: str | Path | None = None) -> int:
+def recover_interrupted_restores(
+    projects_root: str | Path | None = None,
+    *,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> int:
     """Plural alias for :func:`recover_restore_staging`."""
-    return recover_restore_staging(projects_root)
+    return recover_restore_staging(projects_root, registry=registry)
 
 
 def _validate_backup_layout(backup: Path) -> None:
@@ -1250,12 +1296,16 @@ def create_backup(
 # ---------------------------------------------------------------------------
 
 
-def _validate_staged_database(staged_db: Path) -> None:
+def _validate_staged_database(
+    staged_db: Path,
+    *,
+    registry: FrozenSchemaPackRegistry,
+) -> None:
     """Validate a staged database read-only; raise on any corruption/incompat.
 
     Checks, in order: ``PRAGMA quick_check`` (page-level integrity),
     ``PRAGMA foreign_key_check`` (referential integrity), and a schema-version
-    probe against the current standard registry (too-new schema, name drift,
+    probe against the injected frozen registry (too-new schema, name drift,
     checksum drift, or an unregistered pack). The staged file is opened
     ``mode=ro`` and never mutated.
     """
@@ -1285,9 +1335,6 @@ def _validate_staged_database(staged_db: Path) -> None:
     finally:
         conn.close()
 
-    from astrid.core.schema_packs.standard import build_standard_registry
-
-    registry = build_standard_registry()
     try:
         probe_database(staged_db, registry)
     except MigrationError as exc:
@@ -1760,6 +1807,7 @@ def _atomic_swap(
     staged_media: Path,
     *,
     journal_path: Path,
+    registry: FrozenSchemaPackRegistry,
 ) -> None:
     """Publish staged database/media with a durable old-or-new journal.
 
@@ -1809,7 +1857,11 @@ def _atomic_swap(
         # A normal exception gets the same deterministic recovery as a fresh
         # process. Hard-death hooks use os._exit and never reach this block.
         try:
-            _recover_restore_transaction(journal_path, expected_database=live_db)
+            _recover_restore_transaction(
+                journal_path,
+                expected_database=live_db,
+                registry=registry,
+            )
         except BaseException:
             # Preserve the journal for the next standard composition if the
             # in-process rollback itself cannot complete.
@@ -1868,12 +1920,15 @@ def restore_backup(
     projects_root: str | Path | None = None,
     *,
     allow_overwrite: bool = False,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> RestoreResult:
     """Restore a backup into the managed database and media tree atomically.
 
     Stages the backup under ``.astrid/.restore-staging/``, validates the staged
     database read-only (quick_check + foreign_key_check + schema-version), and
-    only then swaps it into place. A corrupt or incompatible backup raises
+    only then swaps it into place. The schema-version probe uses the injected
+    frozen registry; callers without one receive one canonical short-lived
+    standard composition. A corrupt or incompatible backup raises
     :class:`RestoreValidationError` and leaves live data untouched.
 
     Safety default: when the target root already holds a live database with
@@ -1888,6 +1943,7 @@ def restore_backup(
     except BackupError as exc:
         raise RestoreValidationError(f"backup publication recovery failed: {exc}") from exc
     _validate_backup_layout(backup)
+    registry = _resolve_restore_registry(registry)
 
     live_db = derive_database_path(root)
     live_media = root / MANAGED_DIR_NAME / MEDIA_DIR_NAME
@@ -1910,7 +1966,7 @@ def restore_backup(
                 "it deliberately."
             )
         try:
-            recover_restore_staging(root)
+            recover_restore_staging(root, registry=registry)
         except BackupError as exc:
             raise RestoreValidationError(
                 f"interrupted restore recovery failed: {exc}"
@@ -1943,7 +1999,7 @@ def restore_backup(
                 dependencies=external_dependencies,
             )
             _normalize_staged_database_journal(staged_db)
-            _validate_staged_database(staged_db)
+            _validate_staged_database(staged_db, registry=registry)
             previous_dir = txn_dir / "previous"
             previous_dir.mkdir(parents=True, exist_ok=True)
             state = _RestoreJournal(
@@ -1970,6 +2026,7 @@ def restore_backup(
                 staged_db,
                 staged_media,
                 journal_path=journal_path,
+                registry=registry,
             )
             # Project workspaces are derived from kernel rows, but they live
             # outside the journaled database/media pair.  Materialize them

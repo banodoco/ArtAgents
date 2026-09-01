@@ -53,7 +53,7 @@ def resource_text(relative):
 
 
 def yaml_section(text, field):
-    match = re.search(rf"(?m)^{re.escape(field)}:\s*$", text)
+    match = re.search(rf"(?m)^\s*{re.escape(field)}:\s*$", text)
     if match is None:
         raise AssertionError(f"missing manifest section: {field}")
     remainder = text[match.end():]
@@ -65,12 +65,12 @@ def manifest_catalog(relative):
     text = resource_text(relative)
     mounts = dict(
         re.findall(
-            r"(?m)^\s{2}([a-z][a-z0-9_]*):\s*([a-z][a-z0-9_]*(?:\s+[a-z][a-z0-9_]*)*)\s*$",
+            r"(?m)^\s{4}([a-z][a-z0-9_]*):\s*([a-z][a-z0-9_]*(?:\s+[a-z][a-z0-9_]*)*)\s*$",
             yaml_section(text, "cli_mounts"),
         )
     )
     tables_section = re.search(
-        r"(?ms)^migrations:\s*\n.*?^\s+tables:\s*\n((?:^\s+-\s+[^\n]+\n?)+)",
+        r"(?ms)^[ ]{2}migrations:\s*\n.*?^[ ]{6}tables:\s*\n((?:^[ ]{8}-\s+[^\n]+\n?)+)",
         text,
     )
     if tables_section is None:
@@ -90,21 +90,38 @@ def sql_tables(relative):
 
 
 # The wheel's declared YAML dependency is intentionally not installed by the
-# shared harness in this lane.  Importing any ``astrid.core`` module first
+# shared harness in this lane. Importing any ``astrid.core`` module first
 # executes the package initializer, so install the same inert parser shim
-# before touching the installed runtime registration.  No manifest loader is
-# called: the probe reads the shipped manifest resources directly above.
+# before touching the installed runtime registration. The probe reads the
+# canonical v2 pack resources directly above.
 try:
     import yaml  # noqa: F401
 except ModuleNotFoundError:
     yaml = types.ModuleType("yaml")
     yaml.YAMLError = Exception
+    yaml.SafeLoader = object
     yaml.safe_load = lambda _text: {}
+    yaml.load = lambda _text, Loader=None: {}
+    yaml.compose = lambda _text, Loader=None: None
+    nodes = types.ModuleType("yaml.nodes")
+    nodes.MappingNode = type("MappingNode", (), {})
+    nodes.SequenceNode = type("SequenceNode", (), {})
+    constructor = types.ModuleType("yaml.constructor")
+    constructor.ConstructorError = type("ConstructorError", (Exception,), {})
+    yaml.nodes = nodes
+    yaml.constructor = constructor
     sys.modules["yaml"] = yaml
+    sys.modules["yaml.nodes"] = nodes
+    sys.modules["yaml.constructor"] = constructor
 
+try:
+    import jsonschema  # noqa: F401
+except ModuleNotFoundError:
+    jsonschema = types.ModuleType("jsonschema")
+    sys.modules["jsonschema"] = jsonschema
 
-# domain_product is the installed runtime registration.  The manifest files
-# are read separately from the installed resource tree and must agree with it.
+# domain_product is the installed runtime registration. Canonical v2 pack
+# resources are read separately from the installed tree and must agree with it.
 from astrid.core.cli import domain_product
 
 expected_families = (
@@ -117,11 +134,10 @@ assert set(runtime_families) == set(expected_families), runtime_families
 assert set(domain_product.FAMILY_PARSER_MODULES) == {
     "projects", "timelines", "media", "tasks", "runs", "shots", "references"
 }
-
 manifest_files = {
-    "timeline": "packs/timeline/schema-pack.yaml",
-    "shots": "packs/shots/schema-pack.yaml",
-    "references": "packs/references/schema-pack.yaml",
+    "timeline": "packs/timeline/pack.yaml",
+    "shots": "packs/shots/pack.yaml",
+    "references": "packs/references/pack.yaml",
 }
 manifest_catalogs = {pack: manifest_catalog(path) for pack, path in manifest_files.items()}
 manifest_mounts = {
@@ -146,7 +162,6 @@ from astrid.core.schema_packs.registry import RegisteredMigration
 core_sql = "core/migrations/sql/core/0001_initial.sql"
 core_tables = set(sql_tables(core_sql))
 assert len(core_tables) == 14, sorted(core_tables)
-
 pack_specs = {
     "timeline": "migrations/0001_initial.sql",
     "shots": "migrations/0001_initial.sql",
@@ -167,6 +182,25 @@ for pack, catalog in pack_catalog.items():
     assert catalog["manifest_tables"] == catalog["sql_tables"], (pack, catalog)
 
 
+import astrid
+
+package_root = Path(astrid.__file__).resolve().parent
+
+
+def database_resource(pack: str, relative: str) -> SimpleNamespace:
+    owner_root = package_root if pack == "core" else package_root / f"packs/{pack}"
+    resolved = owner_root / relative
+    payload = resolved.read_bytes()
+    return SimpleNamespace(
+        path=relative,
+        root=owner_root,
+        resolved=resolved,
+        kind="database.migration",
+        file_kind="file",
+        size=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+    )
+
 class InstalledRegistry:
     def __init__(self):
         self.packs = {
@@ -178,7 +212,7 @@ class InstalledRegistry:
                 for pack in pack_specs
             },
         }
-        specs = [("core", "initial", "sql/core/0001_initial.sql")]
+        specs = [("core", "initial", "core/migrations/sql/core/0001_initial.sql")]
         specs.extend(
             (pack, "initial", path) for pack, path in pack_specs.items()
         )
@@ -195,6 +229,12 @@ class InstalledRegistry:
                         else manifest_catalogs[pack]["tables"]
                     )
                 ),
+                owner_root=(
+                    package_root
+                    if pack == "core"
+                    else package_root / f"packs/{pack}"
+                ),
+                resource=database_resource(pack, path),
             )
             for pack, name, path in specs
         )
@@ -218,7 +258,7 @@ for existing in (database, database.with_name(database.name + "-wal"), database.
 connection = sqlite3.connect(str(database), isolation_level=None)
 try:
     applied = apply_pending_migrations(
-        connection, registry, SimpleNamespace(applied=())
+        connection, registry, probe_database(database, registry)
     )
 finally:
     connection.close()

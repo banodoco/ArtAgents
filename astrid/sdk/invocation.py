@@ -12,15 +12,19 @@ from collections.abc import Mapping
 from contextlib import nullcontext, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+
+if TYPE_CHECKING:
+    from astrid.core.pack.canonical import BundledCatalog
 
 from ._module import _sdk_module
 from .exceptions import (
     AstridSDKError,
     CapabilityInvocationError,
     CapabilityValidationError,
+    ServiceUnavailableError,
     UnsupportedCapabilityError,
     _error_payload_from_internal_error,
     _internal_error_from_result,
@@ -61,17 +65,28 @@ def dispatch_retried_task(
     worker implementations. Callers must invoke this only for a fresh retry
     receipt; exact receipt replays are read-only and must not dispatch again.
     """
-    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
-    from astrid.core.kernel.read import schema_registry_context
-    from astrid.core.store.uow import UnitOfWork
-
     spec = dict(getattr(task, "spec", {}) or {})
     capability_kind = str(spec.get("kind") or "executor")
+    extra_pack_roots = tuple(spec.get("extra_pack_roots") or ())
+    from astrid.core.pack.canonical import BundledCatalog
+    from astrid.core.pack.loader import DEFAULT_PACKS_ROOT
+    from astrid.sdk.discovery import _load_registries
+
+    catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+    capability_registries = _load_registries(
+        catalog=catalog,
+        project_root=projects_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=True,
+        include_elements=False,
+    )
     handler = CapabilityTaskHandler(
         capability_kind=capability_kind,
         capability_id=str(task.capability),
         projects_root=projects_root,
         invocation="sdk",
+        executor_registry=capability_registries[0],
+        orchestrator_registry=capability_registries[1],
     )
     service = ExecutionService(projects_root=projects_root, task_repo=task_repo)
     with schema_registry_context(registry) if registry is not None else nullcontext():
@@ -108,12 +123,14 @@ def discover(
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
     kind: str | None = None,
+    catalog: BundledCatalog | None = None,
 ) -> DiscoveryResult:
     sdk_module = _sdk_module()
     discovered_packs = sdk_module._discover_pack_inventory(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
+        catalog=catalog,
     )
     pack_permission_ids_by_pack_id = sdk_module._pack_permission_ids_by_pack_id(discovered_packs)
     executor_registry, orchestrator_registry, element_registry = sdk_module._load_registries(
@@ -124,6 +141,7 @@ def discover(
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         include_elements=True,
+        catalog=catalog,
     )
     if element_registry is None:
         raise CapabilityInvocationError("element registry was not loaded")
@@ -208,6 +226,7 @@ def get_capability(
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
+    catalog: BundledCatalog | None = None,
     _registries: tuple[Any, Any, Any | None] | None = None,
 ):
     sdk_module = _sdk_module()
@@ -220,6 +239,7 @@ def get_capability(
             active_theme=active_theme,
             include_missing_roots=include_missing_roots,
             include_elements=include_elements or kind == "element" or kind is None,
+            catalog=catalog,
         )
     else:
         executor_registry, orchestrator_registry, element_registry = _registries
@@ -235,10 +255,14 @@ def get_capability(
     # Keep direct describes consistent with discover(): pack-level and
     # capability-specific safety permissions are part of the public handle,
     # not only of the full inventory DTO.
-    discovered_packs = sdk_module._discover_pack_inventory(
-        project_root=project_root,
-        extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
+    discovered_packs = (
+        tuple(catalog.ordered_entries)
+        if catalog is not None
+        else sdk_module._discover_pack_inventory(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
     )
     return sdk_module._apply_pack_permission_ids(
         resolved,
@@ -849,12 +873,20 @@ def _kernel_invoke(
     outputs: Mapping[str, Any] | None,
     extra_pack_roots: tuple[str, ...] = (),
     idempotency_context: Mapping[str, Any] | None = None,
+    catalog: BundledCatalog | None = None,
     registry: FrozenSchemaPackRegistry | None = None,
+    application: Any | None = None,
+    executor_registry: Any | None = None,
+    orchestrator_registry: Any | None = None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
-    """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
+    """Admit one capability over an injected or short-lived composition.
+
+    A client-bound invocation reuses the application's writer and repositories
+    without closing them. A standalone invocation owns exactly one
+    ``StandardPackComposition`` and one short-lived writer.
+    """
     from astrid.core.repositories.tasks import compute_spec_hash
     from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import DatabaseWriter
     from astrid.core.events.service import EventAppendService
     from astrid.core.receipts.service import ReceiptService
     from astrid.core.repositories.runs import RunRepository
@@ -865,20 +897,52 @@ def _kernel_invoke(
     from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
     from astrid.core.kernel.read import schema_registry_context
     from astrid.core.integrations.reigh.bridge_service import derive_database_path
-    if registry is None:
-        from astrid.core.schema_packs.standard import build_standard_registry
+    from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
+    owns_writer = application is None
+    owner_lock = None
+    if application is not None:
+        # The application is the composition authority for bound clients.
+        catalog = application.catalog
+        registry = application.registry
+        projects_root = Path(application.projects_root)
+        writer = application.writer
+        runs = application.runs
+        tasks = application.tasks
+        projects = application.projects
+        media_repo = application.media
+    else:
+        from astrid.packs import compose_standard_pack_database, open_standard_writer
 
-        registry = build_standard_registry()
-    db_path = derive_database_path(projects_root)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = DatabaseWriter(db_path, registry)
+        pack_composition = compose_standard_pack_database(
+            catalog=catalog,
+            registry=registry,
+        )
+        catalog = pack_composition.catalog
+        registry = pack_composition.registry
+        db_path = derive_database_path(projects_root)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            owner_lock = DatabaseOwnerLock(db_path)
+        except OwnerLockError as exc:
+            raise ServiceUnavailableError(
+                "the canonical store is owned by another Astrid process",
+                details={"reason": "store_owned", "retryable": True},
+            ) from exc
+        try:
+            writer = open_standard_writer(db_path, registry=registry)
+        except BaseException:
+            owner_lock.release()
+            raise
     try:
-        events = EventAppendService(registry)
-        receipts = ReceiptService()
-        runs = RunRepository(events=events, receipts=receipts)
-        tasks = TaskRepository(events=events, receipts=receipts)
-        projects = ProjectRepository(events=events, receipts=receipts)
-        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
+        if application is None:
+            events = EventAppendService(registry)
+            receipts = ReceiptService()
+            runs = RunRepository(events=events, receipts=receipts)
+            tasks = TaskRepository(events=events, receipts=receipts)
+            projects = ProjectRepository(events=events, receipts=receipts)
+            media_repo = MediaRepository(
+                events=events, receipts=receipts, projects_root=projects_root
+            )
         project_id = project if project else "default"
         try:
             UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_id, name=project_id, settings={}, idempotency_key=f"proj:{project_id}", project_id=project_id))
@@ -991,7 +1055,13 @@ def _kernel_invoke(
             # marked terminal (task succeeded before run derived status).
             raw_result: dict[str, Any] = {"ok": True, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim_key}
             return run_id, task_id, claim_key, None, raw_result, True, None
-        handler = CapabilityTaskHandler(capability_kind=capability.capability_type, capability_id=capability.id, projects_root=projects_root)
+        handler = CapabilityTaskHandler(
+            capability_kind=capability.capability_type,
+            capability_id=capability.id,
+            projects_root=projects_root,
+            executor_registry=executor_registry,
+            orchestrator_registry=orchestrator_registry,
+        )
         svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
         with schema_registry_context(registry):
             exec_res = svc.execute(
@@ -1093,10 +1163,14 @@ def _kernel_invoke(
             svc.cleanup_staging(prepared.staging_dir)
         return run_id, task_id, prepared.attempt.id, mpath, raw_result, ok, None
     finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
+        if owns_writer:
+            try:
+                writer.close()
+            except Exception:
+                pass
+            finally:
+                if owner_lock is not None:
+                    owner_lock.release()
 
 
 def invoke(
@@ -1121,8 +1195,20 @@ def invoke(
     execution_mode: str = "subprocess",
     argv: tuple[str, ...] = (),
     orchestrator_args: tuple[str, ...] = (),
+    catalog: BundledCatalog | None = None,
     registry: FrozenSchemaPackRegistry | None = None,
+    application: Any | None = None,
 ) -> InvocationResult:
+    if application is not None:
+        # Never let a per-call override split a bound client from its store.
+        catalog = application.catalog
+        registry = application.registry
+    elif catalog is None:
+        from astrid.packs import compose_standard_pack_database
+
+        composition = compose_standard_pack_database(registry=registry)
+        catalog = composition.catalog
+        registry = composition.registry
     sdk_module = _sdk_module()
     include_elements = kind == "element"
     registries = sdk_module._load_registries(
@@ -1133,6 +1219,7 @@ def invoke(
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
         include_elements=include_elements,
+        catalog=catalog,
     )
     capability = sdk_module.get_capability(
         capability_id,
@@ -1143,6 +1230,7 @@ def invoke(
         banodoco_config=banodoco_config,
         active_theme=active_theme,
         include_missing_roots=include_missing_roots,
+        catalog=catalog,
         _registries=registries,
     )
     if capability.capability_type == "element":
@@ -1291,16 +1379,24 @@ def invoke(
     project = resolved_project
     projects_root = _resolve_projects_root(project_root, project)
     try:
+        kernel_kwargs: dict[str, Any] = {
+            "kind": kind,
+            "project": project,
+            "projects_root": projects_root,
+            "inputs": inputs,
+            "outputs": outputs,
+            "extra_pack_roots": extra_pack_roots,
+            "idempotency_context": invocation_authority_context,
+            "registry": registry,
+            "executor_registry": registries[0],
+            "orchestrator_registry": registries[1],
+        }
+        if catalog is not None:
+            kernel_kwargs["catalog"] = catalog
+        if application is not None:
+            kernel_kwargs["application"] = application
         kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(
-            capability,
-            kind=kind,
-            project=project,
-            projects_root=projects_root,
-            inputs=inputs,
-            outputs=outputs,
-            extra_pack_roots=extra_pack_roots,
-            idempotency_context=invocation_authority_context,
-            registry=registry,
+            capability, **kernel_kwargs
         )
         executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
@@ -1370,7 +1466,10 @@ def invoke_result(
     ``error`` mapping used by a post-admission failure.  No run, task, staging
     directory, network call, or provider request is created by this adapter.
     """
-
+    application = kwargs.get("application")
+    if application is not None:
+        kwargs["catalog"] = application.catalog
+        kwargs["registry"] = application.registry
     try:
         return invoke(capability_id, kind=kind, **kwargs)
     except AstridSDKError as exc:

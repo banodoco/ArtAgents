@@ -9,25 +9,231 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core.pack import (
-    PackDefinition,
-    discover_packs,
-    pack_manifest_path,
-    pack_taxonomy_from_manifest,
-    packs_root,
+    BundledCatalog,
+    CanonicalPackEntry,
+    DEFAULT_PACKS_ROOT,
+    ExternalPackSource,
+    canonical_manifest_path,
+    read_normalize_validate,
 )
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
-from astrid.core.pack.validate import (
-    extract_trust_summary,
-)
+from astrid.core.pack.discovery import discover_canonical_packs_ordered
 
-from ._cli_shared import _pack_payload, _pack_taxonomy, _print_taxonomy_block
+
+def _canonical_resource_row(handle: Any) -> dict[str, Any]:
+    """Serialize one already-confined canonical resource handle."""
+    return {
+        "path": handle.path,
+        "kind": handle.kind,
+        "file_kind": handle.file_kind,
+        "size": handle.size,
+        "sha256": handle.sha256,
+        "resolved": str(handle.resolved),
+    }
+
+
+def _build_canonical_inspect(
+    entry: CanonicalPackEntry,
+    *,
+    record: Any | None = None,
+) -> dict[str, Any]:
+    """Build stable inspect data exclusively from canonical projections."""
+    definition = entry.definition
+    normalized = definition.to_dict()
+    capabilities = entry.capability_projection()
+    documentation = entry.documentation_projection()
+    resource_projection = entry.resource_projection()
+    resource_rows = [
+        _canonical_resource_row(item) for item in resource_projection.resources
+    ]
+    database_projection = entry.database_projection()
+    database = None if database_projection is None else database_projection.database
+
+    database_data: dict[str, Any] = {
+        "owner": None,
+        "owned": False,
+        "default_enabled": False,
+        "head": None,
+        "depends_on": [],
+        "migrations": [],
+        "tables": [],
+        "stream_types": [],
+        "event_kinds": [],
+        "command_kinds": [],
+        "repositories": [],
+        "conformance": [],
+        "cli_mounts": {},
+        "bridge_mounts": [],
+    }
+    if database is not None:
+        database_data.update(
+            {
+                "owner": entry.id,
+                "owned": True,
+                "default_enabled": database.default_enabled,
+                "head": database.migration_head,
+                "depends_on": [
+                    {"pack": item.pack, "min_migration": item.min_migration}
+                    for item in database.depends_on
+                ],
+                "migrations": [
+                    {
+                        "version": item.version,
+                        "name": item.name,
+                        "path": item.path,
+                        "tables": list(item.tables),
+                    }
+                    for item in database.migrations
+                ],
+                "tables": sorted(
+                    {
+                        table
+                        for migration in database.migrations
+                        for table in migration.tables
+                    }
+                ),
+                "stream_types": list(database.stream_types),
+                "event_kinds": list(database.event_kinds),
+                "command_kinds": list(database.command_kinds),
+                "repositories": list(database.repositories),
+                "conformance": list(database.conformance),
+                "cli_mounts": dict(database.cli_mounts),
+                "bridge_mounts": list(database.bridge_mounts),
+            }
+        )
+
+    trust = dict(getattr(record, "trust_summary", {}) or {}) if record is not None else {}
+    component_counts = (
+        dict(getattr(record, "component_inventory", {}) or {})
+        if record is not None
+        else {}
+    )
+    entrypoints = list(getattr(record, "entrypoints", ()) or ()) if record is not None else []
+    declared_secrets = (
+        list(getattr(record, "declared_secrets", ()) or ()) if record is not None else []
+    )
+    dependencies = list(getattr(record, "dependencies", ()) or ()) if record is not None else []
+    status = (
+        "active" if bool(getattr(record, "active", False)) else "inactive"
+        if record is not None
+        else definition.status
+    )
+    manifest_digest = (
+        str(getattr(record, "manifest_digest", "") or "")
+        if record is not None
+        else entry.manifest.sha256
+    )
+    if not entrypoints:
+        entrypoints = list(definition.agent.get("normal_entrypoints", ()))
+    if not declared_secrets:
+        declared_secrets = [
+            item["name"] for item in definition.secrets if item.get("name")
+        ]
+
+    docs_data: dict[str, Any] | None = None
+    if documentation.documentation is not None:
+        doc = documentation.documentation
+        docs_data = {
+            "kind": doc.kind,
+            "path": doc.path,
+            "reason": doc.reason,
+            "required_context": [
+                _canonical_resource_row(item) for item in documentation.required_context
+            ],
+        }
+
+    result: dict[str, Any] = {
+        "pack_id": entry.id,
+        "identity": dict(entry.identity),
+        "name": definition.name,
+        "version": definition.version,
+        "schema_version": definition.schema_version,
+        "description": definition.description,
+        "status": status,
+        "pack_status": definition.status,
+        "source": entry.source,
+        "source_path": str(entry.root),
+        "root": str(entry.root),
+        "manifest": _canonical_resource_row(entry.manifest),
+        "manifest_digest": manifest_digest,
+        "provenance_identity": entry.provenance.provenance_identity,
+        "taxonomy": {
+            "origin": "builtin" if entry.source == "bundled" else "external",
+            "install_tier": (
+                "default"
+                if database is not None and database.default_enabled
+                else "optional"
+            ),
+            "pack_type": "capability" if capabilities.capabilities else "adapter",
+            "domain": definition.domain,
+            "stability": definition.stability,
+            "support": definition.support,
+        },
+        "capabilities": list(capabilities.capabilities),
+        "capability_summary": {
+            "declared": list(capabilities.capabilities),
+            "content": dict(capabilities.content),
+            "extensions": normalized.get("extensions", {}),
+            "aliases": normalized.get("aliases", []),
+            "permissions": normalized.get("permissions", []),
+        },
+        "database": database_data,
+        "documentation": docs_data,
+        "resources": resource_rows,
+        "resource_closure": {
+            "count": len(resource_rows),
+            "paths": [item["path"] for item in resource_rows],
+        },
+        "component_counts": component_counts,
+        "entrypoints": entrypoints,
+        "declared_secrets": declared_secrets,
+        "dependencies": dependencies,
+        "agent": normalized.get("agent"),
+        "keywords": list(definition.keywords),
+        "permissions": normalized.get("permissions", []),
+        "permission_ids": trust.get(
+            "permission_ids",
+            [item.get("id") for item in normalized.get("permissions", [])],
+        ),
+        "trust": trust.get("trust", {}),
+        "warnings": list(trust.get("warnings", ())),
+        "dependencies_struct": trust.get("dependencies_struct", {}),
+    }
+    if record is not None:
+        for field in (
+            "installed_at",
+            "git_url",
+            "commit_sha",
+            "requested_ref",
+            "astrid_version",
+            "trust_tier",
+            "previous_active_revision",
+        ):
+            result[field] = getattr(record, field, None)
+        result["install_source_path"] = getattr(record, "source_path", None)
+    return result
+
+
+def _build_canonical_agent_view(
+    entry: CanonicalPackEntry,
+    *,
+    record: Any | None = None,
+) -> dict[str, Any]:
+    """Build the agent view from a normalized canonical definition."""
+    trust = dict(getattr(record, "trust_summary", {}) or {}) if record is not None else {}
+    view = _build_agent_view(entry.definition.to_dict(), trust)
+    view.update(
+        {
+            "pack_id": entry.id,
+            "identity": dict(entry.identity),
+            "source": entry.source,
+            "root": str(entry.root),
+        }
+    )
+    return view
 
 # ---------------------------------------------------------------------------
 # pack inspect
@@ -54,37 +260,36 @@ def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> 
             recovery_command=f"Try reinstalling the pack: python3 -m astrid packs install {pack_id}",
         )
 
-    manifest_path = pack_manifest_path(rev_dir)
+    manifest_path = canonical_manifest_path(rev_dir)
     if manifest_path is None:
         raise AstridError(
-            f"inspect: no pack manifest found in installed revision {rev_dir}.",
-            recovery_command=f"The installed revision may be corrupt. Try reinstalling: python3 -m astrid packs install {pack_id}",
+            f"inspect: no canonical pack.yaml found in installed revision {rev_dir}.",
+            recovery_command=f"The installed revision may be corrupt. Try reinstalling the pack: python3 -m astrid packs install {pack_id}",
         )
 
     try:
-        manifest = load_manifest_mapping(manifest_path, manifest_kind="pack")
-    except ManifestParseError as e:
+        entry = read_normalize_validate(
+            manifest_path,
+            source=ExternalPackSource.INSTALLED,
+            expected_pack_id=pack_id,
+        )
+    except Exception as exc:
         raise AstridError(
-            f"inspect: failed to parse pack manifest: {e}",
-            recovery_command=f"Check the manifest file for syntax errors: cat {manifest_path}",
-        ) from e
-
-    try:
-        trust_summary = extract_trust_summary(rev_dir)
-    except Exception:
-        trust_summary = {}
+            f"inspect: failed to load canonical pack entry: {exc}",
+            recovery_command=f"Try reinstalling the pack: python3 -m astrid packs install {pack_id}",
+        ) from exc
 
     if agent:
-        agent_data = _build_agent_view(manifest, trust_summary)
+        agent_data = _build_canonical_agent_view(entry, record=record)
         if json_output:
-            print(json.dumps(agent_data, indent=2, default=str))
+            print(json.dumps(agent_data, indent=2, sort_keys=True, default=str))
         else:
             _print_agent_view(agent_data)
         return 0
 
-    full_data = _build_full_inspect(record, manifest, trust_summary, rev_dir=rev_dir)
+    full_data = _build_canonical_inspect(entry, record=record)
     if json_output:
-        print(json.dumps(full_data, indent=2, default=str))
+        print(json.dumps(full_data, indent=2, sort_keys=True, default=str))
     else:
         _print_full_inspect(full_data)
 
@@ -321,236 +526,8 @@ def _read_stage_excerpt(stage_path: Path, *, max_lines: int = 30) -> str | None:
     return "\n".join(excerpt_lines).strip() or None
 
 
-def _scan_inspect_components(
-    rev_dir: Path | None, manifest: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """Scan component manifests under declared content roots in *rev_dir*.
-
-    Returns a deterministic (sorted by id) list of component overview dicts.
-    Each dict includes: id, name, kind, description, runtime, is_entrypoint,
-    docs_paths, stage_excerpt.
-    """
-    if rev_dir is None:
-        return []
-
-    content = manifest.get("content", {}) if isinstance(manifest.get("content"), dict) else {}
-    agent = manifest.get("agent", {}) if isinstance(manifest.get("agent"), dict) else {}
-    normal_eps = set()
-    if isinstance(agent.get("normal_entrypoints"), list):
-        normal_eps = {str(ep) for ep in agent["normal_entrypoints"] if ep}
-    if not normal_eps and isinstance(agent.get("entrypoints"), list):
-        normal_eps = {str(ep) for ep in agent["entrypoints"] if ep}
-
-    components: list[dict[str, Any]] = []
-
-    for comp_kind in ("executors", "orchestrators"):
-        comp_root_rel = content.get(comp_kind)
-        if not isinstance(comp_root_rel, str) or not comp_root_rel.strip():
-            continue
-        comp_root = rev_dir / comp_root_rel
-        if not comp_root.is_dir():
-            continue
-
-        manifest_kind = comp_kind.rstrip("s")  # "executors" -> "executor"
-
-        for comp_dir in sorted(comp_root.iterdir()):
-            if not comp_dir.is_dir() or comp_dir.name.startswith("."):
-                continue
-            if comp_dir.name == "__pycache__":
-                continue
-
-            mf_path = _find_component_manifest(comp_dir, manifest_kind)
-            if mf_path is None:
-                continue
-
-            try:
-                data = load_manifest_mapping(mf_path, manifest_kind=manifest_kind)
-            except ManifestParseError:
-                continue
-
-            comp_id = str(data.get("id", comp_dir.name))
-            name = str(data.get("name", comp_id))
-            description = str(data.get("description", ""))
-            kind = str(data.get("kind", manifest_kind))
-
-            # Runtime
-            runtime_raw = data.get("runtime", {}) if isinstance(data.get("runtime"), dict) else {}
-            runtime: dict[str, Any] | None = None
-            if runtime_raw:
-                runtime = {
-                    "type": runtime_raw.get("type"),
-                    "entrypoint": runtime_raw.get("entrypoint"),
-                    "callable": runtime_raw.get("callable"),
-                }
-
-            # Is entrypoint?
-            is_entrypoint = comp_id in normal_eps
-
-            # Docs paths
-            docs = data.get("docs", {}) if isinstance(data.get("docs"), dict) else {}
-            stage_rel = docs.get("stage", "STAGE.md")
-            stage_path = comp_dir / stage_rel
-            docs_paths: dict[str, str] = {"stage": str(stage_path)}
-
-            # Stage excerpt
-            stage_excerpt = _read_stage_excerpt(stage_path)
-
-            components.append({
-                "id": comp_id,
-                "name": name,
-                "kind": kind,
-                "description": description,
-                "runtime": runtime,
-                "is_entrypoint": is_entrypoint,
-                "docs_paths": docs_paths,
-                "stage_excerpt": stage_excerpt,
-            })
-
-    # Elements: two-level structure — elements/<kind>/<element_name>/
-    elements_root_rel = content.get("elements")
-    if isinstance(elements_root_rel, str) and elements_root_rel.strip():
-        elements_root = rev_dir / elements_root_rel
-        if elements_root.is_dir():
-            for kind_dir in sorted(elements_root.iterdir()):
-                if not kind_dir.is_dir() or kind_dir.name.startswith("."):
-                    continue
-                if kind_dir.name == "__pycache__":
-                    continue
-
-                for elem_dir in sorted(kind_dir.iterdir()):
-                    if not elem_dir.is_dir() or elem_dir.name.startswith("."):
-                        continue
-                    if elem_dir.name == "__pycache__":
-                        continue
-
-                    mf_path = _find_component_manifest(elem_dir, "element")
-                    if mf_path is None:
-                        continue
-
-                    try:
-                        data = load_manifest_mapping(mf_path, manifest_kind="element")
-                    except ManifestParseError:
-                        continue
-
-                    comp_id = str(data.get("id", elem_dir.name))
-                    name = str(data.get("metadata", {}).get("label", comp_id)) if isinstance(data.get("metadata"), dict) else str(data.get("name", comp_id))
-                    description = str(data.get("description", ""))
-                    kind = str(data.get("kind", kind_dir.name.rstrip("s")))
-
-                    # Elements have no runtime/entrypoint
-                    runtime = None
-                    is_entrypoint = False
-
-                    # Docs paths
-                    docs = data.get("docs", {}) if isinstance(data.get("docs"), dict) else {}
-                    stage_rel = docs.get("stage", "STAGE.md")
-                    stage_path = elem_dir / stage_rel
-                    docs_paths: dict[str, str] = {"stage": str(stage_path)}
-
-                    # Stage excerpt
-                    stage_excerpt = _read_stage_excerpt(stage_path)
-
-                    components.append({
-                        "id": comp_id,
-                        "name": name,
-                        "kind": kind,
-                        "description": description,
-                        "runtime": runtime,
-                        "is_entrypoint": is_entrypoint,
-                        "docs_paths": docs_paths,
-                        "stage_excerpt": stage_excerpt,
-                    })
-
-    # Sort by id for determinism
-    components.sort(key=lambda c: c["id"])
-    return components
 
 
-def _build_full_inspect(
-    record: "InstallRecord", manifest: dict, trust_summary: dict,
-    *, rev_dir: "Path | None" = None,
-) -> dict:
-    """Build a full inspect dict for JSON or pretty-print output.
-
-    When *rev_dir* is provided, component manifests under declared content
-    roots are scanned and STAGE.md excerpts are extracted for each component.
-    """
-    # ── Structured secrets ──────────────────────────────────────────
-    secrets_raw = manifest.get("secrets")
-    structured_secrets: list[dict[str, Any]] = []
-    if isinstance(secrets_raw, list):
-        for s_obj in secrets_raw:
-            if isinstance(s_obj, dict) and s_obj.get("name"):
-                structured_secrets.append({
-                    "name": str(s_obj["name"]),
-                    "required": bool(s_obj.get("required", False)),
-                    "description": str(s_obj.get("description", "")),
-                })
-    elif isinstance(secrets_raw, dict):
-        req_list = secrets_raw.get("required")
-        if isinstance(req_list, list):
-            for s in req_list:
-                if s:
-                    structured_secrets.append({
-                        "name": str(s), "required": True, "description": "",
-                    })
-
-    # ── Structured dependencies ─────────────────────────────────────
-    deps_raw = manifest.get("dependencies")
-    structured_deps: dict[str, list[str]] = {}
-    if isinstance(deps_raw, dict):
-        for eco in ("python", "npm", "system"):
-            eco_deps = deps_raw.get(eco)
-            if isinstance(eco_deps, list):
-                structured_deps[eco] = [str(d) for d in eco_deps if d]
-
-    # ── Components scan ─────────────────────────────────────────────
-    components = _scan_inspect_components(rev_dir, manifest) if rev_dir is not None else []
-    taxonomy = pack_taxonomy_from_manifest(manifest, status=str(manifest.get("status", "active")))
-
-    result = {
-        "pack_id": record.pack_id,
-        "name": record.name,
-        "version": record.version,
-        "schema_version": record.schema_version,
-        "description": manifest.get("description", ""),
-        "source_path": record.source_path,
-        "installed_at": record.installed_at,
-        "status": "active" if record.active else "inactive",
-        "component_counts": trust_summary.get("component_counts", {}),
-        "entrypoints": trust_summary.get("entrypoints", []),
-        "declared_secrets": trust_summary.get("declared_secrets", []),
-        "secrets": structured_secrets,  # structured: [{name, required, description}]
-        "dependencies": trust_summary.get("dependencies", []),
-        "dependencies_struct": trust_summary.get("dependencies_struct", {}),
-        "docs": trust_summary.get("docs", {}),
-        "warnings": trust_summary.get("warnings", []),
-        "agent": manifest.get("agent") if isinstance(manifest.get("agent"), dict) else None,
-        # Git-enriched and trust fields
-        "git_url": record.git_url,
-        "commit_sha": record.commit_sha,
-        "source_type": record.source_type,
-        "requested_ref": record.requested_ref,
-        "astrid_version": record.astrid_version if hasattr(record, 'astrid_version') else None,
-        "trust_tier": record.trust_tier,
-        "manifest_digest": record.manifest_digest if hasattr(record, 'manifest_digest') else None,
-        "previous_active_revision": record.previous_active_revision if hasattr(record, 'previous_active_revision') else None,
-        # New structured fields from trust_summary
-        "normal_entrypoints": trust_summary.get("normal_entrypoints", []),
-        "do_not_use_for": trust_summary.get("do_not_use_for"),
-        "required_context": trust_summary.get("required_context", []),
-        "keywords": trust_summary.get("keywords", []),
-        "capabilities": trust_summary.get("capabilities", []),
-        # Permissions and trust metadata — sourced from extract_trust_summary()
-        "permissions": trust_summary.get("permissions", []),
-        "permission_ids": trust_summary.get("permission_ids", []),
-        "trust": trust_summary.get("trust", {}),
-        **taxonomy,
-        "taxonomy": taxonomy,
-        # Component details (scanned from disk)
-        "components": components,
-    }
-    return result
 
 
 def _print_full_inspect(data: dict) -> None:
@@ -560,12 +537,60 @@ def _print_full_inspect(data: dict) -> None:
     print(f"  Version:       {data['version']}")
     print(f"  Schema:        {data['schema_version']}")
     print(f"  Status:        {data['status']}")
-    print(f"  Source:        {data['source_path']}")
-    print(f"  Installed:     {data['installed_at']}")
+    print(f"  Source:        {data.get('source_path', '')}")
+    if data.get("source"):
+        print(f"  Source Kind:   {data['source']}")
+    if data.get("root"):
+        print(f"  Root:          {data['root']}")
+    installed_at = data.get("installed_at")
+    if installed_at:
+        print(f"  Installed:     {installed_at}")
+
+    identity = data.get("identity")
+    if isinstance(identity, dict):
+        print(
+            "  Identity:      "
+            f"{identity.get('id', '')} / {identity.get('name', '')} "
+            f"/ {identity.get('version', '')}"
+        )
+    if data.get("provenance_identity"):
+        print(f"  Provenance ID: {data['provenance_identity']}")
 
     desc = data.get("description")
     if desc:
         print(f"  Description:   {desc}")
+
+    capability_summary = data.get("capability_summary")
+    if isinstance(capability_summary, dict):
+        declared = capability_summary.get("declared", ())
+        print(f"  Capabilities:  {', '.join(str(item) for item in declared)}")
+
+    database = data.get("database")
+    if isinstance(database, dict) and database.get("owned"):
+        print(
+            "  Database:      "
+            f"owner={database.get('owner', '')} "
+            f"head={database.get('head', '')} "
+            f"default={database.get('default_enabled', False)}"
+        )
+        tables = database.get("tables", ())
+        if tables:
+            print(f"  DB Tables:      {', '.join(str(item) for item in tables)}")
+    else:
+        print("  Database:      none")
+
+    documentation = data.get("documentation")
+    if isinstance(documentation, dict):
+        print(
+            f"  Documentation: {documentation.get('kind', '')}"
+            f"{' ' + str(documentation.get('path')) if documentation.get('path') else ''}"
+        )
+    else:
+        print("  Documentation: none")
+
+    closure = data.get("resource_closure")
+    if isinstance(closure, dict):
+        print(f"  Resources:     {closure.get('count', 0)} declared/resolved")
 
     _print_taxonomy_block(data.get("taxonomy", {}), indent="  ")
 
@@ -737,48 +762,49 @@ def _print_full_inspect(data: dict) -> None:
         print("    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
-def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool, pack_roots: tuple[str, ...] = ()) -> int:
-    """Render discovery-backed inspect output for non-installed packs."""
-    roots = [packs_root(), *[Path(item).expanduser() for item in pack_roots]]
-    roots.extend(
-        Path(item).expanduser()
-        for item in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep)
-        if item
-    )
-    packs: dict[str, PackDefinition] = {}
-    for root in roots:
-        for pack in discover_packs(root, include_hidden=True):
-            packs.setdefault(pack.id, pack)
-    pack = packs.get(pack_id)
-    if pack is None:
+def _inspect_discovered_pack(
+    *,
+    pack_id: str,
+    agent: bool,
+    json_output: bool,
+    pack_roots: tuple[str, ...] = (),
+) -> int:
+    """Render a bundled or externally discovered canonical pack entry."""
+    catalog = BundledCatalog.from_root(DEFAULT_PACKS_ROOT)
+    entries: dict[str, CanonicalPackEntry] = {
+        entry.id: entry for entry in catalog.ordered_entries
+    }
+    repo_root = DEFAULT_PACKS_ROOT.parent.parent
+    for entry in discover_canonical_packs_ordered(
+        project_root=repo_root,
+        extra_pack_roots=tuple(pack_roots),
+        include_installed=True,
+    ):
+        # Preserve the existing source precedence: bundled entries win over
+        # local/extra/environment/installed duplicates.
+        entries.setdefault(entry.id, entry)
+
+    entry = entries.get(pack_id)
+    if entry is None:
         raise AstridError(
-            f"packs inspect: unknown pack {pack_id!r}",
+            f"packs inspect: unknown canonical pack {pack_id!r}",
             recovery_command="List available packs: python3 -m astrid packs list",
         )
 
-    payload = pack.agent if agent else _pack_payload(pack)
-    if json_output:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-
     if agent:
-        for key, value in sorted(payload.items()):
-            print(f"{key}: {value}")
+        payload = _build_canonical_agent_view(entry)
+        if json_output:
+            print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        else:
+            _print_agent_view(payload)
         return 0
 
-    for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
-        print(f"{key}: {payload.get(key, '')}")
-    _print_taxonomy_block(payload.get("taxonomy", _pack_taxonomy(pack)))
-    if pack.content:
-        print("content:")
-        for key, value in sorted(pack.content.items()):
-            print(f"  {key}: {value}")
-    if pack.agent:
-        print("agent:")
-        for key, value in sorted(pack.agent.items()):
-            print(f"  {key}: {value}")
+    payload = _build_canonical_inspect(entry)
+    if json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        _print_full_inspect(payload)
     return 0
-
 
 def _handle_inspect(args: argparse.Namespace) -> int:
     """Handler for ``packs inspect``."""

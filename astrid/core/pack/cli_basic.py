@@ -54,7 +54,7 @@ def _eprint(*args: object) -> None:
 
 
 def _pack_id_is_valid(pack_id: str) -> bool:
-    """Check that a pack id matches the v1 schema pattern."""
+    """Check that a pack id matches the canonical v2 grammar."""
     return bool(_PACK_ID_RE.fullmatch(pack_id))
 
 
@@ -222,30 +222,24 @@ def _create_pack_skeleton(pack_id: str) -> int:
 
     pack_yaml = target / "pack.yaml"
     pack_yaml.write_text(
-        f"""schema_version: 1
+        f"""schema_version: 2
 id: {pack_id}
 name: {pack_name}
 version: 0.1.0
-# One-line summary shown in `packs list` and search results. Make it specific.
 description: {description}
-origin: external
-install_tier: core
-pack_type: capability
-domain: system
-stability: stable
-support: core
-# Search/selection metadata: agents find and choose packs by these. Fill them in.
-keywords: []          # search terms an agent would type, e.g. [video, editing, ffmpeg]
-capabilities: []      # concrete things this pack can do, e.g. [trim_clip, concat, add_subtitles]
+capabilities: [{pack_id}]
 content:
   executors: executors
   orchestrators: orchestrators
   elements: elements
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 agent:
-  purpose: "TODO: describe what this pack is for"
-  do_not_use_for: "TODO: when an agent should NOT pick this pack"
-  normal_entrypoints: []   # orchestrator/executor ids an agent should start with
-  required_context: []     # inputs/secrets an agent must have before using this pack
+  purpose: "Describe what this pack is for."
+  do_not_use_for: "Describe when this pack should not be selected."
+  normal_entrypoints: []
+  required_context: []
 """,
         encoding="utf-8",
     )

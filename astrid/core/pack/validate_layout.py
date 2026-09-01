@@ -82,7 +82,7 @@ class LayoutValidationIssue:
 
 
 CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
-    CanonicalLayoutRule("pack.yaml|pack.yml|pack.json", "pack manifest at the pack root"),
+    CanonicalLayoutRule("pack.yaml", "canonical pack manifest at the pack root"),
     CanonicalLayoutRule("skill/SKILL.md", "optional pack-level skill guidance"),
     CanonicalLayoutRule("executors/<name>/...", "executor capability directories"),
     CanonicalLayoutRule("orchestrators/<name>/...", "orchestrator capability directories"),
@@ -145,8 +145,7 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 
 def is_canonical_pack_path(relpath: str) -> bool:
     """Return True when *relpath* matches a known canonical pack layout entry."""
-    normalized = PurePosixPath(relpath)
-    if normalized.name in {"pack.yaml", "pack.yml", "pack.json"} and len(normalized.parts) == 1:
+    if normalized.name == "pack.yaml" and len(normalized.parts) == 1:
         return True
     parts = normalized.parts
     if len(parts) == 2 and parts[0] == "skill" and parts[1] == "SKILL.md":
