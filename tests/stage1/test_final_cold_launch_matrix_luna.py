@@ -39,7 +39,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "60670d942f7b5c6b843398ab2a11d038a6bf195a"
+RUNTIME_COMMIT = "3a0a37c2f0c353716594e78bdb22f9a3f8a655f8"
 
 
 def _archive_runtime(destination: Path) -> Path:
@@ -198,6 +198,20 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         owner_token = owner_token_file.read_text(encoding="utf-8").strip()
         assert owner_token
         assert owner_token not in serialized_discovery
+        worker_credential_file = Path(discovery["worker_credential_file"])
+        assert worker_credential_file.is_file()
+        assert stat.S_IMODE(worker_credential_file.stat().st_mode) == 0o600
+        worker_token = worker_credential_file.read_text(encoding="utf-8").strip()
+        assert worker_token and worker_token != owner_token
+        assert discovery["worker_actor"] == "astrid-pack-host"
+        assert tuple(discovery["worker_scopes"]) == (
+            "worker:register",
+            "worker:execute",
+            "tasks:read",
+            "tasks:write",
+            "objects:read",
+            "objects:write",
+        )
 
         # A second real launch with the first-run manifest removed exercises
         # persisted-profile/env-less relaunch rather than mocked delegation.
@@ -324,7 +338,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             )
             host = GenericPackHost(
                 pack_roots=[pack],
-                client=RuntimeProtocolClient(started["endpoint"], owner_token),
+                client=RuntimeProtocolClient(started["endpoint"], worker_token),
                 executor_id="cold-cpu-host",
                 attempt_root=tmp_path / "attempt",
             )
@@ -394,7 +408,10 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert restarted["realm_id"] == started["realm_id"]
         new_discovery = _json(discovery_path)
         runtime_pid = int(new_discovery["pid"])
-        new_token = owner_token_file.read_text(encoding="utf-8").strip()
+        new_worker_credential_file = Path(new_discovery["worker_credential_file"])
+        assert stat.S_IMODE(new_worker_credential_file.stat().st_mode) == 0o600
+        new_token = new_worker_credential_file.read_text(encoding="utf-8").strip()
+        assert new_token and new_token != owner_token
 
         from banodoco_workspace_client import WorkspaceClient
 

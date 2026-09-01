@@ -32,7 +32,7 @@ from astrid.sdk.exceptions import CapabilityValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_WORKTREE = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "60670d942f7b5c6b843398ab2a11d038a6bf195a"
+RUNTIME_COMMIT = "3a0a37c2f0c353716594e78bdb22f9a3f8a655f8"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(
