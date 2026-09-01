@@ -19,7 +19,7 @@ class _RemoteFamily:
         self._client = client
 
     def _typed(self, operation: str, *args: Any, key: str | None = None, **kwargs: Any) -> DomainResult[Any]:
-        reads = {"get_project", "list_projects", "current_project", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "list_project_shots", "get_reference", "list_project_references", "get_object", "head_object", "list_project_objects", "list_media_relations", "get_task", "list_project_tasks", "get_run", "list_project_runs", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents"}
+        reads = {"get_project", "list_projects", "current_project", "get_timeline", "list_timelines", "list_timeline_history", "diff_timeline", "get_shot", "list_project_shots", "get_reference", "list_project_references", "get_object", "head_object", "list_project_objects", "list_media_relations", "get_task", "list_project_tasks", "get_run", "list_project_runs", "list_events", "list_run_events", "list_generations", "get_generation", "list_variants", "get_document", "list_documents", "list_project_shot_text_bindings", "get_project_shot_text_binding"}
         if key is None and operation not in reads:
             key = uuid.uuid4().hex
         try:
@@ -49,6 +49,7 @@ class _RemoteFamily:
             elif operation == "get_project": value = self._client.get_project(*args, **kwargs)
             elif operation == "get_project_reference": value = self._client.get_project_reference(*args, **kwargs)
             elif operation == "get_project_shot": value = self._client.get_project_shot(*args, **kwargs)
+            elif operation == "get_project_shot_text_binding": value = self._client.get_project_shot_text_binding(*args, **kwargs)
             elif operation == "get_run": value = self._client.get_run(*args, **kwargs)
             elif operation == "get_task": value = self._client.get_task(*args, **kwargs)
             elif operation == "get_timeline": value = self._client.get_timeline(*args, **kwargs)
@@ -62,6 +63,7 @@ class _RemoteFamily:
             elif operation == "list_project_references": value = self._client.list_project_references(*args, **kwargs)
             elif operation == "list_project_runs": value = self._client.list_project_runs(*args, **kwargs)
             elif operation == "list_project_shots": value = self._client.list_project_shots(*args, **kwargs)
+            elif operation == "list_project_shot_text_bindings": value = self._client.list_project_shot_text_bindings(*args, **kwargs)
             elif operation == "list_project_tasks": value = self._client.list_project_tasks(*args, **kwargs)
             elif operation == "list_projects": value = self._client.list_projects(*args, **kwargs)
             elif operation == "list_run_events": value = self._client.list_run_events(*args, **kwargs)
@@ -75,6 +77,9 @@ class _RemoteFamily:
             elif operation == "register_executor": value = self._client.register_executor(*args, **kwargs)
             elif operation == "remove_shot_item": value = self._client.remove_shot_item(*args, **kwargs)
             elif operation == "reorder_shot_items": value = self._client.reorder_shot_items(*args, **kwargs)
+            elif operation == "set_project_shot_text_binding": value = self._client.set_project_shot_text_binding(*args, **kwargs)
+            elif operation == "set_project_shot_text_binding_by_id": value = self._client.set_project_shot_text_binding_by_id(*args, **kwargs)
+            elif operation == "rebind_project_shot_text_binding": value = self._client.rebind_project_shot_text_binding(*args, **kwargs)
             elif operation == "retry_run": value = self._client.retry_run(*args, **kwargs)
             elif operation == "retry_task": value = self._client.retry_task(*args, **kwargs)
             elif operation == "select_project": value = self._client.select_project(*args, **kwargs)
@@ -438,6 +443,26 @@ class RemoteShots(_RemoteFamily):
         try: version = self._version(shot_id, expected_version, project)
         except WorkspaceClientError as exc: return DomainResult.failure(ErrorObject(exc.code, exc.message, exc.details), idempotency_key=key)
         return self._typed("reorder_shot_items", project, shot_id, list(item_ids or []), key=key, expected_version=version, idempotency_key=key)
+
+    def list_text_bindings(self, project, *, shot_id=None, kind=None, slot=None):
+        return self._typed("list_project_shot_text_bindings", project, shot_id=shot_id, kind=kind, slot=slot)
+
+    def show_text_binding(self, project, binding_id):
+        return self._typed("get_project_shot_text_binding", project, binding_id)
+
+    def set_text_binding(self, project, *, shot_id, kind, text, expected_head, slot=None, binding_id=None, idempotency_key=None):
+        key = idempotency_key or uuid.uuid4().hex
+        body = {"shot_id": shot_id, "kind": kind, "text": text, "expected_head": expected_head}
+        if slot is not None: body["slot"] = slot
+        if binding_id is not None:
+            body = {"binding_id": binding_id, "text": text, "expected_head": expected_head}
+        operation = "set_project_shot_text_binding_by_id" if binding_id is not None else "set_project_shot_text_binding"
+        args = (project, binding_id, body) if binding_id is not None else (project, body)
+        return self._typed(operation, *args, key=key, idempotency_key=key)
+
+    def rebind_text_binding(self, project, binding_id, *, media_id, expected_head, idempotency_key=None):
+        key = idempotency_key or uuid.uuid4().hex
+        return self._typed("rebind_project_shot_text_binding", project, binding_id, key=key, media_id=media_id, expected_head=expected_head, idempotency_key=key)
 
 
 class RemoteGenerations(_RemoteFamily):

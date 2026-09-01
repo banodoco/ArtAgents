@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 PROTOCOL = "workspace.v1"
-SCHEMA_DIGEST = "sha256:99086502e2fc6f1a110b25fb1e6b12c6954359b6781daec22c4e53ab346c0243"
-OPERATIONS = ('health', 'handshake', 'getRealm', 'doctor', 'createBackup', 'restoreBackup', 'exportRealm', 'tombstoneRealm', 'recoverRealm', 'purgeRealm', 'listProjects', 'createProject', 'getProject', 'updateProject', 'currentProject', 'selectProject', 'listDocuments', 'createDocument', 'getDocument', 'updateDocument', 'listProjectObjects', 'ingestProjectObject', 'listProjectTasks', 'listProjectRuns', 'createTimeline', 'listTimelines', 'createTimelineDocument', 'getTimeline', 'updateTimeline', 'listTimelineHistory', 'diffTimeline', 'archiveTimeline', 'recoverTimeline', 'createShot', 'getShot', 'updateShot', 'archiveShot', 'recoverShot', 'createReference', 'createProjectShot', 'listProjectShots', 'getProjectShot', 'updateProjectShot', 'archiveProjectShot', 'recoverProjectShot', 'addShotItem', 'removeShotItem', 'reorderShotItems', 'createProjectReference', 'listProjectReferences', 'getProjectReference', 'updateProjectReference', 'archiveProjectReference', 'recoverProjectReference', 'associateReference', 'setPrimaryReference', 'linkReferences', 'getReference', 'updateReference', 'archiveReference', 'recoverReference', 'listMediaRelations', 'createMediaRelation', 'ingestObject', 'getObject', 'headObject', 'admitTask', 'claimTask', 'getTask', 'cancelTask', 'retryTask', 'getRun', 'cancelRun', 'retryRun', 'listRunEvents', 'listEvents', 'registerExecutor', 'listCapabilities', 'registerCapability', 'listGenerations', 'createGeneration', 'getGeneration', 'listVariants', 'createVariant', 'getVariant', 'settleAttempt', 'prepareReboot', 'checkpointAttempt', 'failAttempt', 'heartbeatAttempt', 'requestReboot', 'resumeAttempt')
+SCHEMA_DIGEST = "sha256:b5841ab4b66ffe0d5d779bb5acca963bdeada404b3047f8b81258c8c6489a270"
+OPERATIONS = ('health', 'handshake', 'getRealm', 'doctor', 'createBackup', 'restoreBackup', 'exportRealm', 'tombstoneRealm', 'recoverRealm', 'purgeRealm', 'listProjects', 'createProject', 'getProject', 'updateProject', 'currentProject', 'selectProject', 'listDocuments', 'createDocument', 'getDocument', 'updateDocument', 'listProjectObjects', 'ingestProjectObject', 'listProjectTasks', 'listProjectRuns', 'createTimeline', 'listTimelines', 'createTimelineDocument', 'getTimeline', 'updateTimeline', 'listTimelineHistory', 'diffTimeline', 'archiveTimeline', 'recoverTimeline', 'createShot', 'getShot', 'updateShot', 'archiveShot', 'recoverShot', 'createReference', 'createProjectShot', 'listProjectShots', 'getProjectShot', 'updateProjectShot', 'archiveProjectShot', 'recoverProjectShot', 'addShotItem', 'removeShotItem', 'reorderShotItems', 'listProjectShotTextBindings', 'setProjectShotTextBinding', 'getProjectShotTextBinding', 'setProjectShotTextBindingById', 'rebindProjectShotTextBinding', 'createProjectReference', 'listProjectReferences', 'getProjectReference', 'updateProjectReference', 'archiveProjectReference', 'recoverProjectReference', 'associateReference', 'setPrimaryReference', 'linkReferences', 'getReference', 'updateReference', 'archiveReference', 'recoverReference', 'listMediaRelations', 'createMediaRelation', 'ingestObject', 'getObject', 'headObject', 'admitTask', 'claimTask', 'getTask', 'cancelTask', 'retryTask', 'getRun', 'cancelRun', 'retryRun', 'listRunEvents', 'listEvents', 'registerExecutor', 'listCapabilities', 'registerCapability', 'listGenerations', 'createGeneration', 'getGeneration', 'listVariants', 'createVariant', 'getVariant', 'settleAttempt', 'prepareReboot', 'checkpointAttempt', 'failAttempt', 'heartbeatAttempt', 'requestReboot', 'resumeAttempt')
 
 
 @dataclass(frozen=True)
@@ -177,6 +177,27 @@ class ManagedObject:
     @classmethod
     def from_json(cls, value: Mapping[str, Any]) -> "ManagedObject":
         return cls(object_id=value["object_id"], digest=value["digest"], media_type=value["media_type"], size=int(value["size"]), version=int(value["version"]), created_at=value["created_at"], filename=value.get("filename"), relation=value.get("relation"))
+
+
+@dataclass(frozen=True)
+class ShotTextBinding:
+    binding_id: str
+    project_id: str
+    shot_id: str
+    kind: str
+    media_id: str
+    event_stream_id: str
+    head: int
+    content_hash: str
+    mime_type: str
+    byte_size: int
+    slot: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def from_json(cls, value: Mapping[str, Any]) -> "ShotTextBinding":
+        return cls(binding_id=value["binding_id"], project_id=value["project_id"], shot_id=value["shot_id"], kind=value["kind"], media_id=value["media_id"], event_stream_id=value["event_stream_id"], head=int(value["head"]), content_hash=value["content_hash"], mime_type=value["mime_type"], byte_size=int(value["byte_size"]), slot=value.get("slot"), created_at=value.get("created_at", ""), updated_at=value.get("updated_at", ""))
 
 
 @dataclass(frozen=True)
@@ -658,6 +679,28 @@ class WorkspaceClient:
 
     def reorder_shot_items(self, project_id: str, shot_id: str, item_ids: list[str], *, expected_version: int, idempotency_key: str) -> MutationResult:
         return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/shots/{_path_part(shot_id)}/reorder", body=json.dumps({"expected_version": expected_version, "item_ids": item_ids}, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
+
+    def list_project_shot_text_bindings(self, project_id: str, *, shot_id: str | None = None, kind: str | None = None, slot: str | None = None) -> tuple[list[Mapping[str, Any]], str | None]:
+        query = []
+        if shot_id is not None: query.append("shot_id=" + _path_part(shot_id))
+        if kind is not None: query.append("kind=" + _path_part(kind))
+        if slot is not None: query.append("slot=" + _path_part(slot))
+        suffix = ("?" + "&".join(query)) if query else ""
+        value = self._json(self._request("GET", f"/v1/projects/{_path_part(project_id)}/shot-text-bindings" + suffix)[2])
+        return self._page(value)
+
+    def get_project_shot_text_binding(self, project_id: str, binding_id: str) -> Mapping[str, Any]:
+        return self._json(self._request("GET", f"/v1/projects/{_path_part(project_id)}/shot-text-bindings/{_path_part(binding_id)}")[2])
+
+    def set_project_shot_text_binding(self, project_id: str, body: Mapping[str, Any], *, idempotency_key: str) -> MutationResult:
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/shot-text-bindings", body=json.dumps(dict(body), ensure_ascii=False, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
+
+    def set_project_shot_text_binding_by_id(self, project_id: str, binding_id: str, body: Mapping[str, Any], *, idempotency_key: str) -> MutationResult:
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/shot-text-bindings/{_path_part(binding_id)}", body=json.dumps(dict(body), ensure_ascii=False, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
+
+    def rebind_project_shot_text_binding(self, project_id: str, binding_id: str, *, media_id: str, expected_head: int, idempotency_key: str) -> MutationResult:
+        body = {"media_id": media_id, "expected_head": expected_head}
+        return self._mutation_json(self._request("POST", f"/v1/projects/{_path_part(project_id)}/shot-text-bindings/{_path_part(binding_id)}/rebind", body=json.dumps(body, separators=(",", ":")).encode(), headers={"Content-Type": "application/json", "Idempotency-Key": idempotency_key})[2])
 
     def update_shot(self, shot_id: str, *, expected_version: int, start_ms: int | None = None, duration_ms: int | None = None, reference_ids: list[str] | None = None, idempotency_key: str | None = None) -> Mapping[str, Any]:
         payload: dict[str, Any] = {"expected_version": expected_version}
