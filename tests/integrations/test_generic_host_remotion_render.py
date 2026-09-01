@@ -235,7 +235,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         host = GenericPackHost(
             pack_roots=[pack],
             client=RuntimeProtocolClient(daemon.endpoint, daemon.worker_token),
-            executor_id="generic-remotion-host",
+            executor_id="astrid-pack-host",
             attempt_root=tmp_path / "attempt",
         )
         record = host.discover()[0]
@@ -243,7 +243,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         assert host.capabilities[record.id].ready is True
 
         registration = host.register()
-        assert registration["registration"].executor_id == "generic-remotion-host"
+        assert registration["registration"].executor_id == "astrid-pack-host"
 
         spec = {
             "inputs": {
@@ -271,7 +271,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
             spec=spec,
         )
         claim = generated.claim_task(
-            executor_id="generic-remotion-host",
+            executor_id="astrid-pack-host",
             capability_ids=[record.id],
             idempotency_key="generic-remotion-claim",
             runtime_epoch=generated.health().runtime_epoch,
