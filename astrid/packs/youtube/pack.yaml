@@ -1,10 +1,7 @@
-schema_version: 1
+schema_version: 2
 id: youtube
 name: Astrid YouTube
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
 domain: integration
 stability: stable
 support: core
@@ -40,14 +37,6 @@ agent:
   - youtube.upload
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: builtin.youtube_audio
-  canonical_id: youtube.youtube_audio
-  deprecated: true
-  deprecation_message: Moved to youtube.youtube_audio
-- kind: executor
-  alias: upload.youtube
-  canonical_id: youtube.upload
-  deprecated: true
-  deprecation_message: Moved to youtube.upload
+documentation:
+  kind: skill
+  path: skill/SKILL.md

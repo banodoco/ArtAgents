@@ -1,20 +1,18 @@
-schema_version: 1
+schema_version: 2
 id: moirae
 name: Astrid Moirae
 version: 1.0.0
-origin: external
-install_tier: core
-pack_type: capability
+description: Renders a YAML screenplay into a terminal-as-cinema video via Moirae (asciinema, agg, ffmpeg).
+status: active
+visibility: visible
 domain: integration
 stability: stable
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs Moirae terminal-as-cinema renderer with asciinema and ffmpeg.
   - id: project_files
     reason: Reads screenplay files and writes rendered video.
-description: Renders a YAML screenplay into a terminal-as-cinema video via Moirae (asciinema, agg, ffmpeg).
 keywords:
   - moirae
   - terminal
@@ -27,16 +25,13 @@ keywords:
 capabilities:
   - render_screenplay
   - produce_terminal_video
-content:
-  executors: executors
 agent:
   purpose: "Use to turn a Moirae screenplay file into a scripted terminal/CLI demo video (typewriter text, simulated agent Q&A, camera moves). External pack — requires the moirae package plus asciinema, agg, and ffmpeg binaries."
   do_not_use_for: "Not for trimming real video files (use the media pack) or assembling iteration videos from run provenance (use the iteration pack)."
   normal_entrypoints:
     - moirae.moirae
-aliases:
-- kind: executor
-  alias: external.moirae
-  canonical_id: moirae.moirae
-  deprecated: true
-  deprecation_message: Moved to moirae.moirae
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+content:
+  executors: executors

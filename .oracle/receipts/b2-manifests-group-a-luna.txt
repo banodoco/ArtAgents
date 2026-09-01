@@ -1,0 +1,9 @@
+IMPLEMENTATION: PASS
+CHANGED: `astrid/packs/{blender,comfy_wrap,editorial,fal,foley,generation,iteration,media,moirae}/pack.yaml`; deleted `astrid/packs/builtin/`
+PACKS: All nine strict v2 parsed and projected.
+COUNTS: 41 capability IDs; 20 normal entrypoints; 0 manifest extensions; 34 executors and 2 orchestrators preserved; generation taxonomy remains typed kernel projection.
+ALIASES: 24 removed from owned manifests.
+RESOURCES: Blender declares exactly five standalone resources; confined closure within Blender root; no duplicate content/extension-owned declarations.
+ISOLATION: Production remains legacy-active; four `schema-pack.yaml` preserved; no loader/discovery/source/consumer rewiring.
+BLOCKERS: none
+0

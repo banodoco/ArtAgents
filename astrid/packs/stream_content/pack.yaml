@@ -1,10 +1,7 @@
-schema_version: 1
+schema_version: 2
 id: stream_content
 name: Astrid Stream Content
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
 domain: media
 stability: experimental
 support: core
@@ -25,4 +22,6 @@ agent:
 content:
   executors: executors
   orchestrators: orchestrators
-metadata: {}
+documentation:
+  kind: skill
+  path: skill/SKILL.md

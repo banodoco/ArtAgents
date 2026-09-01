@@ -16,6 +16,19 @@ gate reuses unaffected candidate-45 passes; there is no candidate 47 or whole
 review reset. The delta gate passed with no finite blockers. B1 checkpoint:
 `14f1f7d5f77cb6bd384749941cff6e522b696590`.
 
+### B2 addendum
+
+B2.1–B2.9 are implemented in a frozen 35-path candidate over B1 control HEAD.
+Exactly 22 strict v2 manifests preserve the 64/12/10 capability census and
+typed rendering/generation projections; `builtin` and 59 aliases are gone.
+Four canonical database declarations preserve existing semantics and defaults.
+All 22 packs have direct skills; `_core` routes a deterministic 22-pack census.
+Five standalone Blender resources are confined, the offline 22-row coverage
+ledger has zero unclassified surfaces, and production remains legacy-active
+with four byte-unchanged schema manifests. One independent Luna certification
+passed 106 focused tests plus 78 subtests with no findings. B2 checkpoint
+commit is pending.
+
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-canonical-pack-beta`
 
 Branch: `megado/canonical-pack-beta`
@@ -355,21 +368,21 @@ useful beta dispositions are:
 
 | Goal criterion | Status now | Evidence-based interpretation |
 | --- | --- | --- |
-| 1. Every bundled product pack loads from v2 `pack.yaml` | **B1 isolated contract complete; bundled conversion pending B2** | Strict v2 schema/model/catalog and golden roots exist; 22 production manifests are not yet converted |
+| 1. Every bundled product pack loads from v2 `pack.yaml` | **B2 manifest set complete; activation pending B4** | Exactly 22 retained packs strict-load from v2 with 64 executors, 12 orchestrators, 10 elements; production remains intentionally legacy-active |
 | 2. One parsed authority feeds consumers | **B1 isolated authority complete; activation pending B4** | Canonical object/catalog projections exist in isolated roots; production consumers remain legacy-active |
-| 3. Zero-unclassified customization ledger | **Research only** | exploration exists, but no reviewed final coverage ledger over the cutover tree |
+| 3. Zero-unclassified customization ledger | **B2 complete** | Offline 22-row ledger maps capability/database/CLI/SDK/bridge/docs/operations/resources, justifies kernel owners, and reports zero unclassified |
 | 4. Manifest-derived standard DB composition | **Not done** | three fixed authorities and eight consumers/readers remain |
-| 5. Four data-pack semantics preserved | **Existing behavior implemented; cutover proof pending** | SQL/repositories/CLI/SDK/conformance exist; no canonical conversion has occurred |
+| 5. Four data-pack semantics preserved | **B2 declaration proof complete; engine projection pending B3** | Canonical declarations match retained tables, vocabulary, migrations, dependencies, mounts, defaults, and references semantics |
 | 6. Owner-relative migrations and dependencies | **B1 grammar/confinement complete; B3 enforcement pending** | Positive minimum-head grammar and confined handles exist; database engine projection remains B3 |
 | 7. Operational consumers agree | **Existing operations work; convergence not done** | application/SDK/doctor/restore/media can independently rebuild registry |
-| 8. Packaged agent docs and `_core` census | **Partial** | 17/22 direct pack skills plus `_core`; five missing; skills excluded from wheel |
+| 8. Packaged agent docs and `_core` census | **B2 source docs complete; wheel proof pending B5** | 22/22 direct skills validate and deterministic `_core` routing resolves all 22 |
 | 9. Canonical inspect/doctor output | **Partial old surface** | installed-pack inspect and schema doctor exist; neither exposes the complete canonical pack/database/docs/resource view |
-| 10. Clean wheel contains all declared resources | **Not done** | old three schema packs explicitly packaged; skills excluded; no v2 closure proof |
-| 11. Legacy authorities deleted | **Not done** | schema-pack parser/manifests, v1 loader forms, fixed lists, `builtin`, and aliases remain |
+| 10. Clean wheel contains all declared resources | **B2 source closure complete; wheel proof pending B5** | Five standalone Blender resources and all content/extension/migration handles resolve confined with no overlap |
+| 11. Legacy authorities deleted | **B2 partial by cutover invariant** | `builtin` and 59 aliases deleted; schema manifests/parser/fixed authorities intentionally remain until B4 atomic activation |
 | 12. External capability works; external DB fails | **B1 isolated behavior complete** | External capability admission and pre-resolution external database rejection have focused evidence; production hard cut remains later |
 | 13. Three golden pack forms validate | **B1 complete in isolated roots** | Capability-only, database-only, and combined fixtures validate under the strict path |
-| 14. Focused and broad tests pass after cutover | **B1 focused evidence green; later suites pending** | Candidate 46 repair passed 185 lifecycle tests plus 104 subtests; unaffected candidate-45 validation/baseline receipts remain accepted |
-| 15. Final evidence and independent review | **B1 bounded gate and checkpoint complete; final matrix pending B5** | User-directed closure combines two unaffected candidate-45 Luna passes with one independent candidate-46 custody delta pass; B1 checkpoint `14f1f7d5` |
+| 14. Focused and broad tests pass after cutover | **B1–B2 focused evidence green; later suites pending** | B2 integrated and independent certification each passed 106 focused tests plus 78 subtests; full cutover suites remain later |
+| 15. Final evidence and independent review | **B1 checkpoint complete; B2 bounded certification PASS; final matrix pending B5** | B2 35-path identity and independent Luna certification have no findings; B2 checkpoint commit pending |
 
 ## Direct execution plan
 
@@ -523,13 +536,13 @@ composes; all declared docs/resources resolve; final tests and review pass.
   discovered executors/orchestrators/elements already live in domain packs;
   17 of 22 product packs have direct skills; all four SQLite product slices and
   their migration/repository/operational machinery work.
-- **Canonical v2 product cutover:** B1.1–B1.10 implemented and gate-accepted
-  in a frozen 30-path isolated candidate; production activation remains
-  intentionally unchanged.
-- **Clarity/reconciliation:** complete; control documents reflect accepted B1.
-- **Frozen final criteria:** 0/15 complete end to end; B1 supplies accepted
-  isolated evidence toward criteria 1, 2, 6, 12, and 13.
-- **Remaining sequence:** B2–B5 under the frozen gates.
+- **Canonical v2 product cutover:** B1 checkpoint complete; B2.1–B2.9
+  implemented and independently certified in an unshipped 35-path candidate.
+  Production activation remains intentionally unchanged.
+- **Clarity/reconciliation:** complete; control documents reflect B1–B2.
+- **Frozen final criteria:** 0/15 complete end to end; B1–B2 provide accepted
+  isolated/unshipped evidence.
+- **Remaining sequence:** B2 checkpoint, then B3–B5 under the frozen gates.
 
-The correct product action is B2 implementation. Cloud capacity and tooling
-preflight are green.
+The correct product action is the reviewed B2 checkpoint, then B3 database
+projection. Cloud capacity and tooling preflight are green.

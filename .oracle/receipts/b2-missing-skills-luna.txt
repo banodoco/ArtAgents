@@ -1,0 +1,6 @@
+IMPLEMENTATION: PASS
+CHANGED: `astrid/packs/blender/skill/SKILL.md`, `astrid/packs/timeline/skill/SKILL.md`, `astrid/packs/shots/skill/SKILL.md`, `astrid/packs/references/skill/SKILL.md`, `astrid/packs/runaway/skill/SKILL.md`
+GUIDANCE: All five packs now have structured frontmatter, entrypoints, SDK/CLI or repository usage, behavior boundaries, database ownership, vocabulary, resources, and recovery guidance. References covers the three-table model and `media references`; Runaway documents explicit optional composition without CLI/SDK claims.
+CHECKS: Five skill paths/frontmatter/heading assertions passed; skill discovery found all five target packs; `python3 -m pytest tests/v10/test_docs_cli_alignment.py -q` passed (`4 passed`).
+BLOCKERS: none
+0

@@ -1,0 +1,7 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/packs/_core/skill/SKILL.md; astrid/packs/generation/skill/SKILL.md; astrid/packs/media/skill/SKILL.md; astrid/packs/rendering/skill/SKILL.md; astrid/packs/stream_content/skill/SKILL.md
+CENSUS: Deterministic sorted census of 22 product packs; all 22 owning `skill/SKILL.md` routes resolve; `_core` remains irreducible kernel guidance.
+GUIDANCE: 17 in-scope pack skills validated; corrected metadata and capability coverage for media, stream_content, generation, and rendering.
+CHECKS: Targeted metadata/capability audit PASS (`17` skills, `76` capabilities); census audit PASS (`22` unique sorted routes); skill discovery PASS; `python3 -m astrid help` PASS; `git diff --check` PASS.
+BLOCKERS: none
+0

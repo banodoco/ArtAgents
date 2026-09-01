@@ -1,101 +1,26 @@
-schema_version: 1
+schema_version: 2
 id: editorial
 name: Astrid Editorial
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+description: Transcript-to-cut editorial pipeline — transcribe, detect scenes/shots, arrange clip pools, run heuristic and human review, and validate the rendered cut.
+status: active
+visibility: visible
 domain: editorial
 stability: stable
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs editorial executors as subprocesses for transcription, review, and arrangement.
   - id: project_files
     reason: Reads and writes transcripts, scenes, arrangements, and review artifacts.
-description: Transcript-to-cut editorial pipeline — transcribe, detect scenes/shots, arrange clip pools, run heuristic and human review, and validate the rendered cut.
 keywords: [transcribe, scenes, shots, arrange, review, validate, transcript, editorial]
 capabilities: [transcribe_audio, detect_scenes, slice_shots, arrange_clips, refine_arrangement, grade_quality_zones, run_editor_review, collect_human_review, ingest_human_notes, scout_quotes, generate_script, inspect_cut, validate_cut]
 agent:
   purpose: "Use for the narrative-editing workflow: turning source video/audio into a structured cut — transcription, scene/shot detection, clip-pool arrangement, reviewer notes (heuristic or human-in-the-loop), and final cut validation."
   do_not_use_for: "Generating new image/video frames (use the generation pack), Foley/spatial audio (use the foley pack), or raw lossless trimming (use the media pack)."
   normal_entrypoints: [editorial.transcribe, editorial.scenes, editorial.shots, editorial.arrange, editorial.validate]
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: builtin.inspect_cut
-  canonical_id: editorial.inspect_cut
-  deprecated: true
-  deprecation_message: Moved to editorial.inspect_cut
-- kind: executor
-  alias: builtin.refine
-  canonical_id: editorial.refine
-  deprecated: true
-  deprecation_message: Moved to editorial.refine
-- kind: executor
-  alias: builtin.editor_review
-  canonical_id: editorial.editor_review
-  deprecated: true
-  deprecation_message: Moved to editorial.editor_review
-- kind: executor
-  alias: builtin.human_review
-  canonical_id: editorial.human_review
-  deprecated: true
-  deprecation_message: Moved to editorial.human_review
-- kind: executor
-  alias: builtin.human_notes
-  canonical_id: editorial.human_notes
-  deprecated: true
-  deprecation_message: Moved to editorial.human_notes
-- kind: executor
-  alias: builtin.triage
-  canonical_id: editorial.triage
-  deprecated: true
-  deprecation_message: Moved to editorial.triage
-- kind: executor
-  alias: builtin.scenes
-  canonical_id: editorial.scenes
-  deprecated: true
-  deprecation_message: Moved to editorial.scenes
-- kind: executor
-  alias: builtin.shots
-  canonical_id: editorial.shots
-  deprecated: true
-  deprecation_message: Moved to editorial.shots
-- kind: executor
-  alias: builtin.quality_zones
-  canonical_id: editorial.quality_zones
-  deprecated: true
-  deprecation_message: Moved to editorial.quality_zones
-- kind: executor
-  alias: builtin.boundary_candidates
-  canonical_id: editorial.boundary_candidates
-  deprecated: true
-  deprecation_message: Moved to editorial.boundary_candidates
-- kind: executor
-  alias: builtin.quote_scout
-  canonical_id: editorial.quote_scout
-  deprecated: true
-  deprecation_message: Moved to editorial.quote_scout
-- kind: executor
-  alias: builtin.script_pipeline
-  canonical_id: editorial.script_pipeline
-  deprecated: true
-  deprecation_message: Moved to editorial.script_pipeline
-- kind: executor
-  alias: builtin.validate
-  canonical_id: editorial.validate
-  deprecated: true
-  deprecation_message: Moved to editorial.validate
-- kind: executor
-  alias: builtin.arrange
-  canonical_id: editorial.arrange
-  deprecated: true
-  deprecation_message: Moved to editorial.arrange
-- kind: executor
-  alias: builtin.transcribe
-  canonical_id: editorial.transcribe
-  deprecated: true
-  deprecation_message: Moved to editorial.transcribe

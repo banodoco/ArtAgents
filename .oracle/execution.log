@@ -1458,3 +1458,51 @@
   `14f1f7d5f77cb6bd384749941cff6e522b696590` (`packs: freeze canonical v2
   contract`): 30 frozen product/test/fixture paths plus accepted B1 control
   evidence. Production remains legacy-active; B2 is next.
+- B2 began from control HEAD
+  `c966b4b79fbca08e5bb30bc152a2b8467d0a7e74`. Four disjoint exact-Luna units
+  launched in parallel: runtime-resource audit, customization-coverage audit,
+  five missing pack skills, and existing-skill validation plus `_core` census.
+  Production remains legacy-active; manifest conversion waits for audit/docs
+  receipts.
+- B2 audit/docs wave returned four `PASS` receipts. Five missing skills were
+  added and four existing skills plus `_core` census were corrected; all 22
+  sorted skill routes resolve. Coverage confirmed 64 executors, 12
+  orchestrators, 10 elements, 59 aliases, four data packs, and zero
+  unclassified intended ownership. Resource audit classified all 22 packs;
+  only Blender requires five standalone runtime-resource declarations.
+- Three disjoint exact-Luna manifest units launched in parallel: nine
+  capability packs plus `builtin` deletion, nine remaining capability packs,
+  and four database pack manifests. Skills/tests/source/schema manifests are
+  outside their write sets; production remains legacy-active.
+- User intervention `babysit-b2-safe-concurrency-bounded-gates` acknowledged.
+  The completed four-unit B2 audit/docs wave was not cancelled, restarted, or
+  duplicated; manifest conversion launched only after its audit dependencies
+  settled. B2–B5 use one independent Luna certification by default, smallest
+  correction plus affected-criterion delta verification for blockers, and no
+  equivalent whole-cycle resets. Extra segment review requires a recorded
+  high-risk reason; the final independent Sol integrated review remains.
+- All three manifest units returned `PASS`: 18 capability manifests converted,
+  59 aliases removed, `builtin` deleted, four database manifests added with
+  three default-enabled plus Runaway disabled, 64 executors/12 orchestrators/
+  10 elements preserved by group counts, five Blender resources declared, and
+  four legacy schema manifests unchanged.
+- One exact-Luna integrated B2 closure unit launched to reconcile all 22 packs,
+  create focused behavioral gates and the offline zero-unclassified coverage
+  ledger, and prove docs/resource/catalog/database isolation before the bounded
+  independent certification.
+- Integrated exact-Luna B2 closure returned `PASS`: 22 packs, zero aliases,
+  64/12/10 capability census, eight rendering extensions, four preserved
+  database declarations/defaults, 22 skills, five confined Blender resources,
+  zero-unclassified coverage ledger, 106 focused tests plus 78 subtests, and
+  legacy-active isolation.
+- B2 candidate 1 froze 35 paths including the required `builtin/pack.yaml`
+  deletion in `.oracle/evidence/b2-candidate-1.sha256`; manifest SHA-256
+  `db527ea94373db32a34c67fbb0d1bcea0799d18b6253f8206ad92e1e1f2a4eb5`.
+  One independent exact-Luna bounded certification was dispatched under
+  `babysit-b2-safe-concurrency-bounded-gates`.
+- Independent exact-Luna B2 certification returned `PASS`: 35-entry identity,
+  22 strict manifests, zero aliases/builtin, 64/12/10 plus rendering/generation
+  projections, four preserved database declarations/defaults, 22 skills,
+  confined resources, zero-unclassified coverage, 106 tests plus 78 subtests,
+  and legacy-active isolation. No findings or recorded high-risk reason require
+  another segment review; B2 proceeds to checkpoint.

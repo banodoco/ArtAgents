@@ -37,6 +37,45 @@ python3 -m astrid projects --help # inspect one family's verbs
 is no other CLI surface to discover; when you do not know which family a
 question belongs to, read the census first.
 
+## Canonical bundled pack census
+
+The canonical beta bundle contains 22 product packs. `_core` is deliberately
+not one of them: it is irreducible, code-owned kernel guidance. The table is a
+deterministic checked-in routing projection, sorted by pack id, with each
+destination fixed to the owning pack's `skill/SKILL.md`. It is not an identity
+or capability authority; the canonical pack catalog and each pack's manifest
+remain authoritative. The five skill roots outside this bounded documentation
+edit are routed here without modifying their documents.
+
+<!-- BEGIN PACK CENSUS (deterministic checked-in routing projection) -->
+
+| Product pack | Owning agent guidance |
+| --- | --- |
+| `blender` | [`skill/SKILL.md`](../../blender/skill/SKILL.md) |
+| `comfy_wrap` | [`skill/SKILL.md`](../../comfy_wrap/skill/SKILL.md) |
+| `editorial` | [`skill/SKILL.md`](../../editorial/skill/SKILL.md) |
+| `fal` | [`skill/SKILL.md`](../../fal/skill/SKILL.md) |
+| `foley` | [`skill/SKILL.md`](../../foley/skill/SKILL.md) |
+| `generation` | [`skill/SKILL.md`](../../generation/skill/SKILL.md) |
+| `iteration` | [`skill/SKILL.md`](../../iteration/skill/SKILL.md) |
+| `media` | [`skill/SKILL.md`](../../media/skill/SKILL.md) |
+| `moirae` | [`skill/SKILL.md`](../../moirae/skill/SKILL.md) |
+| `references` | [`skill/SKILL.md`](../../references/skill/SKILL.md) |
+| `reigh` | [`skill/SKILL.md`](../../reigh/skill/SKILL.md) |
+| `rendering` | [`skill/SKILL.md`](../../rendering/skill/SKILL.md) |
+| `runaway` | [`skill/SKILL.md`](../../runaway/skill/SKILL.md) |
+| `runpod` | [`skill/SKILL.md`](../../runpod/skill/SKILL.md) |
+| `shots` | [`skill/SKILL.md`](../../shots/skill/SKILL.md) |
+| `stream_content` | [`skill/SKILL.md`](../../stream_content/skill/SKILL.md) |
+| `timeline` | [`skill/SKILL.md`](../../timeline/skill/SKILL.md) |
+| `training` | [`skill/SKILL.md`](../../training/skill/SKILL.md) |
+| `understanding` | [`skill/SKILL.md`](../../understanding/skill/SKILL.md) |
+| `vibecomfy` | [`skill/SKILL.md`](../../vibecomfy/skill/SKILL.md) |
+| `video_editing` | [`skill/SKILL.md`](../../video_editing/skill/SKILL.md) |
+| `youtube` | [`skill/SKILL.md`](../../youtube/skill/SKILL.md) |
+
+<!-- END PACK CENSUS -->
+
 ## Bootstrap and the store
 
 - `ASTRID_PROJECTS_ROOT` selects the projects root (default `<repo>/projects`

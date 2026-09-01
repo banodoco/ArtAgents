@@ -1,14 +1,13 @@
-schema_version: 1
+schema_version: 2
 id: comfy_wrap
 name: Comfy Workflow Wrapper
 version: 0.1.0
-origin: external
-install_tier: core
-pack_type: capability
+description: Wrap a parameterized ComfyUI workflow JSON and generate images from a text prompt via vibecomfy.
+status: active
+visibility: visible
 domain: generation
 stability: experimental
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs ComfyUI via vibecomfy for image generation.
@@ -18,7 +17,6 @@ permissions:
     reason: Reads workflow JSON files and writes generated outputs.
   - id: accelerator
     reason: May use GPU for ComfyUI model inference.
-description: Wrap a parameterized ComfyUI workflow JSON and generate images from a text prompt via vibecomfy.
 keywords:
   - comfyui
   - vibecomfy
@@ -33,5 +31,8 @@ agent:
   do_not_use_for: Do not use for arbitrary model selection or multi-modal generation — use generation.generate_image for the standard happy path.
   normal_entrypoints:
     - comfy_wrap.run
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 content:
   executors: executors

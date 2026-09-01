@@ -1,14 +1,13 @@
-schema_version: 1
+schema_version: 2
 id: fal
 name: Astrid fal
 version: 1.0.0
-origin: external
-install_tier: core
-pack_type: capability
+description: fal.ai integration for clip Foley and MiniMax H3 video generation.
+status: active
+visibility: visible
 domain: integration
 stability: stable
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs fal.ai media generation executors.
@@ -18,18 +17,14 @@ permissions:
     reason: Reads input video clips and writes generated audio files.
   - id: environment
     reason: Reads FAL_KEY for fal.ai API authentication.
-description: fal.ai integration for clip Foley and MiniMax H3 video generation.
 keywords: [fal, foley, audio, hunyuan, minimax, h3, video, api, integration]
 capabilities: [generate_clip_foley, generate_h3_video]
 agent:
   purpose: "Use for fal.ai Hunyuan Foley or MiniMax H3 text/reference video generation (requires FAL_KEY)."
   do_not_use_for: "Full spatial-Foley orchestration (use foley.foley_map) or general image/video generation already covered by the generation pack."
   normal_entrypoints: [fal.fal_foley, fal.h3_video]
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: external.fal_foley
-  canonical_id: fal.fal_foley
-  deprecated: true
-  deprecation_message: Moved to fal.fal_foley

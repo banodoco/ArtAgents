@@ -1,10 +1,7 @@
-schema_version: 1
+schema_version: 2
 id: reigh
 name: Astrid Reigh
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
 domain: integration
 stability: stable
 support: core
@@ -41,24 +38,6 @@ agent:
   - reigh.reigh_data
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: builtin.reigh_data
-  canonical_id: reigh.reigh_data
-  deprecated: true
-  deprecation_message: Moved to reigh.reigh_data
-- kind: executor
-  alias: builtin.open_in_reigh
-  canonical_id: reigh.open_in_reigh
-  deprecated: true
-  deprecation_message: Moved to reigh.open_in_reigh
-- kind: executor
-  alias: builtin.spatial_audio_page
-  canonical_id: reigh.spatial_audio_page
-  deprecated: true
-  deprecation_message: Moved to reigh.spatial_audio_page
-- kind: executor
-  alias: builtin.publish
-  canonical_id: reigh.publish
-  deprecated: true
-  deprecation_message: Moved to reigh.publish
+documentation:
+  kind: skill
+  path: skill/SKILL.md

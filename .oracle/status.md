@@ -4,9 +4,10 @@
 - Execution contract: **FROZEN**
 - Huge-run policy: **active — 4–6 engineer-weeks**
 - Existing Astrid package/product foundation: **substantial and mostly built**
-- Canonical-v2 implementation batches: **B1 COMPLETE — 1/5 checkpoints**
-- Frozen final criteria: **0/15 end to end; B1 isolated evidence accepted**
-- Product checkpoint: **30 source/test/fixture paths**
+- Canonical-v2 implementation batches: **B1 COMMITTED; B2 GATE PASS —
+  1/5 checkpoints committed**
+- Frozen final criteria: **0/15 end to end; B1–B2 evidence accepted**
+- Product candidate: **B2 frozen 35-path delta over B1 control HEAD**
 - Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
 - B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
 - Branch: `megado/canonical-pack-beta`
@@ -21,18 +22,20 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 6 — B2 implementation dispatch**
-- Active batch: **B1 committed; prepare all 22 canonical product manifests,
-  direct structured guidance, `_core` census, customization coverage, and known
-  runtime-resource ownership while production remains legacy-active**
-- Model routing: **Sol owns the Megado run and gate decisions; Luna performs
-  normal bounded work and independent reviews; later batches retain separate
-  Sol oracle dispositions. B1's user-directed finite delta closure is recorded
-  above; no `[XHARD]` task currently exists.**
+- Current Megado phase: **Phase 6 — B2 checkpoint preparation**
+- Active batch: **independent Luna certification PASS: 22 strict v2 packs,
+  64/12/10 census, four database declarations, 22 skills, confined resources,
+  zero-unclassified coverage, production legacy-active**
+- Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
+  normal implementation, validation, and bounded independent certification.
+  Segment Sol review requires a recorded high-risk reason; final independent
+  Sol integrated review remains. No `[XHARD]` task currently exists.**
 - Fresh pre-execution review: **PASS after bounded path correction**
-- Review cadence: **B1 closed by the recorded user intervention; B2–B5 retain
-  three Luna passes plus one Sol disposition, with cumulative gates after B3
-  and B4**
+- Review cadence: **B1 closed by its recorded intervention. B2–B5 use one
+  independent Luna pass by default; blockers receive the smallest correction
+  and one affected-criterion delta verification while unaffected passes remain
+  valid. No equivalent whole-cycle resets. Cumulative activation/migration/
+  integration gates remain.**
 
 ## What “mostly done” means
 
@@ -71,8 +74,8 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Dispatch bounded exact-Luna B2 implementation units with disjoint path
-ownership, then freeze and validate the complete B2 candidate.
+Commit the reviewed B2 checkpoint, record its SHA and receipt set, then begin
+B3 database projection without activating production authority.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

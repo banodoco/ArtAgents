@@ -1,0 +1,30 @@
+schema_version: 2
+id: runaway
+name: Runaway
+version: 1.0.0
+description: Sharded Runaway transition persistence and idempotent creation.
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+database:
+  default_enabled: false
+  depends_on:
+    - pack: core
+      min_migration: 1
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables:
+        - runaway_transitions
+  stream_types: []
+  event_kinds: []
+  command_kinds:
+    - runaway.create
+  repositories:
+    - RunawayRepository
+  conformance:
+    - writer_ownership
+    - crash_atomicity
+  cli_mounts: {}
+  bridge_mounts: []

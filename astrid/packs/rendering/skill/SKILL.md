@@ -88,6 +88,7 @@ specified.
 | `rendering.timeline_visualize` | Read managed timeline event logs without mutation and emit a deterministic, run-owned agent evidence pack with JSON, Markdown, PNG, SVG, and navigation actions. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
+| `rendering.timeline_storyboard` | Read a timeline and asset registry, resolve each pinned shot's ordered image inputs, and write a read-only JSON view model plus static HTML storyboard. |
 
 ## Escape hatch: element system
 

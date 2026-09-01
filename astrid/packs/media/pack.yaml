@@ -1,10 +1,10 @@
-schema_version: 1
+schema_version: 2
 id: media
 name: Media
 version: 0.1.0
-origin: builtin
-install_tier: core
-pack_type: capability
+description: Media processing tools, including clip extraction, weak-mic speech repair, and remote GIF search.
+status: active
+visibility: visible
 domain: media
 stability: stable
 support: core
@@ -17,7 +17,6 @@ permissions:
     reason: Optional speech repair executor calls fal.ai LavaSR; GIF search calls remote media APIs.
   - id: environment
     reason: Reads FAL_KEY for fal.ai speech repair and GIPHY_API_KEY for GIF search.
-description: Media processing tools, including clip extraction, weak-mic speech repair, and remote GIF search.
 keywords:
   - video
   - clip
@@ -38,8 +37,6 @@ capabilities:
   - repair_speech
   - search_gifs
   - download_remote_media
-content:
-  executors: executors
 agent:
   purpose: "Use when you need to trim media segments, repair weak-mic speech in a video clip, or search/download GIF and sticker assets."
   do_not_use_for: "Not for building iteration videos from run history (use the iteration pack) or final timeline rendering (use the rendering pack)."
@@ -47,3 +44,8 @@ agent:
     - media.clip_extract
     - media.speech_repair_lavasr
     - media.gif_search
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+content:
+  executors: executors

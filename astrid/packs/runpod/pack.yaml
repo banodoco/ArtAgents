@@ -1,10 +1,7 @@
-schema_version: 1
+schema_version: 2
 id: runpod
 name: Astrid RunPod
 version: 1.0.0
-origin: external
-install_tier: core
-pack_type: capability
 domain: infrastructure
 stability: stable
 support: core
@@ -42,29 +39,6 @@ agent:
   - runpod.provision
 content:
   executors: executors
-aliases:
-- kind: executor
-  alias: external.runpod.provision
-  canonical_id: runpod.provision
-  deprecated: true
-  deprecation_message: Moved to runpod.provision
-- kind: executor
-  alias: external.runpod.exec
-  canonical_id: runpod.exec
-  deprecated: true
-  deprecation_message: Moved to runpod.exec
-- kind: executor
-  alias: external.runpod.pull
-  canonical_id: runpod.pull
-  deprecated: true
-  deprecation_message: Moved to runpod.pull
-- kind: executor
-  alias: external.runpod.teardown
-  canonical_id: runpod.teardown
-  deprecated: true
-  deprecation_message: Moved to runpod.teardown
-- kind: executor
-  alias: external.runpod.session
-  canonical_id: runpod.session
-  deprecated: true
-  deprecation_message: Moved to runpod.session
+documentation:
+  kind: skill
+  path: skill/SKILL.md

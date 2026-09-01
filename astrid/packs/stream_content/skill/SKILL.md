@@ -1,5 +1,5 @@
 ---
-name: "stream-content"
+name: stream_content
 short_description: "Distill long event or stream recordings into content blocks and clip candidates."
 description: "Use for stream/event recordings that need holding screens, dead air, real content, and publishable clip candidates separated into reviewable artifacts."
 ---
@@ -8,6 +8,14 @@ description: "Use for stream/event recordings that need holding screens, dead ai
 
 Use this pack when a long event, webinar, livestream, panel, or conference
 recording needs to become reviewable publishing material.
+
+## Capabilities
+
+| Capability | Kind | What it does |
+|---|---|---|
+| `stream_content.distill` | Orchestrator | Distill a long recording into labeled segments, clip candidates, and reviewable artifacts. |
+| `stream_content.segment_map` | Executor | Build a labeled segment map when full distillation is unnecessary. |
+| `stream_content.clip_candidates` | Executor | Generate scored clip candidates from an existing transcript and optional segment map. |
 
 ## Quick Start
 

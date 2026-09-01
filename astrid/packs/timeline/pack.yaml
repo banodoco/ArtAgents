@@ -1,0 +1,46 @@
+schema_version: 2
+id: timeline
+name: Timeline
+version: 1.0.0
+description: Persistent project timelines and their event-backed editing operations.
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+database:
+  default_enabled: true
+  depends_on:
+    - pack: core
+      min_migration: 1
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables:
+        - timelines
+  stream_types:
+    - timeline.timeline
+  event_kinds:
+    - timeline.created
+    - timeline.saved
+    - timeline.archived
+    - timeline.unarchived
+    - timeline.config_replaced
+  command_kinds:
+    - timeline.create
+    - timeline.save
+    - timeline.archive
+    - timeline.unarchive
+    - timeline.replace_config
+  repositories:
+    - TimelineRepository
+  conformance:
+    - replay
+    - mismatch_before_mutation
+    - same_project
+    - vocabulary
+    - writer_ownership
+    - crash_atomicity
+  cli_mounts:
+    timelines: timelines
+  bridge_mounts:
+    - timelines

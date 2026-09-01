@@ -1,0 +1,8 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/packs/timeline/pack.yaml; astrid/packs/shots/pack.yaml; astrid/packs/references/pack.yaml; astrid/packs/runaway/pack.yaml
+PACKS: timeline, shots, references, and Runaway strict v2 PASS; version 1.0.0; migration head 1; isolated copies excluded retained legacy manifests.
+DATABASE: Tables preserved: timelines; shots/shot_items; project_references/media_references/reference_links; runaway_transitions. Defaults timeline/shots/references true, Runaway false. All migrations version 1 `initial`, `migrations/0001_initial.sql`. Core dependency uses positive minimum migration 1. Stream/event/command/repository/conformance/CLI/bridge declarations preserved.
+REFERENCES: Three tables, seven events, seven commands, ReferenceRepository, SDK surface, nested `media references` mount, and direct skill declaration preserved.
+ISOLATION: Four `schema-pack.yaml` files unchanged; no loader/discovery/consumer/source rewiring; production remains legacy-active.
+BLOCKERS: none
+0

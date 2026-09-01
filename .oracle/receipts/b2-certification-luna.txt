@@ -1,0 +1,9 @@
+VERDICT: PASS
+IDENTITY: 35-entry frozen candidate verified: 34/34 content hashes match; required `astrid/packs/builtin/pack.yaml` deletion confirmed.
+CATALOG: 22 strict v2 product manifests; 64 executors, 12 orchestrators, 10 elements, 8 rendering extensions, generation 29/14/4; zero aliases; builtin absent.
+DATABASE: Four declarations preserve legacy tables/vocabulary/migrations/dependencies/mounts/semantics; timeline/shots/references true and Runaway false; four schema manifests unchanged; production legacy-active.
+DOCS_RESOURCES: 22/22 direct structured skills through deterministic `_core` census; `_core` not a product pack; exactly five standalone confined Blender resources, no overlap.
+COVERAGE: Offline 22-row ledger has justified kernel owners, zero unclassified, no runtime consumption.
+VALIDATION: `python3 -m pytest tests/packs/test_b2_integrated_closure.py tests/packs/test_canonical_pack_v2.py tests/v10/test_docs_cli_alignment.py tests/v10/test_catalog_migrations.py -q` — 106 passed, 78 subtests; `python3 -m astrid help` PASS; `test_m7_docs` remains unrelated exact-base baseline and was not rerun.
+FINDINGS: none
+0

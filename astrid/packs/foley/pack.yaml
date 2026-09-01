@@ -1,42 +1,27 @@
-schema_version: 1
+schema_version: 2
 id: foley
 name: Astrid Foley
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+description: Spatial Foley pipeline — tile a video, prompt a VLM for per-tile audio cues, score Foley per tile, and emit a position-mixed viewer.
+status: active
+visibility: visible
 domain: media
 stability: stable
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs ffmpeg for audio and video foley processing.
   - id: project_files
     reason: Reads source media files and writes foley-processed outputs.
-description: Spatial Foley pipeline — tile a video, prompt a VLM for per-tile audio cues, score Foley per tile, and emit a position-mixed viewer.
 keywords: [foley, audio, spatial, tile, video, viewer, vlm, soundscape]
 capabilities: [tile_video, review_foley, build_spatial_viewer, orchestrate_spatial_foley]
 agent:
   purpose: "Use to build a spatial soundscape for a video: it tiles the frame, asks a VLM for per-tile prompts, generates Foley per tile (via fal.fal_foley), and renders a viewer that mixes tracks by viewport position."
   do_not_use_for: "Generating Foley for a single whole clip (call fal.fal_foley directly) or transcript/cut editorial work (use the editorial pack)."
   normal_entrypoints: [foley.foley_map]
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 content:
   executors: executors
   orchestrators: orchestrators
-aliases:
-- kind: executor
-  alias: builtin.foley_review
-  canonical_id: foley.foley_review
-  deprecated: true
-  deprecation_message: Moved to foley.foley_review
-- kind: executor
-  alias: builtin.tile_video
-  canonical_id: foley.tile_video
-  deprecated: true
-  deprecation_message: Moved to foley.tile_video
-- kind: orchestrator
-  alias: builtin.foley_map
-  canonical_id: foley.foley_map
-  deprecated: true
-  deprecation_message: Moved to foley.foley_map

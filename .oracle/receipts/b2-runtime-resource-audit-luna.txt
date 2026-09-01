@@ -1,0 +1,7 @@
+AUDIT: PASS
+PACK_RESOURCES: All 22 packs classified. Only Blender needs standalone `runtime_resources`: `render_core.py`, `mesh_fetch.py`, `renders/wink_turn.py`, `server/blender_render_server.py`, and `server/blender-render-api.service`. Editorial presets, rendering schemas/font/template, training schemas/review UI, and video-editing speaker data are already confined beneath declared executor/orchestrator content roots and must not be duplicated. Timeline, shots, references, and Runaway migrations belong only in `database.migrations`; remaining packs use declared content/extensions or external/project inputs.
+KERNEL_OWNERS: v2 grammar/resource vocabulary; core rendering manifest schemas; core migration SQL; code-only element-kind/generation taxonomy registries; `_core` guidance/census.
+UNCLASSIFIED: none
+MANIFEST_ACTIONS: strict v2 for 22 packs; five Blender resources only; preserve eight rendering extension paths; four migration paths only in database blocks; declare `documentation: {kind: skill, path: skill/SKILL.md}` for every retained pack; classify README/STAGE/golden/tests/placeholders as authoring-only and exclude cache/build output.
+BLOCKERS: none
+0

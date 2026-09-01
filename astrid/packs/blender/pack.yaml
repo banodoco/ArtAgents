@@ -1,14 +1,13 @@
-schema_version: 1
+schema_version: 2
 id: blender
 name: Astrid Blender
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+description: Render 3D scenes with Blender, locally or on a remote cloud render host (a Hetzner box or an on-demand RunPod GPU pod).
+status: active
+visibility: visible
 domain: media
 stability: stable
 support: core
-visibility: visible
 permissions:
   - id: subprocess
     reason: Runs the blender binary (local render) and ffmpeg (animation encode).
@@ -16,7 +15,6 @@ permissions:
     reason: Reads scene/blend inputs and writes rendered image/video output.
   - id: network
     reason: Cloud execution POSTs to a remote Blender render API host (Hetzner / RunPod).
-description: Render 3D scenes with Blender, locally or on a remote cloud render host (a Hetzner box or an on-demand RunPod GPU pod).
 keywords:
   - blender
   - render
@@ -33,6 +31,20 @@ agent:
   purpose: Choose this pack to render a Blender scene (declarative spec or .blend file) to a still image or animation, either on this machine or on a remote GPU/CPU render host.
   do_not_use_for: Not for timeline/video-edit rendering (use rendering.render); this pack renders standalone 3D scenes.
   normal_entrypoints:
-  - blender.render
+    - blender.render
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 content:
   executors: executors
+resources:
+  - path: render_core.py
+    kind: runtime
+  - path: mesh_fetch.py
+    kind: runtime
+  - path: renders/wink_turn.py
+    kind: runtime
+  - path: server/blender_render_server.py
+    kind: runtime
+  - path: server/blender-render-api.service
+    kind: service

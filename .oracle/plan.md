@@ -62,11 +62,15 @@ is in `.oracle/implementation-ledger.md`.
 - User control `babysit-c46-end-open-ended-b1-loop` accepts B1 from the two
   unaffected candidate-45 Luna passes plus the candidate-46 delta pass. It
   prohibits candidate 47, another panel, and another oracle dispatch.
+- B2 implemented all 22 strict manifests, direct skills, `_core` census,
+  bounded resource ownership, and zero-unclassified coverage. One independent
+  Luna certification passed the 35-path candidate with 106 focused tests plus
+  78 subtests; production remains legacy-active.
 - Checkpoints: B1 `14f1f7d5f77cb6bd384749941cff6e522b696590`;
-  1/5 committed.
-- Frozen end-to-end criteria: 0/15 complete; B1 provides accepted isolated
-  evidence toward criteria 1, 2, 6, 12, and 13.
-- Next action: begin B2.
+  B2 commit pending; 1/5 committed.
+- Frozen end-to-end criteria: 0/15 complete; B1–B2 provide accepted isolated
+  and unshipped evidence.
+- Next action: commit B2, then begin B3.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

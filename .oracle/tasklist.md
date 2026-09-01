@@ -160,36 +160,39 @@ direct cut, and proportionate beta scope. Avoid compatibility aliases,
 unclassified surfaces, fake `_core` symmetry, and exhaustive ownership
 machinery.
 
-- [ ] B2.1 Delete the empty `builtin` pack and all 59 deprecated alias shims.
-- [ ] B2.2 Convert the 18 retained capability manifests to v2 without losing
+- [x] B2.1 Delete the empty `builtin` pack and all 59 deprecated alias shims.
+- [x] B2.2 Convert the 18 retained capability manifests to v2 without losing
   any of 64 executors, 12 orchestrators, 10 elements, or the typed
   rendering/generation projections.
-- [ ] B2.3 Add v2 `pack.yaml` to `timeline`, `shots`, `references`, and
+- [x] B2.3 Add v2 `pack.yaml` to `timeline`, `shots`, `references`, and
   `runaway`, merging their database declarations without changing SQL or
   product semantics.
-- [ ] B2.4 Preserve explicit defaults: timeline/shots/references enabled,
+- [x] B2.4 Preserve explicit defaults: timeline/shots/references enabled,
   Runaway disabled but explicitly composable.
-- [ ] B2.5 Make `references` the combined capability/database/SDK/CLI/docs
+- [x] B2.5 Make `references` the combined capability/database/SDK/CLI/docs
   exemplar while preserving its three-table and command/event behavior.
-- [ ] B2.6 Give **all 22 retained product packs** direct structured guidance.
+- [x] B2.6 Give **all 22 retained product packs** direct structured guidance.
   Add skills for blender, timeline, shots, references, and Runaway; use no
   bundled-pack documentation opt-out. The general grammar may retain a
   justified opt-out for a future truly internal pack.
-- [ ] B2.7 Generate the `_core` 22-pack census and links to every owning skill;
+- [x] B2.7 Generate the `_core` 22-pack census and links to every owning skill;
   keep `_core` as code-owned guidance/kernel, not a fake product pack.
-- [ ] B2.8 Produce a lightweight customization coverage ledger covering pack,
+- [x] B2.8 Produce a lightweight customization coverage ledger covering pack,
   capability/extension, database, CLI/SDK/bridge, documentation, operational,
   and `runtime_resource` ownership, ending with zero unclassified surfaces or
   unjustified kernel owners.
-- [ ] B2.9 Inventory the known typed component/rendering loaders and explicit
+- [x] B2.9 Inventory the known typed component/rendering loaders and explicit
   pack-relative file reads. Every known runtime resource must be declared or
   justified as kernel-owned; do not attempt exhaustive all-file/Python
   ownership.
 
-Gate B2: all 22 bundled product manifests, docs, and known runtime resources
-are ready in v2 under the unshipped cutover branch. Three independent Luna
-reviews and one Sol oracle disposition must pass; then commit the reviewed B2
-checkpoint while legacy runtime authority remains active.
+Gate B2: **PASS under user control
+`babysit-b2-safe-concurrency-bounded-gates`**. One independent Luna
+certification verified the 35-path frozen candidate, exact 22-pack/64/12/10
+census, four database declarations, 22 direct skills, confined resources,
+zero-unclassified coverage, 106 focused tests plus 78 subtests, and
+legacy-active isolation. No blocking finding or recorded high-risk reason
+requires another segment review. Commit the reviewed B2 checkpoint.
 
 ## B3 — project canonical databases through the existing engine
 
@@ -331,12 +334,13 @@ independent pass.
   domain-discovered; 17 of 22 product packs already have direct skills; all
   four database-backed slices and their migration engine are operational.
 - Clarity/reconciliation control work: **P0 9/9 complete**.
-- B1 implementation: **10/10 items complete; bounded gate PASS**.
-- Canonical-v2 implementation checkpoints: **B1 committed; 1/5 complete**.
-- Frozen final criteria satisfied end to end: **0/15**; B1 supplies accepted
-  isolated evidence toward criteria 1, 2, 6, 12, and 13 without activating
-  production.
-- B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`;
-  production remains legacy-active.
+- B1 implementation: **10/10 complete; checkpoint
+  `14f1f7d5f77cb6bd384749941cff6e522b696590`**.
+- B2 implementation: **9/9 complete; bounded certification PASS; checkpoint
+  commit pending**.
+- Canonical-v2 implementation checkpoints: **1/5 committed**.
+- Frozen final criteria satisfied end to end: **0/15**; B1–B2 provide accepted
+  isolated/unshipped evidence without activating production.
 
-Next action: execute B2. Do not start candidate 47 or another B1 review cycle.
+Next action: commit the reviewed B2 checkpoint, record its SHA, then execute B3
+database projection. Production remains legacy-active.

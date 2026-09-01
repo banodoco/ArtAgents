@@ -1,0 +1,8 @@
+AUDIT: PASS
+COUNTS: 22 retained product packs; 18 capability plus 4 database; 64 executors; 12 orchestrators; 10 rendering elements; 8 rendering extensions; 29 generation features; 14 modes; 4 built-in backend descriptors; 59 deprecated aliases; 17 pre-existing direct skills.
+PACK_COVERAGE: Every retained pack mapped across capability/extension, database, CLI/SDK/bridge, documentation, operational consumer, and runtime-resource ownership. Timeline owns `timelines`; shots owns `shots`/`shot_items`; references owns its three tables and `media references`/SDK surface; Runaway owns `runaway_transitions` and stays non-default. Rendering owns 5 executors, 10 elements, 8 typed extensions and content-root resources. Generation owns 4 executors while typed kernel projections remain explicit. Other capability packs retain their discovered counts and generic/static surfaces.
+KERNEL_OWNERS: shared SQLite/writer/UoW/event infrastructure; generic typed registry/loaders; built-in generation taxonomy/model catalog/backend adapters; core product families and operational transport.
+UNCLASSIFIED: none by intended ownership. Five missing skills, stale `_core` entries, undeclared v1 resource closure, builtin, and aliases are identified B2 gaps with owners.
+LEDGER_ACTIONS: delete builtin/59 aliases; prove 64/12/10 after 18 conversions; add four database packs with 3 default plus Runaway disabled; preserve references semantics; add five skills and exact 22-route core census; create final offline coverage ledger with zero unclassified; verify known confined resources and defer source/wheel closure to B5.
+BLOCKERS: none
+0

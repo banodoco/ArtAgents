@@ -223,20 +223,22 @@ verbs.
 
 ## Executors (direct access)
 
-The pack's three executors remain available for direct use through the SDK
+The pack's four executors remain available for direct use through the SDK
 (`astrid.sdk.invoke(...)`) and for subprocess/cron automation.
 
 | Executor | What it does |
 |---|---|
-| `generation.generate_image` | Generate images from text prompts via local (vibecomfy) or cloud (fal) backends. v2: model→mode→backend taxonomy with a required `mode` input. Supports t2i, i2i, and edit modes. |
-| `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v, i2v, and flf (first-last-frame) modes. |
+| `generation.generate_audio` | Generate audio from text prompts via local or cloud backends. v2: model→mode→backend taxonomy with a required `mode`; the current mode is `music`. |
+| `generation.generate_image` | Generate images from text prompts via local (vibecomfy), cloud (fal), or Codex backends. v2: model→mode→backend taxonomy with a required `mode`; supports t2i, i2i, and edit modes. |
+| `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend taxonomy with a required `mode`; supports t2v, i2v, and flf modes. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. Requires `OPENAI_API_KEY`. |
 
-> **⚠️  `generate_image_openai` is executor-only for this sprint.**
+> **Note:** `generate_image_openai` is executor-only for this sprint.
 > The `astrid.generate.image()` facade explicitly rejects
 > `execution="openai"` with a diagnostic pointing to
-> `generation.generate_image_openai`.  Direct executor access via the SDK is
-> the supported path for OpenAI image generation.
+> `generation.generate_image_openai`. Direct executor access through the SDK
+> is the supported path for OpenAI image generation.
+
 
 For detailed image generation guidance — mode selection (t2i/i2i/edit),
 model decision tree, drop-with-warning behavior, and escape hatches — see

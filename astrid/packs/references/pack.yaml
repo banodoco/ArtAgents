@@ -1,0 +1,52 @@
+schema_version: 2
+id: references
+name: References
+version: 1.0.0
+description: Project, media, and linked references with repository, SDK, and CLI support.
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+database:
+  default_enabled: true
+  depends_on:
+    - pack: core
+      min_migration: 1
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables:
+        - project_references
+        - media_references
+        - reference_links
+  stream_types:
+    - reference.reference
+  event_kinds:
+    - reference.created
+    - reference.updated
+    - reference.archived
+    - reference.unarchived
+    - reference.media_associated
+    - reference.primary_changed
+    - reference.linked
+  command_kinds:
+    - reference.create
+    - reference.update
+    - reference.archive
+    - reference.unarchive
+    - reference.associate
+    - reference.set_primary
+    - reference.link
+  repositories:
+    - ReferenceRepository
+  conformance:
+    - replay
+    - mismatch_before_mutation
+    - same_project
+    - vocabulary
+    - writer_ownership
+    - crash_atomicity
+    - hash_chain
+  cli_mounts:
+    references: media references
+  bridge_mounts: []

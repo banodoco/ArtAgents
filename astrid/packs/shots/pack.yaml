@@ -1,0 +1,45 @@
+schema_version: 2
+id: shots
+name: Shots
+version: 1.0.0
+description: Persistent shots and shot items for project timelines.
+documentation:
+  kind: skill
+  path: skill/SKILL.md
+database:
+  default_enabled: true
+  depends_on:
+    - pack: core
+      min_migration: 1
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables:
+        - shots
+        - shot_items
+  stream_types:
+    - shot.shot
+  event_kinds:
+    - shot.created
+    - shot.item_added
+    - shot.item_removed
+    - shot.reordered
+  command_kinds:
+    - shot.create
+    - shot.add_item
+    - shot.remove_item
+    - shot.reorder
+  repositories:
+    - ShotRepository
+  conformance:
+    - replay
+    - mismatch_before_mutation
+    - same_project
+    - vocabulary
+    - writer_ownership
+    - crash_atomicity
+    - hash_chain
+  cli_mounts:
+    shots: timelines shots
+  bridge_mounts: []
