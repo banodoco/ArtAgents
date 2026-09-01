@@ -40,8 +40,8 @@ FAMILY_PROOFS: dict[str, dict[str, str]] = {
     },
     "provider": {
         "kind": "family_representative",
-        "selector": "tests/test_provider_manifest_readiness.py::test_every_tcp_provider_manifest_declares_an_enforceable_host_broker",
-        "rationale": "provider readiness, credentials, host-managed TCP broker, and descendant enforcement are checked at the shared adapter boundary",
+        "selector": "tests/integrations/test_generic_host_external_provider.py::test_external_pack_command_imports_from_its_admitted_pack_root",
+        "rationale": "provider family executes a real host-managed loopback route through the subprocess host and settles output in the runtime",
     },
     "render": {
         "kind": "family_representative",
