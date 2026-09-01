@@ -662,6 +662,7 @@ def test_runtime_protocol_client_uses_worker_token_contract_without_user_handsha
     )
 
     assert client.WORKER_SCOPES == (
+        "handshake",
         "worker:register",
         "worker:execute",
         "tasks:read",
@@ -670,6 +671,33 @@ def test_runtime_protocol_client_uses_worker_token_contract_without_user_handsha
     )
     assert response["executor_id"] == "worker-1"
     assert client.generated.handshake_called is False
+
+
+def test_runtime_protocol_client_uses_a_fresh_idempotency_key_for_each_heartbeat(
+    monkeypatch,
+):
+    class WorkerGenerated:
+        def __init__(self, endpoint, token):
+            self.heartbeats = []
+
+        def health(self):
+            return {"runtime_epoch": 7}
+
+        def heartbeat_attempt(self, attempt_id, **payload):
+            self.heartbeats.append((attempt_id, payload))
+            return payload
+
+    monkeypatch.setattr("banodoco_workspace_client.WorkspaceClient", WorkerGenerated)
+    client = RuntimeProtocolClient("http://127.0.0.1:8765", "worker-token")
+
+    client.heartbeat("task-1", "lease-1", attempt_id="attempt-1", fence=3)
+    client.heartbeat("task-1", "lease-1", attempt_id="attempt-1", fence=3)
+
+    first = client.generated.heartbeats[0][1]
+    second = client.generated.heartbeats[1][1]
+    assert first["runtime_epoch"] == second["runtime_epoch"] == 7
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert first["idempotency_key"].startswith("heartbeat-attempt-1-3-7-")
 
 
 def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):

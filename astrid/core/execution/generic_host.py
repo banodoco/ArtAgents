@@ -655,6 +655,7 @@ class RuntimeProtocolClient:
     """
 
     WORKER_SCOPES = (
+        "handshake",
         "worker:register",
         "worker:execute",
         "tasks:read",
@@ -684,6 +685,9 @@ class RuntimeProtocolClient:
         self.schema_digest = SCHEMA_DIGEST
         self.generated = WorkspaceClient(self.endpoint, self.credential)
         self._runtime_epoch: int | None = None
+        self._heartbeat_session = secrets_module.token_hex(8)
+        self._heartbeat_sequence = 0
+        self._heartbeat_lock = threading.Lock()
 
     def health(self):
         """Read protocol/schema/runtime epoch through the generated client."""
@@ -762,12 +766,23 @@ class RuntimeProtocolClient:
     def heartbeat(self, task_id: str, lease_token: str, *, attempt_id: str | None = None, fence: int | None = None):
         if not attempt_id or fence is None:
             raise HostError("generated heartbeat requires attempt_id and fence")
+        runtime_epoch = self._current_runtime_epoch()
+        # A heartbeat extends the lease and is therefore a new mutation, not a
+        # replay of the first pulse.  Reusing one idempotency key here makes a
+        # long render appear healthy to the host while the runtime repeatedly
+        # returns the original receipt and lets the lease expire.
+        with self._heartbeat_lock:
+            self._heartbeat_sequence += 1
+            heartbeat_sequence = self._heartbeat_sequence
         return self.generated.heartbeat_attempt(
             attempt_id,
             lease_id=lease_token,
             fence=int(fence),
-            idempotency_key=f"heartbeat-{attempt_id}-{fence}",
-            runtime_epoch=self._current_runtime_epoch(),
+            idempotency_key=(
+                f"heartbeat-{attempt_id}-{fence}-{runtime_epoch}-"
+                f"{self._heartbeat_session}-{heartbeat_sequence}"
+            ),
+            runtime_epoch=runtime_epoch,
         )
 
     def claim(self, task_id: str, worker_id: str, lease_token: str):
