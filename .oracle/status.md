@@ -4,10 +4,11 @@
 - Execution contract: **FROZEN**
 - Huge-run policy: **active — 4–6 engineer-weeks**
 - Existing Astrid package/product foundation: **substantial and mostly built**
-- Canonical-v2 implementation batches: **B1–B2 COMPLETE —
-  2/5 checkpoints committed**
-- Frozen final criteria: **0/15 end to end; B1–B2 evidence accepted**
-- Product state: **22 v2 manifests prepared; production legacy-active**
+- Canonical-v2 implementation batches: **B1–B2 COMPLETE; B3 GATE PASS —
+  2/5 checkpoints committed, B3 checkpoint pending**
+- Frozen final criteria: **0/15 end to end; B1–B3 evidence accepted**
+- Product state: **22 v2 manifests and canonical database projection prepared;
+  production legacy-active**
 - Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`
 - B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
 - B2 checkpoint: `a293e4c416c0e716154c392c0dd43165344f870d`
@@ -23,10 +24,9 @@
   dependencies green; exact Luna/Sol wrapper routes green; authorized push
   dry-run green; inherited focused baseline `179 passed`.
 - Goal state: **ACTIVE**
-- Current Megado phase: **Phase 7 — B3 implementation dispatch**
-- Active batch: **project canonical database declarations through existing
-  collision/migration machinery by explicit injection; preserve legacy
-  production builders until B4**
+- Current Megado phase: **Phase 7 — B3 checkpoint preparation**
+- Active batch: **frozen six-path B3 candidate independently certified; commit
+  the reviewed checkpoint, then run cumulative gate 1 before B4**
 - Model routing: **Sol owns Megado sequencing and gate decisions; Luna performs
   normal implementation, validation, and bounded independent certification.
   Segment Sol review requires a recorded high-risk reason; final independent
@@ -52,12 +52,12 @@ Most underlying functionality was already implemented before this run:
   repositories, product behavior, and operational support. The migration
   engine, writer/UoW, SDK wiring, doctor, and backup/restore also exist.
 
-What is not done is the new canonical-authority cutover: there is no active v2
-catalog, the four database slices still use separate `schema-pack.yaml`, three
-fixed default-composition authorities remain, eight builder/reader consumers
-have not converged, five direct product-pack skills are missing, and wheel
-closure has not been proved. Therefore the existing foundation is mostly built
-while the specifically requested v2 cutover remains 0/5 and 0/15.
+What is not done is the active canonical-authority cutover: production still
+uses the four `schema-pack.yaml` manifests, three fixed default-composition
+authorities, and eight unconverged builder/reader consumers. B4 must atomically
+activate v2 and delete those alternates; B5 must prove inspection, doctor,
+documentation, packaging, clean-wheel, focused/full-suite, and evidence
+closure. The frozen goal therefore remains 0/15 end to end.
 
 ## Execution authority
 
@@ -75,8 +75,8 @@ not evidence that this canonical-pack product cutover ran.
 
 ## Correct next action
 
-Dispatch independent exact-Luna B3 implementation units only where paths and
-dependencies are safe, then run integrated database-projection closure.
+Commit the reviewed B3 checkpoint, record its SHA, then run cumulative gate 1
+over B1–B3 while production remains legacy-active.
 
 Cloud preflight has `build` 1.6.0 installed. B5 still requires its own recorded
 isolated validation/build environment and clean-wheel proof.

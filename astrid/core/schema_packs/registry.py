@@ -23,10 +23,14 @@ error), and no partial state is recorded when any collision exists.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import Any, Iterable, Mapping, TYPE_CHECKING
 
 from astrid.core.schema_packs.manifest import SchemaPackManifest
+
+if TYPE_CHECKING:
+    from astrid.core.pack.canonical import ResourceHandle
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -46,16 +50,14 @@ class SchemaPackRegistryFrozenError(SchemaPackRegistryError):
 
 
 # ---------------------------------------------------------------------------
-# Immutable models
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class RegisteredMigration:
     """One forward-only migration of a registered pack.
 
-    Flattens the manifest's :class:`MigrationDescriptor` with the owning pack id
-    so the migration runner and catalog tests never need to re-derive ownership.
+    ``path`` remains the public relative identity used by the legacy
+    schema-pack contract.  Canonical projections additionally carry the
+    owning root and the already-confined resource handle, so execution never
+    needs to rediscover a resource from a pack id.
     """
 
     pack: str
@@ -63,6 +65,38 @@ class RegisteredMigration:
     name: str
     path: str
     tables: tuple[str, ...]
+    owner_root: Path | None = None
+    resource: ResourceHandle | None = None
+
+    @property
+    def relative_path(self) -> str:
+        """Canonical spelling for the retained relative migration identity."""
+        return self.path
+
+
+@dataclass(frozen=True, slots=True)
+class DatabasePackProjection:
+    """Immutable database-only projection consumed by collision/freeze logic.
+
+    This deliberately is not a :class:`SchemaPackManifest`: canonical packs
+    have one source of truth and must not be converted back into the legacy
+    manifest grammar merely to enter the runtime registry.
+    """
+
+    id: str
+    version: str | int
+    depends_on: tuple[Any, ...]
+    migrations: tuple[Any, ...]
+    stream_types: tuple[str, ...]
+    event_kinds: tuple[str, ...]
+    command_kinds: tuple[str, ...]
+    repositories: tuple[str, ...]
+    conformance: tuple[str, ...]
+    cli_mounts: Mapping[str, str]
+    bridge_mounts: tuple[str, ...]
+    name: str = ""
+    default_enabled: bool = True
+    source_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +109,8 @@ class FrozenSchemaPackRegistry:
     that repositories and the migration runner may consume.
     """
 
-    packs: Mapping[str, SchemaPackManifest]
-    """Registered pack id -> validated immutable manifest (sorted by id)."""
+    packs: Mapping[str, Any]
+    """Registered legacy manifests or canonical database projections."""
 
     tables: Mapping[str, str]
     """Owned table name -> owning pack id (sorted by table name)."""
@@ -102,8 +136,10 @@ class FrozenSchemaPackRegistry:
     bridge_mounts: Mapping[str, str]
     """Bridge mount token -> declaring pack id (sorted by token)."""
 
-    def pack(self, pack_id: str) -> SchemaPackManifest:
-        """Return the manifest for ``pack_id`` or raise :class:`KeyError`."""
+    canonical_projection: bool = False
+
+    def pack(self, pack_id: str) -> Any:
+        """Return the projected pack for ``pack_id`` or raise ``KeyError``."""
         return self.packs[pack_id]
 
     def migration(self, pack: str, version: int) -> RegisteredMigration | None:
@@ -145,16 +181,18 @@ class SchemaPackRegistry:
     """
 
     def __init__(self) -> None:
-        self._packs: dict[str, SchemaPackManifest] = {}
+        self._packs: dict[str, Any] = {}
         self._tables: dict[str, str] = {}
         self._migration_versions: set[tuple[str, int]] = set()
         self._migration_names: set[tuple[str, str]] = set()
+        self._migration_resources: dict[tuple[str, int], ResourceHandle] = {}
         self._stream_types: dict[str, str] = {}
         self._event_kinds: dict[str, str] = {}
         self._command_kinds: dict[str, str] = {}
         self._repositories: dict[str, str] = {}
         self._cli_mounts: dict[str, tuple[str, str]] = {}
         self._bridge_mounts: dict[str, str] = {}
+        self._canonical_projection: bool = False
         self._frozen: bool = False
 
     # -- public API --------------------------------------------------------
@@ -180,6 +218,137 @@ class SchemaPackRegistry:
         self._record(manifest)
         return self
 
+    def register_database_projection(
+        self,
+        pack_or_id: Any,
+        database: Any | None = None,
+        *,
+        owner_root: Path | None = None,
+        resources: Iterable[ResourceHandle] = (),
+        default_enabled: bool | None = None,
+        name: str | None = None,
+        version: str | int | None = None,
+    ) -> SchemaPackRegistry:
+        """Register one immutable canonical database projection.
+
+        ``pack_or_id`` may be a canonical pack entry or an id string used by
+        the explicit kernel projection. This adapter does not construct a
+        legacy :class:`SchemaPackManifest`.
+        """
+        if self._frozen:
+            pack_id = getattr(pack_or_id, "id", pack_or_id)
+            raise SchemaPackRegistryFrozenError(
+                f"cannot register pack {pack_id!r}: the schema-pack registry is already frozen"
+            )
+        entry = pack_or_id if not isinstance(pack_or_id, str) else None
+        source_path: Path | None = None
+        if entry is not None:
+            pack_id = str(getattr(entry, "id"))
+            if database is None:
+                database = getattr(entry, "database", None)
+            if owner_root is None:
+                owner_root = Path(getattr(entry, "root"))
+            resources = tuple(resources)
+            if not resources:
+                resources = tuple(getattr(entry, "resources", ()))
+            if name is None:
+                definition = getattr(entry, "definition", None)
+                name = getattr(definition, "name", None)
+            if version is None:
+                definition = getattr(entry, "definition", None)
+                version = getattr(definition, "version", None)
+            manifest = getattr(entry, "manifest", None)
+            if manifest is not None:
+                source_path = Path(manifest.resolved)
+        else:
+            pack_id = str(pack_or_id)
+        if database is None:
+            raise SchemaPackRegistryError(
+                f"database projection for pack {pack_id!r} is missing"
+            )
+        migrations = tuple(getattr(database, "migrations", ()))
+        if not migrations:
+            raise SchemaPackRegistryError(
+                f"database projection for pack {pack_id!r} declares no migrations"
+            )
+        if owner_root is None:
+            raise SchemaPackRegistryError(
+                f"database projection for pack {pack_id!r} is missing owner root"
+            )
+        root = Path(owner_root).resolve()
+        resource_by_path: dict[str, ResourceHandle] = {}
+        for handle in resources:
+            try:
+                handle_root = Path(handle.root).resolve()
+                resolved = Path(handle.resolved).resolve()
+                relative = str(handle.path)
+                file_kind = handle.file_kind
+                relative_path = Path(relative)
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise SchemaPackRegistryError(
+                    f"database projection {pack_id!r} contains an invalid migration resource"
+                ) from exc
+            if (
+                handle_root != root
+                or relative_path.is_absolute()
+                or ".." in relative_path.parts
+                or relative_path.as_posix() != relative
+                or resolved != (root / relative_path).resolve()
+                or not resolved.is_relative_to(root)
+            ):
+                raise SchemaPackRegistryError(
+                    f"database migration resource {relative!r} for pack {pack_id!r} "
+                    "is outside its owner root"
+                )
+            if file_kind != "file":
+                raise SchemaPackRegistryError(
+                    f"database migration resource {relative!r} for pack {pack_id!r} "
+                    "is not a regular file"
+                )
+            if relative in resource_by_path:
+                raise SchemaPackRegistryError(
+                    f"database projection {pack_id!r} contains duplicate resource {relative!r}"
+                )
+            resource_by_path[relative] = handle
+        for descriptor in migrations:
+            path = str(getattr(descriptor, "path"))
+            if path not in resource_by_path:
+                raise SchemaPackRegistryError(
+                    f"database migration {pack_id!r}/{descriptor.version} has no confined resource"
+                )
+        if default_enabled is None:
+            default_enabled = bool(getattr(database, "default_enabled", True))
+        projected = DatabasePackProjection(
+            id=pack_id,
+            name=name or pack_id,
+            version=version if version is not None else 1,
+            depends_on=tuple(getattr(database, "depends_on", ())),
+            migrations=migrations,
+            stream_types=tuple(getattr(database, "stream_types", ())),
+            event_kinds=tuple(getattr(database, "event_kinds", ())),
+            command_kinds=tuple(getattr(database, "command_kinds", ())),
+            repositories=tuple(getattr(database, "repositories", ())),
+            conformance=tuple(getattr(database, "conformance", ())),
+            cli_mounts=MappingProxyType(dict(getattr(database, "cli_mounts", {}))),
+            bridge_mounts=tuple(getattr(database, "bridge_mounts", ())),
+            default_enabled=default_enabled,
+            source_path=source_path,
+        )
+        collisions = self._collect_collisions(projected)
+        if collisions:
+            raise SchemaPackDuplicateError(
+                f"schema-pack registry rejects pack {pack_id!r} with duplicate declaration(s):\n"
+                + "\n".join(f"  - {message}" for message in collisions)
+            )
+        self._canonical_projection = True
+        self._record(projected)
+        for descriptor in migrations:
+            self._migration_resources[(pack_id, descriptor.version)] = resource_by_path[
+                str(descriptor.path)
+            ]
+        return self
+
+
     def freeze(self) -> FrozenSchemaPackRegistry:
         """Freeze the registry into an immutable, sorted view.
 
@@ -199,14 +368,28 @@ class SchemaPackRegistry:
             repositories=MappingProxyType(dict(sorted(self._repositories.items()))),
             cli_mounts=MappingProxyType(dict(sorted(self._cli_mounts.items()))),
             bridge_mounts=MappingProxyType(dict(sorted(self._bridge_mounts.items()))),
+            canonical_projection=self._canonical_projection,
         )
 
     # -- internals ---------------------------------------------------------
-
     def _iter_registered_migrations(self) -> list[RegisteredMigration]:
         migrations: list[RegisteredMigration] = []
         for pack_id, manifest in self._packs.items():
             for descriptor in manifest.migrations:
+                key = (pack_id, descriptor.version)
+                resource = self._migration_resources.get(key)
+                if resource is not None:
+                    owner_root = Path(resource.root)
+                else:
+                    source_path = getattr(manifest, "source_path", None)
+                    if source_path is not None:
+                        owner_root = Path(source_path).parent.resolve()
+                    elif pack_id == "core":
+                        owner_root = Path(__file__).resolve().parents[1] / "migrations"
+                    else:
+                        owner_root = Path(__file__).resolve().parents[2] / "packs" / pack_id
+                    owner_root = owner_root.resolve()
+                    resource = self._legacy_resource_handle(owner_root, descriptor.path)
                 migrations.append(
                     RegisteredMigration(
                         pack=pack_id,
@@ -214,11 +397,37 @@ class SchemaPackRegistry:
                         name=descriptor.name,
                         path=descriptor.path,
                         tables=descriptor.tables,
+                        owner_root=owner_root,
+                        resource=resource,
                     )
                 )
         return migrations
 
-    def _collect_collisions(self, manifest: SchemaPackManifest) -> list[str]:
+    @staticmethod
+    def _legacy_resource_handle(owner_root: Path, relative_path: str) -> ResourceHandle:
+        """Create a compatibility handle for an old schema-pack manifest."""
+        from astrid.core.pack.canonical import ResourceHandle
+
+        candidate = owner_root.joinpath(*relative_path.split("/"))
+        resolved = candidate.resolve(strict=False)
+        if candidate.is_file():
+            size = candidate.stat().st_size
+            import hashlib
+
+            digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        else:
+            size, digest = 0, ""
+        return ResourceHandle(
+            relative_path,
+            owner_root,
+            resolved,
+            "legacy database.migration",
+            "file",
+            size,
+            digest,
+        )
+
+    def _collect_collisions(self, manifest: Any) -> list[str]:
         """Return every deterministic collision between ``manifest`` and the registry."""
         collisions: list[str] = []
         pack_id = manifest.id
@@ -293,8 +502,8 @@ class SchemaPackRegistry:
 
         return collisions
 
-    def _record(self, manifest: SchemaPackManifest) -> None:
-        """Record a collision-free manifest into the registry state."""
+    def _record(self, manifest: Any) -> None:
+        """Record a collision-free manifest or projection."""
         pack_id = manifest.id
         self._packs[pack_id] = manifest
         for descriptor in manifest.migrations:
@@ -317,6 +526,7 @@ class SchemaPackRegistry:
 
 
 __all__ = [
+    "DatabasePackProjection",
     "FrozenSchemaPackRegistry",
     "RegisteredMigration",
     "SchemaPackDuplicateError",

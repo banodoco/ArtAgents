@@ -1,0 +1,9 @@
+MAP: PASS
+SOURCE_SLICES: Canonical projection in `astrid/core/pack/canonical.py`; immutable database projection/registration in `astrid/core/schema_packs/registry.py`; explicit kernel projection in events registry/exports; owner-relative handles and dependency heads in migration runner/order path; focused B3 tests. Keep active legacy adapters/builders.
+CONTRACT: Immutable `DatabasePackProjection`; `project_catalog_database(catalog, additional_pack_ids=()) -> FrozenSchemaPackRegistry`; inject synthetic reserved kernel `core`; select default-enabled plus explicit packs. `RegisteredMigration` retains pack/version/name/path/tables and adds `owner_root` plus confined `ResourceHandle`.
+KERNEL: Explicit non-unloadable `core` projection from `CORE_MIGRATIONS`/`core_sql_path`, existing 14 tables and vocabularies; no `_core` catalog entry; reject product `core`.
+MIGRATIONS: Read canonical bytes from `RegisteredMigration.resource.resolved`, never hard-coded pack root. Validate selected dependency exists, has migrations, available head >= positive minimum, reaches core, no self/duplicate/cycle. Preserve dependency/version order, schema_migrations authority, exact-byte checksum/drift/read-only/transaction rollback.
+COMPOSITION: Default core+timeline+shots+references; explicit Runaway adds through same projector; no lock/lifecycle/second path.
+RISKS: Preserve legacy `SchemaPackManifest` builders until B4; no canonical fallback; reserve core; validate selected heads; keep collision mappings/public contracts; SQL table declarations must match migrations.
+BLOCKERS: none
+0

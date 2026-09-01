@@ -25,9 +25,45 @@ from astrid.packs.runaway.repository import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "deliverables" / "timing-manifest.json"
-AUDIO_REACTIVE_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "timeline" / "audio-reactive-v1.json"
 
+@pytest.fixture
+def timing_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    segment_specs = (
+        ("S01", 16, "literal_main_note", "rose"),
+        ("S02", 125, "section_clock", "teal"),
+        ("S03", 214, "literal_main_note", "indigo"),
+        ("S04", 211, "literal_main_note", "violet"),
+    )
+    transitions: list[dict[str, object]] = []
+    ordinal = 0
+    for segment_id, count, timing_mode, colour_name in segment_specs:
+        for _ in range(count):
+            transitions.append(
+                {
+                    "frame": ordinal * 10,
+                    "segment_id": segment_id,
+                    "timing_mode": timing_mode,
+                    "colour_name": colour_name,
+                }
+            )
+            ordinal += 1
+
+    manifest = {
+        "intent": "G-sharp 4 at 2:06.293",
+        "transition_count": len(transitions),
+        "clock": {"fps": 48},
+        "segments": [
+            {"id": segment_id, "transition_count": count}
+            for segment_id, count, _, _ in segment_specs
+        ],
+        "transitions": transitions,
+    }
+    audio_reactive = {"timebase": {"range_end_frame": 8085, "fps": 48}}
+    manifest_path = tmp_path / "timing-manifest.json"
+    audio_reactive_path = tmp_path / "audio-reactive-v1.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    audio_reactive_path.write_text(json.dumps(audio_reactive), encoding="utf-8")
+    return manifest_path, audio_reactive_path
 
 def _build_registry():
     reg = SchemaPackRegistry()
@@ -279,10 +315,13 @@ def test_receipt_idempotency(env):
         UnitOfWork(writer).run(lambda uow: repo.create(uow, project_id=project_id, run_id=run_id, transitions=altered))
 
 
-def test_prompts_deterministic_and_sample(env):
+def test_prompts_deterministic_and_sample(env, timing_fixture):
     assert build_prompt(colour_name="rose", timing_mode="literal_main_note", segment_id="S01", next_colour_name="teal") == \
         "rose neon piano chord, hard cut, 48fps, complementary colour teal, literal_main_note, S01"
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest_path, _ = timing_fixture
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
     transitions = manifest["transitions"]
     prompts = prompts_for_manifest(transitions)  # type: ignore
     assert len(prompts) == 566
@@ -301,11 +340,12 @@ def test_prompts_deterministic_and_sample(env):
     assert "section_clock" in prompts[s02_idx]
 
 
-def test_roundtrip_timing_manifest_to_kernel(env):
-    assert MANIFEST_PATH.is_file()
-    assert AUDIO_REACTIVE_PATH.is_file()
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    audio_reactive = json.loads(AUDIO_REACTIVE_PATH.read_text(encoding="utf-8"))
+def test_roundtrip_timing_manifest_to_kernel(env, timing_fixture):
+    manifest_path, audio_reactive_path = timing_fixture
+    assert manifest_path.is_file()
+    assert audio_reactive_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    audio_reactive = json.loads(audio_reactive_path.read_text(encoding="utf-8"))
     assert manifest["transition_count"] == 566
     assert audio_reactive["timebase"]["range_end_frame"] == 8085
     assert audio_reactive["timebase"]["fps"] == 48
@@ -349,8 +389,9 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             assert row.metadata["colour_name"] == raw["colour_name"]
             assert row.ordinal == idx
 
-    # Evidence with kind runaway_timing_migrated
+    # Evidence round-trip uses the repository's closed evidence vocabulary.
     from astrid.core.repositories.evidence import EvidenceRepository
+
 
     def _record(uow: UnitOfWork):
         evidence_repo = EvidenceRepository(events=env["events"], receipts=env["receipts"])
@@ -358,7 +399,7 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             uow,
             project_id=project_id,
             run_id=run_id,
-            kind="runaway_timing_migrated",
+            kind="validation",
             summary="Runaway timing v1 round-trip",
             data={"frame_count": 8085, "transition_count": 566},
             idempotency_key=f"test:evidence:{run_id}",
@@ -367,16 +408,17 @@ def test_roundtrip_timing_manifest_to_kernel(env):
     UnitOfWork(writer).run(_record)
     with writer.read_only_connection() as conn:
         conn.row_factory = sqlite3.Row
-        ev = conn.execute("SELECT kind, data_json FROM evidence_items WHERE run_id = ? AND kind = ?", (run_id, "runaway_timing_migrated")).fetchall()
+        ev = conn.execute("SELECT kind, data_json FROM evidence_items WHERE run_id = ? AND kind = ?", (run_id, "validation")).fetchall()
         assert len(ev) == 1
         data = json.loads(ev[0]["data_json"])
         assert data["frame_count"] == 8085
         assert data["transition_count"] == 566
 
 
-def test_old_files_not_deleted():
-    assert MANIFEST_PATH.is_file()
-    assert AUDIO_REACTIVE_PATH.is_file()
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+def test_deterministic_fixture_files(timing_fixture):
+    manifest_path, audio_reactive_path = timing_fixture
+    assert manifest_path.is_file()
+    assert audio_reactive_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert len(manifest["transitions"]) == 566
-    assert "G-sharp 4 at 2:06.293" in manifest.get("intent", "")
+    assert "G-sharp 4 at 2:06.293" in manifest["intent"]

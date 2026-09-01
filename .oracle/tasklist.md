@@ -204,34 +204,35 @@ SQLite authority, SQL-owned DDL, existing migration/writer/UoW reuse, confined
 resources, and manifest-derived composition. Avoid duplicate state, YAML DDL,
 general SQL observers, project locks, and premature legacy deletion.
 
-- [ ] B3.1 Project canonical database declarations into the surviving
+- [x] B3.1 Project canonical database declarations into the surviving
   immutable collision/migration machinery through explicit catalog injection;
   do not delete production legacy builders yet.
-- [ ] B3.2 Replace the code-created core `SchemaPackManifest` with an explicit
+- [x] B3.2 Replace the code-created core `SchemaPackManifest` with an explicit
   irreducible kernel database/vocabulary projection; keep core non-unloadable.
-- [ ] B3.3 Carry owning pack, owner root, and confined migration resource handle
+- [x] B3.3 Carry owning pack, owner root, and confined migration resource handle
   on every migration descriptor instead of rebuilding `astrid/packs/<id>`.
-- [ ] B3.4 Enforce the B1 dependency grammar by comparing every declared
+- [x] B3.4 Enforce the B1 dependency grammar by comparing every declared
   positive minimum migration head with the dependency pack's available head.
-- [ ] B3.5 Derive default composition only from bundled entries with
+- [x] B3.5 Derive default composition only from bundled entries with
   `database.default_enabled=true`; derive explicit Runaway composition through
   the same projection.
-- [ ] B3.6 Preserve `schema_migrations` as the sole applied-state record and
+- [x] B3.6 Preserve `schema_migrations` as the sole applied-state record and
   preserve checksums, drift/order/transaction semantics, writer/UoW,
   repositories, and conformance behavior.
-- [ ] B3.7 Verify each bundled migration affects only declared owned tables
+- [x] B3.7 Verify each bundled migration affects only declared owned tables
   with focused fresh-schema assertions, not a generalized SQL observer.
-- [ ] B3.8 Add fresh-default, existing-reopen, explicit-Runaway, read-only
+- [x] B3.8 Add fresh-default, existing-reopen, explicit-Runaway, read-only
   pending, dependency/head/cycle, collision, checksum/name drift, and rollback
   tests.
-- [ ] B3.9 Replace historical Runaway-demo dependencies with a deterministic
+- [x] B3.9 Replace historical Runaway-demo dependencies with a deterministic
   temporary-project round trip; never restore or package the missing demo.
 
-Gate B3: injected catalog-derived default and extended database projections
-are green while production authority remains legacy until B4 activation.
-Three independent Luna reviews and one Sol oracle disposition must pass; then
-commit the reviewed B3 checkpoint. Run cumulative gate 1 over B1–B3 and require
-three fresh Luna passes plus one Sol disposition before B4 begins.
+Gate B3: **PASS under bounded gate control**. Integrated closure and one
+independent Luna certification verified the frozen six-path identity and each
+passed 122 focused projection/registry/migration/Runaway tests. Production
+remains legacy-active; there are no findings or recorded high-risk reasons for
+an extra segment Sol review. Commit the reviewed B3 checkpoint, then run
+cumulative gate 1 over B1–B3 before B4 begins.
 
 ## B4 — converge consumers and activate the atomic hard cut
 
@@ -339,9 +340,11 @@ independent pass.
   `14f1f7d5f77cb6bd384749941cff6e522b696590`**.
 - B2 implementation: **9/9 complete; checkpoint
   `a293e4c416c0e716154c392c0dd43165344f870d`**.
-- Canonical-v2 implementation checkpoints: **2/5 committed**.
-- Frozen final criteria satisfied end to end: **0/15**; B1–B2 provide accepted
+- B3 implementation: **9/9 complete; frozen six-path gate PASS, checkpoint
+  commit pending**.
+- Canonical-v2 implementation checkpoints: **2/5 committed; B3 gate passed**.
+- Frozen final criteria satisfied end to end: **0/15**; B1–B3 provide accepted
   isolated/unshipped evidence without activating production.
 
-Next action: execute B3 database projection while production remains
-legacy-active.
+Next action: commit the reviewed B3 checkpoint, then run cumulative gate 1
+while production remains legacy-active.

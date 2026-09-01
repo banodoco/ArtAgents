@@ -125,11 +125,16 @@ def pack_resource_root(pack_id: str) -> Path:
 
 
 def read_migration_bytes(registered: RegisteredMigration) -> bytes:
-    """Read the exact bytes of one registered migration's SQL resource.
+    """Read exact migration bytes from its registered resource handle.
 
-    Raises :class:`MigrationError` when the declared resource is missing.
+    Canonical projections are already confined by the catalog and therefore
+    use ``resource.resolved`` directly. The fallback preserves the legacy
+    manifest adapter for callers that construct a descriptor by hand.
     """
-    path = pack_resource_root(registered.pack) / registered.path
+    if registered.resource is not None:
+        path = Path(registered.resource.resolved)
+    else:
+        path = pack_resource_root(registered.pack) / registered.path
     if not path.is_file():
         raise MigrationError(
             f"migration resource for {registered.pack}/{registered.version} "

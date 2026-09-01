@@ -1,0 +1,83 @@
+# B3 validation research
+
+Model assignment: **normal task — user-selected GPT-5.6 Luna**.
+Repository: `/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid`
+Branch: `megado/canonical-pack-beta`
+Current HEAD: `6d40ddf51c1b934ab76cf34a7ff2ba9708499105`
+B1 checkpoint: `14f1f7d5f77cb6bd384749941cff6e522b696590`
+B2 checkpoint: `a293e4c416c0e716154c392c0dd43165344f870d`
+
+Read `.oracle/agent_goal.md`, `.oracle/tasklist.md` B3, `.oracle/plan.md`, `.oracle/implementation-ledger.md`, and nearer instructions. B3 continues the unshipped tranche. Production legacy builders and active authority remain until B4. Do not commit, push, delete schema manifests/parser/standard builders, rewire operational consumers, or activate v2. Skip formatters, linters, and broad/full suites.
+
+## Complete North Star
+
+# North Star — one canonical Astrid pack
+
+Astrid has one understandable pack concept. Every bundled product extension is
+owned by one strict `pack.yaml`; a pack may contribute capabilities, SQLite
+schema, agent documentation, or any combination. `timeline`, `shots`,
+`references`, and `runaway` are ordinary bundled packs rather than a second
+schema-pack species.
+
+Opening a pack directory should reveal one authoritative declaration of its
+identity, resources, custom capabilities, database ownership, migrations,
+events, commands, CLI surface, and agent guidance. Runtime systems consume
+typed projections of that declaration instead of independently rediscovering
+or reinterpreting the pack. Every existing bundled customization is either
+owned by a canonical pack or explicitly classified as irreducible kernel
+behavior; nothing remains unclassified.
+
+## Enduring principles
+
+- One pack identity, manifest grammar, parser/validator, normalized definition,
+  and bundled catalog.
+- SQLite remains the per-project authority. Migration SQL owns columns,
+  constraints, indexes, and transformations; YAML does not duplicate DDL.
+- Reuse the strong machinery already present: typed registries, migration
+  ordering/checksums/drift/transactions, `DatabaseWriter`, `UnitOfWork`,
+  repositories, SDK behavior, and conformance tests.
+- Bundled trusted packs may contribute database schema; external packs remain
+  capability-only during beta.
+- Every pack-relative resource is confined, discoverable, and present in the
+  built wheel.
+- Every user/agent-facing bundled pack ships structured agent documentation;
+  the `_core` skill exposes a generated canonical pack census and routes agents
+  to the owning pack documentation.
+- With no users to migrate, cut directly to the final form and delete alternate
+  authorities instead of maintaining shims.
+- Keep beta scope proportionate: unify today's bundled system without
+  prebuilding a marketplace or variable project-composition lifecycle.
+
+## Anti-patterns
+
+- Hiding the old schema-pack subsystem inside `pack.yaml` while retaining its
+  parser, identity, discovery, or hard-coded standard list.
+- Replacing useful typed registries with a giant universal service locator.
+- Duplicating SQLite DDL or mutable runtime facts in YAML or skill prose.
+- Per-project pack locks, enable/disable/purge state machines, dynamic database
+  plugins, or migration ceremony without an observed beta need.
+- Allowing external packs to execute SQL.
+- Making the irreducible kernel dynamically unloadable for conceptual symmetry.
+- Compatibility shims, dual reads, schema-less manifests, or legacy fallbacks.
+- Declaring success while any bundled customization, documentation surface,
+  operational consumer, or packaged resource bypasses canonical ownership.
+
+North Star SHA-256: `c938f081f463bfda44a93d9215cbaa6ff08c37bf0f431cf4be95655ee2b45c6d`.
+
+User control `babysit-b2-safe-concurrency-bounded-gates` applies: independent safe work stays concurrent; dependencies and mutation conflicts wait; one Luna certification by default; smallest correction plus affected-criterion delta on blockers; no equivalent whole-cycle reset; final Sol integrated review remains.
+
+## Read-only B3 validation and Runaway map
+
+Map existing tests/fixtures and exact focused scenarios for B3.7–B3.9: fresh default DB, existing reopen, explicit Runaway extension, read-only pending, dependency min-head/cycle, collisions, checksum/name drift, rollback, per-pack owned-table effects, and deterministic temporary Runaway round trip replacing absent historical demo dependencies. Identify current baseline failures and test helpers to reuse. Table-effect proof must be focused fresh-schema assertions, not a generalized SQL observer. Do not edit or run broad tests.
+
+Return exactly:
+```text
+MAP: PASS|BLOCKED
+EXISTING_TESTS: <paths/helpers/contracts>
+SCENARIOS: <case-to-test mapping>
+TABLE_OWNERSHIP: <focused assertion plan>
+RUNAWAY: <historical dependency and temporary-project replacement>
+SOURCE_DEPENDENCIES: <implementation prerequisites>
+RISKS: <finite list>
+BLOCKERS: <none or exact blocker>
+```

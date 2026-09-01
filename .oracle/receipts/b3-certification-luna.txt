@@ -1,0 +1,7 @@
+VERDICT: PASS
+IDENTITY: manifest 8f2140a6a79f3f591c04385f72bf3cd8ba7eedf299011ecf9ea7360d17a6f087; 6/6 hashes match
+CRITERIA: B3.1 PASS; B3.2 PASS; B3.3 PASS; B3.4 PASS; B3.5 PASS; B3.6 PASS; B3.7 PASS; B3.8 PASS; B3.9 PASS
+TESTS: `python3 -m pytest tests/v10/test_b3_canonical_projection.py tests/v10/test_catalog_migrations.py tests/v10/test_registry.py tests/test_runaway_transitions.py` — 122 passed in 2.24s
+ISOLATION: PASS — production remains legacy-active; legacy builders, parser, schema-pack manifests, fixed standard paths, and operational consumers remain active for B4.
+FINDINGS: none
+0

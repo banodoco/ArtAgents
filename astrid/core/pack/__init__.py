@@ -51,6 +51,7 @@ from astrid.core.pack.canonical import (
     CapabilityProjection,
     CatalogProvenance,
     DatabaseContribution,
+    DatabasePackProjection,
     DatabaseProjection,
     Documentation,
     DocumentationProjection,
@@ -63,6 +64,7 @@ from astrid.core.pack.canonical import (
     ResourceProjection,
     catalog_from_root,
     canonical_manifest_path,
+    project_catalog_database,
     read_normalize_validate,
     validate_canonical_pack,
 )
@@ -158,6 +160,7 @@ __all__ = [
     "CapabilityProjection",
     "CatalogProvenance",
     "DatabaseContribution",
+    "DatabasePackProjection",
     "DatabaseProjection",
     "Documentation",
     "DocumentationProjection",
@@ -169,6 +172,7 @@ __all__ = [
     "ResourceHandle",
     "ResourceProjection",
     "canonical_manifest_path",
+    "project_catalog_database",
     "read_normalize_validate",
     "validate_canonical_pack",
 ]

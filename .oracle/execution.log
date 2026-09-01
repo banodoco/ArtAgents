@@ -1510,3 +1510,41 @@
   `a293e4c416c0e716154c392c0dd43165344f870d` (`packs: convert bundled catalog
   to v2`): 35-path reviewed candidate plus B2 briefs/receipts/control evidence.
   Production remains legacy-active; B3 is next.
+- B3 began from control HEAD
+  `6d40ddf51c1b934ab76cf34a7ff2ba9708499105`. Two independent read-only
+  exact-Luna maps launched in parallel: source/type/interface decomposition for
+  canonical database projection, and focused scenario/table-ownership/Runaway
+  validation mapping. Implementation waits for their verified contracts;
+  production legacy builders remain active.
+- Both B3 maps returned `PASS` with no blockers. The contract keeps legacy
+  builders active while adding explicit catalog-to-frozen-registry injection,
+  a reserved synthetic kernel projection, owner-root/resource migration
+  handles, selected dependency-head enforcement, manifest-derived defaults,
+  focused table-effect assertions, and deterministic temporary Runaway tests.
+- Two disjoint exact-Luna implementations launched in parallel: main B3
+  source/registry/migration/focused scenarios, and
+  `tests/test_runaway_transitions.py` fixture replacement only.
+- The initial B3 main implementation wrapper exited after editing but without
+  a durable final receipt. Its edits were preserved; one exact-Luna
+  continuation inspected and completed them, returned `PASS`, and recorded
+  114 focused canonical projection/registry/migration tests. The disjoint
+  Runaway fixture unit separately recorded eight passing tests.
+- Owner reconciliation found the six-path combined B3 candidate also includes
+  `astrid/core/pack/__init__.py`, omitted from the continuation's changed-path
+  list, and its export list dropped `ResourceProjection`. An integrated
+  exact-Luna closure was dispatched to reconcile every path, repair any real
+  export/API defect, and run the bounded combined B3 checks before freezing.
+- Integrated B3 closure returned `PASS` across the complete six-path candidate,
+  restored the retained `ResourceProjection` export, and passed 122 combined
+  projection/registry/migration/Runaway tests. Candidate 1 froze in
+  `.oracle/evidence/b3-candidate-1.sha256`; manifest SHA-256
+  `8f2140a6a79f3f591c04385f72bf3cd8ba7eedf299011ecf9ea7360d17a6f087`.
+- One independent exact-Luna B3 certification was dispatched against the
+  frozen identity under the bounded-gate cadence. No duplicate full-suite run
+  or multi-review panel is launched.
+- Independent exact-Luna B3 certification returned `PASS`: candidate manifest
+  and 6/6 file hashes matched, B3.1–B3.9 passed, the bounded command passed 122
+  tests, production remained legacy-active, and there were no findings.
+- The owner accepted B3 candidate 1 under the current bounded-gate control.
+  No high-risk reason requires an extra segment Sol review. Control documents
+  were reconciled to B3 gate truth before the reviewed checkpoint commit.

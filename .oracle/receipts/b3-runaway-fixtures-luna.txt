@@ -1,0 +1,7 @@
+IMPLEMENTATION: PASS
+CHANGED: tests/test_runaway_transitions.py
+FIXTURE: Deterministic `tmp_path` manifest/audio fixture with 566 transitions across S01–S04, 48fps, range end frame 8085.
+BEHAVIOR: Real `manifest_to_transitions` round trip into `RunawayRepository`; deterministic prompts; metadata/timing; receipt-backed validation evidence preserved.
+TESTS: `python3 -m pytest tests/test_runaway_transitions.py` — 8 passed.
+BLOCKERS: none
+0

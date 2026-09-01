@@ -1,0 +1,10 @@
+CLOSURE: PASS
+CHANGED: astrid/core/migrations/runner.py, astrid/core/pack/__init__.py, astrid/core/pack/canonical.py, astrid/core/schema_packs/registry.py, tests/v10/test_b3_canonical_projection.py, tests/test_runaway_transitions.py
+EXPORTS: ResourceProjection preserved and exported; DatabasePackProjection and project_catalog_database present exactly once in public exports. LSP references unavailable; bounded grep and import evidence confirm availability.
+PROJECTION: Immutable catalog-derived default projection is core+timeline+shots+references; explicit Runaway uses the same projector; synthetic core is reserved and non-unloadable; dependency availability, positive heads, cycles, and core reachability fail closed.
+MIGRATIONS: Owner roots, relative identities, and confined ResourceHandles preserved; execution uses handles; ordering, collision, checksum/name/too-new drift, read-only probing, transaction rollback, schema_migrations, writer/UoW, and repository behavior pass.
+RUNAWAY: Deterministic temporary-project fixture preserves 566 transitions across S01–S04; manifest-to-transitions round trip and repository/evidence assertions pass.
+TESTS: `python3 -m pytest tests/v10/test_b3_canonical_projection.py tests/v10/test_catalog_migrations.py tests/v10/test_registry.py tests/test_runaway_transitions.py` — 122 passed in 2.39s.
+ISOLATION: Legacy production builders, parser, schema manifests, fixed paths, and operational consumers remain active and unchanged for B4 cutover.
+BLOCKERS: none
+0

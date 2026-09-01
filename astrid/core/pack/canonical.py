@@ -15,9 +15,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import jsonschema
+
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+
 
 from astrid.core.pack._common import SymlinkedPackPathError, reject_symlinked_path
 from astrid.core.pack.manifest import load_manifest_mapping
@@ -1218,11 +1221,24 @@ class BundledCatalog:
                         )
                     owners[label][value] = entry.id
 
+        # ``core`` is an irreducible code-owned projection, not a bundled
+        # catalog entry.  Catalog validation still checks its reserved
+        # dependency head so a product catalog can omit a fake core pack.
+        from astrid.core.migrations.catalog import CORE_MIGRATIONS, CORE_PACK
+
+        core_head = max((migration.version for migration in CORE_MIGRATIONS), default=0)
         for entry in entries:
             if entry.database is None:
                 continue
             for dependency in entry.database.depends_on:
                 target = by_id.get(dependency.pack)
+                if dependency.pack == CORE_PACK:
+                    if core_head < dependency.min_migration:
+                        raise CanonicalPackValidationError(
+                            f"{entry.id}: dependency {dependency.pack!r} has migration head "
+                            f"{core_head}, requires {dependency.min_migration}"
+                        )
+                    continue
                 if target is None or target.database is None:
                     raise CanonicalPackValidationError(
                         f"{entry.id}: database dependency {dependency.pack!r} is missing or not database-bearing"
@@ -1246,6 +1262,8 @@ class BundledCatalog:
             entry = by_id[pack_id]
             if entry.database:
                 for dependency in entry.database.depends_on:
+                    if dependency.pack == CORE_PACK:
+                        continue
                     visit(dependency.pack)
             visiting.remove(pack_id)
             visited.add(pack_id)
@@ -1291,6 +1309,183 @@ class BundledCatalog:
 
 
 
+def _core_database_projection() -> tuple[str, DatabaseContribution, Path, tuple[ResourceHandle, ...]]:
+    """Build the reserved kernel database projection from audited code declarations."""
+    from astrid.core.events.registry import (
+        CORE_COMMAND_KINDS,
+        CORE_CONFORMANCE_DIMENSIONS,
+        CORE_EVENT_KINDS,
+        CORE_PACK_ID,
+        CORE_REPOSITORIES,
+        CORE_STREAM_TYPES,
+    )
+    from astrid.core.migrations.catalog import CORE_MIGRATIONS, core_sql_path
+
+    declared = CORE_MIGRATIONS
+    migrations = tuple(
+        MigrationDescriptor(
+            version=descriptor.version,
+            name=descriptor.name,
+            path=descriptor.path,
+            tables=tuple(sorted(descriptor.owned_tables)),
+        )
+        for descriptor in declared
+    )
+    database = DatabaseContribution(
+        default_enabled=True,
+        depends_on=(),
+        migrations=migrations,
+        stream_types=tuple(CORE_STREAM_TYPES),
+        event_kinds=tuple(CORE_EVENT_KINDS),
+        command_kinds=tuple(CORE_COMMAND_KINDS),
+        repositories=tuple(CORE_REPOSITORIES),
+        conformance=tuple(CORE_CONFORMANCE_DIMENSIONS),
+        cli_mounts=MappingProxyType({}),
+        bridge_mounts=(),
+    )
+    sql_path = core_sql_path().resolve()
+    owner_root = sql_path.parents[2]
+    handles = tuple(
+        _resource_handle(owner_root, descriptor.path, "database.migration")
+        for descriptor in declared
+    )
+    return CORE_PACK_ID, database, owner_root, handles
+
+
+def _normalise_projection_ids(value: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise CanonicalPackValidationError(
+            "additional_pack_ids must be a sequence of pack IDs"
+        )
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, pack_id in enumerate(value):
+        if not isinstance(pack_id, str) or not _PACK_ID.fullmatch(pack_id):
+            raise CanonicalPackValidationError(
+                f"additional_pack_ids[{index}] must be a valid pack ID"
+            )
+        if pack_id in seen:
+            raise CanonicalPackValidationError(
+                f"additional_pack_ids contains duplicate pack ID {pack_id!r}"
+            )
+        seen.add(pack_id)
+        result.append(pack_id)
+    return tuple(result)
+
+
+@dataclass(frozen=True, slots=True)
+class DatabasePackProjection:
+    """Compose selected canonical database entries into the schema registry."""
+
+    catalog: BundledCatalog
+    additional_pack_ids: tuple[str, ...] = ()
+
+    def project(self) -> FrozenSchemaPackRegistry:
+        from astrid.core.schema_packs.registry import SchemaPackRegistry
+
+        if not isinstance(self.catalog, BundledCatalog):
+            raise CanonicalPackValidationError("catalog must be a BundledCatalog")
+        explicit = _normalise_projection_ids(self.additional_pack_ids)
+        if "core" in explicit:
+            raise CanonicalPackValidationError(
+                "product core is reserved and cannot be explicitly selected"
+            )
+        entries_by_id = self.catalog.entries_by_id
+        if "core" in entries_by_id:
+            raise CanonicalPackValidationError(
+                "catalog must not contain the reserved product core pack"
+            )
+        missing = sorted(pack_id for pack_id in explicit if pack_id not in entries_by_id)
+        if missing:
+            raise CanonicalPackValidationError(
+                "additional_pack_ids contains unknown pack ID(s): " + ", ".join(missing)
+            )
+
+        explicit_set = set(explicit)
+        selected = [
+            entry
+            for entry in self.catalog.entries
+            if entry.database is not None
+            and (entry.database.default_enabled or entry.id in explicit_set)
+        ]
+        for entry in self.catalog.entries:
+            if entry.id in explicit_set and entry.database is None:
+                raise CanonicalPackValidationError(
+                    f"explicit database pack {entry.id!r} is not database-bearing"
+                )
+
+        core_id, core_database, core_root, core_resources = _core_database_projection()
+        available: dict[str, DatabaseContribution] = {core_id: core_database}
+        available.update(
+            {entry.id: entry.database for entry in selected if entry.database is not None}
+        )
+        for entry in selected:
+            assert entry.database is not None
+            for dependency in entry.database.depends_on:
+                target = available.get(dependency.pack)
+                if target is None:
+                    raise CanonicalPackValidationError(
+                        f"{entry.id}: database dependency {dependency.pack!r} "
+                        "is not selected or is not database-bearing"
+                    )
+                if target.migration_head < dependency.min_migration:
+                    raise CanonicalPackValidationError(
+                        f"{entry.id}: dependency {dependency.pack!r} has migration head "
+                        f"{target.migration_head}, requires {dependency.min_migration}"
+                    )
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(pack_id: str) -> None:
+            if pack_id in visiting:
+                raise CanonicalPackValidationError(
+                    f"selected database dependencies contain a cycle at {pack_id!r}"
+                )
+            if pack_id in visited:
+                return
+            visiting.add(pack_id)
+            for dependency in available[pack_id].depends_on:
+                visit(dependency.pack)
+            visiting.remove(pack_id)
+            visited.add(pack_id)
+
+        for pack_id in sorted(available):
+            visit(pack_id)
+
+        for entry in selected:
+            reachable: set[str] = set()
+            stack = [entry.id]
+            while stack:
+                current = stack.pop()
+                if current in reachable:
+                    continue
+                reachable.add(current)
+                stack.extend(dependency.pack for dependency in available[current].depends_on)
+            if core_id not in reachable:
+                raise CanonicalPackValidationError(
+                    f"{entry.id}: database dependency graph cannot reach reserved core"
+                )
+
+        registry = SchemaPackRegistry()
+        registry.register_database_projection(
+            core_id,
+            core_database,
+            owner_root=core_root,
+            resources=core_resources,
+        )
+        for entry in sorted(selected, key=lambda item: item.id):
+            registry.register_database_projection(entry)
+        return registry.freeze()
+
+
+def project_catalog_database(
+    catalog: BundledCatalog, additional_pack_ids: Sequence[str] = ()
+) -> FrozenSchemaPackRegistry:
+    """Project default-enabled and explicitly selected database packs."""
+    return DatabasePackProjection(catalog, tuple(additional_pack_ids)).project()
+
+
 def catalog_from_root(root: str | Path) -> BundledCatalog:
     return BundledCatalog.from_root(root)
 
@@ -1305,6 +1500,7 @@ __all__ = [
     "CapabilityProjection",
     "CatalogProvenance",
     "DatabaseContribution",
+    "DatabasePackProjection",
     "DatabaseProjection",
     "Documentation",
     "DocumentationProjection",
@@ -1317,6 +1513,7 @@ __all__ = [
     "ResourceDeclaration",
     "ResourceHandle",
     "ResourceProjection",
+    "project_catalog_database",
     "catalog_from_root",
     "validate_canonical_pack",
 ]

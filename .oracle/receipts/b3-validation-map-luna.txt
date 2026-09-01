@@ -1,0 +1,9 @@
+MAP: PASS
+EXISTING_TESTS: Reuse `tests/v10/conftest.py` registry/database fixtures; `test_catalog_migrations.py` table/schema/byte helpers and fresh/reopen/read-only/drift/cycle coverage; `test_registry.py` collision helpers; B2 explicit catalog/default/resource assertions; canonical dependency/collision tests; SDK extended-composition coverage.
+SCENARIOS: Injected default fresh/reopen; explicit Runaway; read-only pending byte stability; min-head/cycle; pack/vocabulary/table/migration collision; checksum/name/too-new drift; transactional failure rollback.
+TABLE_OWNERSHIP: Fresh SQLite only; use `sqlite_master`/`PRAGMA table_info`; subtract kernel tables and assert exact per-pack owned sets and `schema_migrations`. No generalized SQL observer.
+RUNAWAY: Replace absent `projects/runaway-piano-colour-demo` timing/timeline reads with deterministic `tmp_path` JSON, `manifest_to_transitions`, temporary project/run, repository create/list, prompt/metadata/timing/evidence assertions; preserve migration semantics; do not package demo.
+SOURCE_DEPENDENCIES: Explicit canonical catalog-to-frozen registry injection; owner root/resource handle on registered migrations; min available head enforcement; explicit core kernel projection. Production consumers remain legacy-active.
+RISKS: Legacy capability discovery sees v2 manifests in an existing extended SDK test; expected unshipped tranche isolation, not a B3 production rewire. Recheck heads at projection admission. Never rediscover hard-coded roots. Transaction rollback only; no down migration.
+BLOCKERS: none
+0

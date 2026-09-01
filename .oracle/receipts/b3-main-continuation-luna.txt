@@ -1,0 +1,9 @@
+IMPLEMENTATION: PASS
+CHANGED: astrid/core/migrations/runner.py, astrid/core/pack/canonical.py, astrid/core/schema_packs/registry.py, tests/v10/test_b3_canonical_projection.py
+PROJECTION: Catalog-derived immutable registry passes; explicit synthetic non-unloadable core projection; default composition is core+timeline+shots+references; explicit Runaway uses the same projector and preserves default_enabled=false.
+MIGRATIONS: Every canonical migration carries owner root and confined ResourceHandle; dependency heads, ordering, missing/self/duplicate/cycle/core reachability, checksum/name/too-new drift, read-only probing, and per-migration transaction rollback pass.
+TABLES: Fresh canonical schema proves exact declared ownership for core, timeline, shots, references, and Runaway; no undeclared tables observed.
+TESTS: `python3 -m pytest tests/v10/test_b3_canonical_projection.py tests/v10/test_catalog_migrations.py tests/v10/test_registry.py` — 114 passed. Existing disjoint receipt: `python3 -m pytest tests/test_runaway_transitions.py` — 8 passed.
+ISOLATION: Production legacy builders, parser, schema manifests, fixed paths, and operational consumers remain active and untouched for B4 cutover.
+BLOCKERS: none
+0
