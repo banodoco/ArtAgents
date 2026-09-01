@@ -21,6 +21,7 @@ from astrid.core.execution.process_group import _process_snapshot
 
 PACK_HOST_ACTOR = "astrid-pack-host"
 PACK_HOST_SCOPES = (
+    "handshake",
     "worker:register",
     "worker:execute",
     "tasks:read",

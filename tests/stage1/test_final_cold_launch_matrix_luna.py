@@ -40,7 +40,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "1c6ab208cd0df0a7ec40be5c3ec539fd3561c293"
+RUNTIME_COMMIT = "cc8dc0252d64c886dbe6c9f285af7eae91dd22cd"
 
 
 def _archive_runtime(destination: Path) -> Path:
@@ -212,6 +212,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert worker_token and worker_token != owner_token
         assert discovery["worker_actor"] == "astrid-pack-host"
         assert tuple(discovery["worker_scopes"]) == (
+            "handshake",
             "worker:register",
             "worker:execute",
             "tasks:read",
@@ -422,8 +423,9 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         from banodoco_workspace_client import WorkspaceClient
 
         generated = WorkspaceClient(restarted["endpoint"], new_token)
-        owner_token = str(_json(Path(restarted["credential_file"])).get("token") or "")
-        owner_generated = WorkspaceClient(restarted["endpoint"], owner_token)
+        astrid_token = str(_json(Path(restarted["credential_file"])).get("token") or "")
+        assert astrid_token and astrid_token != owner_token
+        owner_generated = WorkspaceClient(restarted["endpoint"], astrid_token)
         new_epoch = int(generated.health()["runtime_epoch"])
         assert new_epoch > old_epoch
         with pytest.raises(Exception):
@@ -539,7 +541,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         _run([str(runtime_pkg / "node_modules" / ".bin" / "tsc"), "-p", str(conformance / "tsconfig.json")], {**envless, "CI": "1"}, check=True)
         actor = conformance / "dist" / "conformance" / "fake-second-product.js"
         assert actor.is_file()
-        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", owner_token], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
+        actor_result = _run(["node", str(actor), "--endpoint", restarted["endpoint"], "--token", astrid_token, "--worker-token", new_token], {**envless, "BANODOCO_RUNTIME_OWNER_TOKEN": "", "BANODOCO_LOCAL_OWNER_TOKEN": ""})
         actor_payload = json.loads(actor_result.stdout)
         assert actor_payload["product"] == "neutral-gallery"
         assert actor_payload["realm_id"] == started["realm_id"]
