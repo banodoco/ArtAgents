@@ -165,7 +165,7 @@ def _run_all_deterministic(
 # ---------------------------------------------------------------------------
 
 
-def test_shot_command_specs_register_exactly_the_four_commands(
+def test_shot_command_specs_register_exactly_the_five_commands(
     conformance_context,
 ) -> None:
     """The pack-owned factory registers exactly the frozen command kinds."""
@@ -175,6 +175,7 @@ def test_shot_command_specs_register_exactly_the_four_commands(
         "shot.add_item",
         "shot.remove_item",
         "shot.reorder",
+        "shot.promote_candidate",
     }
     for command_kind, spec in specs.items():
         assert spec.pack_id == "shots", command_kind
@@ -198,12 +199,13 @@ def test_text_binding_vocabulary_is_declared_but_not_a_legacy_shot_spec(
     assert "shot.text_binding" in manifest.stream_types
     assert "shot.text_binding.set" in manifest.command_kinds
     assert set(shot_command_specs(conformance_context)) == {
-        "shot.create", "shot.add_item", "shot.remove_item", "shot.reorder"
+        "shot.create", "shot.add_item", "shot.remove_item", "shot.reorder",
+        "shot.promote_candidate",
     }
 
 
 def test_every_shot_command_conforms_on_every_dimension(tmp_path: Path) -> None:
-    """All four shot commands pass all seven kit dimensions."""
+    """All five shot commands pass all seven kit dimensions."""
     specs = shot_command_specs(
         _build_context(
             tmp_path / "probe.sqlite3", with_shots=True, with_references=False
@@ -214,6 +216,7 @@ def test_every_shot_command_conforms_on_every_dimension(tmp_path: Path) -> None:
         "shot.add_item",
         "shot.remove_item",
         "shot.reorder",
+        "shot.promote_candidate",
     }
 
     for command_kind, spec in specs.items():
@@ -509,6 +512,7 @@ def test_shot_and_reference_specs_run_independently(tmp_path: Path) -> None:
             "shot.add_item",
             "shot.remove_item",
             "shot.reorder",
+            "shot.promote_candidate",
         }
         report = _run_all_deterministic(
             tmp_path,

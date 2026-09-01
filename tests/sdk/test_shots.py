@@ -695,3 +695,61 @@ def test_show_cross_project_returns_not_found(env: SimpleNamespace) -> None:
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "not_found"
+
+
+def test_promote_candidate_is_receipted_cas_protected_and_retains_history(
+    env: SimpleNamespace,
+) -> None:
+    project = _create_project(env)
+    created = _create_shot(env, project, idempotency_key="promote-shot")
+    shot_id = created.data["id"]
+    primary = env.service.add_item(
+        project,
+        shot_id,
+        media_id=_import_media(env, project),
+        metadata={"role": "primary_visual", "status": "primary"},
+        idempotency_key="promote-primary",
+    )
+    candidate = env.service.add_item(
+        project,
+        shot_id,
+        media_id=_import_media(env, project),
+        metadata={"role": "primary_visual", "status": "candidate", "run_id": "r1"},
+        idempotency_key="promote-candidate",
+    )
+    assert primary.ok and candidate.ok
+    promoted = env.service.promote_candidate(
+        project,
+        shot_id,
+        candidate.data["item"]["id"],
+        expected_head_seq=3,
+        idempotency_key="promote-k",
+    )
+    assert promoted.ok is True
+    assert promoted.data["promotion"]["superseded_item_id"] == primary.data["item"]["id"]
+    shown = env.service.show(project, shot_id)
+    statuses = {
+        item["id"]: item["metadata"].get("status") for item in shown.data["items"]
+    }
+    assert statuses[primary.data["item"]["id"]] == "superseded"
+    assert statuses[candidate.data["item"]["id"]] == "primary"
+
+    replay = env.service.promote_candidate(
+        project,
+        shot_id,
+        candidate.data["item"]["id"],
+        expected_head_seq=3,
+        idempotency_key="promote-k",
+    )
+    assert replay.ok is True
+    assert replay.data == promoted.data
+    stale = env.service.promote_candidate(
+        project,
+        shot_id,
+        candidate.data["item"]["id"],
+        expected_head_seq=3,
+        idempotency_key="promote-new-k",
+    )
+    assert stale.ok is False
+    assert stale.error is not None
+    assert stale.error.code == "stale_version"

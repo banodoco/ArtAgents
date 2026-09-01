@@ -57,6 +57,9 @@ from astrid.packs.generation.executors._common import (
 from astrid.packs.generation.executors._common import (
     _request_to_argv as _request_to_argv_base,
 )
+from astrid.packs.generation.executors.generate_image.task_adapter import (
+    validate_shot_generation_recipe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,7 @@ _IMAGE_ARGV_FLAG_NAMES: tuple[str, ...] = (
     "noise_scale",
     "env_file",
     "loras",
+    "shot_generation_recipe",
 )
 
 
@@ -353,19 +357,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated LoRA registry ids and/or path@scale specs "
         "(e.g. 'flux-realism' or 'https://...lora.safetensors@0.8').",
     )
+    p.add_argument(
+        "--shot-generation-recipe",
+        dest="shot_generation_recipe",
+        type=json.loads,
+        default=None,
+        help="Validated frozen shot-generation recipe JSON.",
+    )
     return p
 
 
 # ---------------------------------------------------------------------------
 # core entrypoints
-# ---------------------------------------------------------------------------
-
-
 def generate_core(
     args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
 ) -> GenerationResult:
     args = _coerce_args(args_or_request)
-
     mode_name: str = args.mode  # SD-005: explicit --mode required
 
     # --- load backend registry ----------------------------------------------
@@ -398,6 +405,16 @@ def generate_core(
     warnings: list[dict[str, str]] = []
     dropped_features: list[str] = []
     fallback_warning = _resolve_execution_with_codex_fallback(args, mode_spec)
+    recipe = getattr(args, "shot_generation_recipe", None)
+    if recipe is not None:
+        validate_shot_generation_recipe(
+            recipe,
+            project_id=None,
+            model=getattr(entry, "id", args.model),
+            mode=mode_name,
+            execution=getattr(args, "execution", None),
+            resolved_settings=vars(args),
+        )
     if fallback_warning is not None:
         warnings.append(fallback_warning)
 
@@ -715,6 +732,10 @@ def _build_inputs_request(
             inputs[key] = val
     if image_ref_resolved is not None:
         inputs["image_ref_resolved"] = image_ref_resolved
+    recipe = getattr(args, "shot_generation_recipe", None)
+    if recipe is not None:
+        inputs["shot_generation_recipe"] = recipe
+        request["shot_generation_recipe"] = recipe
     return inputs, request
 
 

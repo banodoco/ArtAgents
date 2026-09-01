@@ -41,6 +41,7 @@ from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.shots import text_checkout
+from astrid.packs.shots.dependencies import analyze_invalidation
 from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
     SHOT_CREATE_COMMAND_KIND,
@@ -294,6 +295,58 @@ class ShotsService:
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
             model.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
+    # -- promote_candidate -----------------------------------------------
+
+    def promote_candidate(
+        self,
+        project: str,
+        shot_id: str,
+        candidate_item_id: str,
+        *,
+        expected_head_seq: int,
+        timeline_assets: Sequence[Mapping[str, Any]]
+        | Mapping[str, Mapping[str, Any]]
+        = (),
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Promote a candidate and return its derived invalidation report."""
+        try:
+            key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        try:
+            promotion = UnitOfWork(self._writer).run(
+                lambda uow: self._shots.promote_candidate(
+                    uow,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    candidate_item_id=candidate_item_id,
+                    expected_head_seq=expected_head_seq,
+                    idempotency_key=key,
+                )
+            )
+            shot = self._shots.show(self._writer, project_id, shot_id)
+            media = (
+                [item.to_dict() for item in self._media.list(self._writer, project_id)]
+                if self._media is not None
+                else []
+            )
+            invalidation = analyze_invalidation(
+                [item.to_dict() for item in shot.items],
+                media,
+                timeline_assets,
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            {"promotion": promotion.to_dict(), "invalidation": invalidation},
             receipt=self._committed_receipt(project_id, key),
             idempotency_key=key,
         )

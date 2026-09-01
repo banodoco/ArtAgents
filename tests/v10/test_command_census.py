@@ -77,6 +77,7 @@ _EVENT_EXCEPTIONS: dict[str, str] = {
     "timeline.replace_config": "timeline.config_replaced",
     "shot.add_item": "shot.item_added",
     "shot.remove_item": "shot.item_removed",
+    "shot.promote_candidate": "shot.candidate_promoted",
     "reference.associate": "reference.media_associated",
     "reference.set_primary": "reference.primary_changed",
     "shot.text_binding.set": "shot.text_binding.created",

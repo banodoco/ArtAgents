@@ -644,3 +644,63 @@ def test_generation_adapter_is_pack_owned_and_confines_outputs(env) -> None:
     assert "astrid.packs" not in kernel_sources
     assert "task_adapter" not in kernel_sources
     assert "import astrid.core.execution" not in kernel_sources
+
+
+def test_shot_generation_recipe_round_trips_in_task_and_result_inputs(
+    env, monkeypatch,
+) -> None:
+    from astrid.packs.generation.executors.generate_image.task_adapter import (
+        GenerateImageAdapter,
+    )
+
+    _install_generation_backend(monkeypatch, DeterministicImageBackend)
+    project = _create_project(env)
+    recipe = {
+        "schema": "astrid.shot-generation-recipe/v1",
+        "project_id": project.id,
+        "shot_id": "shot-02",
+        "target_role": "primary_visual",
+        "prompt_binding": {
+            "id": "binding-02",
+            "head": 3,
+            "media_id": "prompt-media",
+            "content_sha256": "a" * 64,
+        },
+        "generator": {
+            "capability_id": "generation.generate_image",
+            "model": "z-image",
+            "backend": "local",
+            "mode": "t2i",
+            "settings": {"seed": 42},
+        },
+        "inputs": [],
+        "parent_media_id": "parent-media",
+        "parent_content_sha256": "b" * 64,
+    }
+    task = _admit(
+        env,
+        project_id=project.id,
+        spec={**GENERATION_SPEC, "shot_generation_recipe": recipe},
+    )
+    claim = _claim(env, project_id=project.id)
+    service = ExecutionService(projects_root=env.projects_root, task_repo=env.task_repo)
+    prepared_result = service.execute(
+        UnitOfWork(env.writer),
+        project_id=project.id,
+        task_id=task.id,
+        attempt_id=claim.attempt.id,
+        lease_id=claim.attempt.lease_id,
+        expected_status_version=claim.attempt.status_version,
+        idempotency_key="execute-recipe",
+        handler=GenerateImageAdapter(projects_root=env.projects_root),
+        now=TS2,
+    )
+    assert prepared_result.outcome == "prepared"
+    prepared = prepared_result.prepared
+    assert prepared is not None
+    assert task.spec["shot_generation_recipe"] == recipe
+    assert prepared.manifest.inputs["shot_generation_recipe"] == recipe
+    completed = _complete(env, service, prepared)
+    assert completed.outcome == "completed"
+    assert completed.completed is not None
+    assert completed.completed.outputs[0].params["path"] == "manifest.json"

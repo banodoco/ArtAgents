@@ -61,9 +61,9 @@ def dispatch_retried_task(
     worker implementations. Callers must invoke this only for a fresh retry
     receipt; exact receipt replays are read-only and must not dispatch again.
     """
-    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
     from astrid.core.kernel.read import schema_registry_context
     from astrid.core.store.uow import UnitOfWork
+    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
 
     spec = dict(getattr(task, "spec", {}) or {})
     capability_kind = str(spec.get("kind") or "executor")
@@ -852,19 +852,18 @@ def _kernel_invoke(
     registry: FrozenSchemaPackRegistry | None = None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
     """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
-    from astrid.core.repositories.tasks import compute_spec_hash
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.integrations.reigh.bridge_service import derive_database_path
+    from astrid.core.io.media_import import managed_media_path
+    from astrid.core.kernel.read import schema_registry_context
+    from astrid.core.receipts.service import ReceiptService
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import ProjectRepository
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
     from astrid.core.store.uow import UnitOfWork
     from astrid.core.store.writer import DatabaseWriter
-    from astrid.core.events.service import EventAppendService
-    from astrid.core.receipts.service import ReceiptService
-    from astrid.core.repositories.runs import RunRepository
-    from astrid.core.repositories.tasks import TaskRepository
-    from astrid.core.repositories.projects import ProjectRepository
-    from astrid.core.repositories.media import MediaRepository
-    from astrid.core.io.media_import import managed_media_path
     from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
-    from astrid.core.kernel.read import schema_registry_context
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path
     if registry is None:
         from astrid.core.schema_packs.standard import build_standard_registry
 
@@ -1187,7 +1186,24 @@ def invoke(
             require_local_generation_readiness,
             validate_generation_request,
         )
+        if capability.id == "generation.generate_image":
+            from astrid.packs.generation.executors.generate_image.task_adapter import (
+                GenerateImageAdapterError,
+                validate_shot_generation_recipe,
+            )
 
+            recipe = request_inputs.get("shot_generation_recipe")
+            if recipe is not None:
+                try:
+                    validate_shot_generation_recipe(
+                        recipe,
+                        model=request_inputs.get("model"),
+                        mode=request_inputs.get("mode"),
+                        execution=request_inputs.get("execution"),
+                        resolved_settings=request_inputs,
+                    )
+                except GenerateImageAdapterError as exc:
+                    raise CapabilityValidationError(str(exc)) from exc
         model_entry, _mode_spec = validate_generation_request(
             model_registry,
             model=request_inputs.get("model"),

@@ -213,6 +213,7 @@ def test_reference_and_shot_commands_are_executable_through_pack_factories(
         "shot.add_item",
         "shot.remove_item",
         "shot.reorder",
+        "shot.promote_candidate",
     }
     shots_manifest = load_schema_pack_manifest(
         Path("astrid") / "packs" / "shots" / "schema-pack.yaml"

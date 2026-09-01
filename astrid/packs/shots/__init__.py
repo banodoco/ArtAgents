@@ -18,17 +18,19 @@ stream/event/command name through the single explicit ``register_pack()``
 path — never through discovery or the capability-pack loader.
 """
 
-from __future__ import annotations
-
+from astrid.packs.shots.dependencies import analyze_invalidation
 from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
+    SHOT_CANDIDATE_PROMOTED_EVENT_KIND,
     SHOT_CREATE_COMMAND_KIND,
     SHOT_CREATED_EVENT_KIND,
     SHOT_ITEM_ADDED_EVENT_KIND,
     SHOT_ITEM_REMOVED_EVENT_KIND,
+    SHOT_PROMOTE_CANDIDATE_COMMAND_KIND,
     SHOT_REMOVE_ITEM_COMMAND_KIND,
     SHOT_STREAM_TYPE,
     ShotAlreadyExistsError,
+    ShotCandidatePromotionReadModel,
     ShotItemMutationReadModel,
     ShotItemNotFoundError,
     ShotItemReadModel,
@@ -66,14 +68,18 @@ from astrid.packs.shots.text_bindings import (
 )
 
 __all__ = [
+    "analyze_invalidation",
     "SHOT_ADD_ITEM_COMMAND_KIND",
+    "SHOT_CANDIDATE_PROMOTED_EVENT_KIND",
     "SHOT_CREATE_COMMAND_KIND",
     "SHOT_CREATED_EVENT_KIND",
     "SHOT_ITEM_ADDED_EVENT_KIND",
     "SHOT_ITEM_REMOVED_EVENT_KIND",
+    "SHOT_PROMOTE_CANDIDATE_COMMAND_KIND",
     "SHOT_REMOVE_ITEM_COMMAND_KIND",
     "SHOT_STREAM_TYPE",
     "ShotAlreadyExistsError",
+    "ShotCandidatePromotionReadModel",
     "ShotItemMutationReadModel",
     "ShotItemNotFoundError",
     "ShotItemReadModel",

@@ -38,6 +38,7 @@ event_kinds:
   - shot.item_added
   - shot.item_removed
   - shot.reordered
+  - shot.candidate_promoted
   - shot.text_binding.created
   - shot.text_binding.rebound
 command_kinds:
@@ -45,6 +46,7 @@ command_kinds:
   - shot.add_item
   - shot.remove_item
   - shot.reorder
+  - shot.promote_candidate
   - shot.text_binding.set
   - shot.text_binding.rebind
   - shot.text_binding.apply

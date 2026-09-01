@@ -74,7 +74,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from astrid.core.events.service import ACTOR_KINDS, EventAppendService
+from astrid.core.events.service import (
+    ACTOR_KINDS,
+    EventAppendService,
+    EventHeadConflictError,
+)
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -113,13 +117,11 @@ SHOT_ITEM_REMOVED_EVENT_KIND = "shot.item_removed"
 Carries the removed item's facts — including the exact kernel ``media_id``
 — so the log alone proves which media identity was preserved on removal.
 """
-
 SHOT_REORDERED_EVENT_KIND = "shot.reordered"
-"""The m3 event kind emitted by a receipt-backed whole-shot reorder.
+"""The m3 event kind emitted by a receipt-backed whole-shot reorder."""
 
-Carries the exact ordered item ids and the matching ordered kernel media
-ids, so the log alone reconstructs the shot's new order.
-"""
+SHOT_CANDIDATE_PROMOTED_EVENT_KIND = "shot.candidate_promoted"
+"""The event emitted when a candidate becomes the primary visual."""
 
 SHOT_CREATE_COMMAND_KIND = "shot.create"
 """The m3 command kind that shot-create receipts are keyed on."""
@@ -132,6 +134,9 @@ SHOT_REMOVE_ITEM_COMMAND_KIND = "shot.remove_item"
 
 SHOT_REORDER_COMMAND_KIND = "shot.reorder"
 """The m3 command kind that whole-shot reorder receipts are keyed on."""
+
+SHOT_PROMOTE_CANDIDATE_COMMAND_KIND = "shot.promote_candidate"
+"""The command kind that candidate-promotion receipts are keyed on."""
 
 SHOT_SORT_KEY_WIDTH = 12
 """The fixed zero-padded width of normalized item sort keys.
@@ -476,6 +481,47 @@ class ShotReorderReadModel:
             media_ids=tuple(
                 str(media_id) for media_id in (value.get("media_ids") or [])
             ),
+            event_head_seq=int(value["event_head_seq"]),
+        )
+
+@dataclass(frozen=True, slots=True)
+class ShotCandidatePromotionReadModel:
+    """Receipt result for one atomic candidate-to-primary promotion."""
+
+    shot_id: str
+    project_id: str
+    candidate_item_id: str
+    primary_item_id: str
+    superseded_item_id: str | None
+    item_ids: tuple[str, ...]
+    event_head_seq: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "shot_id": self.shot_id,
+            "project_id": self.project_id,
+            "candidate_item_id": self.candidate_item_id,
+            "primary_item_id": self.primary_item_id,
+            "superseded_item_id": self.superseded_item_id,
+            "item_ids": list(self.item_ids),
+            "event_head_seq": self.event_head_seq,
+        }
+
+    @classmethod
+    def from_mapping(
+        cls, value: Mapping[str, Any]
+    ) -> ShotCandidatePromotionReadModel:
+        return cls(
+            shot_id=str(value["shot_id"]),
+            project_id=str(value["project_id"]),
+            candidate_item_id=str(value["candidate_item_id"]),
+            primary_item_id=str(value["primary_item_id"]),
+            superseded_item_id=(
+                str(value["superseded_item_id"])
+                if value.get("superseded_item_id") is not None
+                else None
+            ),
+            item_ids=tuple(str(item_id) for item_id in (value.get("item_ids") or [])),
             event_head_seq=int(value["event_head_seq"]),
         )
 
@@ -1426,6 +1472,219 @@ class ShotRepository:
         )
         return result
 
+    # -- promote_candidate -------------------------------------------------
+
+    def promote_candidate(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        shot_id: str,
+        candidate_item_id: str,
+        expected_head_seq: int,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        created_at: str | None = None,
+        command_kind: str = SHOT_PROMOTE_CANDIDATE_COMMAND_KIND,
+    ) -> ShotCandidatePromotionReadModel:
+        """Promote one candidate while retaining the previous primary.
+
+        The receipt gate and shot-head CAS both run before projection writes.
+        Status lives in the existing item metadata: no promotion table or
+        second ledger is introduced.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        shot_id = _require_non_empty_string("shot_id", shot_id)
+        candidate_item_id = _require_non_empty_string(
+            "candidate_item_id", candidate_item_id
+        )
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if (
+            isinstance(expected_head_seq, bool)
+            or not isinstance(expected_head_seq, int)
+            or expected_head_seq < 0
+        ):
+            raise ShotValidationError(
+                "expected_head_seq must be a non-negative integer"
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise ShotValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+
+        request = {
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "candidate_item_id": candidate_item_id,
+            "expected_head_seq": expected_head_seq,
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise ShotValidationError(
+                f"cannot hash shot candidate promotion request: {exc}"
+            ) from exc
+
+        # Receipt-first: retries never inspect or mutate current shot state.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return ShotCandidatePromotionReadModel.from_mapping(replayed)
+
+        shot_row = uow.query_one(
+            "SELECT id, project_id FROM shots WHERE id = ?", (shot_id,)
+        )
+        if shot_row is None or str(shot_row["project_id"]) != project_id:
+            raise ShotNotFoundError(shot_id=shot_id, project_id=project_id)
+        stream_id = f"{shot_id}:{SHOT_STREAM_TYPE}"
+        stream_row = uow.query_one(
+            "SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)
+        )
+        if stream_row is None:
+            raise ShotNotFoundError(shot_id=shot_id, project_id=project_id)
+        actual_head = int(stream_row["head_seq"])
+        if actual_head != expected_head_seq:
+            raise EventHeadConflictError(
+                stream_id=stream_id,
+                expected_head_seq=expected_head_seq,
+                actual_head_seq=actual_head,
+            )
+
+        item_rows = _ordered_item_rows(uow, shot_id)
+        candidate_row = next(
+            (row for row in item_rows if str(row["id"]) == candidate_item_id),
+            None,
+        )
+        if candidate_row is None:
+            raise ShotItemNotFoundError(
+                item_id=candidate_item_id, shot_id=shot_id
+            )
+        candidate_metadata = _parse_object(
+            str(candidate_row["metadata_json"]),
+            label="shot item",
+            subject=candidate_item_id,
+        )
+        if (
+            candidate_metadata.get("role") != "primary_visual"
+            or candidate_metadata.get("status") != "candidate"
+        ):
+            raise ShotValidationError(
+                "candidate item must have role='primary_visual' and "
+                "status='candidate'"
+            )
+
+        primary_rows: list[tuple[Any, dict[str, Any]]] = []
+        for row in item_rows:
+            metadata = _parse_object(
+                str(row["metadata_json"]),
+                label="shot item",
+                subject=str(row["id"]),
+            )
+            if (
+                metadata.get("role") == "primary_visual"
+                and metadata.get("status") == "primary"
+            ):
+                primary_rows.append((row, metadata))
+        if len(primary_rows) > 1:
+            raise ShotValidationError(
+                "shot must contain at most one primary_visual item"
+            )
+        previous = primary_rows[0] if primary_rows else None
+        if previous is not None and str(previous[0]["id"]) == candidate_item_id:
+            raise ShotValidationError("candidate item is already the primary")
+
+        for field, expected in (("project_id", project_id), ("shot_id", shot_id)):
+            supplied = candidate_metadata.get(field)
+            if supplied is not None and supplied != expected:
+                raise ShotValidationError(
+                    f"candidate metadata {field!r} does not match the target"
+                )
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise ShotValidationError("created_at must be a non-empty string")
+        candidate_metadata["status"] = "primary"
+        updates = [(candidate_item_id, candidate_metadata)]
+        superseded_id: str | None = None
+        if previous is not None:
+            superseded_id = str(previous[0]["id"])
+            previous_metadata = dict(previous[1])
+            previous_metadata["status"] = "superseded"
+            updates.insert(0, (superseded_id, previous_metadata))
+        for item_id, metadata in updates:
+            try:
+                metadata_json = canonical_json(metadata)
+            except CanonicalizationError as exc:
+                raise ShotValidationError(
+                    f"cannot canonicalize promoted item metadata: {exc}"
+                ) from exc
+            uow.execute(
+                "UPDATE shot_items SET metadata_json = ? WHERE id = ? AND shot_id = ?",
+                (metadata_json, item_id, shot_id),
+            )
+        uow.execute("UPDATE shots SET updated_at = ? WHERE id = ?", (stamp, shot_id))
+
+        txn_id = uuid.uuid4().hex
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=SHOT_CANDIDATE_PROMOTED_EVENT_KIND,
+            data={
+                "shot_id": shot_id,
+                "candidate_item_id": candidate_item_id,
+                "primary_item_id": candidate_item_id,
+                "superseded_item_id": superseded_id,
+                "target_role": "primary_visual",
+            },
+            changes=[
+                "candidate_item_id",
+                "primary_item_id",
+                "superseded_item_id",
+                "target_role",
+            ],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            expected_head_seq=expected_head_seq,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+        result = ShotCandidatePromotionReadModel(
+            shot_id=shot_id,
+            project_id=project_id,
+            candidate_item_id=candidate_item_id,
+            primary_item_id=candidate_item_id,
+            superseded_item_id=superseded_id,
+            item_ids=tuple(str(row["id"]) for row in item_rows),
+            event_head_seq=append.stream_seq,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=result.to_dict(),
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
     # -- reads -------------------------------------------------------------
 
     def show(
@@ -1538,15 +1797,18 @@ class ShotRepository:
 
 __all__ = [
     "SHOT_ADD_ITEM_COMMAND_KIND",
+    "SHOT_CANDIDATE_PROMOTED_EVENT_KIND",
     "SHOT_CREATE_COMMAND_KIND",
     "SHOT_CREATED_EVENT_KIND",
     "SHOT_ITEM_ADDED_EVENT_KIND",
     "SHOT_ITEM_REMOVED_EVENT_KIND",
+    "SHOT_PROMOTE_CANDIDATE_COMMAND_KIND",
     "SHOT_REMOVE_ITEM_COMMAND_KIND",
     "SHOT_REORDER_COMMAND_KIND",
     "SHOT_REORDERED_EVENT_KIND",
     "SHOT_STREAM_TYPE",
     "ShotAlreadyExistsError",
+    "ShotCandidatePromotionReadModel",
     "ShotItemMutationReadModel",
     "ShotItemNotFoundError",
     "ShotItemReadModel",

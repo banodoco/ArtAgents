@@ -40,23 +40,26 @@ independently when the other pack repository is absent.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 from astrid.core.conformance.kit import (
+    TS,
     CommandSpec,
     ConformanceContext,
     ConformanceError,
-    TS,
 )
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.receipts import ReceiptMismatchError
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
+    SHOT_CANDIDATE_PROMOTED_EVENT_KIND,
     SHOT_CREATE_COMMAND_KIND,
     SHOT_CREATED_EVENT_KIND,
     SHOT_ITEM_ADDED_EVENT_KIND,
     SHOT_ITEM_REMOVED_EVENT_KIND,
+    SHOT_PROMOTE_CANDIDATE_COMMAND_KIND,
     SHOT_REMOVE_ITEM_COMMAND_KIND,
     SHOT_REORDER_COMMAND_KIND,
     SHOT_REORDERED_EVENT_KIND,
@@ -89,6 +92,7 @@ _SEED_KEYS: dict[str, str] = {
     "add_item": "crash-shot-add-item",
     "remove_item": "crash-shot-remove-item",
     "reorder": "crash-shot-reorder",
+    "promote_candidate": "crash-shot-promote-candidate",
 }
 """Fixed idempotency keys the crash-check seeds use (deterministic replay)."""
 
@@ -210,6 +214,7 @@ def _add_prepared_item(
     item_id: str,
     key: str,
     position: int,
+    metadata: Mapping[str, Any] | None = None,
 ) -> Any:
     """Insert one exact-media item inside *uow* (deterministic identity)."""
     shots = _require(context, "shots")
@@ -220,6 +225,7 @@ def _add_prepared_item(
         media_id=_media_id(variant),
         position=position,
         source_frame=0,
+        metadata=metadata,
         idempotency_key=key,
         item_id=item_id,
         created_at=TS,
@@ -428,6 +434,96 @@ def _seed_add_item(context: ConformanceContext, writer: Any) -> dict[str, Any]:
         )
 
     UnitOfWork(writer).run(_run)
+    return {
+        "project_id": "crash-proj",
+        "ref": _stable_shot_id(f"prepare-{key}"),
+        "key": key,
+    }
+
+# ---------------------------------------------------------------------------
+# shot.promote_candidate
+# ---------------------------------------------------------------------------
+
+
+def _prepare_promote_candidate(
+    context: ConformanceContext,
+    writer: Any,
+    *,
+    project_id: str,
+    key: str,
+) -> None:
+    """Promote needs one primary and two candidate items."""
+    _prepare_base(context, writer, project_id=project_id)
+    shot_id = _stable_shot_id(f"prepare-{key}")
+
+    def _run(uow: UnitOfWork) -> None:
+        _create_shot(
+            context,
+            uow,
+            project_id=project_id,
+            shot_id=shot_id,
+            name=f"Prepared {key}",
+            key=f"prepare-{key}-shot",
+        )
+        _add_prepared_item(
+            context, uow, project_id=project_id, shot_id=shot_id, variant="a",
+            item_id=_stable_item_id(f"prepare-{key}", "primary"),
+            key=f"prepare-{key}-primary", position=0,
+            metadata={"role": "primary_visual", "status": "primary"},
+        )
+        for suffix in ("candidate", "changed"):
+            _add_prepared_item(
+                context, uow, project_id=project_id, shot_id=shot_id, variant="b",
+                item_id=_stable_item_id(f"prepare-{key}", suffix),
+                key=f"prepare-{key}-{suffix}", position=None,
+                metadata={"role": "primary_visual", "status": "candidate"},
+            )
+
+    UnitOfWork(writer).run(_run)
+
+
+def _invoke_promote_candidate(
+    context: ConformanceContext,
+    uow: UnitOfWork,
+    *,
+    project_id: str,
+    key: str,
+) -> Any:
+    shots = _require(context, "shots")
+    return shots.promote_candidate(
+        uow,
+        project_id=project_id,
+        shot_id=_stable_shot_id(f"prepare-{key}"),
+        candidate_item_id=_stable_item_id(f"prepare-{key}", "candidate"),
+        expected_head_seq=4,
+        idempotency_key=key,
+        created_at=TS2,
+    )
+
+
+def _invoke_promote_candidate_changed(
+    context: ConformanceContext,
+    uow: UnitOfWork,
+    *,
+    project_id: str,
+    key: str,
+) -> Any:
+    shots = _require(context, "shots")
+    return shots.promote_candidate(
+        uow,
+        project_id=project_id,
+        shot_id=_stable_shot_id(f"prepare-{key}"),
+        candidate_item_id=_stable_item_id(f"prepare-{key}", "changed"),
+        expected_head_seq=4,
+        idempotency_key=key,
+        created_at=TS2,
+    )
+
+
+def _seed_promote_candidate(context: ConformanceContext, writer: Any) -> dict[str, Any]:
+    key = _SEED_KEYS["promote_candidate"]
+    _seed_create(context, writer)
+    _prepare_promote_candidate(context, writer, project_id="crash-proj", key=key)
     return {
         "project_id": "crash-proj",
         "ref": _stable_shot_id(f"prepare-{key}"),
@@ -769,6 +865,21 @@ def shot_command_specs(
             read=_shot_read,
             seed=_seed_remove_item,
             prepare=_prepare_remove_item,
+            is_expected_mismatch=is_mismatch,
+            result_ref=_shot_ref,
+            mutable_tables=("shots", "shot_items"),
+            list_other=_shot_list_other,
+        ),
+        SHOT_PROMOTE_CANDIDATE_COMMAND_KIND: CommandSpec(
+            command_kind=SHOT_PROMOTE_CANDIDATE_COMMAND_KIND,
+            pack_id="shots",
+            stream_type=SHOT_STREAM_TYPE,
+            event_kinds=(SHOT_CANDIDATE_PROMOTED_EVENT_KIND,),
+            invoke=_invoke_promote_candidate,
+            invoke_changed=_invoke_promote_candidate_changed,
+            read=_shot_read,
+            seed=_seed_promote_candidate,
+            prepare=_prepare_promote_candidate,
             is_expected_mismatch=is_mismatch,
             result_ref=_shot_ref,
             mutable_tables=("shots", "shot_items"),
