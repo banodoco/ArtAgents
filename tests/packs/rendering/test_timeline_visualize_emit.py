@@ -577,7 +577,7 @@ def test_scope_none_matches_full_timeline(desert) -> None:
         "start_seconds": 0.0,
         "end_seconds": 98.0,
     }
-    # Backward compatibility: the other scope-aware emitters are unchanged too.
+    # The other scope-aware emitters use the same explicit full-timeline scope.
     default_actions = emit_action_index(model, identity_map, snapshot, MANIFEST_PATH)
     assert default_actions == emit_action_index(model, identity_map, snapshot, MANIFEST_PATH, full)
     assert emit_diagnostics(model, identity_map, snapshot) == emit_diagnostics(

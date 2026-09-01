@@ -30,8 +30,6 @@ class LayoutExceptionLifecycle(str, Enum):
     PERMANENT = "permanent"
 
 
-# LEGACY_PUBLIC_SHIM and DSL_ORCHESTRATOR_SHIM were removed in M2
-# after all deferred shims were either deleted or migrated to canonical layout.
 _TEMPORARY_LAYOUT_EXCEPTION_CLASSES: set[LayoutExceptionClass] = set()
 
 _LAYOUT_EXCEPTION_DECLARATION_PATH = "metadata.layout.exceptions"
@@ -93,25 +91,6 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# M2-completed: legacy shim exceptions removed
-# ---------------------------------------------------------------------------
-# These shims were either deleted or migrated to canonical layout in M2:
-#
-#   builtin/agent_probe.py
-#       status:      migrated to orchestrators/agent_probe/run.py (M2)
-#
-#   video_editing/hype.py
-#       status:      deleted (M2) — canonical duplicate at
-#                    orchestrators/hype/run.py
-#
-#   text_analysis/summarize.py
-#       status:      deleted (M2) — re-export shim; canonical at
-#                    orchestrators/summarize/run.py
-#
-#   stream_content/__init__.py
-#       status:      deleted (M2) — now a namespace package
-#
 # ---------------------------------------------------------------------------
 # Special non-manifest directories (classified in this contract)
 # ---------------------------------------------------------------------------

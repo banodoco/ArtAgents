@@ -1384,18 +1384,6 @@ class RenderSegment:
             )
             object.__setattr__(self, "layer", layer)
 
-    @property
-    def backend(self) -> str:
-        """Compatibility accessor; ``renderer.id`` is authoritative."""
-
-        return self.renderer.id
-
-    @property
-    def support(self) -> SupportReport:
-        """Compatibility accessor; ``renderer.support_decision`` is authoritative."""
-
-        return self.renderer.support_decision
-
     def to_dict(self) -> dict[str, Any]:
         payload = {
             "window": self.window,

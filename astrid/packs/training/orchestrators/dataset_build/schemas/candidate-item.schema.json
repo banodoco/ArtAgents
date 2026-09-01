@@ -80,11 +80,6 @@
       "format": "date-time",
       "description": "ISO 8601 timestamp when this candidate was acquired."
     },
-    "downloaded_at": {
-      "type": "string",
-      "format": "date-time",
-      "description": "Alias for acquired_at. Accepted for backward compatibility."
-    },
     "derived_from": {
       "type": "object",
       "description": "Derivation metadata when media is generated or transformed.",
