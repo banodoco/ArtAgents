@@ -8,10 +8,13 @@ attempt outputs.
 
 from __future__ import annotations
 
+import io
 import os
 import importlib
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -28,6 +31,17 @@ from astrid.sdk import invocation
 from astrid.sdk.exceptions import CapabilityValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_WORKTREE = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME_COMMIT = "587316a85a68a25bf81513bca295379d504d437a"
+_RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
+RUNTIME = Path(_RUNTIME_TMP.name)
+archive = subprocess.run(
+    ["git", "-C", str(RUNTIME_WORKTREE), "archive", "--format=tar", RUNTIME_COMMIT],
+    check=True,
+    capture_output=True,
+).stdout
+with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
+    tar.extractall(RUNTIME)
 
 
 def test_live_import_graph_does_not_load_project_timeline_authority() -> None:
@@ -131,13 +145,9 @@ def test_runtime_materialization_projects_in_memory_and_never_repairs(tmp_path: 
 
 def test_runtime_timeline_create_read_version_and_cas(tmp_path: Path) -> None:
     """The supported timeline lifecycle is a runtime transaction, including CAS."""
-    runtime_root = Path(
-        os.environ.get(
-            "ASTRID_RUNTIME_CHECKOUT",
-            "/Users/peteromalley/Documents/reigh-workspace/"
-            "banodoco-workspace-runtime-stage1-convergence",
-        )
-    )
+    # Keep the subprocess on the pinned runtime source, independent of any
+    # mutable sibling checkout or ambient override.
+    runtime_root = RUNTIME
     if not runtime_root.is_dir():
         pytest.skip("workspace runtime checkout is not available")
     probe = r'''import sys

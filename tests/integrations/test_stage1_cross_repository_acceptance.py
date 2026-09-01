@@ -9,15 +9,28 @@ generated-client directory or monkeypatch the SDK transport.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 import pytest
 
 WORKSPACE = Path(__file__).parents[3]
-RUNTIME = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME_WORKTREE = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME_COMMIT = "587316a85a68a25bf81513bca295379d504d437a"
+_RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
+RUNTIME = Path(_RUNTIME_TMP.name)
+archive = subprocess.run(
+    ["git", "-C", str(RUNTIME_WORKTREE), "archive", "--format=tar", RUNTIME_COMMIT],
+    check=True,
+    capture_output=True,
+).stdout
+with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
+    tar.extractall(RUNTIME)
 sys.path.insert(0, str(RUNTIME))
 
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402
@@ -182,7 +195,7 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
                 "task": {
                     "id": task.task_id,
                     "capability": record.id,
-                    "spec": {},
+                    "spec": {"spec": {"inputs": {}}},
                     "attempt_id": claim["attempt_id"],
                     "fence": claim["fence"],
                 }
@@ -211,7 +224,9 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
 
 
 def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypatch):
-    runtime = Path(os.environ.get("BANODOCO_RUNTIME_CHECKOUT") or RUNTIME).expanduser().resolve()
+    # Always exercise the immutable acceptance runtime, never a dirty sibling
+    # checkout whose contract digest may have advanced independently.
+    runtime = RUNTIME
     realm, support = tmp_path / "realm", tmp_path / "support"
     daemon, metadata = _start_runtime(realm, support, runtime)
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", metadata["endpoint"])

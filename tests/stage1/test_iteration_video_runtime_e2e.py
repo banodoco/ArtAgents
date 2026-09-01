@@ -3,19 +3,30 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import io
 import os
 from contextlib import nullcontext
 from pathlib import Path
 import sys
 import subprocess
+import tarfile
+import tempfile
 from types import SimpleNamespace
 
 import pytest
 
-RUNTIME = Path(
-    os.environ.get("BANODOCO_RUNTIME_CHECKOUT")
-    or "/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence"
-)
+RUNTIME_WORKTREE = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
+RUNTIME_COMMIT = "587316a85a68a25bf81513bca295379d504d437a"
+_RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
+RUNTIME = Path(_RUNTIME_TMP.name)
+archive = subprocess.run(
+    ["git", "-C", str(RUNTIME_WORKTREE), "archive", "--format=tar", RUNTIME_COMMIT],
+    check=True,
+    capture_output=True,
+).stdout
+with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
+    tar.extractall(RUNTIME)
 sys.path.insert(0, str(RUNTIME))
 pytest.importorskip("runtime_protocol.daemon")
 
@@ -63,6 +74,15 @@ def test_public_iteration_video_uses_explicit_runtime_project_and_run(
 ) -> None:
     support = tmp_path / "support"
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=support).start()
+    # Standalone task admission is strict: seed the runtime catalog explicitly
+    # instead of relying on a retired default-capability compatibility hook.
+    daemon.service.register_capability(
+        {
+            "capability_id": "render.basic",
+            "definition_digest": "sha256:" + hashlib.sha256(b"render.basic").hexdigest(),
+            "status": "ready",
+        }
+    )
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(support / "credentials" / "owner.token"))
     try:
