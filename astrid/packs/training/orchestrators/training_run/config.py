@@ -125,7 +125,7 @@ def preflight_budget(
     require_spend_confirmation = bool(compute.get("require_spend_confirmation", True))
     if not dry_run and require_spend_confirmation and not spend_confirmed:
         raise TrainingRunSpendConfirmationError(
-            "live training requires spend confirmation (--yes) before provisioning"
+            "live training requires spend confirmation (--confirm-spend) before provisioning"
         )
     return BudgetPreflightReport(
         backend=backend,

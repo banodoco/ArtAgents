@@ -2,7 +2,7 @@
 
 **Status**: `music` mode implemented (cloud-first).  
 **Executor**: `generation.generate_audio`  
-**Escape hatch**: `external.vibecomfy` (custom audio pipelines, spectrogram conditioning)
+**Escape hatch**: `vibecomfy.run` (custom audio pipelines, spectrogram conditioning)
 
 ## Canonical audio modes
 
@@ -65,10 +65,10 @@ Manifest `schema_version` is 2 (per SD-006).
 ## Escape hatch
 
 For spectrogram conditioning, multi-track generation, vocal inpainting, or exotic
-audio samplers, use `external.vibecomfy` directly.  The `generation.generate_audio`
+audio samplers, use `vibecomfy.run` directly.  The `generation.generate_audio`
 executor covers the basic happy path only.
 
 See:
 - `astrid/packs/generation/executors/generate_audio/STAGE.md` — executor usage and examples
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy workflow runner
 - `docs/generation/33-music-models.md` — cloud model and local workflow reference

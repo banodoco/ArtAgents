@@ -31,7 +31,7 @@ All entries are registered in `astrid/core/model_catalog/models.yaml` under
 ### Local (`--execution local`)
 
 Not wired this sprint.  The escape hatch for local ComfyUI audio pipelines is
-`external.vibecomfy` (see below).  A follow-up sprint will add vibecomfy
+`vibecomfy.run` (see below).  A follow-up sprint will add vibecomfy
 ready-templates for Stable Audio 3, ACE-Step, and Stable Audio Open, plus the
 necessary `VibeComfyBackend` node-target wiring.
 
@@ -47,13 +47,13 @@ Requires `FAL_KEY` to be resolvable via the candidate-env-file walk
 ## Escape hatch
 
 **For spectrogram conditioning, multi-track generation, vocal inpainting, custom
-audio samplers, and exotic audio workflows, use `external.vibecomfy` directly.**
+audio samplers, and exotic audio workflows, use `vibecomfy.run` directly.**
 The `generation.generate_audio` executor covers the basic happy-path only
 (prompt, negative_prompt, seed, count, duration, guidance_scale, steps,
 lyrics_prompt, instrumental, output_format).
 
 See:
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy workflow runner
 - `docs/generation/32-audio-contract.md` — audio modality contract
 - `docs/generation/33-music-models.md` — cloud model and local workflow reference
 - `docs/generation/` — modality contracts, manifest schema, feature list

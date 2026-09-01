@@ -35,11 +35,6 @@ ASTRID_TIMELINE_SCHEMA_PYTHONPATH = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
 """Absolute server-owned Python install root containing
 ``banodoco_timeline_schema`` for Remotion timeline validation."""
 
-ASTRID_GATEWAY_RESOLVED_PROJECT = "ASTRID_GATEWAY_RESOLVED_PROJECT"
-"""Project slug resolved by the gateway for the current request. Set by
-``gateway._dispatch_with_resolved_project``; read by executor/orchestrator CLI
-shims to inject ``--project`` when the user omitted it."""
-
 # ---------------------------------------------------------------------------
 # Project run context
 # ---------------------------------------------------------------------------
@@ -150,7 +145,6 @@ __all__ = [
     "ASTRID_AUDIT_RUN_DIR",
     "ASTRID_AUTHOR_TEST",
     "ASTRID_BANODOCO_CATALOG_URL",
-    "ASTRID_GATEWAY_RESOLVED_PROJECT",
     "ASTRID_HOME",
     "ASTRID_INTERNAL_INVOCATION",
     "ASTRID_LOG_MAX_BYTES",

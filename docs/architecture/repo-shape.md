@@ -194,9 +194,8 @@ source root for user-authored capabilities. Its `pack.yaml` and content
 manifests are discovered like every other source pack; there is no fork state,
 sidecar redirect, or local-priority rule.
 
-The `builtin` pack is hidden and deprecated. It remains only for legacy test
-fixtures and historical pack-level aliases; new capability work should use the
-canonical shipped packs.
+The retired `builtin` pack is not shipped. Historical fixtures that referenced
+it are retired; new capability work uses the canonical shipped packs.
 
 The `_core/` directory is a **skill-only shell** — it contains only
 `skill/SKILL.md` (the root Astrid gateway skill), has no `pack.yaml`, and is

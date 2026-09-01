@@ -155,6 +155,12 @@ class TestValidateReviewFinal:
         assert result["experiment_id"] == "eval-test"
         assert result["reviewer"]["id"] == "peter"
 
+    def test_legacy_review_decisions_key_is_rejected(self):
+        payload = _payload()
+        payload["review_decisions"] = payload.pop("decisions")
+        with pytest.raises(ExperimentValidationError, match="decisions list"):
+            validate_review_final(payload, experiment=EXPERIMENT, case_ids=CASE_IDS)
+
     def test_score_below_minimum_rejected(self):
         p = _payload()
         p["decisions"][0]["scores"]["continuity"] = 0

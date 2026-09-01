@@ -46,17 +46,8 @@ def _stringify_value(value: Any) -> str:
 
 
 def _eprint(*args: object) -> None:
-    """Shared stderr sink for command previews and legacy override diagnostics."""
+    """Shared stderr sink for command previews."""
     print(*args, file=sys.stderr)
-
-
-def _gateway_resolved_project(explicit_project: str | None) -> str | None:
-    if explicit_project is not None:
-        return None
-    from astrid.core.env_vars import ASTRID_GATEWAY_RESOLVED_PROJECT
-
-    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT)
-    return value or None
 
 
 def _require_qualified_id(value: str, label: str) -> None:
@@ -252,25 +243,6 @@ def _require_pack_match(
         raise ValueError(
             f"{component_type} {definition.id!r} does not belong to pack {pack_id!r}"
         )
-
-
-def _definition_content_root(
-    definition: _HasIdAndMetadata,
-    *,
-    fallback_root_key: str,
-) -> Path:
-    """Extract content root from definition metadata.
-
-    Tries ``content_root`` first, then *fallback_root_key* (e.g.
-    ``"executor_root"`` or ``"orchestrator_root"``), then ``Path.cwd()``.
-    """
-    root_str = definition.metadata.get("content_root")
-    if root_str:
-        return Path(root_str)
-    root_str = definition.metadata.get(fallback_root_key)
-    if root_str:
-        return Path(root_str)
-    return Path.cwd()
 
 
 # ---------------------------------------------------------------------------

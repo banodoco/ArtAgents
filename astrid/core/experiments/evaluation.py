@@ -189,15 +189,12 @@ def build_rubric_response_schema(
 def _coerce_decisions(
     payload: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Return the rubric decisions list, tolerating legacy 'review_decisions'."""
-    if "decisions" in payload:
-        decisions = payload["decisions"]
-    elif "review_decisions" in payload:
-        decisions = payload["review_decisions"]
-    else:
+    """Return the canonical rubric decisions list."""
+    if "decisions" not in payload:
         raise ExperimentValidationError(
             "review.final must include a decisions list"
         )
+    decisions = payload["decisions"]
     if not isinstance(decisions, list):
         raise ExperimentValidationError("review.final decisions must be a list")
     if not all(isinstance(d, Mapping) for d in decisions):

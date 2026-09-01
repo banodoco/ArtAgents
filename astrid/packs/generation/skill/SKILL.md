@@ -58,11 +58,10 @@ img = astrid.generate.image(
 )
 ```
 
-`execution` is the canonical facade parameter.  `backend` is accepted as a
-compatibility alias, but it is resolved before invocation admission and is
-never ignored: an unavailable model/backend pair (for example
-`model="flux-schnell", backend="local"`) fails with the valid backend list
-and creates no run.  If both spellings are supplied, they must match.
+`execution` is the sole facade backend parameter.  The retired `backend`
+spelling is rejected before invocation admission; an unavailable pair (for
+example `model="flux-schnell", execution="local"`) fails with the valid
+backend list and creates no run.
 
 > **Note:** `edit`, `inpaint`, `outpaint`, and `upscale` always require an
 > explicit `mode` argument — they cannot be inferred from inputs (SD-002).

@@ -129,4 +129,4 @@ through the registry.  Everything else goes through the vibecomfy escape
 hatch, which gives direct access to ready-templates, custom workflows,
 and the full ComfyUI node graph.
 
-See: `vibecomfy` skill, `astrid/packs/external/vibecomfy/STAGE.md`
+See: `vibecomfy` skill, `astrid/packs/vibecomfy/executors/run/STAGE.md`

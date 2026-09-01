@@ -1,13 +1,7 @@
-"""Sprint 9 Phase 6 Step 12 — public id resolution parity.
+"""Public canonical-id resolution parity.
 
-Verifies that every public id flagged as "at risk" during the Sprint 9
-migration still resolves through the default executor / orchestrator
-registries. The Step 9.0 `qualified_id` regex relaxation made it possible to
-keep every existing id (notably the 3-segment `external.runpod.*` and
-`external.vibecomfy.*` ids), so no aliases were introduced. This test is the
-parity guard for that decision.
-
-See `docs/git-backed-packs/sprint-09/migration-aliases.md`.
+Verifies that the shipped canonical ids resolve through the default executor /
+orchestrator registries and that retired ids are not reintroduced.
 """
 
 from __future__ import annotations
@@ -19,8 +13,7 @@ from astrid.core.execution.orchestrator.registry import (
     load_default_registry as load_orchestrator_registry,
 )
 
-# The six 3-segment ids that survive only because the qualified_id regex was
-# relaxed in Step 9.0. These are the load-bearing cases for this test.
+# Representative canonical ids across the shipped external and built-in packs.
 PRESERVED_EXECUTOR_IDS = [
     "runpod.provision",
     "runpod.exec",
@@ -28,8 +21,7 @@ PRESERVED_EXECUTOR_IDS = [
     "runpod.session",
     "vibecomfy.run",
     "vibecomfy.validate",
-    # One canonical 2-segment id per remaining pack — sanity checks that the
-    # regex relaxation did not regress the common case either.
+    # One canonical id per remaining pack — sanity checks for common cases.
     "training.pool_build",
     "iteration.assemble",
     "youtube.upload",

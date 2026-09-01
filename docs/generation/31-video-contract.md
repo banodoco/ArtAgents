@@ -2,7 +2,7 @@
 
 **Status**: Implemented (Sprint 04)  
 **Executor**: `generation.generate_video`  
-**Escape hatch**: `external.vibecomfy` (custom video pipelines, frame-level control)
+**Escape hatch**: `vibecomfy.run` (custom video pipelines, frame-level control)
 
 ## Canonical video modes
 
@@ -100,12 +100,12 @@ Manifest `schema_version` is 2 (per SD-006).
 
 **For frame-level control, multi-pass pipelines, keyframe conditioning,
 LoRAs, custom samplers, or any video workflow beyond the basic happy path,
-use `external.vibecomfy` directly.**  The `generation.generate_video` executor
+use `vibecomfy.run` directly.**  The `generation.generate_video` executor
 covers basic text-to-video, image-to-video, and first-last-frame
 interpolation only — everything else belongs in the escape hatch.
 
 See:
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy workflow runner
   and escape-hatch documentation
 - `astrid/packs/generation/executors/generate_video/STAGE.md` — the generate_video
   executor documentation with wired-cells table, CLI examples, and golden

@@ -99,7 +99,6 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help="Validate and report without provisioning.")
     parser.add_argument("--smoke", action="store_true", help="Run local-only smoke validation without provisioning.")
     parser.add_argument("--confirm-spend", action="store_true", help="Confirm live spend caps after reviewing dry-run output.")
-    parser.add_argument("--yes", action="store_true", help="Confirm live execution after dry-run review.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
 
 
@@ -112,7 +111,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     preflight = preflight_training_run(
         config,
         dry_run=local_only,
-        spend_confirmed=bool(args.yes or args.confirm_spend),
+        spend_confirmed=bool(args.confirm_spend),
     )
     compute_config = dict(config.get("compute", {}))
     backend_id = preflight.budget.backend

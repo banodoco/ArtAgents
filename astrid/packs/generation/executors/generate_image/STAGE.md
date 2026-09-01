@@ -86,7 +86,7 @@ single image_ref, strength, guidance_scale, steps).  Everything else belongs in
 the escape hatch.
 
 See:
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy workflow runner
 - `docs/generation/` — modality contracts, manifest schema, feature list
 
 ## SDK quick-start

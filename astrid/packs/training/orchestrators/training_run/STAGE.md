@@ -62,10 +62,9 @@ orchestrator and explicit example config.
 
 Live mode fails closed before provisioning if any environment variable declared
 in `secrets.required_env` is missing. Use `--confirm-spend` only after reviewing
-dry-run output and spend limits in the config. `--yes` is retained as a
-compatibility alias. After successful training and local sample download, live
-mode pauses at the checkpoint review gate and keeps the pod teardown guard in
-state for resume or explicit follow-up.
+dry-run output and spend limits in the config. After successful training and
+local sample download, live mode pauses at the checkpoint review gate and keeps
+the pod teardown guard in state for resume or explicit follow-up.
 
 ```python
 # requires RUNPOD_API_KEY, HF_TOKEN

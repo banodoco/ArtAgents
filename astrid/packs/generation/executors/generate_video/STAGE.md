@@ -73,7 +73,7 @@ only (prompt, image_ref, image_end_ref, negative_prompt, seed, count,
 resolution, frames, fps, duration, guidance_scale, steps).
 
 See:
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy workflow runner
 - `docs/generation/31-video-contract.md` — video modality contract
 - `docs/generation/` — modality contracts, manifest schema, feature list
 
@@ -184,4 +184,4 @@ exercises every wired cell with mocked `HttpClient` transport and mocked
 - `docs/generation/10-registry-schema.md` — model registry schema (v2)
 - `docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
 - `docs/generation/31-video-contract.md` — video modality contract
-- `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy escape hatch
+- `astrid/packs/vibecomfy/executors/run/STAGE.md` — VibeComfy escape hatch

@@ -2,7 +2,7 @@
 
 **Status**: Implemented (Sprint 02 — v2 model → mode → backend taxonomy)
 **Executor**: `generation.generate_image`
-**Escape hatch**: `external.vibecomfy` (LoRAs, IP-adapter, controlnet, custom samplers,
+**Escape hatch**: `vibecomfy.run` (LoRAs, IP-adapter, controlnet, custom samplers,
 graph composition)
 
 ## Canonical image modes
@@ -91,13 +91,12 @@ Edit).  These are separate model IDs from text-to-image checkpoints
 
 ## Request validation (hard-fail BEFORE the generation loop)
 
-The typed `astrid.generate.image()` facade uses `execution` as its canonical
-backend-selection parameter.  It also accepts `backend` as a compatibility
-alias; the alias is resolved before kernel admission and can never silently
-fall back to an inferred backend.  Supplying an unavailable pair such as
-`model="flux-schnell", backend="local"` fails with the model's valid backend
-list and creates no run.  If both `execution` and `backend` are supplied, they
-must name the same backend.
+The typed `astrid.generate.image()` facade uses `execution` as its sole
+backend-selection parameter.  The retired `backend` spelling is rejected before
+kernel admission; callers must provide `execution` explicitly when the model
+and mode expose more than one backend.  Supplying an unavailable pair such as
+`model="flux-schnell", execution="local"` fails with the model's valid backend
+list and creates no run.
 
 1. **Missing `--mode`**: Rejected at argparse (required argument).
 2. **Unknown (model, mode) pair**: Exits non-zero with a clear error.

@@ -87,9 +87,9 @@ Every runnable tool is a built-in or external executor exposed from exactly one 
 | Hype pipeline stages | `astrid/packs/{editorial,video_editing,rendering,understanding,foley}/*` | `STEP_ORDER` stages used by `video_editing.hype`. |
 | Understanding tools | `astrid/packs/understanding/{audio_understand,visual_understand,video_understand,understand}` | Concrete media understanding tools, plus a thin `understand` dispatcher executor that selects modality via `--mode`. |
 | Standalone/service tools | `astrid/packs/{training,editorial,generation,rendering}/*` | Standalone executor capabilities across domain packs. `generate_image` is the multi-backend (local + cloud) image executor in `generation`; `generate_image_openai` is the OpenAI DALL-E executor, also in `generation`. |
-| External tools | `astrid/packs/{moirae,vibecomfy,fal,runpod,youtube}/*` | `moirae.moirae`, `vibecomfy.run`, `vibecomfy.validate`, `fal.fal_foley`, `runpod.*`, `youtube.*`. Each adapter pack wraps a third-party substrate. Legacy `external.*` ids are deprecated pack-level aliases. |
+| External tools | `astrid/packs/{moirae,vibecomfy,fal,runpod,youtube}/*` | `moirae.moirae`, `vibecomfy.run`, `vibecomfy.validate`, `fal.fal_foley`, `runpod.*`, `youtube.*`. Each adapter pack wraps a third-party substrate; only these canonical ids are registered. |
 | Iteration tools | `astrid/packs/iteration/assemble` | Runtime-owned project runs are read through the generated client; `iteration_video` invokes `iteration.assemble` and `rendering.render`. The retired `iteration.prepare` executor is not declared or invoked. |
-| Upload tools | `astrid/packs/youtube/` | `youtube.upload` and `youtube.youtube_audio`. Legacy `upload.youtube` is a deprecated alias. |
+| Upload tools | `astrid/packs/youtube/` | `youtube.upload` and `youtube.youtube_audio`. |
 
 Executor-owned complexity stays in the executor folder, usually under optional local `src/` modules. Hype/editing domain logic belongs with its owning pack under `astrid/packs/editorial/hype`; generic plumbing belongs in `astrid/utilities`.
 
