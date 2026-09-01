@@ -22,6 +22,12 @@ neutral workspace runtime is the sole owner of product tables, constraints,
 and migration application; pack manifests remain executable capability
 metadata.
 
+The published Astrid wheel includes the generated
+`banodoco_workspace_client` transport package. It is a pinned vendor copy of
+the neutral runtime contract (source commit is recorded in
+`banodoco_workspace_client.contract_metadata`); it is never loaded from a
+sibling checkout or an ambient `PYTHONPATH`.
+
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in
 > [docs/platform-contract.md](../contracts/platform-contract.md). That file defines the
@@ -364,8 +370,8 @@ print(result.run_id)
 `timeline_ref` is a canonical runtime timeline slug, UUID, or ULID. Use
 `expected_version` when the observed stream head must remain unchanged. The
 runtime owns output publication and provenance; callers must not invoke
-the rendering service, a pack `run.py`, or the retired direct-render symbol.
-That retained symbol rejects direct execution with an actionable error.
+the rendering service, a pack `run.py`, or a direct-render convenience symbol.
+No direct product-render symbol is exposed by the SDK.
 
 ### `support(backend, ...) -> SupportReport`
 

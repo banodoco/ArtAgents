@@ -43,10 +43,13 @@ question belongs to, read the census first.
 
 ## Runtime connection
 
-Resolve the runtime from `BANODOCO_RUNTIME_ENDPOINT`, or from the discovery
-JSON named by `BANODOCO_RUNTIME_DISCOVERY`; the token is read from
-`BANODOCO_RUNTIME_CREDENTIAL`. If any of these are unavailable, the typed
-recovery action is `banodoco-local up --profile astrid`.
+The explicit SDK receives the loopback runtime endpoint, credential, realm, and
+actor as connection context. CLI commands use the installed
+`banodoco-local up --profile astrid` launcher with
+`BANODOCO_LOCAL_SOURCE_MANIFEST`; an optional
+`BANODOCO_RUNTIME_CREDENTIAL` supplies the owner credential. If the launcher
+context is unavailable, the typed recovery action is
+`banodoco-local up --profile astrid`.
 
 `doctor --json` asks the runtime for health. `backup` routes create, restore,
 export, tombstone, recover, and purge through the runtime and supports
@@ -173,7 +176,15 @@ or through a bound client:
 ```python
 from astrid.sdk.client import AstridClient
 
-with AstridClient.open() as client:          # composes the standard application
+with AstridClient.open(
+    endpoint=RUNTIME_ENDPOINT,
+    credential=RUNTIME_CREDENTIAL,
+    realm_id=RUNTIME_REALM_ID,
+    actor_id=RUNTIME_ACTOR_ID,
+    client_name="my-agent",
+    client_version="1",
+    protocol_version="workspace.v1",
+) as client:
     result = client.invoke(
         "rendering.render",
         kind="executor",
@@ -183,8 +194,8 @@ with AstridClient.open() as client:          # composes the standard application
 ```
 
 Typed facades exist for the most common surfaces: `astrid.generate.*`
-(image/audio/video generation), `astrid.render` / `astrid.support` /
-`astrid.renderer_main` / `astrid.RenderContext` (rendering), and
+(image/audio/video generation), `astrid.support` / `astrid.renderer_main` /
+`astrid.RenderContext` (renderer authoring), and
 `client.tasks` / `client.timelines` / `client.media` / … (the seven typed
 services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
 
@@ -431,9 +442,10 @@ preflights the pinned document before run admission: `output` may be omitted,
 but when present it must contain `resolution`, `fps`, and `file`; timeline and
 registry schema errors or missing asset ids return typed validation errors
 with null run/task ids.
-Renderer authors use the typed
-`astrid.render` / `astrid.support` / `astrid.renderer_main` /
-`astrid.RenderContext` surface (see `docs/reference/sdk.md`).
+Renderer authors use the typed `astrid.support` /
+`astrid.renderer_main` / `astrid.RenderContext` surface (see
+`docs/reference/sdk.md`). Product renders are admitted through the runtime's
+`rendering.render` capability and generic host.
 
 ### Local effect assets
 
@@ -577,7 +589,6 @@ orchestrator, or element manifests.
 | `stream_content.distill` | Distill a long event stream into segments, extracted blocks, candidates, and a review page. |
 | `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
-| `typed_timeline.render` | Map typed rows then render via ffmpeg fast-path. |
 | `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
 | `video_editing.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
 | `video_editing.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |

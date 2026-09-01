@@ -55,9 +55,8 @@ def _runtime_for(slug: str) -> dict[str, Any]:
             Path(__file__).resolve().parents[4]
             / "banodoco-workspace-runtime-stage1-convergence"
         )
-        for import_root in (runtime_checkout, runtime_checkout / "packages" / "python"):
-            if str(import_root) not in sys.path:
-                sys.path.insert(0, str(import_root))
+        if str(runtime_checkout) not in sys.path:
+            sys.path.insert(0, str(runtime_checkout))
         from runtime_protocol.daemon import RuntimeDaemon
         from astrid.sdk.workspace_client import WorkspaceClient
 
@@ -66,9 +65,6 @@ def _runtime_for(slug: str) -> dict[str, Any]:
             support_root=_RUNTIME_STORAGE_ROOT / "support",
         ).start()
         os.environ["BANODOCO_RUNTIME_ENDPOINT"] = daemon.endpoint
-        os.environ["BANODOCO_RUNTIME_DISCOVERY"] = str(
-            _RUNTIME_STORAGE_ROOT / "support" / "discovery.json"
-        )
         os.environ["BANODOCO_RUNTIME_CREDENTIAL"] = str(
             _RUNTIME_STORAGE_ROOT / "support" / "credentials" / "owner.token"
         )

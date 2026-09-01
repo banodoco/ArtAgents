@@ -27,8 +27,8 @@ def test_connection_resolution_does_not_guess_a_checkout_or_catalog(tmp_path: Pa
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "wrong-token"))
     with pytest.raises(WorkspaceClientError):
         resolve_runtime_connection("", "")
-    assert resolve_runtime_connection("https://runtime.example/", "Bearer token") == (
-        "https://runtime.example",
+    assert resolve_runtime_connection("https://127.0.0.1:8443/", "Bearer token") == (
+        "https://127.0.0.1:8443",
         "token",
     )
 

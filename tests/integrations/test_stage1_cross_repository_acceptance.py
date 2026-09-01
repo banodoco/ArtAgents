@@ -1,7 +1,9 @@
 """Small honest Stage 1 composition against the pinned runtime head.
 
-This test intentionally imports the sibling runtime at the exact checkout used
-for acceptance instead of relying on an ambient installed runtime package.
+This test intentionally imports the sibling runtime service at the exact
+checkout used for acceptance. The generated workspace client itself comes
+from Astrid's packaged vendor copy, so this test does not inject a sibling
+generated-client directory or monkeypatch the SDK transport.
 """
 
 from __future__ import annotations
@@ -17,7 +19,6 @@ import pytest
 WORKSPACE = Path(__file__).parents[3]
 RUNTIME = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
 sys.path.insert(0, str(RUNTIME))
-sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402
 from astrid.core.execution.generic_host import GenericPackHost, RuntimeProtocolClient  # noqa: E402
@@ -26,7 +27,7 @@ from astrid.sdk.client import AstridClient  # noqa: E402
 
 def _start_runtime(realm: Path, support: Path, runtime: Path = RUNTIME) -> tuple[subprocess.Popen[str], dict[str, str]]:
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join((str(runtime), str(runtime / "packages" / "python"), env.get("PYTHONPATH", "")))
+    env["PYTHONPATH"] = os.pathsep.join((str(runtime), env.get("PYTHONPATH", "")))
     process = subprocess.Popen(
         [sys.executable, "-m", "runtime_protocol", "start", "--root", str(realm), "--support-root", str(support)],
         cwd=runtime,
@@ -151,7 +152,6 @@ def test_pinned_daemon_astrid_host_composition_survives_restart(tmp_path, monkey
             executor_id="acceptance-host",
         )
         assert host.register()["registration"].executor_id == "acceptance-host"
-        assert host.register()["registration"]["executor_id"] == "acceptance-host"
         capability_page, capability_cursor = generated.list_capabilities()
         assert capability_cursor is None
         registered = {item.capability_id: item for item in capability_page}
@@ -218,9 +218,6 @@ def test_b71_project_shot_reference_sdk_crud_survives_restart(tmp_path, monkeypa
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(support / "credentials" / "owner.token"))
     monkeypatch.setenv("BANODOCO_RUNTIME_CHECKOUT", str(runtime))
     try:
-        for module_name in list(sys.modules):
-            if module_name == "banodoco_workspace_client" or module_name.startswith("banodoco_workspace_client."):
-                sys.modules.pop(module_name, None)
         astrid = AstridClient.open(
             endpoint=metadata["endpoint"],
             credential=support / "credentials" / "owner.token",

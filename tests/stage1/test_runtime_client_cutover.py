@@ -13,19 +13,11 @@ RUNTIME = Path(
     or "/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence"
 )
 sys.path.insert(0, str(RUNTIME))
-sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 
 pytest.importorskip("runtime_protocol.daemon")
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
-from banodoco_workspace_client import WorkspaceClient as GeneratedRuntimeClient  # noqa: E402
 from astrid.core.gateway import dispatch, main as gateway_main  # noqa: E402
 from astrid.sdk.client import AstridClient  # noqa: E402
-import astrid.sdk.workspace_client as workspace_client  # noqa: E402
-
-# The SDK stays importable without the optional generated package.  This
-# integration module supplies the neutral runtime package after collection so
-# the full suite remains order-independent.
-workspace_client.GeneratedWorkspaceClient = GeneratedRuntimeClient
 
 
 def _open_client(daemon: RuntimeDaemon) -> AstridClient:
@@ -51,7 +43,6 @@ def _use_explicit_gateway_connection(monkeypatch: pytest.MonkeyPatch, daemon: Ru
 
 
 def test_product_client_requires_bootstrap_with_exact_next_action(tmp_path, monkeypatch):
-    monkeypatch.setenv("BANODOCO_RUNTIME_DISCOVERY", str(tmp_path / "missing-discovery.json"))
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "missing-credential.json"))
     monkeypatch.delenv("BANODOCO_RUNTIME_ENDPOINT", raising=False)
     with pytest.raises(Exception, match=r"banodoco-local up --profile astrid"):
@@ -437,7 +428,6 @@ def test_retired_public_commands_are_absent():
 
 def test_doctor_and_backup_never_open_local_storage(capsys, monkeypatch, tmp_path):
     monkeypatch.delenv("BANODOCO_RUNTIME_ENDPOINT", raising=False)
-    monkeypatch.setenv("BANODOCO_RUNTIME_DISCOVERY", str(tmp_path / "missing.json"))
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "missing.token"))
 
     assert dispatch._dispatch_doctor(["--json"]) == 1

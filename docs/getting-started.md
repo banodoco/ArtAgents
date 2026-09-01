@@ -5,17 +5,17 @@ agentic UXes — pipelines where agents and humans collaborate to make art.
 
 ## Prerequisites
 
-Astrid requires Python 3.11+ and an editable Banodoco workspace-runtime
-checkout. The runtime is a separate local service that owns durable workspace
-state; the Astrid checkout is a client and pack source, not the state store.
+Astrid requires Python 3.11+. The runtime is a separate local service that
+owns durable workspace state; the Astrid checkout is a client and pack source,
+not the state store.
 
-Install Astrid from the checkout and point the client at the neutral runtime
-checkout. The first product command starts or reconnects that runtime through
-the neutral launcher; no separate database service is needed:
+Install Astrid and configure the installed neutral launcher with an explicit
+source-profile manifest. The first product command starts or reconnects that
+runtime through the neutral launcher; no separate database service is needed:
 
 ```bash
-pip install -e .
-export BANODOCO_RUNTIME_CHECKOUT=/path/to/banodoco-workspace-runtime
+pip install .
+export BANODOCO_LOCAL_SOURCE_MANIFEST=/path/to/astrid-source-profile.json
 python3 -m astrid --help
 python3 -m astrid projects list --json
 ```
@@ -42,16 +42,15 @@ python3 -m astrid projects list --json
 python3 -m astrid projects show demo --json
 ```
 
-If a direct runtime endpoint is deliberately supplied, set
-`BANODOCO_RUNTIME_ENDPOINT` and `BANODOCO_RUNTIME_CREDENTIAL`, or set
-`BANODOCO_RUNTIME_DISCOVERY` to the runtime's discovery JSON. Never point
-Astrid at a local SQLite/CAS directory; the runtime owns those details.
+If using the SDK directly, pass the loopback runtime endpoint and credential to
+`AstridClient.open(...)` together with the runtime realm and actor identity.
+Never point Astrid at a local SQLite/CAS directory; the runtime owns those
+details.
 
 `astrid doctor` remains a read-only diagnostic and does not create support
-state. Product commands and SDK `AstridClient.open()` perform the bounded
-neutral launch/reconnect handoff automatically. Set
-`BANODOCO_ASTRID_AUTO_BOOTSTRAP=0` to inspect an unavailable runtime without
-attempting that handoff.
+state. Product commands perform the bounded neutral launch/reconnect handoff
+through `AstridClient.open_from_launcher()`. Ordinary SDK
+`AstridClient.open()` calls remain explicit and never launch a process.
 
 The seven top-level gateway families are `projects`, `timelines`, `media`,
 `tasks`, `runs`, `doctor`, and `backup`; `timelines shots` and `media

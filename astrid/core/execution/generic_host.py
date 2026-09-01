@@ -621,8 +621,7 @@ class RuntimeProtocolClient:
             from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
         except ImportError as exc:
             raise HostError(
-                "generated banodoco_workspace_client is unavailable; install the "
-                "workspace runtime client package"
+                "generated banodoco_workspace_client is unavailable; reinstall the Astrid package"
             ) from exc
         self.schema_digest = SCHEMA_DIGEST
         self.generated = WorkspaceClient(self.endpoint, self.credential)
@@ -1157,7 +1156,9 @@ class GenericPackHost:
 
     def _runtime_compatibility(self) -> dict[str, Any]:
         """Read and validate the exact runtime protocol/schema/epoch."""
-        expected_protocol = "workspace.v1"
+        from banodoco_workspace_client.contract_metadata import PROTOCOL
+
+        expected_protocol = PROTOCOL
         if self.client is None:
             return {
                 "protocol": expected_protocol,

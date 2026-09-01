@@ -200,7 +200,6 @@ finally:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         (
-            str(runtime_root / "packages" / "python"),
             str(runtime_root),
             str(ROOT),
         )

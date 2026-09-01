@@ -646,7 +646,7 @@ def test_generated_runtime_attempt_settlement_round_trip(monkeypatch: pytest.Mon
             return {"attempt_id": attempt_id, "status": settlement["status"], "outputs": settlement["output_objects"]}
 
     monkeypatch.setattr(workspace_client, "GeneratedWorkspaceClient", Generated)
-    client = WorkspaceClient("https://runtime.example", "runtime-token")
+    client = WorkspaceClient("https://127.0.0.1:8443", "runtime-token")
     settlement = {
         "status": "succeeded",
         "output_objects": [{"name": "rendered", "object_id": "sha256:" + "a" * 64}],

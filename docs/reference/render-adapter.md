@@ -166,9 +166,9 @@ Python SDK importable on any machine with only Python dependencies.
 ## This adapter vs the rendering SDK
 
 This document is about the **npm adapter install** for the built-in Remotion
-backend. It is unrelated to the public **rendering SDK** (`astrid.render`,
-`astrid.support`, `astrid.renderer_main`, `astrid.RenderContext`), which is
-the Python surface for authoring and driving protocol-v1 renderers — see
+backend. It is unrelated to the public **rendering SDK** (`astrid.support`,
+`astrid.renderer_main`, `astrid.RenderContext`), which is the Python surface
+for authoring protocol-v1 renderers — see
 [sdk.md](sdk.md#rendering-sdk) for the worked example, and
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path)
 for the scaffold → implement → test → validate → trusted install → smoke →
@@ -178,7 +178,7 @@ provenance authoring path.
 
 - [STAGE.md](../../astrid/packs/rendering/executors/render/STAGE.md) — Render executor stage documentation
 - [render-backend-v1.md](../contracts/render-backend-v1.md) — Public pluggable renderer contract
-- [sdk.md](sdk.md#rendering-sdk) — Public rendering SDK (`render`, `support`, `renderer_main`, `RenderContext`)
+- [sdk.md](sdk.md#rendering-sdk) — Public rendering SDK (`support`, `renderer_main`, `RenderContext`)
 - `astrid/packs/rendering/backends/remotion/run.py:_validate_project_dir` — Fail-closed adapter validation
 - `remotion/package.json` — Adapter dependency declarations
 - SD2 gate decision — `state.json` settled decision record

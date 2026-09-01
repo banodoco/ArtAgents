@@ -37,7 +37,6 @@ if not DEPENDENCY_ROOT.is_dir():
         allow_module_level=True,
     )
 
-sys.path.insert(0, str(RUNTIME / "packages" / "python"))
 sys.path.insert(0, str(RUNTIME))
 
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402
@@ -171,7 +170,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         "PYTHONPATH",
         os.pathsep.join(
             str(path)
-            for path in (ROOT, RUNTIME, RUNTIME / "packages" / "python", SCHEMA_ROOT)
+            for path in (ROOT, RUNTIME, SCHEMA_ROOT)
         ),
     )
 
