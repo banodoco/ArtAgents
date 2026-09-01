@@ -1,0 +1,11 @@
+[launch_hermes_agent] model=codex:gpt-5.6-luna → resolved=openai-codex/gpt-5.6-luna toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid
+Working...
+VERDICT: PASS
+IDENTITIES: branch `megado/canonical-pack-beta`, HEAD `7ac50c12e8e4d90988fee603ffdb9896e5628792`, product diff outside `.oracle`: empty
+E0: E0.3/E0.4 evidence is current and sufficient; custody hashes, durable operation registration, exact HEAD, zero product diff, tooling/dependencies, Luna/Sol routes, push dry-run, capacity, and 179-test baseline are corroborated. Corrected B1 brief path and digest are verified.
+B1_READY: PASS; B1 remains isolated contract/fixture work, preserves the active legacy runtime, and has no activation or consumer-rewiring scope.
+BLOCKERS: none
+[launch_hermes_agent] done in 114.4s (exit=0)
+0

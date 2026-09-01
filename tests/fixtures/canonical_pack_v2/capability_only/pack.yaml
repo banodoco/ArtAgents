@@ -1,0 +1,17 @@
+schema_version: 2
+id: capability_only
+name: Capability Only
+version: 1.0.0
+description: A capability-only golden pack.
+capabilities: [render]
+content:
+  executors: executors
+permissions:
+  - id: project_files
+    reason: Reads project media.
+documentation:
+  kind: agents
+  path: AGENTS.md
+resources:
+  - path: assets/example.txt
+    kind: data

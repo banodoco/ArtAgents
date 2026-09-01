@@ -1,0 +1,23 @@
+schema_version: 2
+id: database_only
+name: Database Only
+version: 1.0.0
+documentation:
+  kind: agents
+  path: AGENTS.md
+database:
+  default_enabled: true
+  depends_on: []
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables: [records]
+  stream_types: []
+  event_kinds: [database_only.created]
+  command_kinds: [database_only.create]
+  repositories: [RecordRepository]
+  conformance: [replay]
+  cli_mounts:
+    records: records
+  bridge_mounts: []

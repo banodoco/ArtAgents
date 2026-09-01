@@ -1,0 +1,7 @@
+[launch_hermes_agent] model=codex:gpt-5.6-sol → resolved=openai-codex/gpt-5.6-sol toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid
+Working...
+SOL_OK
+[launch_hermes_agent] done in 5.0s (exit=0)
+0

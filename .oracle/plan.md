@@ -1,47 +1,73 @@
-# Megado plan v8 FINAL — declarative storyboard layer (single-authority model)
+# Canonical pack beta — executable plan
 
-v8 resolves all prior findings: single unified variant/resolution model, VO audio sourcing, kernel-sole-authority clarification, gates enumerated, provenance schema defined. This text supersedes earlier drafts entirely.
+This concise plan is the execution authority alongside `.oracle/tasklist.md`.
+The former 2,317-line revision-loop artifact is archived at
+`.oracle/prior-runs/canonical-pack-overgrown-plan.md` and must not be resumed.
 
-## Roles/gates
-Oracle: grok-4.6 (fallback GPT-5.6 Sol via codex). Explorer/executor normal: GLM-5.3 Flash (zhipu:glm-5.3, fallback zhipu:glm-5.2).
-Every batch B1..B6 ends with a grok-4.6 gate whose brief embeds North Star + agent goal (incl Amendments 1-4) + batch delta; verdict PASS/issues → .oracle/checkins/batch-N.md. Final overall review after B6: GLM pass(es) + grok synthesis (≤3 total).
+The 4–6 engineer-week estimate makes this a **huge Megado run**. Every
+implementation task is normal/Luna; no `[XHARD]` task is currently justified.
+Each batch receives three independent Luna reviews and one Sol oracle
+disposition before its reviewed checkpoint commit. Cumulative integrated gates
+occur after B3 (before activation) and after B4 (after activation, before B5).
 
-## Canonical authored input: storyboards/astrid-intro.storyboard.json (tracked)
-AUTHORED INPUT ARTIFACT (analogous to scripts/prompts — source content + lineage). Execution/durable state lives ONLY in SQLite; this file is versioned source content, exempt from the every-durable-fact rule which governs execution/ledger data. It NEVER receives kernel-derived values (no media_id/content_hash/resolved write-backs — those live in compiled config/registry each render).
+## Outcome
 
-Section = {
-  id, nav:{tabs[2],active}, 
-  image:{ variants:[{source:"asset",path,label} | {source:"gen",prompt,model?,refs[],alt_render_path(required-in-v1),gen_kernel_run_id?,label}], active_index },
-  vo:{text, audio_asset:"build/segments/<slug>.wav"},
-  provenance?:{prompt,generator}
-}
-meta {title, canvas:"1920x1080@30", style:"pixel-terminal", timing.default_hold:3.0}
+Astrid has one canonical v2 `pack.yaml` form and one parsed catalog. Each of the
+22 retained bundled product packs owns its capabilities, optional bundled-only
+SQLite contribution, structured guidance, and known runtime resources through
+that form. Existing typed registries and SQLite algorithms remain projections;
+the parallel schema-pack identity and every fixed database authority disappear.
 
-## Compiler (scripts/build_storyboard.py)
-validate(story)->problems | compile(story,*,vo_plan=None)->(config,registry,resolution_report)
-Resolution contract per variant:
- - source=asset → MediaService.import_file(path) → CAS
- - source=gen → import_file(alt_render_path) [v1 requires alt_render_path; NO paid gen branch]
-resolution_report[slug] = section.image.resolved (mirrors variants order) → consumed ONLY into this render's registry/config (kernel-owned), never written back to the storyboard file.
-Registry entries emitted per resolved asset: {"file":<CAS>,"content_sha256":<digest>,"origin":json(section.provenance||{}), "generationId": <variant.gen_kernel_run_id when present, else absent>}. gen_kernel_run_id is an AUTHORED lineage field captured at generation time (kernel run id from the sdk.invoke manifest); resolved identifiers (content_hash/media_id) remain compiler-output-side only and are never written into the authored storyboard. Absence-free validation applies to entries lacking gen_kernel_run_id; presence path is also validated (string).
-Parity rule: baked-PNG active images compile exactly 3 clips/section + brand ⇒ intro compiles 76 clips / 50 assets / ~177.53s vs main v13 oracle. Non-baked apps may later add text-clip synthesis — out of v1 scope.
+This is a hard cut with no compatibility loader, dual-read period, project
+composition lock, database lifecycle redesign, or third-party database packs.
+`_core` remains irreducible code-owned guidance/kernel and publishes the pack
+census; it is not a fake unloadable product pack.
 
-## Batches (each gated by grok check-in; commits between)
-B1 validator+loader module astrid/core/storyboard/ + tests/test_storyboard_schema.py (schema embedded as Python validator module; loader handles str|Path env conventions too? no—only schema+load). Acceptance: intro sample valid; malformed lists ALL problems typed StoryboardError.
-B2 compiler core + golden parity tests (25-section fixture referencing repo-relative test assets → 76/50/177.53±0.5; counts/order/normalized-hash compare) + ffprobe duration probing.
-B3 CLI (validate|compile [--vo-align F] [--render]) + managed imports wired + integration tests: preflight-before-write; create→CAS-save→version bump; rerun byte-equality of saved config+registry.
-B4 author storyboards/astrid-intro.storyboard.json from today's artifacts (plan.json texts/slugs + pyramid prompts + final-slides image paths); validate.
-B5 intro application sequence (all saves target NEW managed timeline slug `storyboard-intro`; `main` remains untouched):
-  1. compile(--vo-align plan.json) with all sections active_index=0 (final-html images) → managed imports (25 png + 25 wav = 50 assets) → save v1. Parity assert: 25/76/177.53±0.5.
-  2. ex_glitch regeneration proof: sdk.invoke('generation.generate_image', flux-schnell, glitch prompt) → kernel run manifest records the paid generation → MediaService.import_file(output png) → append AUTHORED variant {source:"gen", prompt:<same glitch prompt>, label:"regen-glitch", alt_render_path:<fal png>, gen_kernel_run_id:<run_id from manifest>} → set ex_glitch active_index to it → save v2. Transient asset count 51 is expected and asserted.
-  3. flip back: remove the regen-glitch authored variant and restore active_index=0 → save v3; assert config+registry byte-equal to the step-1 snapshot (excluding version metadata) → proves flip independence without drift.
-     (The regeneration evidence persists in Batch 5 artifacts: kernel run manifest + imported managed media row remain in the kernel/CAS regardless of storyboard reversion.)
-  4. render `storyboard-intro` latest version → OCR spot-checks(open,idea1_vc,cta_agents) → evidence matrix. Clip-count invariant stays exactly 76 per version because flips change only WHICH image resolves for one section, never clip structure.
-B6 docs(README snippet)+final oracle review(≤3 passes: 1 GLM pass + grok synthesis)+push branch megado/oracle-run-storyboard+report.
+## Sequence
 
-## Validation commands
-- validate/compile/render commands above against ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects
-- pytest tests/test_storyboard_schema.py
-Estimate ≤1 week ⇒ no huge-run policy.
+1. **B1 — contract and fixtures only.** Freeze the strict v2 grammar,
+   dependency-head semantics, canonical immutable object, catalog projections,
+   documentation/resources, and positive/negative external fixtures. Exercise
+   this only against explicit fixture roots; leave the active v1 runtime alone.
+2. **B2 — prepare all 22 manifests/docs/resources.** Delete empty `builtin` and
+   aliases, convert the 18 capability packs, add the four database packs, give
+   all 22 direct structured guidance, generate the `_core` census, and close
+   the bounded customization/resource ledger.
+3. **B3 — prove database projection by injection.** Reuse collision, ordering,
+   migration, writer/UoW, repository, and conformance machinery; add owner-
+   relative resource handles and enforce dependency minimum heads. Keep legacy
+   production builders until the atomic activation.
+4. **B4 — converge and activate atomically.** Move all seven builder consumers
+   and the direct CLI mount reader to one injected projection. At the same
+   activation point, enable strict v2 and delete all four schema manifests,
+   three fixed authorities, separate schema-pack identity/parser/standard
+   path, and raw rereads. There is no shippable dual-authority checkpoint.
+5. **B5 — close and prove.** Verify legacy absence, package all declared
+   manifests/migrations/docs/resources, create a recorded isolated wheel-build
+   environment, run source/wheel/external/focused/full tests, map all 15 goal
+   criteria to evidence, and obtain independent Sol review before push.
 
-Note: where this plan references batch gates, batches are B1..B6 (B0 folded into B2).
+B2–B4 are one **unshipped atomic cutover tranche**. The complete item-level
+gates and exclusions are in `.oracle/tasklist.md`; the evidence-backed baseline
+is in `.oracle/implementation-ledger.md`.
+
+## Current position
+
+- Existing Astrid pack/product machinery: substantial and mostly implemented.
+- B1 implementation: all 10 isolated-contract items implemented across a
+  frozen 30-path candidate; production remains legacy-active.
+- Candidate 46 closes erased-metadata custody; its sole user-directed
+  independent delta verification passed 30/30 identity hashes, five focused
+  tests plus 12 subtests, and 30 adjacent lifecycle tests.
+- User control `babysit-c46-end-open-ended-b1-loop` accepts B1 from the two
+  unaffected candidate-45 Luna passes plus the candidate-46 delta pass. It
+  prohibits candidate 47, another panel, and another oracle dispatch.
+- Checkpoints: B1 commit pending; 0/5 committed.
+- Frozen end-to-end criteria: 0/15 complete; B1 provides accepted isolated
+  evidence toward criteria 1, 2, 6, 12, and 13.
+- Next action: commit B1, record its SHA, then begin B2.
+
+The separately requested pack-aware `astrid update` command is the next project
+after this cutover. It must preserve user edits and pack-applied database
+migrations and should again use Luna for normal execution and Sol for planning,
+oracle judgment, and exceptional work.

@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astrid.dev/schemas/pack/v2/pack.json",
+  "title": "Astrid canonical pack manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "version"],
+  "allOf": [
+    {
+      "if": {"required": ["database"]},
+      "then": {"properties": {"database": {"$ref": "#/$defs/database"}}}
+    },
+    {
+      "if": {
+        "required": ["documentation"],
+        "properties": {
+          "documentation": {
+            "type": "object",
+            "properties": {"kind": {"const": "none"}}
+          }
+        }
+      },
+      "then": {
+        "anyOf": [
+          {"required": ["capabilities"]},
+          {"required": ["content"]},
+          {"required": ["extensions"]},
+          {"required": ["database"]},
+          {"required": ["resources"]}
+        ]
+      }
+    }
+  ],
+
+  "anyOf": [
+    {"required": ["capabilities"]},
+    {"required": ["content"]},
+    {"required": ["extensions"]},
+    {"required": ["documentation"]},
+    {"required": ["database"]},
+    {"required": ["resources"]}
+  ],
+  "properties": {
+    "schema_version": {"const": 2, "type": "integer"},
+    "id": {"$ref": "#/$defs/pack_id"},
+    "name": {"$ref": "#/$defs/non_blank"},
+    "version": {"$ref": "#/$defs/release_version"},
+    "description": {"type": "string"},
+    "status": {"enum": ["active", "experimental", "deprecated"]},
+    "visibility": {"enum": ["visible", "hidden"]},
+    "domain": {"enum": ["general", "development", "editorial", "generation", "infrastructure", "integration", "media", "system"]},
+    "stability": {"enum": ["stable", "experimental", "deprecated"]},
+    "support": {"enum": ["project", "core", "community"]},
+    "keywords": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/keyword"}},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}},
+    "permissions": {"type": "array", "items": {"$ref": "#/$defs/permission"}},
+    "content": {"$ref": "#/$defs/content"},
+    "extensions": {"$ref": "#/$defs/extensions"},
+    "aliases": {"type": "array", "items": {"$ref": "#/$defs/alias"}},
+    "agent": {"$ref": "#/$defs/agent"},
+    "documentation": {"$ref": "#/$defs/documentation"},
+    "secrets": {"type": "array", "items": {"$ref": "#/$defs/secret"}},
+    "dependencies": {"$ref": "#/$defs/dependencies"},
+    "astrid_version": {"$ref": "#/$defs/release_version"},
+    "database": {"$ref": "#/$defs/database"},
+    "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
+    "authoring_only": {"type": "array", "items": {"$ref": "#/$defs/authoring"}}
+  },
+  "$defs": {
+    "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "lower_ident": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "keyword": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "qualified_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"},
+    "vocabulary": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"},
+    "repository": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+    "migration_name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "python_module": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"},
+    "python_class": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+    "release_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "non_blank": {"type": "string", "minLength": 1, "pattern": "^.*\\S.*$"},
+    "relative_path": {"type": "string", "pattern": "^(?!/)(?!.*\\\\)(?!.*\\x00)(?!.*//)(?!.*(^|/)\\.($|/))(?!.*(^|/)\\.\\.($|/))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$", "not": {"const": "pack.yaml"}},
+    "permission": {
+      "type": "object", "additionalProperties": false, "required": ["id", "reason"],
+      "properties": {
+        "id": {"enum": ["project_files", "network", "subprocess", "environment", "accelerator", "external_services"]},
+        "reason": {"$ref": "#/$defs/non_blank"},
+        "access": {"$ref": "#/$defs/non_blank"},
+        "services": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_blank"}}
+      }
+    },
+    "content": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "executors": {"$ref": "#/$defs/relative_path"}, "orchestrators": {"$ref": "#/$defs/relative_path"},
+        "elements": {"$ref": "#/$defs/relative_path"}, "schemas": {"$ref": "#/$defs/relative_path"},
+        "examples": {"$ref": "#/$defs/relative_path"}, "docs": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "alias": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "alias", "canonical_id"],
+      "properties": {
+        "kind": {"enum": ["executor", "orchestrator", "renderer", "planner", "finalizer"]},
+        "alias": {"$ref": "#/$defs/qualified_id"}, "canonical_id": {"$ref": "#/$defs/qualified_id"}
+      }
+    },
+    "agent": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "purpose": {"$ref": "#/$defs/non_blank"}, "do_not_use_for": {"$ref": "#/$defs/non_blank"},
+        "normal_entrypoints": {"type": "array", "items": {"$ref": "#/$defs/non_blank"}},
+        "required_context": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/relative_path"}}
+      }
+    },
+    "documentation": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "path"], "properties": {"kind": {"const": "skill"}, "path": {"const": "skill/SKILL.md"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "path"], "properties": {"kind": {"const": "agents"}, "path": {"const": "AGENTS.md"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"const": "none"}, "reason": {"$ref": "#/$defs/non_blank"}}}
+      ]
+    },
+    "secret": {
+      "type": "object", "additionalProperties": false, "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}, "required": {"type": "boolean"}, "description": {"type": "string"}}
+    },
+    "dependencies": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "python": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_blank"}},
+        "npm": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_blank"}},
+        "system": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_blank"}}
+      }
+    },
+    "resource": {
+      "type": "object", "additionalProperties": false, "required": ["path", "kind"],
+      "properties": {"path": {"$ref": "#/$defs/relative_path"}, "kind": {"enum": ["runtime", "schema", "template", "documentation", "service", "data"]}}
+    },
+    "authoring": {
+      "type": "object", "additionalProperties": false, "required": ["path", "kind", "reason"],
+      "properties": {"path": {"$ref": "#/$defs/relative_path"}, "kind": {"enum": ["test", "golden", "development_fixture", "authoring_document", "build_output", "placeholder"]}, "reason": {"$ref": "#/$defs/non_blank"}}
+    },
+    "dependency": {
+      "type": "object", "additionalProperties": false, "required": ["pack", "min_migration"],
+      "properties": {"pack": {"$ref": "#/$defs/pack_id"}, "min_migration": {"type": "integer", "exclusiveMinimum": 0}}
+    },
+    "migration": {
+      "type": "object", "additionalProperties": false, "required": ["version", "name", "path", "tables"],
+      "properties": {
+        "version": {"type": "integer", "exclusiveMinimum": 0}, "name": {"$ref": "#/$defs/migration_name"},
+        "path": {"$ref": "#/$defs/relative_path"}, "tables": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}}
+      }
+    },
+    "database": {
+      "type": "object", "additionalProperties": false,
+      "required": ["default_enabled", "depends_on", "migrations", "stream_types", "event_kinds", "command_kinds", "repositories", "conformance", "cli_mounts", "bridge_mounts"],
+      "properties": {
+        "default_enabled": {"type": "boolean"}, "depends_on": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/dependency"}},
+        "migrations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/migration"}},
+        "stream_types": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/vocabulary"}},
+        "event_kinds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/vocabulary"}},
+        "command_kinds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/vocabulary"}},
+        "repositories": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/repository"}},
+        "conformance": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}},
+        "cli_mounts": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[a-z][a-z0-9_]*( [a-z][a-z0-9_]*)*$"}},
+        "bridge_mounts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}}
+      }
+    },
+    "extensions": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "generation": {"$ref": "#/$defs/generation"}, "elements": {"$ref": "#/$defs/elements"}, "timeline": {"$ref": "#/$defs/timeline"},
+        "rendering": {"$ref": "#/$defs/rendering"}, "schemas": {"type": "object"}, "artifact_types": {"$ref": "#/$defs/artifact_types"}
+      }
+    },
+    "generation": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "backends": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "module", "class"], "properties": {"id": {"$ref": "#/$defs/lower_ident"}, "label": {"$ref": "#/$defs/non_blank"}, "description": {"$ref": "#/$defs/non_blank"}, "module": {"$ref": "#/$defs/python_module"}, "class": {"$ref": "#/$defs/python_class"}, "init_kwargs": {"type": "object"}}}},
+        "features": {"$ref": "#/$defs/named_extensions"}, "modes": {"$ref": "#/$defs/named_extensions"}
+      }
+    },
+    "named_extensions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id"], "properties": {"id": {"$ref": "#/$defs/lower_ident"}, "label": {"$ref": "#/$defs/non_blank"}, "description": {"$ref": "#/$defs/non_blank"}}}},
+    "elements": {"type": "object", "additionalProperties": false, "properties": {"kinds": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id"], "properties": {"id": {"$ref": "#/$defs/lower_ident"}, "singular": {"$ref": "#/$defs/non_blank"}, "plural": {"$ref": "#/$defs/non_blank"}, "label": {"$ref": "#/$defs/non_blank"}, "description": {"$ref": "#/$defs/non_blank"}}}}}},
+    "timeline": {"type": "object", "additionalProperties": false, "properties": {"kinds": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["catalog", "id"], "properties": {"catalog": {"enum": ["transition", "clip", "track"]}, "id": {"$ref": "#/$defs/lower_ident"}, "aliases": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}}, "default": {"type": "boolean"}}}}}},
+    "rendering": {"type": "object", "additionalProperties": false, "properties": {"renderers": {"type": "array", "items": {"$ref": "#/$defs/relative_path"}}, "planners": {"type": "array", "items": {"$ref": "#/$defs/relative_path"}}, "finalizers": {"type": "array", "items": {"$ref": "#/$defs/relative_path"}}}},
+    "artifact_types": {"type": "object", "additionalProperties": false, "properties": {"types": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id"], "properties": {"id": {"$ref": "#/$defs/lower_ident"}, "aliases": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/lower_ident"}}, "description": {"$ref": "#/$defs/non_blank"}}}}}}
+  }
+}

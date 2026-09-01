@@ -1,0 +1,7 @@
+VALIDATION: PASS
+IDENTITY: 825cbd2e7a2b2fe4fd24594d65370a2fbfd3c3fb773a82076b71eaff5de8eca4; 30/30 hashes verified
+TESTS: Required focused suites: 214 passed, 102 subtests. Extant B1 acceptance paths: 413 passed, 3 clean-base-matched failures, 137 subtests, 3 warnings. Direct blocker probes: 10 passed, 32 subtests.
+PROBES: Latest repair passed: inactive direct revision rollback and missing/alternate active manifest custody rejection before enumeration/mutation. Candidate-43 discriminator, manifest drift, local/Git update and dry-run, rollback, discovery, identity, malformed metadata, confinement, no-fallback, publication, relative-store, hostile-path, external-database, provenance, and legacy/canonical lifecycle probes passed. Candidate-45 baseline comparison reports no delta.
+ISOLATION: Production remains legacy-active: 19 legacy pack.yaml manifests, 4 schema-pack.yaml manifests, 0 canonical v2 manifests.
+BLOCKERS: none
+0

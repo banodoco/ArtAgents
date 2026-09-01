@@ -1,0 +1,6 @@
+VERDICT: REWORK
+IDENTITY: PASS — 30/30 frozen file hashes verified; manifest SHA-256 matches `89d404a3c9ee1214ea36d9ec0ae6774af2f67e7b87941ff823cb03ee5edfbb00`.
+FINDINGS: 1. Blocking custody bypass in `validate_installed_manifest_custody`: a canonical v2 record with both `manifest_digest` and `trust_summary` empty returns `None` when active `pack.yaml` is missing or alternate-only (`astrid/core/pack/store.py:241-248`). Direct probe stripped both fields, removed active `pack.yaml`, and `rollback_pack` returned `0` while switching the active pointer.
+SCOPE: PASS — B1 remains isolated; production has 19 legacy `pack.yaml` manifests, 4 `schema-pack.yaml` manifests, and 0 v2 manifests.
+VALIDATION: REWORK — three predecessor blocker regressions passed (10 subtests); focused lifecycle passed (181 tests/100 subtests); acceptance had 465 passes with the three known exact-base/environment failures. The additional malformed-custody probe fails the required active-root rejection invariant.
+0

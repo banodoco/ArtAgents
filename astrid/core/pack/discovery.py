@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from astrid.core.pack._common import SymlinkedPackPathError, reject_symlinked_path
 
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
@@ -33,8 +34,32 @@ from astrid.core.pack import (
     iter_executor_roots,
     iter_orchestrator_roots,
 )
+from astrid.core.pack.canonical import (
+    CanonicalPackEntry,
+    CanonicalPackValidationError,
+    ExternalPackSource,
+    read_normalize_validate,
+)
 
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
+CanonicalDiscoverPacksFn = Callable[..., "tuple[CanonicalPackEntry, ...]"]
+
+
+@dataclass(frozen=True)
+class CanonicalDiscoveredPack:
+    """A canonical v2 pack admitted from an external source seam."""
+
+    entry: CanonicalPackEntry
+    source_kind: str
+    priority_index: int
+
+    @property
+    def id(self) -> str:
+        return self.entry.id
+
+    @property
+    def pack_dir(self) -> Path:
+        return self.entry.root
 
 # Source-kind labels in discovery (and therefore priority) order.
 SOURCE_KINDS: tuple[str, ...] = ("source", "local", "extra", "env", "installed")
@@ -107,9 +132,18 @@ def discover_pack_metadata(
     """
     scan = discover_packs_fn if discover_packs_fn is not None else discover_packs
     repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
-    project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
-    local_pack_root = ensure_local_pack_for_elements(project_root=project_root)
-
+    project_root = Path(project_root).expanduser()
+    project_pack_root = project_root / "astrid" / "packs"
+    local_candidate = project_pack_root / "local"
+    try:
+        reject_symlinked_path(project_pack_root)
+        reject_symlinked_path(local_candidate)
+    except SymlinkedPackPathError:
+        project_pack_root = None
+        local_pack_root = None
+    else:
+        project_pack_root = project_pack_root.resolve()
+        local_pack_root = ensure_local_pack_for_elements(project_root=project_root)
     discovered: list[DiscoveredPack] = []
     scanned_external_roots: set[Path] = set()
 
@@ -133,7 +167,16 @@ def discover_pack_metadata(
         """
         from astrid.core.pack import load_pack_manifest, pack_manifest_path
 
-        resolved = _resolve_pack_root(raw_root)
+        try:
+            resolved = _resolve_pack_root(raw_root)
+        except SymlinkedPackPathError as exc:
+            _LOGGER.warning(
+                "skipping symlinked %s root %s: %s",
+                source_kind,
+                raw_root,
+                exc,
+            )
+            return
         # An SDK caller may pass a root explicitly while the same canonical
         # root is also present in ASTRID_PACKS_PATH.  Scan it once, retaining
         # the higher-priority explicit ``extra`` provenance instead of
@@ -159,6 +202,16 @@ def discover_pack_metadata(
             return
         seen: dict[str, Path] = {}
         for child in children:
+            try:
+                reject_symlinked_path(child)
+            except SymlinkedPackPathError as exc:
+                _LOGGER.warning(
+                    "skipping symlinked %s pack %s: %s",
+                    source_kind,
+                    child,
+                    exc,
+                )
+                continue
             try:
                 if (
                     not child.is_dir()
@@ -217,11 +270,11 @@ def discover_pack_metadata(
         for pack in scan(project_pack_root):
             if pack.id == "local":
                 _add(pack, "local")
-
     def _resolve_pack_root(raw_root: str | Path) -> Path:
         candidate = Path(raw_root).expanduser()
         if not candidate.is_absolute():
-            candidate = Path(project_root) / candidate
+            candidate = project_root / candidate
+        reject_symlinked_path(candidate)
         return candidate.resolve()
 
     raw_env_roots = os.environ.get(ASTRID_PACKS_PATH_ENV, "")
@@ -236,6 +289,8 @@ def discover_pack_metadata(
             from astrid.core.pack import load_pack_manifest
             from astrid.core.pack import pack_manifest_path as _pmp
             from astrid.core.pack.store import installed_pack_roots
+
+
 
             for installed_root in installed_pack_roots():
                 if not installed_root.is_dir():
@@ -257,6 +312,151 @@ def discover_pack_metadata(
                 _add(pack, "installed")
 
     return tuple(discovered)
+def discover_canonical_pack_metadata(
+    *,
+    project_root: str | Path = REPO_ROOT,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
+) -> tuple[CanonicalDiscoveredPack, ...]:
+    """Admit canonical v2 packs through external discovery seams only.
+
+    This is intentionally separate from :func:`discover_pack_metadata`, whose
+    legacy source-tree behavior remains active during B1.  Unlike the
+    fault-tolerant legacy walk, canonical admission propagates validation
+    failures so an external database declaration cannot be silently dropped.
+    """
+    project_root = Path(project_root).expanduser()
+    project_pack_root = project_root / "astrid" / "packs"
+    local_candidate = project_pack_root / "local"
+    try:
+        reject_symlinked_path(project_pack_root)
+        reject_symlinked_path(local_candidate)
+    except SymlinkedPackPathError as exc:
+        raise CanonicalPackValidationError(
+            f"local pack root must not be a symlink or contain symlinked ancestors: "
+            f"{project_pack_root}"
+        ) from exc
+    project_pack_root = project_pack_root.resolve()
+    # Canonical discovery is strictly read-only: inspect an existing local
+    # pack only and never materialize the legacy element-only manifest.
+    local_pack_root = project_pack_root / "local"
+    discovered: list[CanonicalDiscoveredPack] = []
+    scanned_roots: set[Path] = set()
+    seen_by_source: dict[tuple[str, str], Path] = {}
+
+    def add(
+        manifest_path: Path,
+        source: ExternalPackSource,
+        *,
+        expected_pack_id: str | None = None,
+    ) -> None:
+        entry = read_normalize_validate(
+            manifest_path,
+            source=source,
+            expected_pack_id=expected_pack_id,
+        )
+        if entry.id == "local" and source is not ExternalPackSource.LOCAL:
+            return
+        if entry.definition.visibility == "hidden":
+            return
+        key = (source.value, entry.id)
+        prior = seen_by_source.get(key)
+        if prior is not None:
+            raise CanonicalPackValidationError(
+                f"duplicate canonical pack ID {entry.id!r} in {source.value}: "
+                f"{prior} and {manifest_path}"
+            )
+        seen_by_source[key] = manifest_path
+        discovered.append(CanonicalDiscoveredPack(entry, source.value, len(discovered)))
+
+    def canonical_manifest(root: Path) -> Path | None:
+        try:
+            reject_symlinked_path(root)
+        except SymlinkedPackPathError as exc:
+            raise CanonicalPackValidationError(
+                f"external pack directory must not be a symlink or contain "
+                f"symlinked ancestors: {root}"
+            ) from exc
+        candidate = root / "pack.yaml"
+        return candidate if candidate.is_file() or candidate.is_symlink() else None
+
+    def resolve_root(raw_root: str | Path) -> Path:
+        candidate = Path(raw_root).expanduser()
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        try:
+            candidate = reject_symlinked_path(candidate)
+        except SymlinkedPackPathError as exc:
+            raise CanonicalPackValidationError(
+                f"external pack root must not be a symlink or contain symlinked "
+                f"ancestors: {candidate}"
+            ) from exc
+        return candidate.resolve()
+
+    def scan_external_root(raw_root: str | Path, source: ExternalPackSource) -> None:
+        resolved = resolve_root(raw_root)
+        if resolved in scanned_roots:
+            return
+        scanned_roots.add(resolved)
+        if not resolved.is_dir():
+            return
+        for child in sorted(resolved.iterdir(), key=lambda path: path.name):
+            if child.is_symlink():
+                raise CanonicalPackValidationError(
+                    f"external pack directory must not be a symlink: {child}"
+                )
+            if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
+                continue
+            manifest_path = canonical_manifest(child)
+            if manifest_path is not None:
+                add(manifest_path, source)
+
+    if project_pack_root.is_dir():
+        manifest_path = canonical_manifest(local_pack_root)
+        if manifest_path is not None:
+            add(manifest_path, ExternalPackSource.LOCAL)
+
+    for extra_root in extra_pack_roots:
+        scan_external_root(extra_root, ExternalPackSource.EXTRA)
+    for env_root in os.environ.get(ASTRID_PACKS_PATH_ENV, "").split(os.pathsep):
+        if env_root:
+            scan_external_root(env_root, ExternalPackSource.ENV)
+
+    if include_installed:
+        from astrid.core.pack.store import installed_pack_roots
+
+        for installed_root in installed_pack_roots():
+            manifest_path = canonical_manifest(installed_root)
+            if manifest_path is not None:
+                # ``installed_pack_roots`` has already validated the custody
+                # record.  The owning install directory, rather than the
+                # revision directory (which may be timestamped), is the
+                # installed identity authority.
+                install_root = installed_root.parent.parent
+                add(
+                    manifest_path,
+                    ExternalPackSource.INSTALLED,
+                    expected_pack_id=install_root.name,
+                )
+
+    return tuple(discovered)
+
+
+def discover_canonical_packs_ordered(
+    *,
+    project_root: str | Path = REPO_ROOT,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
+) -> tuple[CanonicalPackEntry, ...]:
+    """Return canonical v2 entries from the isolated external walk."""
+    return tuple(
+        item.entry
+        for item in discover_canonical_pack_metadata(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+    )
 
 
 def discover_packs_ordered(
@@ -286,6 +486,9 @@ __all__ = [
     "ASTRID_PACKS_PATH_ENV",
     "SOURCE_KINDS",
     "DiscoveredPack",
+    "CanonicalDiscoveredPack",
     "discover_pack_metadata",
+    "discover_canonical_pack_metadata",
+    "discover_canonical_packs_ordered",
     "discover_packs_ordered",
 ]

@@ -111,6 +111,11 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
     manifest_path = Path(path).expanduser().resolve()
     raw = _load_manifest_payload(manifest_path)
     data = _require_mapping(raw, "pack")
+    if data.get("schema_version") in (2, "2"):
+        raise PackValidationError(
+            "canonical v2 packs require canonical external admission; "
+            "legacy loading does not accept schema_version 2"
+        )
     pack_id = _require_string(data, "id", "pack.id")
     _validate_pack_id(pack_id, "pack.id")
     root = manifest_path.parent

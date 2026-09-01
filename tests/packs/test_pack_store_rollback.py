@@ -10,16 +10,14 @@ sites in pack_store.py:
 Target: ≥80% line coverage of astrid/core/pack_store.py.
 """
 
-from __future__ import annotations
-
 import json
 import logging
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.pack.install import rollback_pack
 from astrid.core.pack.store import InstallRecord, InstalledPackStore
 
 
@@ -35,7 +33,7 @@ def _record(
         pack_id=pack_id,
         name="My Pack",
         version="1.0.0",
-        schema_version=2,
+        schema_version=1,
         source_path="/src/my_pack",
         installed_at="2024-01-01T00:00:00Z",
         revision=rev,
@@ -115,10 +113,16 @@ class TestRollback:
         """Install pack_id with revision v1 active, then add revision v2."""
         store = InstalledPackStore(packs_home=tmp_path)
 
-        # Revision v1: the original active revision
+        # These store-only fixtures intentionally model inherited legacy
+        # installs; canonical v2 records require a real pack.yaml.
         rev1_name = pack_id
         rec1 = _record(pack_id, tmp_path, revision=rev1_name)
+        rec1.schema_version = 1
         store.record_install(rec1)
+        (store.revisions_dir(pack_id) / rev1_name / "pack.yml").write_text(
+            "id: my.pack\nname: My Pack\nversion: 1.0.0\n",
+            encoding="utf-8",
+        )
 
         # Create and activate v1 symlink
         link = store.active_symlink_path(pack_id)
@@ -131,15 +135,80 @@ class TestRollback:
             pack_id=pack_id,
             name="My Pack",
             version="2.0.0",
-            schema_version=2,
+            schema_version=1,
             source_path="/src/my_pack_v2",
             installed_at="2024-02-02T12:00:00Z",
             revision=rev2_name,
             install_root=str(tmp_path / pack_id),
+            active=False,
         )
         store.record_install(rec2)
-
+        (store.revisions_dir(pack_id) / rev2_name / "pack.yml").write_text(
+            "id: my.pack\nname: My Pack\nversion: 2.0.0\n",
+            encoding="utf-8",
+        )
         return store, rev1_name, rev2_name
+
+    @pytest.mark.parametrize("metadata_shape", ["astrid", "install_json"])
+    def test_interactive_listing_rejects_external_revision_metadata(
+        self,
+        tmp_path: Path,
+        metadata_shape: str,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Interactive listing never discloses metadata outside revisions/."""
+        store, rev1, rev2 = self._install_two_revisions(tmp_path)
+        pack_id = "my.pack"
+        target_path = store.revisions_dir(pack_id) / rev2
+        external = tmp_path / "external-record"
+        external.mkdir()
+        sentinel = '{"version":"9.9.9","name":"EXTERNAL_SENTINEL"}'
+
+        astrid_path = target_path / ".astrid"
+        if metadata_shape == "astrid":
+            (external / "install.json").write_text(sentinel, encoding="utf-8")
+            (astrid_path / "install.json").unlink()
+            astrid_path.rmdir()
+            astrid_path.symlink_to(external, target_is_directory=True)
+            target_custody = astrid_path.readlink()
+        else:
+            external_record = tmp_path / "external-install.json"
+            external_record.write_text(sentinel, encoding="utf-8")
+            record_path = astrid_path / "install.json"
+            record_path.unlink()
+            record_path.symlink_to(external_record)
+            target_custody = record_path.readlink()
+
+        active_link = store.active_symlink_path(pack_id)
+        active_record_path = (
+            store.revisions_dir(pack_id) / rev1 / ".astrid" / "install.json"
+        )
+        before_active = store.get_active_strict(pack_id)
+        before_active_link = active_link.readlink()
+        before_active_record = active_record_path.read_bytes()
+        before_revisions = tuple(path.name for path in store.list_revisions(pack_id))
+
+        monkeypatch.setattr("builtins.input", lambda _prompt: "")
+        result = rollback_pack(pack_id, store=store, revision=None)
+        captured = capsys.readouterr()
+
+        assert result == 1
+        assert store.get_active_strict(pack_id) == before_active
+        assert "9.9.9" not in captured.out
+        assert "EXTERNAL_SENTINEL" not in captured.out
+        assert active_link.readlink() == before_active_link
+        assert active_record_path.read_bytes() == before_active_record
+        assert tuple(path.name for path in store.list_revisions(pack_id)) == before_revisions
+        if metadata_shape == "astrid":
+            assert astrid_path.is_symlink()
+            assert astrid_path.readlink() == target_custody
+        else:
+            record_path = astrid_path / "install.json"
+            assert record_path.is_symlink()
+            assert record_path.readlink() == target_custody
+
+
 
     def test_rollback_switches_active_symlink(self, tmp_path: Path) -> None:
         store, rev1, rev2 = self._install_two_revisions(tmp_path)
@@ -214,6 +283,32 @@ class TestRollback:
         assert active.revision == rec.revision
 
 
+    def test_rollback_rejects_forged_active_target_before_publication(
+        self, tmp_path: Path
+    ) -> None:
+        store, rev1, rev2 = self._install_two_revisions(tmp_path)
+        pack_id = "my.pack"
+        target_record_path = (
+            store.revisions_dir(pack_id) / rev2 / ".astrid" / "install.json"
+        )
+        target_data = json.loads(target_record_path.read_text(encoding="utf-8"))
+        target_data["active"] = True
+        target_record_path.write_text(json.dumps(target_data), encoding="utf-8")
+        link = store.active_symlink_path(pack_id)
+        before_link = link.readlink()
+        before_current = (
+            store.revisions_dir(pack_id) / rev1 / ".astrid" / "install.json"
+        ).read_bytes()
+
+        with pytest.raises(AstridError) as caught:
+            store.rollback_to_revision(pack_id, rev2)
+
+        assert caught.value.code == "pack.active_corrupt"
+        assert link.readlink() == before_link
+        assert (
+            store.revisions_dir(pack_id) / rev1 / ".astrid" / "install.json"
+        ).read_bytes() == before_current
+        assert json.loads(target_record_path.read_text(encoding="utf-8"))["active"] is True
 class TestRoutedSwallows:
     """Cover the Step 7b routed swallow sites in _read_active_record."""
 
@@ -318,6 +413,32 @@ class TestRemoveAndMiscPaths:
         store = InstalledPackStore(packs_home=tmp_path)
         assert store.list_revisions("no.pack") == []
 
+    def test_list_revisions_skips_symlink_and_nonregular_children(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = InstalledPackStore(packs_home=tmp_path)
+        revisions = store.revisions_dir("listed.pack")
+        revisions.mkdir(parents=True)
+        safe = revisions / "listed.pack.20240101T000000Z"
+        safe.mkdir()
+        outside = tmp_path / "outside-revision"
+        outside.mkdir()
+        symlink = revisions / "listed.pack.20240201T000000Z"
+        symlink.symlink_to(outside, target_is_directory=True)
+        (revisions / "not-a-revision").write_text("skip", encoding="utf-8")
+
+        original_stat = Path.stat
+
+        def guarded_stat(
+            path: Path, *args: object, **kwargs: object
+        ) -> object:
+            if path == symlink and kwargs.get("follow_symlinks", True):
+                raise AssertionError("revision listing followed a symlink")
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", guarded_stat)
+        assert store.list_revisions("listed.pack") == [safe]
+
     def test_mark_inactive_removes_symlink(self, tmp_path: Path) -> None:
         store = InstalledPackStore(packs_home=tmp_path)
         rec = _record("inactive.pack", tmp_path)
@@ -329,3 +450,35 @@ class TestRemoveAndMiscPaths:
         store.mark_inactive("inactive.pack")
         assert not link.exists()
         assert store.get_active("inactive.pack") is None
+
+    def test_active_revision_rejects_traversal_and_absolute_targets(
+        self, tmp_path: Path
+    ) -> None:
+        store = InstalledPackStore(packs_home=tmp_path / "packs")
+        revisions = store.revisions_dir("escape.pack")
+        revisions.mkdir(parents=True)
+        (tmp_path / "escape").mkdir()
+        link = store.active_symlink_path("escape.pack")
+        link.symlink_to(Path("revisions") / "../../../escape")
+        assert store.active_revision_path("escape.pack") is None
+        assert store.active_pack_roots() == ()
+
+        link.unlink()
+        link.symlink_to(tmp_path / "escape", target_is_directory=True)
+        assert store.active_revision_path("escape.pack") is None
+        assert store.active_pack_roots() == ()
+
+    def test_active_pack_roots_skips_symlinked_installed_pack_directory(
+        self, tmp_path: Path
+    ) -> None:
+        store = InstalledPackStore(packs_home=tmp_path / "packs")
+        outside = tmp_path / "outside-pack"
+        revision = outside / "revisions" / "linked.pack"
+        revision.mkdir(parents=True)
+        link = outside / "active"
+        link.symlink_to(Path("revisions") / "linked.pack")
+        store.install_root_for("linked.pack").parent.mkdir(parents=True)
+        store.install_root_for("linked.pack").symlink_to(outside, target_is_directory=True)
+
+        assert store.active_revision_path("linked.pack") is None
+        assert store.active_pack_roots() == ()

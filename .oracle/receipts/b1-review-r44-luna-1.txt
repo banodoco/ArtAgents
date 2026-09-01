@@ -1,0 +1,6 @@
+VERDICT: PASS
+IDENTITY: PASS — 30/30 frozen hashes verified; manifest SHA-256 `89d404a3c9ee1214ea36d9ec0ae6774af2f67e7b87941ff823cb03ee5edfbb00` matches.
+FINDINGS: none
+SCOPE: PASS — B1 remains isolated; production is legacy-active with 19 `pack.yaml`, 4 `schema-pack.yaml`, and 0 v2 production manifests.
+VALIDATION: PASS — independent canonical suite 52 passed/74 subtests; explicit blocker probes 5 passed/14 subtests; valid lifecycle probes 6 passed/3 subtests; aggregate temp-cleanup-sensitive Git failures passed individually and baseline evidence confirms no candidate-only delta.
+0

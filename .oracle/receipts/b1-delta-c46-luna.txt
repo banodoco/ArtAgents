@@ -1,0 +1,8 @@
+DELTA_VERDICT: PASS
+IDENTITY: 30/30 frozen candidate hashes verified; manifest SHA-256 `6f17c1f0adbe4620aa81a081e9a309b99b7fe412e5cad3786da4fc77dee6403e`
+CUSTODY: PASS — empty `manifest_digest`, empty `trust_summary`, or both fail closed before discovery/reads/enumeration/publication; capability and arbitrary-byte drift rejected; exact bytes accepted
+LEGACY: PASS — inherited v1 records without canonical digest metadata continue to succeed
+ADJACENT: PASS — candidate-44 missing/alternate-manifest rejection and valid inactive-direct rollback remain green
+TESTS: `sha256sum -c .oracle/evidence/b1-candidate-46.sha256` — 30 OK, rc 0; erased-custody selection — 5 passed, 12 subtests; adjacent lifecycle selection — 30 passed; independent `openai-codex/gpt-5.6-luna` gate — PASS
+BLOCKERS: none
+0

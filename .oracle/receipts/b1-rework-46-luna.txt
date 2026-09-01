@@ -1,0 +1,7 @@
+REWORK: PASS
+CHANGED: astrid/core/pack/store.py, astrid/core/pack/install_local.py, tests/packs/test_canonical_pack_v2.py, tests/packs/test_pack_store_rollback.py
+FIXES: Canonical records now require non-empty manifest_digest and trust_summary before discovery, enumeration, source reads, staging, or rollback publication; exact manifest-byte verification remains enforced. Legacy v1 records retain digest-free behavior.
+TESTS: `python3 -m pytest -q tests/packs/test_canonical_pack_v2.py tests/packs/test_pack_store_rollback.py tests/packs/test_pack_install.py tests/packs/test_git_pack_install.py` — 185 passed, 104 subtests passed. `py_compile` — passed.
+ISOLATION: `legacy_pack_yaml=19 schema_pack_yaml=4 canonical_v2_pack_yaml=0`; bundled runtime remains legacy-active.
+BLOCKER: none
+0

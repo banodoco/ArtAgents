@@ -1,0 +1,6 @@
+VERDICT: REWORK
+IDENTITY: PASS — 30/30 frozen candidate hashes verified; manifest SHA-256 `89d404a3c9ee1214ea36d9ec0ae6774af2f67e7b87941ff823cb03ee5edfbb00`
+FINDINGS: 1. Blocking canonical lifecycle regression: after a normal force install followed by rollback to a timestamped revision, the prior direct `revisions/<pack_id>` revision is valid and inactive (`active=false`) with a regular canonical `pack.yaml`, but rollback back to that revision returns `1` without mutation. `_canonical_manifest_path_for_revision_target()` unconditionally rejects `pack_root.name == record.pack_id` (`astrid/core/pack/install_local.py:370-375`). The store contract permits rollback to any confined inactive revision; canonical lifecycle does not preserve that behavior.
+SCOPE: PASS — B1 remains isolated; production remains legacy-active with no production v2 manifests.
+VALIDATION: REWORK — independent discriminator, missing/alternate-manifest rollback, and manifest-drift probes passed; focused suites passed (`52 passed, 74 subtests`; `69 passed, 2 subtests`; `60 passed, 24 subtests`). The valid inactive-direct-revision probe exposed the blocking lifecycle defect.
+0

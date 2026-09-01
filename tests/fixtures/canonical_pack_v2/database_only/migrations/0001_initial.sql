@@ -1,0 +1,1 @@
+CREATE TABLE records (id TEXT PRIMARY KEY);

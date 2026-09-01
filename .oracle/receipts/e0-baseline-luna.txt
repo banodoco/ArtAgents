@@ -1,0 +1,11 @@
+[launch_hermes_agent] model=codex:gpt-5.6-luna → resolved=openai-codex/gpt-5.6-luna toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid
+Working...
+HEAD: `7ac50c12e8e4d90988fee603ffdb9896e5628792`  
+Exit status: `0`  
+Result: `179 passed, 0 failed`  
+Elapsed time: `15.55s` wall time (`14.74s` pytest-reported)  
+Failure names: None
+[launch_hermes_agent] done in 32.0s (exit=0)
+0

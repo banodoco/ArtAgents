@@ -1,41 +1,50 @@
-# North Star — Astrid unified execution
+# North Star — one canonical Astrid pack
 
-## The desirable end state
+Astrid has one understandable pack concept. Every bundled product extension is
+owned by one strict `pack.yaml`; a pack may contribute capabilities, SQLite
+schema, agent documentation, or any combination. `timeline`, `shots`,
+`references`, and `runaway` are ordinary bundled packs rather than a second
+schema-pack species.
 
-Astrid v10 as **ONE store and ONE execution path**: every durable fact lives in the
-SQLite kernel (projects, timelines, shots, references, tasks, runs, media, evidence,
-receipts, events); every capability invocation — executor or orchestrator — runs as a
-kernel run+task (admit → claim → start → execute → complete|fail) with hash-chained
-events, receipts, attempts/leases, and managed outputs. `sdk.invoke` is the thin
-admission wrapper. The filesystem `run.json` is at most a derived projection of the
-kernel run — never an independent authority. Docs describe exactly what ships; the
-suite and empirical process runs prove it.
+Opening a pack directory should reveal one authoritative declaration of its
+identity, resources, custom capabilities, database ownership, migrations,
+events, commands, CLI surface, and agent guidance. Runtime systems consume
+typed projections of that declaration instead of independently rediscovering
+or reinterpreting the pack. Every existing bundled customization is either
+owned by a canonical pack or explicitly classified as irreducible kernel
+behavior; nothing remains unclassified.
 
-## Enduring qualities and invariants to preserve
+## Enduring principles
 
-- **Single authority**: the kernel writer + UnitOfWork + receipts + events is the only
-  state. No second store, no silent divergence path, no eventlog-only escape for an
-  existing kernel timeline.
-- **Every run is observable**: leases, attempts, retries, expiry, and the full event
-  chain make any execution auditable, resumable, and replayable.
-- **Honest docs**: no overclaims (e.g. "admitted tasks run" only when a driver ships);
-  documented limitations are real limitations.
-- **Elegance**: KISS / YAGNI. One generic adapter beats 50 bespoke ones; relax the
-  completion contract minimally; cut scope that isn't pulling its weight.
-- **Verified empirically**: every claim backed by a runnable process, test, or probe —
-  not narrative.
+- One pack identity, manifest grammar, parser/validator, normalized definition,
+  and bundled catalog.
+- SQLite remains the per-project authority. Migration SQL owns columns,
+  constraints, indexes, and transformations; YAML does not duplicate DDL.
+- Reuse the strong machinery already present: typed registries, migration
+  ordering/checksums/drift/transactions, `DatabaseWriter`, `UnitOfWork`,
+  repositories, SDK behavior, and conformance tests.
+- Bundled trusted packs may contribute database schema; external packs remain
+  capability-only during beta.
+- Every pack-relative resource is confined, discoverable, and present in the
+  built wheel.
+- Every user/agent-facing bundled pack ships structured agent documentation;
+  the `_core` skill exposes a generated canonical pack census and routes agents
+  to the owning pack documentation.
+- With no users to migrate, cut directly to the final form and delete alternate
+  authorities instead of maintaining shims.
+- Keep beta scope proportionate: unify today's bundled system without
+  prebuilding a marketplace or variable project-composition lifecycle.
 
-## Anti-patterns to avoid
+## Anti-patterns
 
-- A second ledger that must be kept "consistent by convention."
-- Kernel/eventlog divergence (orphaned receipts, silent downgrades).
-- Ghost verbs or docs that claim behavior that does not exist.
-- Per-executor adapters where one generic path would do.
-- Scope creep disguised as architecture (serve/GPU supervision beyond what execution needs).
-
-## What aligned progress looks like
-
-Each batch leaves the kernel as the single execution authority: more invocation paths
-admitted as kernel tasks, fewer places that write run.json, docs and tests converging
-on one ledger, and every gate (suite, process runs, oracle review) passing before the
-next batch starts.
+- Hiding the old schema-pack subsystem inside `pack.yaml` while retaining its
+  parser, identity, discovery, or hard-coded standard list.
+- Replacing useful typed registries with a giant universal service locator.
+- Duplicating SQLite DDL or mutable runtime facts in YAML or skill prose.
+- Per-project pack locks, enable/disable/purge state machines, dynamic database
+  plugins, or migration ceremony without an observed beta need.
+- Allowing external packs to execute SQL.
+- Making the irreducible kernel dynamically unloadable for conceptual symmetry.
+- Compatibility shims, dual reads, schema-less manifests, or legacy fallbacks.
+- Declaring success while any bundled customization, documentation surface,
+  operational consumer, or packaged resource bypasses canonical ownership.

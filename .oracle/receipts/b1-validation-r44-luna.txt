@@ -1,0 +1,7 @@
+VALIDATION: PASS
+IDENTITY: 89d404a3c9ee1214ea36d9ec0ae6774af2f67e7b87941ff823cb03ee5edfbb00; 30/30 hashes verified
+TESTS: Required focused suites: 212 passed, 100 subtests. Extant B1 acceptance paths: 396 passed, 3 known clean-base/environment failures, 244 subtests. Lifecycle custody probes: 27 passed, 32 subtests.
+PROBES: Latest repair and all candidate-43 blockers passed: paired discriminators `1`/`1.0` rejected for installed discovery, local/Git update and rollback before reads or mutation; missing/alternate active manifests and drifted rollback targets rejected; canonical manifest identity, version, capabilities, and arbitrary-byte drift rejected before external reads/publication. Prior malformed metadata, strict binding, pre-enumeration rollback, timestamped targets, single-active publication, no fallback, relative stores, hostile paths, external-database ordering, identity/provenance, and legacy/canonical lifecycle probes passed.
+ISOLATION: Production remains legacy-active: 19 `pack.yaml` manifests, 4 legacy `schema-pack.yaml` manifests, 0 production v2 manifests.
+BLOCKERS: none
+0

@@ -26,6 +26,7 @@ from astrid.core.pack.install import (
     cmd_install,
     cmd_update,
     install_pack,
+    rollback_pack,
     uninstall_pack,
     update_pack,
 )
@@ -193,6 +194,26 @@ class InstallTestBase(unittest.TestCase):
         self.assertIsNotNone(rev)
         assert rev is not None
         return _json.loads((rev / ".astrid" / "install.json").read_text())
+
+
+class TestManifestVersionDispatch(InstallTestBase):
+    def test_duplicate_schema_version_rejected_before_local_mutation(self) -> None:
+        for first, second in (("2", "1"), ("1", "2")):
+            with self.subTest(first=first, second=second):
+                source = self._temp_pack(f"dispatch_{first}_{second}")
+                manifest = source / "pack.yaml"
+                text = manifest.read_text(encoding="utf-8")
+                text = text.replace(
+                    "schema_version: 1\n",
+                    f"schema_version: {first}\nschema_version: {second}\n",
+                    1,
+                )
+                manifest.write_text(text, encoding="utf-8")
+
+                store = self._store()
+                self.assertEqual(self._install(source, store=store), 2)
+                self.assertIsNone(store.get_active(source.name))
+                self.assertFalse(store.install_root_for(source.name).exists())
 
 
 # ---------------------------------------------------------------------------
@@ -724,8 +745,186 @@ class TestInstallCollision(InstallTestBase):
         import yaml as _yaml
         active_data = _yaml.safe_load((rev / "pack.yaml").read_text())
         self.assertEqual(active_data["version"], "0.2.0")
+    def test_force_after_rollback_retires_actual_timestamped_active_record(self) -> None:
+        """A rollback target remains valid after the next force install."""
+        src = self._temp_pack("force_after_rollback")
+        store = self._store()
+        self.assertEqual(self._install(src, store=store), 0)
+
+        pack_yaml = src / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text(encoding="utf-8").replace(
+                "version: 0.1.0", "version: 0.2.0"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(self._install(src, store=store, force=True), 0)
+        v1_revision = next(
+            path.name
+            for path in store.list_revisions("force_after_rollback")
+            if path.name != "force_after_rollback"
+        )
+
+        self.assertEqual(
+            rollback_pack(
+                "force_after_rollback",
+                store=store,
+                revision=v1_revision,
+                skip_confirm=True,
+            ),
+            0,
+        )
+
+        pack_yaml.write_text(
+            pack_yaml.read_text(encoding="utf-8").replace(
+                "version: 0.2.0", "version: 0.3.0"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(self._install(src, store=store, force=True), 0)
+
+        active = store.get_active_strict("force_after_rollback")
+        self.assertIsNotNone(active)
+        assert active is not None
+        self.assertEqual(active.version, "0.3.0")
+        roots = store.active_pack_roots()
+        self.assertEqual(roots, (store.active_revision_path("force_after_rollback"),))
+        self.assertEqual(len(roots), 1)
+        self.assertIn("version: 0.3.0", (roots[0] / "pack.yaml").read_text())
+
+        records = []
+        for revision_path in store.list_revisions("force_after_rollback"):
+            record_path = revision_path / ".astrid" / "install.json"
+            records.append(_json.loads(record_path.read_text(encoding="utf-8")))
+        self.assertEqual(sum(record["active"] for record in records), 1)
+        v1_record = next(record for record in records if record["revision"] == v1_revision)
+        self.assertFalse(v1_record["active"])
+        for record in records:
+            if not record["active"]:
+                _current, target = store.assert_rollback_custody(
+                    "force_after_rollback", record["revision"]
+                )
+                self.assertFalse(target.active)
+        current, target = store.assert_rollback_custody(
+            "force_after_rollback", v1_revision
+        )
+        self.assertEqual(current.version, "0.3.0")
+        self.assertEqual(target.version, "0.1.0")
 
 
+
+    def test_initial_publication_observes_absent_or_complete_install(self) -> None:
+        """The active pointer is switched only after its record is complete."""
+        src = self._temp_pack("initial_publication")
+        store = self._store()
+        active_link = store.active_symlink_path("initial_publication")
+        real_replace = os.replace
+        observations: list[tuple[object, tuple[Path, ...]]] = []
+
+        def observe_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+            if Path(target) == active_link:
+                observations.append(
+                    (store.get_active_strict("initial_publication"), store.active_pack_roots())
+                )
+            real_replace(source, target)
+
+        with mock.patch("astrid.core.pack.install_local.os.replace", side_effect=observe_replace):
+            self.assertEqual(self._install(src, store=store), 0)
+
+        self.assertEqual(len(observations), 1)
+        before_switch, before_roots = observations[0]
+        self.assertIsNone(before_switch)
+        self.assertEqual(before_roots, ())
+        active = store.get_active_strict("initial_publication")
+        self.assertIsNotNone(active)
+        self.assertEqual(len(store.active_pack_roots()), 1)
+
+    def test_force_publication_observes_complete_old_or_new_install(self) -> None:
+        """Every active-pointer replacement exposes strict old/new custody."""
+        src = self._temp_pack("force_publication")
+        store = self._store()
+        self.assertEqual(self._install(src, store=store), 0)
+        (src / "pack.yaml").write_text(
+            (src / "pack.yaml").read_text(encoding="utf-8").replace(
+                "version: 0.1.0", "version: 0.2.0"
+            ),
+            encoding="utf-8",
+        )
+        active_link = store.active_symlink_path("force_publication")
+        real_replace = os.replace
+        observations: list[tuple[object, tuple[Path, ...]]] = []
+
+        def observe_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+            if Path(target) == active_link:
+                observations.append(
+                    (store.get_active_strict("force_publication"), store.active_pack_roots())
+                )
+            real_replace(source, target)
+
+        with mock.patch("astrid.core.pack.install_local.os.replace", side_effect=observe_replace):
+            self.assertEqual(self._install(src, store=store, force=True), 0)
+
+        self.assertEqual(len(observations), 2)
+        self.assertTrue(all(record is not None for record, _roots in observations))
+        self.assertTrue(all(len(roots) == 1 for _record, roots in observations))
+        self.assertTrue(
+            all(record.version == "0.1.0" for record, _roots in observations)
+        )
+        active = store.get_active_strict("force_publication")
+        self.assertIsNotNone(active)
+        self.assertEqual(active.version, "0.2.0")
+
+    def test_initial_record_failure_leaves_no_partial_publication(self) -> None:
+        """A failure after recording but before switching restores absence."""
+        src = self._temp_pack("initial_record_failure")
+        store = self._store()
+        original_record_install = store.record_install
+
+        def record_then_fail(record) -> None:
+            original_record_install(record)
+            raise OSError("injected post-record failure")
+
+        with mock.patch.object(store, "record_install", side_effect=record_then_fail):
+            self.assertNotEqual(self._install(src, store=store), 0)
+
+        self.assertIsNone(store.get_active_strict("initial_record_failure"))
+        self.assertEqual(store.active_pack_roots(), ())
+        self.assertFalse(store.staging_path_for("initial_record_failure").exists())
+        self.assertFalse(store.active_symlink_path("initial_record_failure").exists())
+
+    def test_force_post_switch_metadata_failure_restores_previous_install(self) -> None:
+        """A failure after switching still restores the exact prior install."""
+        src = self._temp_pack("force_metadata_failure")
+        store = self._store()
+        self.assertEqual(self._install(src, store=store), 0)
+        active_link = store.active_symlink_path("force_metadata_failure")
+        before_target = active_link.readlink()
+        before_record_bytes = (
+            store.active_revision_path("force_metadata_failure") / ".astrid" / "install.json"
+        ).read_bytes()
+        (src / "pack.yaml").write_text(
+            (src / "pack.yaml").read_text(encoding="utf-8").replace(
+                "version: 0.1.0", "version: 0.2.0"
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_after_switch(*_args, **_kwargs) -> None:
+            raise OSError("injected post-switch metadata failure")
+
+        with mock.patch.object(store, "_mark_revision_inactive", side_effect=fail_after_switch):
+            self.assertNotEqual(self._install(src, store=store, force=True), 0)
+
+        self.assertEqual(
+            (
+                store.active_revision_path("force_metadata_failure")
+                / ".astrid"
+                / "install.json"
+            ).read_bytes(),
+            before_record_bytes,
+        )
+        self.assertEqual(store.get_active_strict("force_metadata_failure").version, "0.1.0")
+        self.assertFalse(store.staging_path_for("force_metadata_failure").exists())
 # ---------------------------------------------------------------------------
 # Gitignore
 # ---------------------------------------------------------------------------
@@ -903,6 +1102,10 @@ class TestUpdatePack(InstallTestBase):
         src = self._temp_pack("update_test")
         store = self._store()
         self._install(src, store=store)
+        record = store.get_active_strict("update_test")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.schema_version, 1)
 
         # Modify source
         pack_yaml = src / "pack.yaml"
@@ -945,7 +1148,10 @@ class TestUpdatePack(InstallTestBase):
         src = self._temp_pack("dry_update")
         store = self._store()
         self._install(src, store=store)
-
+        record = store.get_active_strict("dry_update")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.schema_version, 1)
         # Modify source
         pack_yaml = src / "pack.yaml"
         pack_yaml.write_text(pack_yaml.read_text().replace("version: 0.1.0", "version: 0.9.0"))

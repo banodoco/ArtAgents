@@ -1,0 +1,7 @@
+BASELINE_PROOF: PASS
+IDENTITY: 30/30 frozen hashes OK; manifest SHA-256 89d404a3c9ee1214ea36d9ec0ae6774af2f67e7b87941ff823cb03ee5edfbb00; dependencies identical (Python 3.11.11, pytest 9.0.2, PyYAML 6.0.3, jsonschema 4.26.0, referencing 0.37.0, banodoco_timeline_schema absent, pip check clean); Runaway schema manifest identical, SHA-256 7c501a5d9bb063df75edf44cee7c096bf1d7c2e896b47fb7f6710f690f9c21f2
+BASE: rc=[1,1,1]; nodes: test_external_pack_python_executor_validates_and_runs, test_inventory_and_layout_fail_under_one_aggregate_surface, test_repo_first_party_packs_root_validates_cleanly; diagnostics: missing banodoco_timeline_schema, expected 2 issues but got 3, unexpected top-level directory runaway; normalized signature 20eea73498ad60f762834b137122712ca6572db79a1202f3b1fee2c09cf4f865
+CANDIDATE: rc=[1,1,1]; nodes: test_external_pack_python_executor_validates_and_runs, test_inventory_and_layout_fail_under_one_aggregate_surface, test_repo_first_party_packs_root_validates_cleanly; diagnostics identical to BASE; normalized signature 20eea73498ad60f762834b137122712ca6572db79a1202f3b1fee2c09cf4f865
+DELTA: none
+CLEANUP: PASS — removed temporary exact-base worktree; candidate worktree retained
+0

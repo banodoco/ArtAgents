@@ -10,6 +10,24 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+
+class SymlinkedPackPathError(ValueError):
+    """A pack path contains a symlinked component."""
+
+
+def reject_symlinked_path(path: str | Path) -> Path:
+    """Reject symlinked components without resolving the supplied path."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    current = Path(candidate.anchor)
+    for component in candidate.parts[1:]:
+        current /= component
+        if current.is_symlink():
+            raise SymlinkedPackPathError(f"pack path contains a symlink: {current}")
+    return candidate
+
+
 if TYPE_CHECKING:
     from astrid.core.pack.definition import PackDefinition
 

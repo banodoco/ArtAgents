@@ -1,0 +1,21 @@
+schema_version: 2
+id: dependency
+name: Dependency
+version: 1.0.0
+database:
+  default_enabled: true
+  depends_on:
+    - pack: core
+      min_migration: 0
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables: [records]
+  stream_types: []
+  event_kinds: []
+  command_kinds: []
+  repositories: []
+  conformance: []
+  cli_mounts: {}
+  bridge_mounts: []

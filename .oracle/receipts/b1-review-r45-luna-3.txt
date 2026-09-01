@@ -1,0 +1,6 @@
+VERDICT: REWORK
+IDENTITY: PASS — 30/30 frozen hashes verified; manifest SHA-256 `825cbd2e7a2b2fe4fd24594d65370a2fbfd3c3fb773a82076b71eaff5de8eca4` matches.
+FINDINGS: 1. Blocking custody bypass: clearing a canonical record’s `manifest_digest` and `trust_summary` allows installed discovery to admit modified capabilities/arbitrary manifest bytes; rollback also returned `0` and changed the active pointer. `_validate_installed_manifest_digest` accepts empty digests (`store.py:193-194`), while canonical identity checks omit capabilities and arbitrary bytes (`store.py:148-183`).
+SCOPE: PASS — B1 remains isolated; production has 19 legacy `pack.yaml`, 4 `schema-pack.yaml`, and 0 canonical v2 manifests.
+VALIDATION: REWORK — candidate-44 probes passed 2/2; candidate-43 probes passed 3/3; canonical and rollback suites passed 82/82; install/Git suites passed 101/101. Independent erased-custody probes exposed the blocking bypass. Known baseline validation remains unchanged with 3 clean-base-matched failures.
+0
