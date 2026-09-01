@@ -38,4 +38,4 @@ the Stage 1 blueprint requires the registered Astrid render/FFmpeg path and
 explicitly makes broader dependency/platform certification post-beta.
 
 The runtime archive is pinned in the test to:
-`3a0a37c2f0c353716594e78bdb22f9a3f8a655f8`.
+`6f843fe6648a25f4fa8e04c43e98e8f4160c388c`.

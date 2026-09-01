@@ -21,7 +21,7 @@ import pytest
 
 WORKSPACE = Path(__file__).parents[3]
 RUNTIME_WORKTREE = WORKSPACE / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "3a0a37c2f0c353716594e78bdb22f9a3f8a655f8"
+RUNTIME_COMMIT = "6f843fe6648a25f4fa8e04c43e98e8f4160c388c"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(
