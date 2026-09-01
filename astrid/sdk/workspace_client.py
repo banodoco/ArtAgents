@@ -168,6 +168,9 @@ class WorkspaceClient:
                 "get_project_shot", "update_project_shot", "archive_project_shot",
                 "recover_project_shot", "add_shot_item", "remove_shot_item",
                 "reorder_shot_items", "list_project_references", "create_project_reference",
+                "list_project_shot_text_bindings", "set_project_shot_text_binding",
+                "get_project_shot_text_binding", "set_project_shot_text_binding_by_id",
+                "rebind_project_shot_text_binding",
                 "get_project_reference", "update_project_reference", "archive_project_reference",
                 "recover_project_reference", "associate_reference", "set_primary_reference",
                 "link_references", "create_document", "list_documents", "get_document",
@@ -378,6 +381,21 @@ class WorkspaceClient:
 
     def reorder_shot_items(self, project_id: str, shot_id: str, item_ids: list[str], *, expected_version: int, idempotency_key: str) -> Any:
         return self._call_generated("reorder_shot_items", project_id, shot_id, item_ids, expected_version=expected_version, idempotency_key=idempotency_key)
+
+    def list_project_shot_text_bindings(self, project_id: str, *, shot_id: str | None = None, kind: str | None = None, slot: str | None = None) -> Any:
+        return self._call_generated("list_project_shot_text_bindings", project_id, shot_id=shot_id, kind=kind, slot=slot)
+
+    def set_project_shot_text_binding(self, project_id: str, body: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("set_project_shot_text_binding", project_id, body, idempotency_key=idempotency_key)
+
+    def get_project_shot_text_binding(self, project_id: str, binding_id: str) -> Any:
+        return self._call_generated("get_project_shot_text_binding", project_id, binding_id)
+
+    def set_project_shot_text_binding_by_id(self, project_id: str, binding_id: str, body: Mapping[str, Any], *, idempotency_key: str) -> Any:
+        return self._call_generated("set_project_shot_text_binding_by_id", project_id, binding_id, body, idempotency_key=idempotency_key)
+
+    def rebind_project_shot_text_binding(self, project_id: str, binding_id: str, *, media_id: str, expected_head: int, idempotency_key: str) -> Any:
+        return self._call_generated("rebind_project_shot_text_binding", project_id, binding_id, media_id=media_id, expected_head=expected_head, idempotency_key=idempotency_key)
 
     def list_project_references(
         self,

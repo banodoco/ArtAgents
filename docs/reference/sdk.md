@@ -22,6 +22,18 @@ neutral workspace runtime is the sole owner of product tables, constraints,
 and migration application; pack manifests remain executable capability
 metadata.
 
+## Shot text bindings
+
+Shot-owned prompts, voiceover scripts, and transcripts are persisted by the
+neutral runtime as project-scoped immutable text bindings. A binding identity
+is deterministic UUIDv5 over `(project_id, shot_id, kind, slot)`; prompt slots
+are lowercase slugs and `slot=null` is the unslotted identity. Text is frozen
+as strict UTF-8 of at most 1 MiB and stored in the runtime CAS. Set/rebind
+commands require `expected_head`, use an idempotency key, and return the
+runtime's committed receipt. The remote shots adapter exposes
+`list_text_bindings`, `show_text_binding`, `set_text_binding`, and
+`rebind_text_binding`; it never opens local persistence.
+
 The published Astrid wheel includes the generated
 `banodoco_workspace_client` transport package. It is a pinned vendor copy of
 the neutral runtime contract (source commit is recorded in
