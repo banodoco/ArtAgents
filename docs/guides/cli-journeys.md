@@ -1,8 +1,8 @@
 # CLI journeys — supported product and recovery commands
 
 This guide walks the five product families (`projects`, `media`, `tasks`,
-`runs`, `timelines`), the two nested mounts (`media references`, `timelines
-shots`), and the local backup/diagnostic commands. Examples use `--json` where
+`runs`, `timelines`), the three nested mounts (`media references`, `timelines
+shots`, `timelines text`), and the local backup/diagnostic commands. Examples use `--json` where
 the command returns an SDK envelope; `doctor --json` is a separate diagnostic
 object, and `serve`/`backup` are human-readable operational commands.
 
@@ -426,7 +426,7 @@ python3 -m astrid timelines save primary --project demo \
   --config '{"tracks":[],"clips":[]}' --registry '{"assets":{}}' \
   --expected-version 2 --json
 python3 -m astrid timelines render primary --project demo \
-  --expected-version 2 --backend rendering.render --json
+  --expected-version 2 --backend rendering.ffmpeg --json
 python3 -m astrid media verify M_RENDERED --project demo \
   --realm managed_local --json
 ```

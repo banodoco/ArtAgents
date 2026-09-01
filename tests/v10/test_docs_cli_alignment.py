@@ -325,6 +325,25 @@ def test_core_docs_have_no_retired_invocation_strings() -> None:
             assert ghost not in text, f"{path.name} contains {ghost!r}"
 
 
+def test_b3_docs_use_three_nested_mounts_and_shipped_ffmpeg_renderer() -> None:
+    """B3 docs expose the complete mount census and executable renderer."""
+    paths = (
+        _ROOT / "astrid/packs/_core/skill/SKILL.md",
+        _ROOT / "docs/guides/cli-journeys.md",
+        _ROOT / "docs/reference/architecture.md",
+        _ROOT / "docs/contracts/cli-contract.md",
+    )
+    docs = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    assert "two nested mounts" not in docs.lower()
+    assert "timelines shots" in docs
+    assert "timelines text" in docs
+    assert "media references" in docs
+
+    journey = (_ROOT / "docs/guides/cli-journeys.md").read_text(encoding="utf-8")
+    assert "--backend rendering.ffmpeg" in journey
+    assert "--backend rendering.render" not in journey
+
+
 def test_pack_stages_do_not_reference_retired_verbs() -> None:
     """Pack STAGE.md / SKILL.md files contain no retired invocation strings."""
     offenders: list[str] = []

@@ -8,8 +8,8 @@ Astrid has three canonical public concepts:
 
 Canonical packages and commands are first-class. `python3 -m astrid` is the
 executable package gateway for the eight families (projects, timelines, media,
-tasks, runs, serve, doctor, backup) and the two nested mounts (`timelines
-shots`, `media references`). Capabilities (executors, orchestrators, elements)
+tasks, runs, serve, doctor, backup) and the three nested mounts (`timelines
+shots`, `timelines text`, `media references`). Capabilities (executors, orchestrators, elements)
 are not gateway commands; they run through the SDK
 (`astrid.sdk.invoke` / `astrid.sdk.client.AstridClient`).
 
@@ -103,7 +103,7 @@ For a step-by-step tutorial on building your first agentic UX, see
 | Module or entry point | Classification | Notes |
 | --- | --- | --- |
 | `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for the eight CLI families. |
-| `astrid/core/gateway/` | System command and dispatcher | Routes the eight families and the two nested mounts; one verb = one SDK call. No capability dispatch. |
+| `astrid/core/gateway/` | System command and dispatcher | Routes the eight families and the three nested mounts (`timelines shots`, `timelines text`, `media references`); one verb = one SDK call. No capability dispatch. |
 | `astrid/packs/video_editing/orchestrators/hype/` | Orchestrator | Canonical hype video editing orchestrator. |
 | `astrid/packs/video_editing/orchestrators/event_talks/` | Orchestrator | Canonical event-talk discovery and rendering workflow. |
 | `astrid/packs/video_editing/orchestrators/thumbnail_maker/` | Orchestrator | Canonical source-evidence thumbnail workflow. |
