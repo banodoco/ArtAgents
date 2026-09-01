@@ -60,6 +60,13 @@ _PACK_REPOSITORY_MODULES: dict[str, str] = {
     "references": "astrid.packs.references.repository",
 }
 
+# The text-binding repository is a deliberately separate module inside the
+# shots pack.  Keep the census tied to the manifest's repository declaration
+# without requiring the pack to add a compatibility alias to repository.py.
+_PACK_REPOSITORY_ALIASES: dict[tuple[str, str], str] = {
+    ("shots", "ShotTextBindingRepository"): "astrid.packs.shots.text_bindings",
+}
+
 # (b) command kind -> event kind for the irregular documented pairs. The
 # default rule is ``<prefix>.<verb-past-participle>`` (``create`` ->
 # ``created``, ``verify`` -> ``verified``, ``retry`` -> ``retried``).
@@ -72,6 +79,9 @@ _EVENT_EXCEPTIONS: dict[str, str] = {
     "shot.remove_item": "shot.item_removed",
     "reference.associate": "reference.media_associated",
     "reference.set_primary": "reference.primary_changed",
+    "shot.text_binding.set": "shot.text_binding.created",
+    "shot.text_binding.rebind": "shot.text_binding.rebound",
+    "shot.text_binding.apply": "shot.text_binding.rebound",
 }
 
 
@@ -106,8 +116,6 @@ def _repository_labels(
         module_name, class_name = _CORE_NAMESPACE_REPOS[noun]
         module = importlib.import_module(module_name)
         return [(f"{module_name}.{class_name}", getattr(module, class_name))]
-    module_name = _PACK_REPOSITORY_MODULES[pack_id]
-    module = importlib.import_module(module_name)
     declared = sorted(
         name for name, owner in registry.repositories.items() if owner == pack_id
     )
@@ -115,9 +123,14 @@ def _repository_labels(
         raise AssertionError(
             f"{command_kind}: pack {pack_id!r} declares no repository class"
         )
-    return [
-        (f"{module_name}.{name}", getattr(module, name)) for name in declared
-    ]
+    labels: list[tuple[str, type]] = []
+    for name in declared:
+        module_name = _PACK_REPOSITORY_ALIASES.get(
+            (pack_id, name), _PACK_REPOSITORY_MODULES[pack_id]
+        )
+        module = importlib.import_module(module_name)
+        labels.append((f"{module_name}.{name}", getattr(module, name)))
+    return labels
 
 
 def test_every_command_kind_has_a_repository_method(standard_registry) -> None:

@@ -944,6 +944,15 @@ _INSTALLED_BACKUP_DIRS = frozenset(
     {"backup", "backups", "backup-output", "restore", "restores"}
 )
 
+# The shot text checkout is an explicitly editable projection.  Its manifest
+# is written atomically as part of the checkout operation; it is not a
+# semantic authority.  Keep this exemption at the exact call shape rather
+# than making JSON writers generally legal in installed product code.
+_INSTALLED_PROJECTION_JSON_WRITER = (
+    "astrid/packs/shots/text_checkout.py",
+    "checkout",
+)
+
 
 def _resolve_installed_layout(value: str | Path) -> tuple[_InstalledLayout | None, list[str]]:
     """Resolve an installed root without ever falling back to the checkout.
@@ -1105,6 +1114,24 @@ def _call_writes_file(node: ast.Call) -> bool:
     return False
 
 
+def _is_checkout_projection_writer(
+    rel: str, node: ast.Call, parents: Mapping[ast.AST, ast.AST]
+) -> bool:
+    """Allow only the checkout projection's atomic manifest serialization."""
+    if rel != _INSTALLED_PROJECTION_JSON_WRITER[0]:
+        return False
+    if _ast_name(node.func).lower() != "json.dump" or len(node.args) < 2:
+        return False
+    if _ast_name(node.args[0]) != "manifest" or _ast_name(node.args[1]) != "handle":
+        return False
+    current: ast.AST | None = node
+    while current is not None:
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current.name == _INSTALLED_PROJECTION_JSON_WRITER[1]
+        current = parents.get(current)
+    return False
+
+
 def _lint_installed_source_patterns(root: Path) -> list[str]:
     """Find authority patterns in supported installed Python source.
 
@@ -1124,6 +1151,11 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
         except (OSError, UnicodeDecodeError, SyntaxError) as exc:
             errors.append(f"{rel}: installed source cannot be parsed: {exc}")
             continue
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
 
         def add(node: ast.AST, detail: str) -> None:
             line = getattr(node, "lineno", 0)
@@ -1177,7 +1209,9 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                     if name.endswith("json.dump") and len(node.args) > 1:
                         path_arg = node.args[1]
                     hint = _ast_path_hint(path_arg)
-                    if name.endswith("json.dump") and not _is_diagnostic_hint(hint) and hint not in {
+                    if name.endswith("json.dump") and _is_checkout_projection_writer(rel, node, parents):
+                        pass
+                    elif name.endswith("json.dump") and not _is_diagnostic_hint(hint) and hint not in {
                         "sys.stdout",
                         "sys.stderr",
                         "stdout",

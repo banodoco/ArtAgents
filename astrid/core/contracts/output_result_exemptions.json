@@ -3,8 +3,8 @@
   "description": "Committed output-result exemption list. Every executor in the default registry either writes a universal result manifest (non-exempt) or appears here with a specific M2-approved reason. The registry conformance gate uses this list to allow non-conforming executors while making the gap visible.",
   "last_registry_snapshot": "2026-08-21T00:00:00Z",
   "total_executors": 72,
-  "m1_adopters": 43,
-  "exempted": 29,
+  "m1_adopters": 41,
+  "exempted": 31,
   "non_exempt": [
     "editorial.arrange",
     "editorial.boundary_candidates",
@@ -19,7 +19,6 @@
     "editorial.transcribe",
     "editorial.triage",
     "editorial.validate",
-    "discord_local.command",
     "fal.h3_video",
     "foley.foley_review",
     "foley.tile_video",
@@ -40,7 +39,6 @@
     "rendering.sprite_sheet",
     "rendering.timeline_storyboard",
     "rendering.timeline_visualize",
-    "seedance_local.reference_video",
     "training.pool_build",
     "training.pool_merge",
     "understanding.audio_understand",
@@ -51,6 +49,14 @@
     "youtube.youtube_audio"
   ],
   "exemptions": {
+    "discord_local.command": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External Discord command integration is maintained outside the in-tree executor registry and has no local universal result-manifest authority."
+    },
+    "seedance_local.reference_video": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External Seedance reference-video integration is maintained outside the in-tree executor registry and has no local universal result-manifest authority."
+    },
     "blender.render": {
       "reasons": ["GPU", "external-escape-hatch"],
       "note": "Runs Blender locally or through an external render host and does not yet write the universal result manifest."

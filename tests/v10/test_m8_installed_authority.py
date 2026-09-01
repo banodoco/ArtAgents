@@ -148,6 +148,12 @@ def test_installed_scan_catches_combined_adversarial_sources(
     )
     _write(
         root,
+        "astrid/sdk/evil_json_dump.py",
+        "import json\nfrom pathlib import Path\n\n"
+        "json.dump({}, Path('timeline.json'))\n",
+    )
+    _write(
+        root,
         "astrid/sdk/evil_fallback.py",
         "def backend():\n    fallback_backend = 'legacy-file'\n    return fallback_backend\n",
     )

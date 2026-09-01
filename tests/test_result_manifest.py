@@ -301,18 +301,19 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
         assert payload["exemptions"][executor_id]["reasons"] == ["external-escape-hatch"]
 
 
-def test_output_result_registry_explicitly_covers_understanding_trio_without_declared_outputs() -> None:
+def test_output_result_registry_explicitly_covers_understanding_trio_contract() -> None:
     registry = load_default_registry()
     payload = json.loads(Path("astrid/core/contracts/output_result_exemptions.json").read_text(encoding="utf-8"))
     non_exempt_ids = set(payload["non_exempt"])
 
-    for executor_id in (
-        "understanding.audio_understand",
-        "understanding.visual_understand",
-        "understanding.video_understand",
-    ):
+    expected_outputs = {
+        "understanding.audio_understand": ("analysis", "manifest"),
+        "understanding.visual_understand": (),
+        "understanding.video_understand": (),
+    }
+    for executor_id, output_names in expected_outputs.items():
         definition = registry.get(executor_id)
-        assert definition.outputs == ()
+        assert tuple(output.name for output in definition.outputs) == output_names
         assert definition.metadata.get("output_result_manifest") is True
         assert executor_id in non_exempt_ids
 
