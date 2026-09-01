@@ -433,6 +433,7 @@ class ShotTextBindingRepository:
         kind: str | None = None,
         slot: str | None = None,
         creation: bool = False,
+        validate_authority: bool = True,
     ) -> Any:
         if binding_id is not None:
             if shot_ref is not None or kind is not None or slot is not None:
@@ -445,7 +446,8 @@ class ShotTextBindingRepository:
             )
             if row is None:
                 raise ShotTextBindingNotFoundError(binding_id=binding_id, project_id=project_id)
-            self._validate_binding_authority(uow, row, project_id=project_id)
+            if validate_authority:
+                self._validate_binding_authority(uow, row, project_id=project_id)
             return row
         if shot_ref is None or kind is None:
             raise ShotTextBindingValidationError(
@@ -475,8 +477,9 @@ class ShotTextBindingRepository:
             raise ShotTextBindingNotFoundError(
                 shot_id=str(shot["id"]), project_id=project_id
             )
-        for row in rows:
-            self._validate_binding_authority(uow, row, project_id=project_id)
+        if validate_authority:
+            for row in rows:
+                self._validate_binding_authority(uow, row, project_id=project_id)
         if len(rows) > 1:
             raise ShotTextBindingAmbiguousError(
                 candidates=[self._candidate(uow, dict(row), project_id) for row in rows]
@@ -824,6 +827,11 @@ class ShotTextBindingRepository:
             reader.row_factory = sqlite3.Row
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
+        if expected_head == 0 and binding_id is not None:
+            raise ShotTextBindingValidationError(
+                "set head 0 requires a complete friendly selector, not binding_id",
+                detail="expected_head",
+            )
         if expected_head == 0 and binding_id is None:
             if shot_ref is None or kind is None:
                 raise ShotTextBindingValidationError(
@@ -839,8 +847,6 @@ class ShotTextBindingRepository:
             existing = _reader_query_one(reader,
                 "SELECT * FROM shot_text_bindings WHERE id = ?", (derived_id,)
             )
-            if existing is not None:
-                self._validate_binding_authority(reader, existing, project_id=project_id)
             return natural[1], kind, slot, derived_id, existing
 
         target = self._resolve_binding(
@@ -850,6 +856,7 @@ class ShotTextBindingRepository:
             shot_ref=shot_ref,
             kind=kind,
             slot=slot,
+            validate_authority=False,
         )
         natural = (
             project_id,
@@ -874,7 +881,7 @@ class ShotTextBindingRepository:
         """Prepare canonical set facts on a read-only snapshot."""
         if not isinstance(frozen, FrozenTextBytes):
             raise ShotTextBindingValidationError("frozen text bytes are required")
-        shot_id, kind, slot, resolved_id, target = self._prepared_target(
+        shot_id, kind, slot, resolved_id, _target = self._prepared_target(
             reader,
             project_id=project_id,
             expected_head=expected_head,
@@ -884,13 +891,6 @@ class ShotTextBindingRepository:
             slot=slot,
         )
         stream_id = derive_text_binding_stream_id(resolved_id)
-        desired = (
-            self._media.read_project_media(
-                reader, project_id=project_id, content_hash=frozen.digest
-            )
-            if self._media is not None
-            else None
-        )
         return _PreparedTextBindingCommand(
             project_id=project_id,
             natural_tuple=(project_id, shot_id, kind, slot),
@@ -898,7 +898,6 @@ class ShotTextBindingRepository:
             event_stream_id=stream_id,
             expected_head=expected_head,
             desired_content_hash=frozen.digest,
-            desired_media_id=desired.id if desired is not None else None,
         )
 
     def prepare_rebind(
@@ -1042,6 +1041,11 @@ class ShotTextBindingRepository:
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
         idempotency_key = _require_key(idempotency_key)
+        if expected_head == 0 and binding_id is not None:
+            raise ShotTextBindingValidationError(
+                "set head 0 requires a complete friendly selector, not binding_id",
+                detail="expected_head",
+            )
         if self._media is None:
             raise ShotTextBindingValidationError("a Core MediaRepository is required")
         if prepared is None:

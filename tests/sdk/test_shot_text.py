@@ -5,6 +5,8 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from astrid.application import compose_standard_application
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs.shots.repository import ShotRepository
@@ -237,20 +239,74 @@ def test_list_supports_friendly_and_exact_modes(tmp_path: Path) -> None:
         assert exact.data[0]["slot"] == "regen-glitch"
 
 
-def test_friendly_and_exact_set_replay_share_canonical_receipt(tmp_path: Path) -> None:
+def test_positive_head_friendly_and_exact_set_replay_share_canonical_receipt(
+    tmp_path: Path,
+) -> None:
     with compose_standard_application(projects_root=tmp_path) as app:
         project_id, shot_id = _seed(app)
         first = app.shots_service.set_text_binding(
             project_id, shot_ref="Opening", kind="transcript", text=b"same",
             expected_head=0, idempotency_key="canonical-set",
         )
-        replay = app.shots_service.set_text_binding(
-            project_id, binding_id=first.data["binding"]["binding_id"], text=b"same",
-            expected_head=0, idempotency_key="canonical-set",
+        changed = app.shots_service.set_text_binding(
+            project_id, shot_ref="Opening", kind="transcript", text=b"changed",
+            expected_head=1, idempotency_key="canonical-positive-set",
         )
-        assert replay.as_dict() == first.as_dict()
-        assert replay.receipt.request_hash == first.receipt.request_hash
+        replay = app.shots_service.set_text_binding(
+            project_id, binding_id=first.data["binding"]["binding_id"], text=b"changed",
+            expected_head=1, idempotency_key="canonical-positive-set",
+        )
+        assert changed.ok and replay.ok
+        assert replay.as_dict() == changed.as_dict()
+        assert replay.receipt.request_hash == changed.receipt.request_hash
         assert replay.data["binding"]["binding_id"] != shot_id
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_exact_binding_id_head_zero_is_rejected_before_uow(
+    tmp_path: Path, monkeypatch, existing: bool
+) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, _shot_id = _seed(app)
+        binding_id = "missing-binding-id"
+        if existing:
+            created = app.shots_service.set_text_binding(
+                project_id, shot_ref="Opening", kind="transcript", text=b"stable",
+                expected_head=0, idempotency_key="head-zero-setup",
+            )
+            binding_id = created.data["binding"]["binding_id"]
+        before = app.writer.submit(
+            lambda session: session.query_one(
+                "SELECT (SELECT COUNT(*) FROM events), "
+                "(SELECT COUNT(*) FROM command_receipts), "
+                "(SELECT COUNT(*) FROM shot_text_bindings)"
+            )
+        )
+        calls = 0
+        original_run = __import__("astrid.sdk.shots", fromlist=["UnitOfWork"]).UnitOfWork.run
+
+        def counted(self, callback):
+            nonlocal calls
+            calls += 1
+            return original_run(self, callback)
+
+        monkeypatch.setattr("astrid.sdk.shots.UnitOfWork.run", counted)
+        result = app.shots_service.set_text_binding(
+            project_id, binding_id=binding_id, text=b"rejected",
+            expected_head=0, idempotency_key=f"head-zero-{existing}",
+        )
+        after = app.writer.submit(
+            lambda session: session.query_one(
+                "SELECT (SELECT COUNT(*) FROM events), "
+                "(SELECT COUNT(*) FROM command_receipts), "
+                "(SELECT COUNT(*) FROM shot_text_bindings)"
+            )
+        )
+        assert result.ok is False
+        assert result.error.code == "validation_error"
+        assert result.error.details["reason"] == "expected_head"
+        assert calls == 0
+        assert tuple(after) == tuple(before)
 
 
 def test_friendly_and_exact_rebind_replay_share_canonical_receipt(tmp_path: Path) -> None:

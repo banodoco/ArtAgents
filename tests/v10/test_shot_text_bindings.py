@@ -261,6 +261,111 @@ def test_authority_corruption_is_rejected_before_any_write(text_env) -> None:
     assert tuple(after) == tuple(before)
 
 
+@pytest.mark.parametrize("selector", ["exact", "friendly"])
+@pytest.mark.parametrize(
+    ("column", "value", "detail"),
+    [
+        ("project_id", "foreign-project", "binding_stream_project_mismatch"),
+        ("stream_type", "wrong.stream", "binding_stream_type_mismatch"),
+        ("aggregate_id", "wrong-aggregate", "binding_stream_aggregate_mismatch"),
+    ],
+)
+def test_corrupt_stream_authority_is_zero_write_for_exact_and_friendly_set(
+    text_env, selector: str, column: str, value: str, detail: str
+) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    created = UnitOfWork(text_env["writer"]).run(
+        lambda u: text_env["bindings"].set(
+            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
+            text=b"stable", expected_head=0, idempotency_key=f"stream-{column}",
+        )
+    )
+    stream_id = created.binding.event_stream_id
+    if column == "project_id":
+        value = _create_project(
+            text_env, slug=f"foreign-stream-{selector}"
+        ).id
+    text_env["writer"].submit(
+        lambda s: s.execute(
+            f"UPDATE event_streams SET {column} = ? WHERE id = ?",
+            (value, stream_id),
+        )
+    )
+    before = text_env["writer"].submit(
+        lambda s: s.query_one(
+            "SELECT b.media_id, b.updated_at, s.head_seq, "
+            "(SELECT COUNT(*) FROM events), "
+            "(SELECT COUNT(*) FROM command_receipts), "
+            "(SELECT COUNT(*) FROM media) "
+            "FROM shot_text_bindings b JOIN event_streams s "
+            "ON s.id = b.event_stream_id WHERE b.id = ?",
+            (created.binding.binding_id,),
+        )
+    )
+    request = {
+        "project_id": project.id,
+        "text": b"next",
+        "expected_head": 1,
+        "idempotency_key": f"stream-corrupt-{selector}-{column}",
+    }
+    if selector == "exact":
+        request["binding_id"] = created.binding.binding_id
+    else:
+        request.update({"shot_ref": shot.id, "kind": "transcript"})
+    with pytest.raises(ShotTextBindingIntegrityError) as exc_info:
+        UnitOfWork(text_env["writer"]).run(
+            lambda u: text_env["bindings"].set(u, **request)
+        )
+    after = text_env["writer"].submit(
+        lambda s: s.query_one(
+            "SELECT b.media_id, b.updated_at, s.head_seq, "
+            "(SELECT COUNT(*) FROM events), "
+            "(SELECT COUNT(*) FROM command_receipts), "
+            "(SELECT COUNT(*) FROM media) "
+            "FROM shot_text_bindings b JOIN event_streams s "
+            "ON s.id = b.event_stream_id WHERE b.id = ?",
+            (created.binding.binding_id,),
+        )
+    )
+    assert exc_info.value.detail == detail
+    assert tuple(after) == tuple(before)
+
+
+def test_receipt_replay_checks_before_full_stream_authority(text_env, monkeypatch) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    created = UnitOfWork(text_env["writer"]).run(
+        lambda u: text_env["bindings"].set(
+            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
+            text=b"stable", expected_head=0, idempotency_key="replay-create",
+        )
+    )
+    changed = UnitOfWork(text_env["writer"]).run(
+        lambda u: text_env["bindings"].set(
+            u, project_id=project.id, shot_ref=shot.id, kind="transcript",
+            text=b"changed", expected_head=1, idempotency_key="replay-changed",
+        )
+    )
+    text_env["writer"].submit(
+        lambda s: s.execute(
+            "UPDATE event_streams SET stream_type = ? WHERE id = ?",
+            ("wrong.stream", created.binding.event_stream_id),
+        )
+    )
+    monkeypatch.setattr(
+        text_env["bindings"], "_validate_binding_authority",
+        lambda *args, **kwargs: pytest.fail("replay performed full authority validation"),
+    )
+    replay = UnitOfWork(text_env["writer"]).run(
+        lambda u: text_env["bindings"].set(
+            u, project_id=project.id, binding_id=created.binding.binding_id,
+            text=b"changed", expected_head=1, idempotency_key="replay-changed",
+        )
+    )
+    assert replay.binding == changed.binding
+
+
 @pytest.mark.parametrize(
     ("column", "value", "detail"),
     [

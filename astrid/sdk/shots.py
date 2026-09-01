@@ -47,6 +47,7 @@ from astrid.packs.shots.repository import (
 from astrid.packs.shots.text_bindings import (
     SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
     SHOT_TEXT_BINDING_SET_COMMAND_KIND,
+    ShotTextBindingValidationError,
     ShotTextBindingRepository,
     freeze_text_bytes,
 )
@@ -431,6 +432,11 @@ class ShotsService:
         key = idempotency_key if isinstance(idempotency_key, str) else ""
         try:
             key = self._resolve_key(idempotency_key)
+            if expected_head == 0 and binding_id is not None:
+                raise ShotTextBindingValidationError(
+                    "set head 0 requires a complete friendly selector, not binding_id",
+                    detail="expected_head",
+                )
             frozen = freeze_text_bytes(text)
             project_id = self._projects.resolve(self._writer, project)
             if self._text_bindings is None:
