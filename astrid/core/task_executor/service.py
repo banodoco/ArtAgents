@@ -71,7 +71,6 @@ from astrid.core.receipts.canonical import (
 )
 from astrid.core.repositories.tasks import (
     CORE_TASK_COMPLETE_COMMAND_KIND,
-    DEFAULT_LEASE_SECONDS,
     TaskAttemptNotFoundError,
     TaskAttemptReadModel,
     TaskCompleteReadModel,
@@ -697,6 +696,7 @@ class ExecutionService:
                 command_kind=command_kind
                 if command_kind is not None
                 else "core.task.fail",
+                update_run_projection=True,
             )
 
         return uow.run(run)

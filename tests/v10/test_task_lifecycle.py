@@ -43,12 +43,10 @@ from astrid.core.repositories.tasks import (
     CORE_TASK_EXPIRED_EVENT_KIND,
     CORE_TASK_FAIL_COMMAND_KIND,
     CORE_TASK_FAILED_EVENT_KIND,
-    CORE_TASK_RETRY_COMMAND_KIND,
     CORE_TASK_RETRIED_EVENT_KIND,
-    CORE_TASK_START_COMMAND_KIND,
+    CORE_TASK_RETRY_COMMAND_KIND,
     CORE_TASK_STARTED_EVENT_KIND,
     CORE_TASK_STREAM_TYPE,
-    DEFAULT_LEASE_SECONDS,
     TaskAttemptNotFoundError,
     TaskCancelReadModel,
     TaskClaimReadModel,
@@ -471,7 +469,7 @@ def test_start_event_has_project_ordering_and_chain(task_env) -> None:
     claim = _claim(task_env, project_id=project.id)
     assert claim is not None
     project_head_before = _project_head(task_env.writer, project.id)
-    started = _start(
+    _start(
         task_env,
         project_id=project.id,
         task_id=task.id,
@@ -1300,22 +1298,16 @@ def test_cancel_running_task_terminates_owned_attempt(task_env) -> None:
     assert _claim(task_env, project_id=project.id, idempotency_key="cancel-claim-2") is None
 
 
-def test_cancel_fences_running_attempt(task_env) -> None:
+def test_cancel_running_attempt_supports_operator_cooperation(task_env) -> None:
     project = _create_project(task_env)
     task = _admit(task_env, project_id=project.id)
     claim = _claim(task_env, project_id=project.id)
     assert claim is not None
     counts = _counts(task_env.writer)
 
-    # Running cancellation without the fence facts is a validation error.
-    with pytest.raises(TaskValidationError):
-        _cancel(
-            task_env,
-            project_id=project.id,
-            task_id=task.id,
-            idempotency_key="cancel-no-fence-k",
-        )
-    # Wrong lease: the caller does not own the attempt.
+    # Partial fences remain a caller error: an executor must provide all
+    # attempt/lease/version facts or none. The latter is the operator's
+    # cooperative cancellation path.
     with pytest.raises(TaskTransitionError) as excinfo:
         _cancel(
             task_env,
@@ -1353,6 +1345,21 @@ def test_cancel_fences_running_attempt(task_env) -> None:
     assert _counts(task_env.writer) == counts
     assert _task_row(task_env.writer, task.id)["status"] == "running"
     assert _attempt_rows(task_env.writer, task.id)[0]["status"] == "claimed"
+
+    # Operators do not need executor-private fence facts. The single writer
+    # terminates the live attempt and task atomically.
+    result = _cancel(
+        task_env,
+        project_id=project.id,
+        task_id=task.id,
+        idempotency_key="cancel-no-fence-k",
+    )
+    assert result.task.status == "cancelled"
+    assert result.attempt is not None
+    assert result.attempt.status == "cancelled"
+    assert result.execution_guidance is not None
+    assert _task_row(task_env.writer, task.id)["status"] == "cancelled"
+    assert _attempt_rows(task_env.writer, task.id)[0]["status"] == "cancelled"
 
 
 def test_cancel_terminal_task_is_typed_outcome_and_writer_order_wins(task_env) -> None:

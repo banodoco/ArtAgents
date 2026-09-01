@@ -87,12 +87,13 @@ def test_real_repository_tree_is_never_mutated() -> None:
     for pack in DOMAIN_PACKS:
         assert (REPO_ROOT / "astrid" / "packs" / pack).is_dir(), pack
     assert packs_module.STANDARD_SCHEMA_PACKS == DOMAIN_PACKS
-    # The in-tree manifests are still exactly the three domain packs.
+    # The three standard packs remain registered explicitly. Optional schema
+    # packs may also ship in-tree without joining that composition.
     discovered = sorted(
         path.parent.name
         for path in (REPO_ROOT / "astrid" / "packs").glob("*/schema-pack.yaml")
     )
-    assert discovered == sorted(DOMAIN_PACKS)
+    assert discovered == sorted((*DOMAIN_PACKS, "runaway"))
 
 
 def test_temp_copy_removes_source_and_registration_deterministically(

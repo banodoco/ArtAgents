@@ -59,16 +59,12 @@ from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.migrations.catalog import FORBIDDEN_TABLES
 from astrid.core.receipts import ReceiptMismatchError
 from astrid.core.repositories.runs import (
-    CORE_RUN_CANCEL_COMMAND_KIND,
     CORE_RUN_CANCELLED_EVENT_KIND,
     CORE_RUN_CONTINUE_COMMAND_KIND,
     CORE_RUN_CONTINUED_EVENT_KIND,
-    CORE_RUN_CREATE_COMMAND_KIND,
     CORE_RUN_CREATED_EVENT_KIND,
-    CORE_RUN_RETRY_COMMAND_KIND,
     CORE_RUN_RETRIED_EVENT_KIND,
     CORE_RUN_STREAM_TYPE,
-    CORE_TASK_CREATED_EVENT_KIND,
     CORE_TASK_STREAM_TYPE,
     RunCancelReadModel,
     RunContinuationReadModel,
@@ -77,13 +73,9 @@ from astrid.core.repositories.runs import (
     RunRetryReadModel,
     RunStaleHeadError,
     RunTerminalError,
-    RunValidationError,
 )
 from astrid.core.repositories.tasks import (
-    CORE_TASK_CANCEL_COMMAND_KIND,
     CORE_TASK_CANCELLED_EVENT_KIND,
-    CORE_TASK_RETRY_COMMAND_KIND,
-    CORE_TASK_RETRIED_EVENT_KIND,
     TaskRepository,
     TaskTransitionError,
 )
@@ -442,15 +434,15 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
         idempotency_key="journey-fanout",
         children=[
             _child(task_id=t0, priority=10, max_attempts=1),
-            _child(
-                task_id=t1,
-                priority=8,
+                _child(
+                    task_id=t1,
+                    priority=8,
                 max_attempts=1,
                 dependencies=[{"task_id": t0, "kind": "hard", "ordinal": 0}],
             ),
-            _child(
-                task_id=t2,
-                priority=6,
+                _child(
+                    task_id=t2,
+                    priority=6,
                 max_attempts=1,
                 dependencies=[{"task_id": t0, "kind": "soft", "ordinal": 0}],
             ),
@@ -647,7 +639,7 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
             lambda u: env.task_repo.retry(
                 u,
                 project_id=project.id,
-                task_id=t2,
+                task_id=t1,
                 idempotency_key="journey-retry-terminal",
                 now=TS2,
             )
@@ -705,7 +697,7 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
     ]
 
     # ------------------------------------------------------------------
-    # Phase D — eligible group cancel with running-child exclusion.
+    # Phase D — eligible group cancel with cooperative running cancellation.
     # ------------------------------------------------------------------
     cancelled = _group_cancel(
         env,
@@ -715,33 +707,25 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
         cancel_request_id="journey-cancel-req-1",
     )
     assert isinstance(cancelled, RunCancelReadModel)
-    # t4 (blocked) and t6 (queued) are eligible; t3 and t5 are running
-    # (owned attempts) and t0/t1/t2 already terminal: all skipped untouched.
-    assert cancelled.cancelled_task_ids == (t4, t6)
-    assert cancelled.skipped_task_ids == (t0, t1, t2, t3, t5)
+    # t3/t5 (running), t4 (blocked), and t6 (queued) are eligible; only
+    # t0/t1/t2 are already terminal and skipped.
+    assert cancelled.cancelled_task_ids == (t3, t4, t5, t6)
+    assert cancelled.skipped_task_ids == (t0, t1, t2)
+    assert cancelled.cooperative_task_ids == (t3, t5)
     assert cancelled.cancel_request_id == "journey-cancel-req-1"
-    assert cancelled.run["status"] == "running"
+    assert cancelled.run["status"] == "failed"
     assert cancelled.run["total_children"] == 7
     assert cancelled.run["succeeded"] == 2
     assert cancelled.run["failed"] == 1
-    assert cancelled.run["cancelled"] == 2
-    for task_id in (t4, t6):
+    assert cancelled.run["cancelled"] == 4
+    for task_id in (t3, t4, t5, t6):
         row = _task_row(env.writer, task_id)
         assert row["status"] == "cancelled"
         assert row["cancel_request_id"] == "journey-cancel-req-1"
         assert row["finished_at"] == TS
-        assert [
-            e["kind"] for e in _event_rows(env.writer, f"{task_id}:{CORE_TASK_STREAM_TYPE}")
-        ] == [CORE_TASK_CREATED_EVENT_KIND, CORE_TASK_CANCELLED_EVENT_KIND]
-    # Running children excluded: their rows, attempts, and streams are
-    # untouched (no cancelled event, no new attempt, no request id).
-    for task_id in (t3, t5):
-        row = _task_row(env.writer, task_id)
-        assert row["status"] == "running"
-        assert row["cancel_request_id"] is None
-        assert [
-            e["kind"] for e in _event_rows(env.writer, f"{task_id}:{CORE_TASK_STREAM_TYPE}")
-        ][-1] != CORE_TASK_CANCELLED_EVENT_KIND
+        assert _event_rows(
+            env.writer, f"{task_id}:{CORE_TASK_STREAM_TYPE}"
+        )[-1]["kind"] == CORE_TASK_CANCELLED_EVENT_KIND
     assert [e["kind"] for e in _event_rows(env.writer, run_stream)] == [
         CORE_RUN_CREATED_EVENT_KIND,
         CORE_RUN_CONTINUED_EVENT_KIND,
@@ -749,81 +733,36 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
         CORE_RUN_CANCELLED_EVENT_KIND,
     ]
     cancelled_event = json.loads(_event_rows(env.writer, run_stream)[3]["payload_json"])["data"]
-    assert cancelled_event["cancelled_task_ids"] == [t4, t6]
-    assert cancelled_event["skipped_task_ids"] == [t0, t1, t2, t3, t5]
-    assert cancelled_event["status"] == "running"
+    assert cancelled_event["cancelled_task_ids"] == [t3, t4, t5, t6]
+    assert cancelled_event["skipped_task_ids"] == [t0, t1, t2]
+    assert cancelled_event["status"] == "failed"
 
     # ------------------------------------------------------------------
-    # Phase E — the running child's owned attempt fails terminally.
+    # Phase E — every child is terminal after cooperative group cancel.
     # ------------------------------------------------------------------
-    claim_t5 = _attempt_rows(env.writer, t5)[0]
-    _fail(
-        env,
-        project_id=project.id,
-        task_id=t5,
-        attempt_id=claim_t5["id"],
-        lease_id=claim_t5["lease_id"],
-        status_version=2,
-        idempotency_key="journey-fail-t5",
-    )
-    assert _task_row(env.writer, t5)["status"] == "failed"
-    # t3 still runs, so the derived run status stays running.
-    assert _derive(env, project_id=project.id, run_id=fanout.run_id).status == "running"
-
-    # ------------------------------------------------------------------
-    # Phase F — the retried child succeeds; every child terminal -> failed.
-    # ------------------------------------------------------------------
-    claim_t3 = _attempt_rows(env.writer, t3)[1]
-    started = _start(
-        env,
-        project_id=project.id,
-        claim=SimpleNamespace(
-            task=SimpleNamespace(id=t3),
-            attempt=SimpleNamespace(
-                id=claim_t3["id"],
-                lease_id=claim_t3["lease_id"],
-                status_version=claim_t3["status_version"],
-            ),
-        ),
-        idempotency_key="journey-start-t3-2",
-        now=TS2,
-    )
-    _complete(
-        env,
-        project_id=project.id,
-        task_id=t3,
-        attempt_id=claim_t3["id"],
-        lease_id=claim_t3["lease_id"],
-        status_version=started.status_version,
-        outputs=[_prepare_output(env, name="t3.png", content=b"t3-bytes")],
-        idempotency_key="journey-complete-t3",
-        now=TS2,
-    )
-    assert _task_row(env.writer, t3)["status"] == "succeeded"
-    # The run is terminal: any failed child wins the derived status.
     progress = _derive(env, project_id=project.id, run_id=fanout.run_id)
     assert progress.status == "failed"
     assert progress.total_children == 7
-    assert progress.succeeded == 3 and progress.failed == 2 and progress.cancelled == 2
+    assert progress.succeeded == 2 and progress.failed == 1 and progress.cancelled == 4
     assert progress.ordered == (
         (0, t0, "succeeded"),
         (1, t1, "succeeded"),
         (2, t2, "failed"),
-        (3, t3, "succeeded"),
+        (3, t3, "cancelled"),
         (4, t4, "cancelled"),
-        (5, t5, "failed"),
+        (5, t5, "cancelled"),
         (6, t6, "cancelled"),
     )
     run_row = _run_row(env.writer, fanout.run_id)
     assert run_row["status"] == "failed"
-    assert run_row["finished_at"] == TS2
+    assert run_row["finished_at"] == TS
     # The persisted projection is exactly the shared derivation's output —
     # the only progress storage; no cursor or mutable aggregate exists.
     assert json.loads(run_row["result_json"]) == {
         "total_children": 7,
-        "succeeded": 3,
-        "failed": 2,
-        "cancelled": 2,
+        "succeeded": 2,
+        "failed": 1,
+        "cancelled": 4,
         "status": "failed",
     }
     # Stable ordinal progress across both chunks, unchanged by every phase.
@@ -854,14 +793,15 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
             idempotency_key="journey-cancel-terminal",
         )
     assert excinfo.value.status == "failed"
-    with pytest.raises(RunTerminalError) as excinfo:
+    with pytest.raises(TaskTransitionError) as excinfo:
         _group_retry(
             env,
             project_id=project.id,
             run_id=fanout.run_id,
             idempotency_key="journey-retry-terminal-run",
+            selected_task_ids=[t0],
         )
-    assert excinfo.value.status == "failed"
+    assert excinfo.value.reason == "task_terminal"
     assert _counts(env.writer) == counts_before
 
     # ------------------------------------------------------------------
@@ -873,9 +813,13 @@ def test_multi_task_journey_spans_chunks_and_derives_run_state(journey_env) -> N
     assert "change_cursor" not in tables
     assert _task_row(env.writer, fanout.run_id) is None
     assert _counts(env.writer)[6] == 0
-    # The winning attempt is the retried attempt 2, never the stale one.
-    winning = _task_row(env.writer, t3)["winning_attempt_id"]
-    assert winning == _attempt_rows(env.writer, t3)[1]["id"]
+    # Cancellation never declares a winning attempt; both t3 attempts are
+    # preserved as history and the live attempt is terminally cancelled.
+    assert _task_row(env.writer, t3)["winning_attempt_id"] is None
+    assert [row["status"] for row in _attempt_rows(env.writer, t3)] == [
+        "failed",
+        "cancelled",
+    ]
 
 
 def test_multi_task_journey_continuation_replay_and_mismatch(journey_env) -> None:

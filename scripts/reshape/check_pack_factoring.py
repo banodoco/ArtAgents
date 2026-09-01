@@ -257,7 +257,12 @@ def _patch_packs_init(packs_init: Path, removed_pack: str) -> None:
         for line in _TIMELINE_IMPORT_LINES:
             if line not in new_text:
                 raise RuntimeError(f"expected timeline import line missing: {line!r}")
-            new_text = new_text.replace(line, "")
+            # Keep source line numbers stable: the authority lint's frozen
+            # writer identities include the two composition-root call sites.
+            # Removing an import outright would shift those identities in the
+            # temporary copy and make a reduced-pack check look like a new
+            # writer authority.
+            new_text = new_text.replace(line, "\n")
     packs_init.write_text(new_text, encoding="utf-8")
 
 

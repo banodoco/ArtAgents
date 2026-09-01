@@ -355,7 +355,8 @@ def run_product_family(
         raise ProductRegistryError(
             f"family parser module {module.__name__!r} has no build_parser()"
         )
-    parsed = build_parser(client).parse_args(list(args))
+    parser = build_parser(client)
+    parsed = parser.parse_args(list(args))
     handler = getattr(parsed, "handler", None)
     if handler is None:
         raise ProductRegistryError(
@@ -393,22 +394,20 @@ def run_product_family(
                 as_json=bool(getattr(parsed, "json", False)),
             )
         if selected is None:
-            from astrid.core.cli.domain_output import print_result
-            from astrid.sdk.contracts import DomainResult, ErrorObject
-
-            return print_result(
-                DomainResult.failure(
-                    ErrorObject(
-                        code="validation_error",
-                        message="no current project is selected; pass --project or run projects select",
-                        details={
-                            "field": "project",
-                            "reason": "no_current_project",
-                            "recovery": "run `astrid projects select <slug-or-id>` or pass --project",
-                        },
-                    )
-                ),
-                as_json=bool(getattr(parsed, "json", False)),
-            )
+            # Task identity and event reads are globally unique kernel reads;
+            # their SDK methods deliberately accept an omitted project and
+            # can therefore be used without a workspace selection. Every
+            # other project-scoped command needs an address before dispatch.
+            # Make that absence a parser/usage error (exit 2), rather than a
+            # domain failure (exit 1), so the CLI contract is consistent with
+            # other missing required arguments.
+            if not (
+                family == "tasks"
+                and getattr(parsed, "command", None) in {"show", "events"}
+            ):
+                parser.error(
+                    "the following arguments are required: --project "
+                    "(or select a current project)"
+                )
         parsed.project = selected
     return int(handler(parsed))

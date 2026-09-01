@@ -36,10 +36,10 @@ import uuid
 from typing import Any
 
 from astrid.core.conformance.kit import (
+    TS,
     CommandSpec,
     ConformanceContext,
     ConformanceError,
-    TS,
 )
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.receipts import ReceiptMismatchError
@@ -332,6 +332,20 @@ def _prepare_archive(
             name=f"Prepared {key}",
             media_id=_media_id("a"),
             key=f"prepare-{key}-ref-a",
+        )
+        # The mismatch probe deliberately addresses a different existing
+        # reference under the same idempotency key.  Keep that target present
+        # so archive reaches its receipt gate instead of failing address
+        # resolution with ReferenceNotFoundError.
+        _create_reference(
+            context,
+            uow,
+            project_id=project_id,
+            reference_id=_stable_reference_id(f"prepare-{key}", "other"),
+            kind="place",
+            name=f"Changed {key}",
+            media_id=_media_id("b"),
+            key=f"prepare-{key}-ref-b",
         )
 
     UnitOfWork(writer).run(_run)

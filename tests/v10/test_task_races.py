@@ -36,8 +36,6 @@ resurrection.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from astrid.core.events.service import EventAppendService
@@ -50,9 +48,6 @@ from astrid.core.repositories.tasks import (
     CORE_TASK_CLAIMED_EVENT_KIND,
     CORE_TASK_COMPLETED_EVENT_KIND,
     CORE_TASK_CREATED_EVENT_KIND,
-    CORE_TASK_EXPIRED_EVENT_KIND,
-    CORE_TASK_FAILED_EVENT_KIND,
-    CORE_TASK_RETRIED_EVENT_KIND,
     CORE_TASK_STARTED_EVENT_KIND,
     CORE_TASK_STREAM_TYPE,
     TaskRepository,
@@ -350,7 +345,7 @@ def test_race_queued_cancel_wins_claim_loses_with_no_receipt(env) -> None:
     assert kinds == [CORE_TASK_CREATED_EVENT_KIND, CORE_TASK_CANCELLED_EVENT_KIND]
 
 
-def test_race_claim_wins_fenceless_cancel_rejected_before_mutation(env) -> None:
+def test_race_claim_wins_cooperative_cancel_is_terminal_winner(env) -> None:
     project = _create_project(env)
     task = _admit(env, project_id=project.id)
     receipts_before = _receipt_count(env.writer, project.id)
@@ -360,14 +355,20 @@ def test_race_claim_wins_fenceless_cancel_rejected_before_mutation(env) -> None:
     assert claim is not None and claim.task.id == task.id
     assert _task_row(env.writer, task.id)["status"] == "running"
 
-    # A cancel that presents no running fences is rejected before mutation.
-    with pytest.raises(TaskValidationError) as excinfo:
-        _cancel(env, project_id=project.id, task_id=task.id,
-                idempotency_key="cancel-claimed")
-    assert "requires attempt_id" in str(excinfo.value)
-    assert _receipt_count(env.writer, project.id) == receipts_before + 1  # only claim
-    assert _task_row(env.writer, task.id)["status"] == "running"
-    # No second claim can double-claim the running task.
+    # An operator cancellation intentionally carries no executor-private
+    # fence. The single writer terminates the claimed attempt and task.
+    cancelled = _cancel(
+        env,
+        project_id=project.id,
+        task_id=task.id,
+        idempotency_key="cancel-claimed",
+    )
+    assert cancelled.task.status == "cancelled"
+    assert cancelled.attempt is not None
+    assert cancelled.attempt.status == "cancelled"
+    assert _receipt_count(env.writer, project.id) == receipts_before + 2
+    assert _task_row(env.writer, task.id)["status"] == "cancelled"
+    # No second claim can resurrect the terminal task.
     assert _claim(env, project_id=project.id, idempotency_key="claim-again") is None
 
 

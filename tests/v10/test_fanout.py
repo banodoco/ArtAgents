@@ -22,12 +22,12 @@ T22 scope (plan step 13) proves the group surface:
 
 - ``derive_progress`` derives ordered progress from the child task rows by
   ``run_ordinal`` — no cursor, no persisted mutable progress aggregate;
-- receipt-protected ``cancel`` drives eligible queued/blocked children to
-  the terminal ``cancelled`` state through the shared task-cancel predicate
-  (skipping already-terminal and running children), recomputes the run
-  projection (``succeeded``/``failed``/``cancelled`` when every child is
-  terminal), appends ``core.run.cancelled``, and records one run-level
-  receipt;
+- receipt-protected ``cancel`` drives eligible queued/blocked/running children
+  to the terminal ``cancelled`` state through the shared task-cancel
+  predicate (running children cooperatively, skipping already-terminal
+  children), recomputes the run projection
+  (``succeeded``/``failed``/``cancelled`` when every child is terminal),
+  appends ``core.run.cancelled``, and records one run-level receipt;
 - receipt-protected ``retry`` restarts all eligible children (or an
   explicit subset) through the shared task-retry predicate and the shared
   retry-eligibility check, recomputes the projection, appends
@@ -48,7 +48,6 @@ from astrid.core.migrations.catalog import FORBIDDEN_TABLES
 from astrid.core.receipts import ReceiptMismatchError
 from astrid.core.repositories import (
     RunAlreadyExistsError,
-    RunFanOutReadModel,
     RunNotFoundError,
     RunRepositoryError,
     RunValidationError,
@@ -60,8 +59,8 @@ from astrid.core.repositories.runs import (
     CORE_RUN_CONTINUED_EVENT_KIND,
     CORE_RUN_CREATE_COMMAND_KIND,
     CORE_RUN_CREATED_EVENT_KIND,
-    CORE_RUN_RETRY_COMMAND_KIND,
     CORE_RUN_RETRIED_EVENT_KIND,
+    CORE_RUN_RETRY_COMMAND_KIND,
     CORE_RUN_STREAM_TYPE,
     CORE_TASK_CREATED_EVENT_KIND,
     CORE_TASK_STREAM_TYPE,
@@ -81,7 +80,6 @@ from astrid.core.repositories.tasks import (
     CORE_TASK_CANCEL_COMMAND_KIND,
     CORE_TASK_CANCELLED_EVENT_KIND,
     CORE_TASK_RETRY_COMMAND_KIND,
-    CORE_TASK_RETRIED_EVENT_KIND,
     TaskDependencyError,
     TaskRepository,
     TaskTransitionError,
@@ -1542,7 +1540,7 @@ def test_group_cancel_cancels_eligible_children_and_recomputes_projection(run_en
     assert counts_after[6] == counts_before[6]
 
 
-def test_group_cancel_skips_terminal_and_running_children(run_env) -> None:
+def test_group_cancel_skips_terminal_and_cooperatively_cancels_running_children(run_env) -> None:
     project = _create_project(run_env)
     child_a = generate_lowercase_ulid()
     child_b = generate_lowercase_ulid()
@@ -1572,20 +1570,20 @@ def test_group_cancel_skips_terminal_and_running_children(run_env) -> None:
         run_env, project_id=project.id, run_id=result.run_id,
         idempotency_key="group-cancel-partial-k",
     )
-    # Only the queued child C is group-cancellable; A (terminal) and B
-    # (running, owned attempt) are skipped.
-    assert cancelled.cancelled_task_ids == (child_c,)
-    assert cancelled.skipped_task_ids == (child_a, child_b)
-    # B is still running, so the run is not all-terminal: it stays running
-    # with the refreshed derived counts (one failed, one cancelled).
-    assert cancelled.run["status"] == "running"
+    # C is queued and B is running; both are group-cancellable. A is already
+    # terminal and is the only skipped child. Running cancellation is
+    # cooperative and reports B explicitly.
+    assert cancelled.cancelled_task_ids == (child_b, child_c)
+    assert cancelled.skipped_task_ids == (child_a,)
+    assert cancelled.cooperative_task_ids == (child_b,)
+    # Every child is terminal, so the failed child determines the run status.
+    assert cancelled.run["status"] == "failed"
     assert cancelled.run["failed"] == 1
-    assert cancelled.run["cancelled"] == 1
+    assert cancelled.run["cancelled"] == 2
     run_row = _run_row(run_env.writer, result.run_id)
-    assert run_row["status"] == "running"
-    assert run_row["finished_at"] is None
-    # The running child was not touched.
-    assert _task_row(run_env.writer, child_b)["status"] == "running"
+    assert run_row["status"] == "failed"
+    assert run_row["finished_at"] == TS
+    assert _task_row(run_env.writer, child_b)["status"] == "cancelled"
 
 
 def test_group_cancel_and_retry_reject_terminal_run_before_mutation(run_env) -> None:
@@ -1617,9 +1615,18 @@ def test_group_cancel_and_retry_reject_terminal_run_before_mutation(run_env) -> 
         _group_cancel(run_env, project_id=project.id, run_id=result.run_id, idempotency_key="term-cancel-2")
     assert excinfo.value.run_id == result.run_id
     assert excinfo.value.status == "failed"
-    with pytest.raises(RunTerminalError) as excinfo:
-        _group_retry(run_env, project_id=project.id, run_id=result.run_id, idempotency_key="term-retry-k")
-    assert excinfo.value.status == "failed"
+    # Failed invocation runs are deliberately recoverable once; selecting an
+    # already-cancelled child still fails before mutation through the shared
+    # task terminal fence.
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _group_retry(
+            run_env,
+            project_id=project.id,
+            run_id=result.run_id,
+            idempotency_key="term-retry-k",
+            selected_task_ids=[child_b],
+        )
+    assert excinfo.value.reason == "task_terminal"
     assert _counts(run_env.writer) == counts
 
     # A fully-cancelled run is equally terminal for retry.
@@ -1680,16 +1687,12 @@ def test_group_cancel_replay_and_mismatch(run_env) -> None:
 
 def test_group_cancel_with_no_cancellable_children_raises(run_env) -> None:
     project = _create_project(run_env)
-    child = generate_lowercase_ulid()
     result = _fanout(
         run_env,
         project_id=project.id,
-        children=[_child(task_id=child, priority=0)],
+        children=[],
         idempotency_key="group-cancel-none-setup",
     )
-    claim = _claim_child(run_env, project_id=project.id, idempotency_key="none-claim")
-    assert claim is not None and claim.task.id == child
-    _start_child(run_env, project_id=project.id, claim=claim, idempotency_key="none-start")
     counts = _counts(run_env.writer)
     with pytest.raises(RunValidationError) as excinfo:
         _group_cancel(run_env, project_id=project.id, run_id=result.run_id, idempotency_key="group-cancel-none-k")
@@ -2030,6 +2033,5 @@ def test_group_operations_create_no_forbidden_tables(run_env) -> None:
     # No parent task and no evidence rows appeared either.
     assert _task_row(run_env.writer, result.run_id) is None
     assert _counts(run_env.writer)[6] == 0
-
 
 
