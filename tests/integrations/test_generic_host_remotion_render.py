@@ -182,7 +182,11 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     remotion = workspace / "remotion"
-    shutil.copytree(ROOT / "remotion", remotion)
+    shutil.copytree(
+        ROOT / "remotion",
+        remotion,
+        ignore=shutil.ignore_patterns("node_modules"),
+    )
     shutil.copytree(DEPENDENCY_ROOT, remotion / "node_modules", symlinks=True)
     timeline_path, assets_path = _make_media(workspace)
 
