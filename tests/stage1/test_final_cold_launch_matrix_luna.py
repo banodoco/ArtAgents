@@ -40,7 +40,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "0073b427ae63e34a26182be7a85e602fce1b4a04"
+RUNTIME_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
 
 
 def _archive_runtime(destination: Path) -> Path:

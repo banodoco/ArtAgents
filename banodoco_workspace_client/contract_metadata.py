@@ -6,7 +6,7 @@ checkout at import or test time.
 """
 
 SOURCE_REPOSITORY = "https://github.com/banodoco/banodoco-workspace-runtime.git"
-SOURCE_COMMIT = "0073b427ae63e34a26182be7a85e602fce1b4a04"
+SOURCE_COMMIT = "7618aebb754a2d746f459545772487f6364fd677"
 GENERATED_CLIENT_SHA256 = "sha256:a3bb45e05e3aeee758f462ff3975745acdde371cfde4e496a0e632978011fc82"
 
 PROTOCOL = "workspace.v1"
