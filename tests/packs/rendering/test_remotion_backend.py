@@ -544,10 +544,11 @@ def test_protocol_render_returns_valid_namespaced_artifact_shape(tmp_path: Path)
 def test_hype_merged_render_props_match_golden() -> None:
     timeline_path = ROOT / "examples" / "hype.timeline.json"
     assets_path = ROOT / "examples" / "hype.assets.json"
-    fallback_theme = ROOT / "themes" / "banodoco-default" / "theme.json"
     assembled = {
         "assets": timeline.load_registry(assets_path),
-        "theme": remotion._resolved_theme_for_render(timeline_path, fallback_theme),
+        # Omitted theme selects the intentional built-in style. Historical
+        # checkout theme paths are no longer a render authority.
+        "theme": remotion._resolved_theme_for_render(timeline_path, None),
         "timeline": remotion._serialize_timeline(
             timeline_path,
             default_theme="banodoco-default",
@@ -685,7 +686,9 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         cmd, kwargs = calls[0]
         self.assertEqual(cmd[0], sys.executable)
         self.assertEqual(Path(cmd[1]), ROOT / "scripts" / "gen_effect_registry.py")
-        self.assertEqual(cmd[2:], ["--theme", str(theme_path)])
+        # Theme is resolved into render props; registry codegen receives no
+        # retired checkout theme override.
+        self.assertEqual(cmd[2:], [])
         self.assertEqual(kwargs["cwd"], str(ROOT))
         env = kwargs["env"]
         self.assertIsInstance(env, dict)
@@ -787,7 +790,6 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
             with (
                 mock.patch.object(render_remotion, "_effective_registry_state", side_effect=state_from_component),
                 mock.patch.object(render_remotion, "_registry_output_paths", return_value=generated_outputs),
-                mock.patch.object(render_remotion, "_active_theme_pointer_current", return_value=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
                 render_remotion.render(

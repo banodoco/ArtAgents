@@ -68,14 +68,6 @@ def test_foley_map_stop_after_foley_writes_enriched_manifest_for_resume(
             AssertionError("review should not run when --stop-after foley is set")
         ),
     )
-    monkeypatch.setattr(
-        foley_map,
-        "step_page",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("page should not run when --stop-after foley is set")
-        ),
-    )
-
     out_dir = tmp_path / "run"
     rc = foley_map.main(
         [
@@ -140,14 +132,6 @@ def test_foley_map_stop_after_review_skips_spatial_page(
         return review_path
 
     monkeypatch.setattr(foley_map, "step_review", fake_step_review)
-    monkeypatch.setattr(
-        foley_map,
-        "step_page",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("page should not run when --stop-after review is set")
-        ),
-    )
-
     rc = foley_map.main(
         [
             "--video",

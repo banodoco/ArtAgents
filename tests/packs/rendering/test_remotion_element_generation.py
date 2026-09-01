@@ -91,7 +91,6 @@ class RemotionElementGenerationTest(unittest.TestCase):
             from astrid.core.pack import discover_packs as real_discover_packs
 
             old_tools_dir = gen_effect_registry.TOOLS_DIR
-            old_themes_root = gen_effect_registry.THEMES_ROOT
             old_discover = element_registry.discover_packs
 
             def generated_fingerprint_and_import() -> tuple[str, str]:
@@ -121,7 +120,6 @@ class RemotionElementGenerationTest(unittest.TestCase):
 
             try:
                 gen_effect_registry.TOOLS_DIR = project
-                gen_effect_registry.THEMES_ROOT = workspace / "themes"
                 element_registry.discover_packs = (
                     lambda root=None: real_discover_packs(local_pack.parent)
                 )
@@ -172,7 +170,6 @@ class RemotionElementGenerationTest(unittest.TestCase):
                 self.assertNotEqual(original, after_manifest)
             finally:
                 gen_effect_registry.TOOLS_DIR = old_tools_dir
-                gen_effect_registry.THEMES_ROOT = old_themes_root
                 element_registry.discover_packs = old_discover
 
 

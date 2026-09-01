@@ -31,7 +31,7 @@ def _execute_args(tmp_path: Path, name: str) -> tuple[tuple[Path, Path, Path], d
 class _FakeMaterializer:
     needs_server = False
 
-    def __init__(self, assets_path: Path) -> None:
+    def __init__(self, assets_path: Path, **_kwargs: object) -> None:
         self.staging_dir = assets_path.parent / "materialized"
 
     def __enter__(self) -> _FakeMaterializer:

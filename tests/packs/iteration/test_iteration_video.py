@@ -64,7 +64,7 @@ def test_iteration_lineage_quality_is_conservative_when_parent_ids_resolve() -> 
 
 def test_iteration_rejects_cross_project_runtime_run_without_leaking_data() -> None:
     class Runs:
-        def list(self, project):
+        def list(self, project, **_kwargs):
             assert project == "selected"
             # Generated runtime clients return the canonical page pair,
             # including the terminal null cursor.
@@ -153,14 +153,14 @@ def test_iteration_relation_media_objects_are_not_promoted_to_run_lineage() -> N
 
 def test_iteration_events_drop_mismatched_aggregate_ids() -> None:
     class Runs:
-        def events(self, run_id):
+        def events(self, run_id, **_kwargs):
             return [[
                 {"event_id": "exact", "aggregate_id": run_id},
                 {"event_id": "other", "aggregate_id": ROOT_RUN_ID},
             ], None]
 
     class Tasks:
-        def events(self, task_id):
+        def events(self, task_id, **_kwargs):
             return [[
                 {"event_id": "exact", "aggregate_id": task_id},
                 {"event_id": "other", "aggregate_id": "task-other"},
@@ -257,13 +257,13 @@ def test_iteration_runtime_readers_reject_bare_lists_and_mappings() -> None:
 
 def test_iteration_task_project_mismatch_is_not_attached() -> None:
     class Tasks:
-        def list(self, project):
-            return [{
+        def list(self, project, **_kwargs):
+            return [[{
                 "task_id": "task-secret",
                 "run_id": TARGET_RUN_ID,
                 "project_id": "other-project",
                 "output_artifacts": [{"kind": "secret"}],
-            }]
+            }], None]
 
     runtime = type("Runtime", (), {"tasks": Tasks()})()
     task_records, available = iteration_video._runtime_task_records(runtime, "selected")
@@ -273,8 +273,8 @@ def test_iteration_task_project_mismatch_is_not_attached() -> None:
 
 def test_iteration_task_without_project_ownership_is_not_attached() -> None:
     class Tasks:
-        def list(self, project):
-            return [{"task_id": "task-unowned", "run_id": TARGET_RUN_ID}]
+        def list(self, project, **_kwargs):
+            return [[{"task_id": "task-unowned", "run_id": TARGET_RUN_ID}], None]
 
     runtime = type("Runtime", (), {"tasks": Tasks()})()
     task_records, available = iteration_video._runtime_task_records(runtime, "selected")
@@ -284,13 +284,13 @@ def test_iteration_task_without_project_ownership_is_not_attached() -> None:
 
 def test_iteration_rejects_conflicting_task_project_owners() -> None:
     class Tasks:
-        def list(self, project):
-            return [{
+        def list(self, project, **_kwargs):
+            return [[{
                 "task_id": "task-bound",
                 "run_id": TARGET_RUN_ID,
                 "project_id": "selected",
                 "project_slug": "other-project",
-            }]
+            }], None]
 
     runtime = type("Runtime", (), {"tasks": Tasks()})()
     task_records, available = iteration_video._runtime_task_records(runtime, "selected")
@@ -377,7 +377,7 @@ def test_iteration_video_public_route_materializes_runtime_output_object(tmp_pat
             self.runs = self
             self.media = self
 
-        def list(self, project: str):
+        def list(self, project: str, **_kwargs):
             self.calls.append(("list", project))
             return SimpleNamespace(ok=True, data=[[{
                 "run_id": TARGET_RUN_ID,
@@ -461,24 +461,24 @@ def _runtime_client(*, include_root: bool = False):
     calls: list[tuple[str, str]] = []
 
     class Runs:
-        def list(self, project):
+        def list(self, project, **_kwargs):
             calls.append(("list", project))
             # Match the generated runtime client's paginated read shape.
             return type("Result", (), {"ok": True, "data": [records, None]})()
 
-        def events(self, run_id):
-            return [{"event_id": f"event-{run_id}", "aggregate_id": run_id, "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}]
+        def events(self, run_id, **_kwargs):
+            return [[{"event_id": f"event-{run_id}", "aggregate_id": run_id, "event_type": "run.completed", "payload": {"evidence": [{"id": f"e-{run_id}"}], "receipt": {"id": f"r-{run_id}"}}}], None]
 
     class Tasks:
-        def list(self, project):
+        def list(self, project, **_kwargs):
             return type("Result", (), {"ok": True, "data": [[{
                 "task_id": f"task-{TARGET_RUN_ID}", "run_id": TARGET_RUN_ID,
                 "project_id": project,
                 "output_artifacts": [_artifact("image", "d" * 64)],
             }], None]})()
 
-        def events(self, task_id):
-            return [{"event_id": f"event-{task_id}", "aggregate_id": task_id, "event_type": "task.completed", "payload": {}}]
+        def events(self, task_id, **_kwargs):
+            return [[{"event_id": f"event-{task_id}", "aggregate_id": task_id, "event_type": "task.completed", "payload": {}}], None]
 
     class Media:
         def list_relations(self, project):

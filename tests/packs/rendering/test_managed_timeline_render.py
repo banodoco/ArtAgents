@@ -46,7 +46,9 @@ class _Runtime:
         self.timelines = SimpleNamespace(show=self._show_timeline, list=self._list_timelines)
         # Remote SDK list reads expose the generated client's JSON-safe page
         # pair, including the terminal null cursor.
-        self.media = SimpleNamespace(list=lambda _project: _result([self.media_rows, None]))
+        self.media = SimpleNamespace(
+            list=lambda _project, **_kwargs: _result([self.media_rows, None])
+        )
         self.shots = SimpleNamespace(show=self._show_shot)
 
     def _show_timeline(self, _project: str, ref: str):

@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.rendering.registry import load_default_registries
-from astrid.packs.rendering.executors.render.run import render
+from astrid.core.rendering.service import RenderService
 from astrid.sdk.rendering import support
 from tests.packs.rendering._helpers import _execution_env, _source_video
 
@@ -264,12 +264,11 @@ def test_hyperframes_real_render_through_public_service(tmp_path: Path) -> None:
     output = tmp_path / "hyperframes.mp4"
     try:
         with _execution_env(), _node_on_path(node):
-            published = render(
-                timeline_path=timeline,
-                assets_registry_path=None,
-                out_path=output,
-                backend=HYPERFRAMES_ID,
-                extra_pack_roots=(str(PACK_ROOT),),
+            published = RenderService(extra_pack_roots=(str(PACK_ROOT),)).render(
+                timeline,
+                None,
+                output,
+                selector=HYPERFRAMES_ID,
             )
     except Exception as exc:  # noqa: BLE001 - network/CLI availability
         message = str(exc)
@@ -360,12 +359,11 @@ def test_hyperframes_real_media_render_through_public_service(tmp_path: Path) ->
     output = tmp_path / "hyperframes-media.mp4"
     try:
         with _execution_env(), _node_on_path(node):
-            published = render(
-                timeline_path=timeline,
-                assets_registry_path=assets,
-                out_path=output,
-                backend=HYPERFRAMES_ID,
-                extra_pack_roots=(str(PACK_ROOT),),
+            published = RenderService(extra_pack_roots=(str(PACK_ROOT),)).render(
+                timeline,
+                assets,
+                output,
+                selector=HYPERFRAMES_ID,
             )
     except Exception as exc:  # noqa: BLE001 - network/CLI availability
         message = str(exc)
@@ -506,17 +504,16 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
     output = tmp_path / "combined.mp4"
     try:
         with _execution_env(), _node_on_path(node):
-            published = render(
-                timeline_path=timeline,
-                assets_registry_path=assets,
-                out_path=output,
-                backend="hyperframes.planner",
+            published = RenderService(extra_pack_roots=(str(PACK_ROOT),)).render(
+                timeline,
+                assets,
+                output,
+                selector="hyperframes.planner",
                 audio="rendered",
                 backend_config={
                     "hyperframes.renderer": {},
                     "rendering.remotion": {},
                 },
-                extra_pack_roots=(str(PACK_ROOT),),
             )
     except Exception as exc:  # noqa: BLE001 - network/CLI availability
         message = str(exc)

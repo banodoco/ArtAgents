@@ -311,13 +311,12 @@ def test_failure_captures_complete_bundle(tmp_path: Path) -> None:
         "result.json",
     ]
 
-    timeline = tmp_path / "timeline.json"
-    assets = tmp_path / "assets.json"
-    assert bundle["inputs"]["timeline"] == {
-        "sha256": sha256_file(timeline),
-        "path": f"inputs/{sha256_file(timeline)}",
-    }
-    assert bundle["inputs"]["assets_registry"]["sha256"] == sha256_file(assets)
+    # Runtime documents are authoritative; replay capture does not copy
+    # attempt-local timeline/assets paths into a second source of truth.
+    assert bundle["inputs"] == {}
+    assert json.loads(
+        (bundle_dir / "request.json").read_text(encoding="utf-8")
+    )["timeline_path"] == "<host-path>"
 
     assert bundle["logs"] == {"stdout": "renderer boom", "stderr": "traceback line"}
     # The partial result is persisted as a localized hashed file and only its
@@ -353,12 +352,7 @@ def test_failure_captures_complete_bundle(tmp_path: Path) -> None:
     assert metadata["eligibility"]["trust_method"] == "test"
     assert metadata["trust_method"] == "test"
 
-    # The localized input copies exist and carry the exact bytes.
-    for role in ("timeline", "assets_registry"):
-        descriptor = bundle["inputs"][role]
-        copied = bundle_dir / descriptor["path"]
-        assert copied.is_file()
-        assert sha256_file(copied) == descriptor["sha256"]
+    assert list((bundle_dir / "inputs").iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +509,7 @@ def test_default_sibling_of_output_when_no_root_configured(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_localized_inputs_copied_hashed_without_host_paths(tmp_path: Path) -> None:
+def test_runtime_authority_does_not_copy_attempt_inputs(tmp_path: Path) -> None:
     theme = tmp_path / "theme.json"
     theme.write_text(json.dumps({"name": "fixture-theme"}), encoding="utf-8")
     timeline = tmp_path / "timeline.json"
@@ -545,7 +539,7 @@ def test_localized_inputs_copied_hashed_without_host_paths(tmp_path: Path) -> No
     bundle_dir = bundles[0].parent
     bundle = _load_bundle(bundles[0])
 
-    assert set(bundle["inputs"]) == {"timeline", "assets_registry", "theme"}
+    assert bundle["inputs"] == {}
     host_text = str(tmp_path)
     bundle_text = json.dumps(bundle)
     assert host_text not in bundle_text
@@ -556,42 +550,13 @@ def test_localized_inputs_copied_hashed_without_host_paths(tmp_path: Path) -> No
     localized_request = json.loads(
         (bundle_dir / "request.json").read_text(encoding="utf-8")
     )
-    assert localized_request["timeline_path"] == bundle["inputs"]["timeline"]["path"]
-    assert (
-        localized_request["assets_registry_path"]
-        == bundle["inputs"]["assets_registry"]["path"]
-    )
-
-    # JSON inputs are rewritten so absolute host paths become bundle-relative
-    # references to captured inputs: the copied timeline points at the copied
-    # theme via its hashed name, and no host path survives anywhere.
-    for role, source in (
-        ("timeline", timeline),
-        ("assets_registry", assets),
-        ("theme", theme),
-    ):
-        descriptor = bundle["inputs"][role]
-        copied = bundle_dir / descriptor["path"]
-        assert copied.is_file()
-        assert host_text not in copied.read_text(encoding="utf-8")
-        # The pinned sha256 is the sha of the on-disk (final) copy, so replay
-        # drift verification always matches.
-        assert descriptor["sha256"] == sha256_file(copied)
-
-    theme_descriptor = bundle["inputs"]["theme"]
-    assert theme_descriptor["sha256"] == sha256_file(theme)
-    # The theme itself contains no host paths, so it is copied byte-for-byte.
-    assert (bundle_dir / theme_descriptor["path"]).read_bytes() == theme.read_bytes()
-
-    timeline_copy = (bundle_dir / bundle["inputs"]["timeline"]["path"]).read_text(
-        encoding="utf-8"
-    )
-    assert f'"theme": "inputs/{theme_descriptor["sha256"]}"' in timeline_copy
+    assert localized_request["timeline_path"] == "<host-path>"
+    assert localized_request["assets_registry_path"] == "<host-path>"
+    assert list((bundle_dir / "inputs").iterdir()) == []
 
 
-def test_copied_input_redacts_absolute_host_paths_not_an_input(tmp_path: Path) -> None:
-    """Absolute host paths under the repo/home roots that are NOT captured as
-    inputs are redacted to ``<host-path>``; non-path strings are untouched."""
+def test_replay_request_redacts_attempt_paths_without_input_copies(tmp_path: Path) -> None:
+    """Replay metadata contains no absolute attempt-local paths."""
     from astrid.core.foundation.paths import REPO_ROOT
 
     missing = REPO_ROOT / "definitely-not-a-captured-input.mp4"
@@ -630,13 +595,10 @@ def test_copied_input_redacts_absolute_host_paths_not_an_input(tmp_path: Path) -
 
     bundle_dir = _bundle_dirs(tmp_path / "replays")[0].parent
     bundle = _load_bundle(bundle_dir / BUNDLE_FILENAME)
-    timeline_copy = (bundle_dir / bundle["inputs"]["timeline"]["path"]).read_text(
-        encoding="utf-8"
-    )
-    assert str(missing) not in timeline_copy
-    assert "<host-path>" in timeline_copy
-    assert '"label": "not a path value"' in timeline_copy
-    assert '"duration": 1.5' in timeline_copy
+    assert bundle["inputs"] == {}
+    request_copy = (bundle_dir / "request.json").read_text(encoding="utf-8")
+    assert str(missing) not in request_copy
+    assert '"timeline_path": "<host-path>"' in request_copy
 
 
 def test_partial_result_redacted_and_written_as_hashed_file(tmp_path: Path) -> None:

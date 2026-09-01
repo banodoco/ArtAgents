@@ -706,6 +706,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     shutil.copy2(parity_media / "silence.m4a", inputs_root / "silence.m4a")
     inputs = {
         "timeline": str(timeline),
+        "timeline_ref": "main",
         "assets_registry": str(assets),
         "selector": "rendering.ffmpeg",
         "output_name": output_name,

@@ -1,28 +1,29 @@
 {
   "visual": {
     "color": {
-      "fg": "#ffffff",
-      "bg": "#000000",
-      "accent": "#ffffff"
+      "fg": "#FAFAFA",
+      "bg": "#050814",
+      "accent": "#67E8F9"
     },
     "type": {
       "families": {
-        "heading": "Georgia, serif",
-        "body": "Georgia, serif"
+        "heading": "Arial",
+        "body": "Arial",
+        "mono": "monospace"
       },
       "size": {
-        "base": 64,
-        "small": 36,
-        "large": 96
+        "base": 32,
+        "small": 22,
+        "large": 84
       },
       "weight": {
         "normal": 400,
-        "bold": 700
+        "bold": 600
       },
-      "lineHeight": 1.1
+      "lineHeight": 1.2
     },
     "motion": {
-      "fadeMs": 250
+      "fadeMs": 450
     },
     "canvas": {
       "width": 1920,

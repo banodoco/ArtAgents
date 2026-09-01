@@ -1396,8 +1396,8 @@ class TestFirstPartyPacksRootValidation(MinimalPackTestCase):
         (root / "blender").unlink()
         _write(
             root / "blender" / "pack.yaml",
-            """id: builtin
-name: Builtin
+            """id: blender
+name: Blender
 version: 0.1.0
 agent:
   purpose: Broken test fixture

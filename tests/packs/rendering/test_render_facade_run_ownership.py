@@ -72,7 +72,11 @@ def _write_project_inputs(projects_root: Path) -> dict[str, str]:
         encoding="utf-8",
     )
     assets.write_text(json.dumps({"assets": {}}), encoding="utf-8")
-    return {"timeline": str(timeline), "assets_registry": str(assets)}
+    return {
+        "timeline": str(timeline),
+        "timeline_ref": "main",
+        "assets_registry": str(assets),
+    }
 
 
 def _attach_task_run(monkeypatch: pytest.MonkeyPatch, timeline: dict) -> None:
