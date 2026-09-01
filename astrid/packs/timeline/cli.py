@@ -105,12 +105,19 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
 
 
 def _cmd_create(parsed: argparse.Namespace) -> int:
+    # An asset-free timeline still has a canonical empty registry.  The
+    # generated runtime client accepts mappings only and calls ``dict(...)``
+    # at the transport boundary, so forwarding argparse's optional ``None``
+    # would turn the documented minimal create command into a TypeError.
+    # Preserve explicit empty or populated JSON objects exactly as supplied.
+    config = parsed.config if parsed.config is not None else {}
+    registry = parsed.registry if parsed.registry is not None else {"assets": {}}
     result = parsed.client.timelines.create(
         project=parsed.project,
         slug=parsed.slug,
         name=parsed.name,
-        config=parsed.config,
-        registry=parsed.registry,
+        config=config,
+        registry=registry,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)

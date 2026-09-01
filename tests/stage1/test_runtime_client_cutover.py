@@ -78,6 +78,69 @@ def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_pat
         daemon.stop()
 
 
+def test_documented_minimal_timeline_create_defaults_empty_document_on_real_gateway(
+    tmp_path, monkeypatch, capsys
+):
+    """The documented create command reaches the real runtime with defaults."""
+    daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    _use_explicit_gateway_connection(monkeypatch, daemon)
+    try:
+        assert gateway_main(
+            ["projects", "create", "demo", "--name", "Demo", "--json"]
+        ) == 0
+        project = json.loads(capsys.readouterr().out)
+        assert project["ok"]
+
+        # This is the documented minimal command: no --config or --registry.
+        assert gateway_main(
+            [
+                "timelines",
+                "create",
+                "--project",
+                "demo",
+                "primary",
+                "--name",
+                "Primary",
+                "--default",
+                "--json",
+            ]
+        ) == 0
+        created = json.loads(capsys.readouterr().out)
+        assert set(created) == {"ok", "data", "error", "receipt", "idempotency_key"}
+        assert created["ok"]
+        assert created["data"]["config"] == {}
+        assert created["data"]["registry"] == {"assets": {}}
+        assert created["data"]["config_version"] == 1
+
+        # Explicit JSON remains authoritative, including an explicitly empty
+        # registry rather than being replaced by the default.
+        assert gateway_main(
+            [
+                "timelines",
+                "create",
+                "--project",
+                "demo",
+                "explicit",
+                "--name",
+                "Explicit",
+                "--config",
+                '{"tracks": []}',
+                "--registry",
+                '{"assets": {"clip": {"media_id": "media-1"}}}',
+                "--json",
+            ]
+        ) == 0
+        explicit = json.loads(capsys.readouterr().out)
+        assert set(explicit) == {"ok", "data", "error", "receipt", "idempotency_key"}
+        assert explicit["ok"]
+        assert explicit["data"]["config"] == {"tracks": []}
+        assert explicit["data"]["registry"] == {
+            "assets": {"clip": {"media_id": "media-1"}}
+        }
+    finally:
+        daemon.stop()
+
+
 def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monkeypatch, capsys):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
