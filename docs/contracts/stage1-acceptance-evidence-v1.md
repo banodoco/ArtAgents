@@ -46,6 +46,37 @@ retained from their real execution lanes. Synthetic, fixture, narrative, or
 manual-claim modes are rejected for live categories. The aggregator never
 creates a substitute receipt.
 
+## Capturing the bundle
+
+The operator-facing capture command runs the fixed Stage 1 proof table and
+retains each command's combined log and JUnit XML under the evidence root:
+
+```bash
+python3 -m scripts.reshape.stage1_evidence_capture \
+  --evidence-dir .astrid-convergence/stage1-evidence
+```
+
+The capture table reuses `s1_gate.py`, the final cold-launch matrix, the
+capability-parity test, canonical Remotion proof, second-client proof,
+conformance, and the focused doctor/security/network/filesystem/static/docs
+tests. A non-zero command, a skipped test, or missing JUnit/artifact leaves a
+failed receipt and the final aggregate cannot pass. Raw command output is
+never replaced by a prose summary.
+
+The B12 live migration rows are deliberately not runnable by this command.
+After the separately controlled operation, supply its portable evidence tree:
+
+```bash
+python3 -m scripts.reshape.stage1_evidence_capture \
+  --evidence-dir .astrid-convergence/stage1-evidence \
+  --b12-evidence-dir /absolute/path/to/migration-evidence-b12
+```
+
+B12 receipt JSON and referenced artifacts are copied byte-for-byte. The
+consumer verifies their schema, paths, and SHA-256 values; absent or malformed
+B12 material remains blocked. Do not provide a narrative report or a prior M7
+artifact in its place.
+
 ## Building the final bundle
 
 ```bash
