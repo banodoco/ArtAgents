@@ -618,6 +618,8 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     def _configure_shots(subparser: argparse.ArgumentParser) -> None:
         nested = subparser.add_subparsers(dest="shot_command", required=True)
         register_product_commands(nested, shots_cli.COMMANDS, family="shots", client=client)
+    def _configure_text(subparser: argparse.ArgumentParser) -> None:
+        shots_cli.configure_text_parser(subparser, client)
 
     parser = argparse.ArgumentParser(
         prog="astrid timelines",
@@ -637,6 +639,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
                 "(manifest-owned mount).",
                 configure=_configure_shots,
             ),
+            CommandSpec("text", help="Shot-authored text checkout workflow.", configure=_configure_text),
         ),
         family=_FAMILY,
         client=client,

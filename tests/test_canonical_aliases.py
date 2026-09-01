@@ -97,7 +97,7 @@ class TimelineProductParserAliasTest(unittest.TestCase):
                 self.assertEqual(spec.aliases, ())
 
     def test_product_timeline_parser_exposes_only_the_ten_verbs(self) -> None:
-        # The manifest-owned nested ``shots`` mount is a declared parser
+        # The manifest-owned nested ``shots``/``text`` mounts are declared parser
         # choice beneath ``timelines`` (the shots family lives only there);
         # timeline verbs are the only SDK-adapter verbs, and
         # ``copy`` plus every legacy/obsolete alias stays absent.
@@ -115,6 +115,7 @@ class TimelineProductParserAliasTest(unittest.TestCase):
                 "visualize",
                 "render",
                 "shots",
+                "text",
             },
         )
 

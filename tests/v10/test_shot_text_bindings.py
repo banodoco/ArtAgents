@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -18,6 +19,7 @@ from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.packs.shots import text_checkout
 from astrid.packs.shots.repository import ShotRepository
 from astrid.packs.shots.text_bindings import (
     MAX_SHOT_TEXT_BYTES,
@@ -1044,3 +1046,227 @@ def test_replay_stale_and_noop_never_prepare_temp(text_env, monkeypatch) -> None
         text=b"two", expected_head=2, idempotency_key="no-op",
     )
     assert no_op.changed is False
+
+
+def test_checkout_manifest_is_canonical_and_selection_rules_are_closed(text_env) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    made = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="prompt", slot="regen-glitch",
+        text=b"prompt", expected_head=0, idempotency_key="checkout-canonical",
+    )
+    with pytest.raises(ValueError, match="combined"):
+        text_checkout.prepare_selection(
+            text_env["bindings"], text_env["writer"], project_id=project.id,
+            binding_ids=[made.binding.binding_id], kind="prompt",
+        )
+    with pytest.raises(ValueError, match="slot requires"):
+        text_checkout.prepare_selection(
+            text_env["bindings"], text_env["writer"], project_id=project.id,
+            all_project=True, slot="regen-glitch",
+        )
+    manifest = text_checkout.checkout(
+        text_env["bindings"], text_env["writer"], project_id=project.id,
+        checkout_dir=text_env["root"] / "projection", binding_ids=[made.binding.binding_id],
+    )
+    assert set(manifest) == {"schema", "project_id", "entries"}
+    assert set(manifest["entries"][0]) == {
+        "binding_id", "shot_id", "kind", "slot", "file", "expected_head", "media_id", "content_hash"
+    }
+    assert manifest["entries"][0]["file"] == f"text/{shot.id}/prompt.regen-glitch.txt"
+    assert "working_hash" not in manifest["entries"][0]
+    with pytest.raises(ValueError, match="duplicate"):
+        text_checkout.status(text_env["bindings"], text_env["writer"],
+                             text_env["root"] / "projection",
+                             [made.binding.binding_id, made.binding.binding_id])
+
+
+def test_checkout_failure_cleans_only_paths_created_by_invocation(text_env, monkeypatch) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    made = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript", text=b"text",
+        expected_head=0, idempotency_key="checkout-cleanup",
+    )
+    destination = text_env["root"] / "nested" / "projection"
+    original_replace = text_checkout.os.replace
+
+    def fail_manifest(src, dst):
+        if Path(dst).name == text_checkout.MANIFEST_NAME:
+            raise OSError("injected manifest install failure")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(text_checkout.os, "replace", fail_manifest)
+    with pytest.raises(OSError, match="injected"):
+        text_checkout.checkout(
+            text_env["bindings"], text_env["writer"], project_id=project.id,
+            checkout_dir=destination, binding_ids=[made.binding.binding_id],
+        )
+    assert not destination.exists()
+    assert not list(destination.parent.glob(".projection*"))
+
+
+def test_status_diff_projection_states_and_invalid_paths(text_env) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    made = _set_binding(
+        text_env, project_id=project.id, shot_ref=shot.id, kind="transcript", text=b"base\n",
+        expected_head=0, idempotency_key="projection-states",
+    )
+    destination = text_env["root"] / "states"
+    text_checkout.checkout(
+        text_env["bindings"], text_env["writer"], project_id=project.id,
+        checkout_dir=destination, binding_ids=[made.binding.binding_id],
+    )
+    clean = text_checkout.status(text_env["bindings"], text_env["writer"], destination)[0]
+    assert clean["local_state"] == "clean" and clean["head_state"] == "current"
+    path = destination / clean["file"]
+    path.write_bytes(b"changed\n")
+    changed = text_checkout.diff(text_env["bindings"], text_env["writer"], destination)[0]
+    assert changed["local_state"] == "modified" and "-base" in changed["diff"]
+    path.write_bytes(b"\xff")
+    invalid = text_checkout.status(text_env["bindings"], text_env["writer"], destination)[0]
+    assert invalid["local_state"] == "invalid_utf8"
+    path.unlink()
+    missing = text_checkout.diff(text_env["bindings"], text_env["writer"], destination)[0]
+    assert missing["local_state"] == "missing" and missing["diff"] is None
+    outside = destination / "outside.txt"
+    value = json.loads((destination / text_checkout.MANIFEST_NAME).read_text())
+    value["entries"][0]["file"] = "../outside.txt"
+    (destination / text_checkout.MANIFEST_NAME).write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="manifest file"):
+        text_checkout.status(text_env["bindings"], text_env["writer"], destination)
+    assert not outside.exists()
+
+    safe = text_env["root"] / "symlink-state"
+    text_checkout.checkout(
+        text_env["bindings"], text_env["writer"], project_id=project.id,
+        checkout_dir=safe, binding_ids=[made.binding.binding_id],
+    )
+    shot_dir = safe / "text" / shot.id
+    real_file = shot_dir / "transcript.txt"
+    real_file.unlink()
+    real_file.symlink_to(text_env["root"] / "outside-source.txt")
+    with pytest.raises(ValueError, match="symlink"):
+        text_checkout.status(text_env["bindings"], text_env["writer"], safe)
+
+
+def test_apply_validates_every_head_before_noop_or_materialization(text_env) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    bindings = []
+    for kind, key in (("transcript", "all-head-a"), ("voiceover_script", "all-head-b")):
+        made = _set_binding(
+            text_env, project_id=project.id, shot_ref=shot.id, kind=kind,
+            text=b"same", expected_head=0, idempotency_key=key,
+        )
+        bindings.append(made.binding.binding_id)
+    checkout = text_env["root"] / "all-head"
+    text_checkout.checkout(
+        text_env["bindings"], text_env["writer"], project_id=project.id,
+        checkout_dir=checkout, binding_ids=bindings,
+    )
+    manifest = json.loads((checkout / text_checkout.MANIFEST_NAME).read_text())
+    # Both local files are unchanged (a would-be no-op), but the later head is stale.
+    _set_binding(
+        text_env, project_id=project.id, binding_id=bindings[1], text=b"new",
+        expected_head=1, idempotency_key="all-head-stale",
+    )
+    _root, _manifest, payloads = text_checkout.prepare_apply(checkout)
+    before = _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=bindings[0]
+    )
+    with pytest.raises(Exception, match="expected head"):
+        UnitOfWork(text_env["writer"]).run(
+            lambda u: text_env["bindings"].apply(
+                u, project_id=project.id, entries=payloads, idempotency_key="all-head-apply"
+            )
+        )
+    assert _persisted_binding_snapshot(
+        text_env, project_id=project.id, binding_id=bindings[0]
+    ) == before
+    assert manifest["entries"] == json.loads(
+        (checkout / text_checkout.MANIFEST_NAME).read_text()
+    )["entries"]
+
+
+def test_apply_reuses_one_materialized_digest_and_freezes_payload(text_env, monkeypatch) -> None:
+    project = _create_project(text_env)
+    shot = _create_shot(text_env, project.id)
+    bindings = []
+    for kind, key in (("transcript", "digest-a"), ("voiceover_script", "digest-b")):
+        made = _set_binding(
+            text_env, project_id=project.id, shot_ref=shot.id, kind=kind,
+            text=b"old", expected_head=0, idempotency_key=key,
+        )
+        bindings.append(made.binding.binding_id)
+    checkout = text_env["root"] / "digest"
+    text_checkout.checkout(
+        text_env["bindings"], text_env["writer"], project_id=project.id,
+        checkout_dir=checkout, binding_ids=bindings,
+    )
+    manifest = json.loads((checkout / text_checkout.MANIFEST_NAME).read_text())
+    for entry in manifest["entries"]:
+        (checkout / entry["file"]).write_bytes(b"new-digest")
+    _root, _manifest, payloads = text_checkout.prepare_apply(checkout)
+    # The admission payload is immutable even if the caller edits the projection later.
+    (checkout / manifest["entries"][0]["file"]).write_bytes(b"late-edit")
+    materialized: list[str] = []
+    original = text_env["bindings"].materialize_absent_text
+
+    def counted(*args, **kwargs):
+        materialized.append(kwargs["frozen"].digest)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(text_env["bindings"], "materialize_absent_text", counted)
+    result = UnitOfWork(text_env["writer"]).run(
+        lambda u: text_env["bindings"].apply(
+            u, project_id=project.id, entries=payloads, idempotency_key="digest-apply"
+        )
+    )
+    assert result["changed"] is True
+    assert materialized == [freeze_text_bytes(b"new-digest").digest]
+    events = text_env["writer"].submit(lambda s: [
+        tuple(row) for row in s.query(
+            "SELECT kind, idempotency_key FROM events WHERE project_id = ? ORDER BY project_seq",
+            (project.id,),
+        )
+    ])
+    tail = events[-3:]
+    assert tail[0][0] == "core.media.imported"
+    assert [row[0] for row in tail[1:]] == ["shot.text_binding.rebound"] * 2
+
+
+def test_text_apply_is_one_observed_writer_transaction(tmp_path: Path) -> None:
+    """The batch is admitted once and commits media/events/receipt together."""
+    from astrid.application import compose_standard_application
+
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project = UnitOfWork(app.writer).run(lambda u: app.projects.create(
+            u, slug="uow-text", name="Uow Text", settings={}, idempotency_key="uow-project"
+        ))
+        shot = UnitOfWork(app.writer).run(lambda u: app.shots.create(
+            u, project_id=project.id, name="Opening", idempotency_key="uow-shot"
+        ))
+        made = app.shots_service.set_text_binding(
+            project.id, shot_ref=shot.id, kind="transcript", text=b"before",
+            expected_head=0, idempotency_key="uow-create"
+        )
+        binding_id = made.data["binding"]["binding_id"]
+        checkout = tmp_path / "uow-checkout"
+        assert app.shots_service.checkout_text_bindings(
+            project.id, checkout, binding_ids=[binding_id]
+        ).ok
+        manifest = json.loads((checkout / text_checkout.MANIFEST_NAME).read_text())
+        (checkout / manifest["entries"][0]["file"]).write_bytes(b"after")
+        _root, _manifest, payloads = text_checkout.prepare_apply(checkout)
+        observed: list[str] = []
+        result = UnitOfWork(
+            app.writer, on_statement=lambda kind, _sql, _params: observed.append(kind)
+        ).run(lambda u: app.text_bindings.apply(
+            u, project_id=project.id, entries=payloads, idempotency_key="uow-apply"
+        ))
+        assert result["changed"] is True
+        assert observed.count("begin_immediate") == 1
+        assert observed.count("commit") == 1
+        assert observed.count("rollback") == 0

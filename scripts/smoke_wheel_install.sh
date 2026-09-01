@@ -61,6 +61,7 @@ try:
     help_record = harness.run_module("help", "astrid", ["help"], check=True)
     assert "Family census (exactly eight families):" in help_record.stdout
     assert "timelines shots       [pack: shots]" in help_record.stdout
+    assert "timelines text        [pack: shots]" in help_record.stdout
     assert "media references      [pack: references]" in help_record.stdout
 
     # ``doctor --json`` is intentionally run against the fresh isolated
@@ -81,6 +82,7 @@ try:
             "from importlib import resources; "
             "required=('core/migrations/sql/core/0001_initial.sql',"
             "'packs/timeline/schema-pack.yaml','packs/shots/schema-pack.yaml',"
+            "'packs/shots/migrations/0002_text_bindings.sql',"
             "'packs/references/schema-pack.yaml'); "
             "root=resources.files('astrid'); "
             "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "

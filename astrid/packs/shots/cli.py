@@ -51,6 +51,10 @@ from astrid.core.cli.registration import CommandSpec, register_product_commands
 
 __all__ = ["COMMANDS", "build_parser"]
 
+def configure_text_parser(parser, client):
+    from astrid.packs.shots import text_cli
+    text_cli.configure_parser(parser, client)
+
 _FAMILY = "shots"
 
 

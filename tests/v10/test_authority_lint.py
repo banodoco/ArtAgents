@@ -42,6 +42,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.reshape.authority_lint import (
+    FROZEN_BASELINE_WRITER_CALL_SITES,
     lint_import_boundaries,
     lint_legacy_authorities,
     lint_removed_authorities,
@@ -260,6 +261,66 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
         )
 
 
+def _write_frozen_writer_baseline_fixture(root: Path) -> None:
+    """Add the six retained calls so a synthetic root has exact baseline truth."""
+    calls = (
+        (
+            "astrid/core/project/kernel_admission.py",
+            "from astrid.core.store.writer import DatabaseWriter\n",
+            "admit_orchestrator_project_run",
+            68,
+            "    DatabaseWriter('/tmp/baseline.sqlite3', None)\n",
+        ),
+        (
+            "astrid/sdk/invocation.py",
+            "from astrid.core.store.writer import DatabaseWriter\n",
+            "_kernel_invoke",
+            874,
+            "    DatabaseWriter('/tmp/baseline.sqlite3', None)\n",
+        ),
+        (
+            "astrid/core/backup/operations.py",
+            "import sqlite3\n",
+            "_online_backup",
+            361,
+            "    sqlite3.connect('/tmp/baseline.sqlite3')\n",
+        ),
+        (
+            "astrid/core/backup/operations.py",
+            "import sqlite3\n",
+            "_normalize_staged_database_journal",
+            1302,
+            "    sqlite3.connect('/tmp/baseline.sqlite3')\n",
+        ),
+        (
+            "astrid/core/backup/operations.py",
+            "import sqlite3\n",
+            "_rebase_staged_managed_media",
+            1413,
+            "    sqlite3.connect('/tmp/baseline.sqlite3')\n",
+        ),
+        (
+            "astrid/core/backup/operations.py",
+            "import sqlite3\n",
+            "_rebase_staged_external_media",
+            1597,
+            "    sqlite3.connect('/tmp/baseline.sqlite3')\n",
+        ),
+    )
+    grouped: dict[str, tuple[str, list[tuple[str, int, str]]]] = {}
+    for rel, header, function, line, call in calls:
+        if rel not in grouped:
+            grouped[rel] = (header, [])
+        grouped[rel][1].append((function, line, call))
+    for rel, (header, entries) in grouped.items():
+        lines = [header]
+        for function, line, call in sorted(entries, key=lambda item: item[1]):
+            lines.append(f"def {function}():\n")
+            lines.extend("    pass\n" for _ in range(line - len(lines) - 1))
+            lines.append(call)
+        _write(root, rel, "".join(lines))
+
+
 # ---------------------------------------------------------------------------
 # Import boundaries
 # ---------------------------------------------------------------------------
@@ -475,13 +536,13 @@ def test_writer_construction_outside_kernel_store_fails(tmp_path: Path) -> None:
     )
     errors = lint_writer_authority(tmp_path)
     assert any(
-        "astrid/core/evil_writer.py: SQLite writer construction outside the "
-        "kernel store" in error
+        error.startswith("astrid/core/evil_writer.py:")
+        and "SQLite writer construction outside the kernel store" in error
         for error in errors
     ), errors
     assert any(
-        "astrid/packs/timeline/evil_writer.py: SQLite writer construction "
-        "outside the kernel store" in error
+        error.startswith("astrid/packs/timeline/evil_writer.py:")
+        and "SQLite writer construction outside the kernel store" in error
         for error in errors
     ), errors
 
@@ -498,7 +559,99 @@ def test_read_only_probe_is_not_a_writer(tmp_path: Path) -> None:
     assert errors == [], errors
 
 
-def test_conformance_kit_scratch_writer_is_exempt(tmp_path: Path) -> None:
+def test_mixed_read_only_and_writable_calls_report_only_the_writer(
+    tmp_path: Path,
+) -> None:
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/mixed_connections.py",
+        "import sqlite3\n"
+        "\n"
+        "def inspect(database):\n"
+        "    read_uri = f'file:{database}?mode=ro'\n"
+        "    readonly = sqlite3.connect(read_uri, uri=True)\n"
+        "    writable = sqlite3.connect(database)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert len(errors) == 1, errors
+    assert ":6:sqlite3.connect:" in errors[0], errors
+
+
+def test_multiline_helper_and_single_assignment_read_only_uris_pass(
+    tmp_path: Path,
+) -> None:
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/readers.py",
+        "import sqlite3\n"
+        "from astrid.core.io.media_import import read_only_uri\n"
+        "\n"
+        "def inspect(database):\n"
+        "    multiline = sqlite3.connect(\n"
+        "        f'file:{database}?mode=ro',\n"
+        "        uri=True,\n"
+        "    )\n"
+        "    canonical = sqlite3.connect(read_only_uri(database), uri=True)\n"
+        "    uri = f'file:{database}?mode=ro'\n"
+        "    sdk_style = sqlite3.connect(uri, uri=True)\n",
+    )
+    assert lint_writer_authority(tmp_path) == []
+
+
+def test_dynamic_or_unknown_sqlite_uri_fails_closed(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/dynamic_reader.py",
+        "import sqlite3\n"
+        "\n"
+        "def make_uri(database):\n"
+        "    return database\n"
+        "\n"
+        "def inspect(database):\n"
+        "    uri = make_uri(database)\n"
+        "    sqlite3.connect(uri)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert any("dynamic_reader.py:inspect:8:sqlite3.connect" in error for error in errors), errors
+
+
+def test_new_writer_in_a_baselined_file_is_not_exempt(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/sdk/invocation.py",
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "writer = DatabaseWriter('/tmp/new.sqlite3', None)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert any("astrid/sdk/invocation.py:<module>:2:DatabaseWriter" in error for error in errors), errors
+
+
+def test_frozen_live_writer_baseline_has_exact_six_call_sites() -> None:
+    from scripts.reshape import authority_lint
+
+    observed = frozenset(authority_lint._writer_call_sites(authority_lint.REPO_ROOT))
+    assert observed == FROZEN_BASELINE_WRITER_CALL_SITES
+
+
+def test_top_level_report_classifies_exact_baseline_as_retained_observation() -> None:
+    """The raw writer lint stays visible while the admission report is clean."""
+    report = run_authority_lint()
+    assert report.ok, report.errors
+    assert report.writer_baseline is not None
+    assert report.writer_baseline["ok"] is True
+    assert report.writer_baseline["expected_count"] == 6
+    assert report.writer_baseline["observed_count"] == 6
+    assert report.writer_baseline["added"] == []
+    assert report.writer_baseline["missing"] == []
+    payload = report.as_dict()
+    assert payload["writer_baseline"] == report.writer_baseline
+
+
+def test_conformance_kit_is_not_a_whole_file_writer_exemption(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     _write(
         tmp_path,
@@ -507,7 +660,11 @@ def test_conformance_kit_scratch_writer_is_exempt(tmp_path: Path) -> None:
         "writer = DatabaseWriter('/tmp/scratch.sqlite3', None)\n",
     )
     errors = lint_writer_authority(tmp_path)
-    assert errors == [], errors
+    assert any(
+        error.startswith("astrid/core/conformance/kit.py:")
+        and "SQLite writer construction outside the kernel store" in error
+        for error in errors
+    ), errors
 
 
 def test_pack_owned_repository_and_conformance_writer_construction_fails(
@@ -549,8 +706,8 @@ def test_pack_owned_repository_and_conformance_writer_construction_fails(
         "astrid/packs/shots/conformance.py",
     ):
         assert any(
-            f"{rel}: SQLite writer construction outside the kernel store"
-            in error
+            error.startswith(f"{rel}:")
+            and "SQLite writer construction outside the kernel store" in error
             for error in errors
         ), (rel, errors)
 
@@ -934,6 +1091,7 @@ def test_pack_convenience_alias_default_columns_fail(tmp_path: Path) -> None:
 def test_clean_fixture_passes_the_whole_authority_lint(tmp_path: Path) -> None:
     """A fixture with only the declared schema pack and no mutations is ok."""
     _bootstrap(tmp_path)
+    _write_frozen_writer_baseline_fixture(tmp_path)
     report = run_authority_lint(tmp_path)
     assert report.ok, report.errors
 
@@ -1028,9 +1186,9 @@ def test_new_surface_mutations_fail_the_whole_authority_lint(
         "'references'" in joined
     )
     assert (
-        "astrid/packs/references/repository.py: SQLite writer construction "
-        "outside the kernel store" in joined
-    )
+            "astrid/packs/references/repository.py:" in joined
+            and "SQLite writer construction outside the kernel store" in joined
+        )
     assert (
         "kernel FK from events to pack table 'project_references'" in joined
     )

@@ -66,9 +66,8 @@ from __future__ import annotations
 import ast
 import json
 import re
-import sqlite3
-from dataclasses import dataclass
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +98,17 @@ SUPPORTED_ENTRY_PATHS = (
     "astrid/core/cli/domain_media.py",
     "astrid/core/cli/domain_tasks.py",
     "astrid/core/cli/domain_runs.py",
+)
+
+# Exactly the two cross-pack parser edges admitted by the frozen product
+# boundary.  Parent-package spellings (``astrid.packs.shots``) are not a
+# second exemption for an import of ``.cli``; import collection below
+# normalizes those prefixes before checking this set.
+CLI_MOUNT_IMPORT_EDGES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("astrid/packs/timeline/cli.py", "astrid.packs.shots.cli"),
+        ("astrid/core/cli/domain_media.py", "astrid.packs.references.cli"),
+    }
 )
 """Supported v10 entry paths the legacy-authority rule scans."""
 
@@ -164,10 +174,32 @@ _PRODUCT_PATH_FILES = (
 # or any other pack module.
 _LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.", "astrid.packs.builtin.")
 
-# The kernel conformance kit constructs scratch DatabaseWriters on its own
-# temp databases to prove crash atomicity of the kernel store; that is
-# conformance testing of the store, never a second write authority.
-_CONFORMANCE_KIT_REL = "astrid/core/conformance/kit.py"
+# Six writable calls were present before the B2 text-binding work.  They are
+# visible baseline debt, not exemptions: M4 compares the observed identities
+# with this exact set and fails closed on additions, removals, or drift.
+FROZEN_BASELINE_WRITER_CALL_SITES = frozenset(
+    {
+        "astrid/core/project/kernel_admission.py:admit_orchestrator_project_run:68:DatabaseWriter",
+        "astrid/sdk/invocation.py:_kernel_invoke:874:DatabaseWriter",
+        "astrid/core/backup/operations.py:_online_backup:361:sqlite3.connect",
+        "astrid/core/backup/operations.py:_normalize_staged_database_journal:1302:sqlite3.connect",
+        "astrid/core/backup/operations.py:_rebase_staged_managed_media:1413:sqlite3.connect",
+        "astrid/core/backup/operations.py:_rebase_staged_external_media:1597:sqlite3.connect",
+    }
+)
+
+# Explicit per-call exemptions preserve the pre-existing conformance scratch
+# writers and the two composition-root writers without masking future calls.
+_ALLOWED_WRITER_CALL_SITES = frozenset(
+    {
+        "astrid/core/conformance/kit.py:_seed_and_run_full:1213:DatabaseWriter",
+        "astrid/core/conformance/kit.py:_seed_and_run_full:1218:DatabaseWriter",
+        "astrid/core/conformance/kit.py:check_crash_atomicity:1267:DatabaseWriter",
+        "astrid/core/conformance/kit.py:check_crash_atomicity:1274:DatabaseWriter",
+        "astrid/packs/__init__.py:open_standard_writer:130:DatabaseWriter",
+        "astrid/packs/__init__.py:compose_standard_bridge:271:DatabaseWriter",
+    }
+)
 
 FORBIDDEN_CONVENIENCE_COLUMNS = frozenset(
     {"slug", "timeline_ulid", "is_default", "event_hash", "previous_event_hash"}
@@ -190,6 +222,7 @@ class LintReport:
     root: str | None = None
     scanned_files: tuple[str, ...] = ()
     observation_counts: Mapping[str, int] | None = None
+    writer_baseline: Mapping[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -208,6 +241,8 @@ class LintReport:
             payload["scanned_files"] = list(self.scanned_files)
         if self.observation_counts is not None:
             payload["observation_counts"] = dict(self.observation_counts)
+        if self.writer_baseline is not None:
+            payload["writer_baseline"] = dict(self.writer_baseline)
         return payload
 
 
@@ -312,24 +347,36 @@ def _is_declared_cli_mount_import(
     embed the shots parser). This is declared composition, never a hidden
     second authority: repository/conformance/service imports stay forbidden.
     """
-    if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
-        return False
-    parts = module.split(".")
-    if len(parts) < 3:
-        return False
-    target_pack = parts[2]
-    if len(parts) > 3 and parts[3] != "cli":
-        return False
-    mount_families = _pack_cli_mount_families(root, target_pack)
-    if not mount_families:
-        return False
     if pack_dir_name is not None:
-        # Pack-to-pack: the importing pack is a declared host of the
-        # target's mount when one of its own cli_mount families matches.
-        importing_families = _pack_cli_mount_families(root, pack_dir_name)
-        return bool(mount_families & importing_families)
-    family = _kernel_cli_family(rel)
-    return family is not None and family in mount_families
+        # The timeline pack owns the host parser for the Shots nested mount.
+        # This is the one admitted pack-to-pack edge; references is embedded
+        # by a kernel family parser and therefore handled below.
+        return (rel, module) in CLI_MOUNT_IMPORT_EDGES
+    return (rel, module) in CLI_MOUNT_IMPORT_EDGES
+
+
+def _normalized_import_modules(modules: set[str]) -> set[str]:
+    """Drop only package prefixes when a more specific child exists.
+
+    ``_imported_modules`` also records imported symbols (for example
+    ``...repository.TimelineRepository``); those are not package prefixes and
+    must remain visible in diagnostics.  Normalize only one concrete pack
+    package, which removes duplicate edges while retaining
+    the module-level import expected by callers/tests.
+    """
+    return {
+        module
+        for module in modules
+        if not any(
+            other != module
+            and other.startswith(module + ".")
+            and (
+                module.startswith("astrid.packs.")
+                and module.count(".") == 2
+            )
+            for other in modules
+        )
+    }
 
 
 def lint_import_boundaries(root: Path) -> list[str]:
@@ -349,7 +396,9 @@ def lint_import_boundaries(root: Path) -> list[str]:
         if rel == COMPOSITION_EXEMPTION:
             continue
         try:
-            modules = _imported_modules(path.read_text(encoding="utf-8"))
+            modules = _normalized_import_modules(
+                _imported_modules(path.read_text(encoding="utf-8"))
+            )
         except (OSError, UnicodeDecodeError, SyntaxError) as exc:
             errors.append(f"{rel}: unreadable source: {exc}")
             continue
@@ -374,7 +423,9 @@ def lint_import_boundaries(root: Path) -> list[str]:
         for path in _iter_python(pack_dir):
             rel = _rel(path, root)
             try:
-                modules = _imported_modules(path.read_text(encoding="utf-8"))
+                modules = _normalized_import_modules(
+                    _imported_modules(path.read_text(encoding="utf-8"))
+                )
             except (OSError, UnicodeDecodeError, SyntaxError):
                 continue
             for module in sorted(modules):
@@ -394,43 +445,174 @@ def lint_import_boundaries(root: Path) -> list[str]:
     return errors
 
 
-def lint_writer_authority(root: Path) -> list[str]:
-    """SQLite writer construction outside the kernel store.
+def _call_name(node: ast.Call) -> str | None:
+    """Return the terminal callable name for a static call expression."""
+    function = node.func
+    if isinstance(function, ast.Name):
+        return function.id
+    if isinstance(function, ast.Attribute):
+        return function.attr
+    return None
 
-    ``astrid/core/store`` owns every writable connection. Two documented
-    exemptions exist: the conformance kit (``astrid/core/conformance/kit.py``)
-    constructs scratch ``DatabaseWriter``\ s on its own temp databases to
-    prove crash atomicity of the kernel store — that is conformance testing
-    of the store, never a second write authority; and
-    ``astrid/packs/__init__.py`` is the standard composition root itself,
-    the single place that constructs the standard database/writer at the
-    gateway serve composition root. Read-only URI probes (``mode=ro``) are
-    not writers and are never flagged.
-    """
-    errors: list[str] = []
-    store_root = root / "astrid" / "core" / "store"
+
+def _contains_text(node: ast.AST, needle: str) -> bool:
+    """Whether a literal/f-string AST contains *needle* in static text."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and needle in node.value
+    if isinstance(node, ast.JoinedStr):
+        return any(
+            isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+            and needle in value.value
+            for value in node.values
+        )
+    return False
+
+
+def _is_read_only_expr(
+    node: ast.AST,
+    assignments: Mapping[str, tuple[ast.AST, ...]],
+    resolving: frozenset[str] = frozenset(),
+) -> bool:
+    """Prove one SQLite URI expression is a canonical read-only value."""
+    if _contains_text(node, "mode=ro"):
+        return True
+    if isinstance(node, ast.Call) and _call_name(node) == "read_only_uri":
+        return True
+    if isinstance(node, ast.Name) and node.id not in resolving:
+        values = assignments.get(node.id, ())
+        return len(values) == 1 and _is_read_only_expr(
+            values[0], assignments, resolving | {node.id}
+        )
+    return False
+
+
+class _WriterCallVisitor(ast.NodeVisitor):
+    """Collect writer calls with function-local read-only dataflow."""
+
+    def __init__(self, rel: str) -> None:
+        self.rel = rel
+        self.function_stack: list[str] = []
+        self.findings: list[str] = []
+        self._assignments: list[Mapping[str, tuple[ast.AST, ...]]] = []
+
+    @property
+    def function_name(self) -> str:
+        return self.function_stack[-1] if self.function_stack else "<module>"
+
+    def _identity(self, node: ast.Call, kind: str) -> str:
+        return f"{self.rel}:{self.function_name}:{node.lineno}:{kind}"
+
+    def _record(self, node: ast.Call, kind: str) -> None:
+        identity = self._identity(node, kind)
+        if identity not in _ALLOWED_WRITER_CALL_SITES:
+            self.findings.append(identity)
+
+    @staticmethod
+    def _function_assignments(
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> dict[str, tuple[ast.AST, ...]]:
+        values: dict[str, list[ast.AST]] = {}
+
+        def visit(current: ast.AST) -> None:
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                if current is not node:
+                    return
+            if isinstance(current, ast.Assign):
+                for target in current.targets:
+                    if isinstance(target, ast.Name):
+                        values.setdefault(target.id, []).append(current.value)
+            elif isinstance(current, ast.AnnAssign) and isinstance(current.target, ast.Name):
+                if current.value is not None:
+                    values.setdefault(current.target.id, []).append(current.value)
+            for child in ast.iter_child_nodes(current):
+                visit(child)
+
+        visit(node)
+        return {name: tuple(items) for name, items in values.items()}
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.function_stack.append(node.name)
+        self._assignments.append(self._function_assignments(node))
+        for child in node.body:
+            self.visit(child)
+        self._assignments.pop()
+        self.function_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)  # type: ignore[arg-type]
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if _call_name(node) == "DatabaseWriter":
+            self._record(node, "DatabaseWriter")
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "connect"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "sqlite3"
+        ):
+            first = node.args[0] if node.args else None
+            assignments = self._assignments[-1] if self._assignments else {}
+            if first is None or not _is_read_only_expr(first, assignments):
+                self._record(node, "sqlite3.connect")
+        for child in ast.iter_child_nodes(node):
+            self.visit(child)
+
+
+def _writer_call_sites(root: Path) -> tuple[str, ...]:
+    """Return individual non-kernel writer call identities, fail-closed."""
+    findings: list[str] = []
     for path in _iter_python(root / "astrid"):
         rel = _rel(path, root)
         if rel.startswith("astrid/core/store/"):
             continue
-        if rel == _CONFORMANCE_KIT_REL:
-            continue
-        if rel == "astrid/packs/__init__.py":
-            continue
         try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError):
             continue
-        if "DatabaseWriter(" in source:
-            errors.append(
-                f"{rel}: SQLite writer construction outside the kernel store"
-            )
-            continue
-        if "sqlite3.connect(" in source and "mode=ro" not in source:
-            errors.append(
-                f"{rel}: SQLite writer construction outside the kernel store"
-            )
-    return errors
+        visitor = _WriterCallVisitor(rel)
+        visitor.visit(tree)
+        findings.extend(visitor.findings)
+    return tuple(sorted(findings))
+
+
+def lint_writer_authority(root: Path) -> list[str]:
+    """Report every non-kernel writable call site, with read-only proof."""
+    return [
+        f"{identity}: SQLite writer construction outside the kernel store"
+        for identity in _writer_call_sites(root)
+    ]
+
+
+def _writer_baseline_report(root: Path) -> tuple[list[str], dict[str, Any]]:
+    """Compare observed writer identities with the exact frozen baseline.
+
+    The low-level writer lint intentionally remains raw: callers that need
+    per-call diagnostics receive every observed identity, including the six
+    pre-existing baseline sites.  Top-level reports classify those six as
+    retained observations and fail only when the set drifts (or an unknown
+    call is added), making the admission decision both exact and auditable.
+    """
+    observed = frozenset(_writer_call_sites(root))
+    expected = frozenset(FROZEN_BASELINE_WRITER_CALL_SITES)
+    added = tuple(sorted(observed - expected))
+    missing = tuple(sorted(expected - observed))
+    baseline: dict[str, Any] = {
+        "ok": not added and not missing,
+        "expected_count": len(expected),
+        "observed_count": len(observed),
+        "expected": sorted(expected),
+        "observed": sorted(observed),
+        "added": list(added),
+        "missing": list(missing),
+    }
+    errors = [
+        f"{identity}: SQLite writer construction outside the kernel store "
+        f"(unbaselined writable call site)"
+        for identity in added
+    ]
+    errors.extend(f"missing frozen writable call site: {identity}" for identity in missing)
+    return errors, baseline
 
 
 def lint_legacy_authorities(root: Path) -> list[str]:
@@ -561,8 +743,9 @@ def _declared_tables(root: Path) -> dict[str, str]:
         if not manifest_path.is_file():
             continue
         manifest = load_schema_pack_manifest(manifest_path)
-        for table in manifest.migrations[0].tables:
-            declared[table] = manifest.id
+        for migration in manifest.migrations:
+            for table in migration.tables:
+                declared[table] = manifest.id
     return declared
 
 
@@ -667,7 +850,7 @@ def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
 
         validate_stream_type(registry, stream_type)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - declaration probe fails closed
         return False
 
 
@@ -1480,7 +1663,23 @@ def run_installed_authority_lint(
     root = layout.root
     errors: list[str] = []
     errors.extend(_safe_installed_rule("import boundaries", lint_import_boundaries, root))
-    errors.extend(_safe_installed_rule("writer authority", lint_writer_authority, root))
+    try:
+        writer_errors, writer_baseline = _writer_baseline_report(root)
+    except Exception as exc:  # noqa: BLE001 - malformed artifact fails closed
+        writer_errors = [
+            "installed authority rule writer authority failed closed: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+        writer_baseline = {
+            "ok": False,
+            "expected_count": len(FROZEN_BASELINE_WRITER_CALL_SITES),
+            "observed_count": 0,
+            "expected": sorted(FROZEN_BASELINE_WRITER_CALL_SITES),
+            "observed": [],
+            "added": [],
+            "missing": sorted(FROZEN_BASELINE_WRITER_CALL_SITES),
+        }
+    errors.extend(writer_errors)
     errors.extend(_safe_installed_rule("legacy authorities", lint_legacy_authorities, root))
     errors.extend(_safe_installed_rule("removed authorities", lint_removed_authorities, root))
     errors.extend(_safe_installed_rule("schema ownership", lint_schema_ownership, root))
@@ -1535,6 +1734,7 @@ def run_installed_authority_lint(
         root=str(root),
         scanned_files=scanned,
         observation_counts=counts,
+        writer_baseline=writer_baseline,
     )
 
 
@@ -1560,11 +1760,17 @@ def run_authority_lint(
     repo_root = Path(root)
     errors: list[str] = []
     errors.extend(lint_import_boundaries(repo_root))
-    errors.extend(lint_writer_authority(repo_root))
+    writer_errors, writer_baseline = _writer_baseline_report(repo_root)
+    errors.extend(writer_errors)
     errors.extend(lint_legacy_authorities(repo_root))
     errors.extend(lint_removed_authorities(repo_root))
     errors.extend(lint_schema_ownership(repo_root))
-    return LintReport(errors=tuple(sorted(errors)), mode="source", root=str(repo_root))
+    return LintReport(
+        errors=tuple(sorted(errors)),
+        mode="source",
+        root=str(repo_root),
+        writer_baseline=writer_baseline,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

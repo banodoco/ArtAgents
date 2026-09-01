@@ -106,8 +106,12 @@ m4-baseline:
 # admission at artifacts/m4/finalizer-admission.json. PY overrides the
 # interpreter (same convention as the other gates).
 m4-gate:
-	@$(PY) scripts/reshape/m4_gate.py
-	@echo "✓ m4-gate (13 focused lanes + authority lint + drift + feasibility admission; admission retained in artifacts/m4/finalizer-admission.json)"
+	@if [ -z "$(M4_FEASIBILITY)" ]; then \
+		echo "ERROR: M4_FEASIBILITY is required (explicit task-bound feasibility-v2 record)" >&2; \
+		exit 2; \
+	fi
+	@$(PY) scripts/reshape/m4_gate.py --feasibility "$(M4_FEASIBILITY)"
+	@echo "✓ m4-gate (13 focused lanes + authority lint + drift + explicit feasibility admission; admission retained in artifacts/m4/finalizer-admission.json)"
 
 # --- m7 GA evidence gate (plan step 9 / task T12_impl) ---
 # The script first validates the fresh Phase 0 admission, runs the explicit

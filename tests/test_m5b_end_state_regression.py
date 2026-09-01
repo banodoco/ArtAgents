@@ -239,8 +239,8 @@ class FamilyHelpIsExecutableTest(unittest.TestCase):
         self.assertIn("select", result.stdout)
 
     def test_timelines_help_is_executable_and_names_verbs_and_shots(self) -> None:
-        """``timelines --help`` exits 0 and documents the seven verbs plus
-        the nested shots mount."""
+        """``timelines --help`` exits 0 and documents the ten verbs plus
+        the nested shots/text mounts."""
         result = subprocess.run(
             [sys.executable, "-m", "astrid", "timelines", "--help"],
             capture_output=True,
@@ -254,6 +254,7 @@ class FamilyHelpIsExecutableTest(unittest.TestCase):
         for verb in ("create", "list", "show", "save", "archive", "history", "diff"):
             self.assertIn(verb, result.stdout)
         self.assertIn("shots", result.stdout)
+        self.assertIn("text", result.stdout)
 
     def test_removed_packs_family_is_rejected(self) -> None:
         """``packs`` is no longer a top-level family: it exits 2 with an

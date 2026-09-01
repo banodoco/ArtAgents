@@ -29,7 +29,7 @@ def _packs_subcommand_list() -> str:
         for action in packs_parser._actions:
             if isinstance(action, argparse._SubParsersAction):
                 return ",".join(sorted(action.choices.keys()))
-    except Exception:
+    except Exception:  # noqa: BLE001 - help falls back when parser introspection fails
         pass
     # Fallback: canonical list matching the packs CLI as of m5b.
     return "agent-index,install,inspect,list,new,rollback,status,uninstall,update,validate"
@@ -67,6 +67,7 @@ Operational families:
 
 Nested mounts (manifest-owned):
   python3 -m astrid timelines shots ...
+  python3 -m astrid timelines text ...
   python3 -m astrid media references ...
 
 Options:
@@ -104,7 +105,7 @@ def _product_help_text() -> str:
     return f"""Astrid product commands — the eight m6 families
 
 The gateway owns exactly eight families: the five product families and the
-three operational families. ``shots`` mounts beneath ``timelines`` and
+three operational families. ``shots`` and ``text`` mount beneath ``timelines`` and
 ``references`` mounts beneath ``media``.
 
 Usage:
@@ -127,6 +128,7 @@ Operational families:
 
 Nested mounts (manifest-owned):
   timelines shots       [pack: shots] project-level reusable shot list/create/show/add/remove/reorder
+  timelines text        [pack: shots] text-binding checkout/status/diff/apply/set/rebind workflow
   media references      [pack: references] reference create/update/archive/associate/link/set-primary/list/show
 
 Options:

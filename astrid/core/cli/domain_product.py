@@ -42,6 +42,7 @@ __all__ = [
     "PRODUCT_FAMILY_SET",
     "EXCLUDED_FROM_PRODUCT_CENSUS",
     "REQUIRED_MANIFEST_MOUNTS",
+    "NESTED_FAMILIES",
     "ProductMount",
     "ProductRegistryError",
     "build_product_mounts",
@@ -82,6 +83,8 @@ REQUIRED_MANIFEST_MOUNTS: dict[str, tuple[str, ...]] = {
     "shots": ("timelines", "shots"),
     # The references pack declares its nested mount beneath media.
     "references": ("media", "references"),
+    # The shots pack's text parser is a sibling mount beneath timelines.
+    "text": ("timelines", "text"),
 }
 """The frozen manifest-declared mounts (family -> mount path).
 
@@ -91,7 +94,7 @@ declaration is a registry error.
 """
 
 # The manifest-declared families that are not core families: exactly the
-# two nested mounts (sense check SC25: only the two declared nested mounts).
+# three nested mounts (shots, text, references).
 NESTED_FAMILIES: frozenset[str] = frozenset(
     family
     for family in REQUIRED_MANIFEST_MOUNTS
@@ -260,8 +263,8 @@ def _validate_mounts(
 def build_product_mounts() -> tuple[ProductMount, ...]:
     """Validate and return the complete product mount registry.
 
-    Exactly the five core families plus the two manifest-declared nested
-    mounts (shots, references) — seven mounts total (sense check SC25).
+    Exactly the five core families plus the three manifest-declared nested
+    mounts (shots, text, references) — eight mounts total.
     """
     return _validate_mounts(PRODUCT_FAMILIES, read_manifest_cli_mounts())
 
@@ -306,6 +309,7 @@ FAMILY_PARSER_MODULES: dict[str, str] = {
     "projects": "astrid.core.cli.domain_projects",
     "timelines": "astrid.packs.timeline.cli",
     "shots": "astrid.packs.shots.cli",
+    "text": "astrid.packs.shots.text_cli",
     "media": "astrid.core.cli.domain_media",
     "references": "astrid.packs.references.cli",
     "tasks": "astrid.core.cli.domain_tasks",

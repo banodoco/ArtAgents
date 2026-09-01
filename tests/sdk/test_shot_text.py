@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 from pathlib import Path
 
@@ -622,3 +624,230 @@ def test_sdk_freezes_once_and_passes_immutable_bytes_into_uow(tmp_path: Path, mo
         )
         assert result.ok
         assert calls == 1
+
+
+def test_checkout_status_diff_apply_is_manifest_based_and_atomic(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"before\n",
+            expected_head=0, idempotency_key="checkout-create",
+        )
+        binding = created.data["binding"]
+        checkout_dir = tmp_path / "checkout"
+        checked = app.shots_service.checkout_text_bindings(
+            project_id, checkout_dir, binding_ids=[binding["binding_id"]]
+        )
+        assert checked.ok
+        assert set(checked.data) == {"schema", "project_id", "entries"}
+        path = checkout_dir / "text" / shot_id / "transcript.txt"
+        path.write_bytes(b"after\n")
+        status = app.shots_service.status_text_checkout(checkout_dir)
+        assert status.ok and status.data["entries"][0]["local_state"] == "modified"
+        diff = app.shots_service.diff_text_checkout(checkout_dir)
+        assert diff.ok and "-before" in diff.data["entries"][0]["diff"]
+        manifest_bytes = (checkout_dir / ".astrid-text-checkout.json").read_bytes()
+        applied = app.shots_service.apply_text_checkout(
+            checkout_dir, idempotency_key="checkout-apply"
+        )
+        assert applied.ok and applied.data["changed"] is True
+        assert applied.data["recheckout_required"] is True
+        assert (checkout_dir / ".astrid-text-checkout.json").read_bytes() == manifest_bytes
+
+
+def test_apply_rejects_stale_noop_before_any_change(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"stable",
+            expected_head=0, idempotency_key="stale-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        checkout_dir = tmp_path / "stale-checkout"
+        assert app.shots_service.checkout_text_bindings(
+            project_id, checkout_dir, binding_ids=[binding_id]
+        ).ok
+        assert app.shots_service.set_text_binding(
+            project_id, binding_id=binding_id, text=b"changed", expected_head=1,
+            idempotency_key="stale-update",
+        ).ok
+        result = app.shots_service.apply_text_checkout(
+            checkout_dir, idempotency_key="stale-apply"
+        )
+        assert result.ok is False
+        assert result.error.code == "stale_version"
+
+
+def test_invalid_utf8_checkout_is_reported_but_not_admitted(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"valid",
+            expected_head=0, idempotency_key="utf8-create",
+        )
+        binding = created.data["binding"]
+        checkout_dir = tmp_path / "utf8-checkout"
+        assert app.shots_service.checkout_text_bindings(
+            project_id, checkout_dir, binding_ids=[binding["binding_id"]]
+        ).ok
+        (checkout_dir / "text" / shot_id / "transcript.txt").write_bytes(b"\xff")
+        status = app.shots_service.status_text_checkout(checkout_dir)
+        assert status.ok and status.data["entries"][0]["local_state"] == "invalid_utf8"
+        result = app.shots_service.apply_text_checkout(
+            checkout_dir, idempotency_key="utf8-apply"
+        )
+        assert result.ok is False and result.error.code == "validation_error"
+
+
+def test_selection_and_manifest_subset_constraints_are_authoritative(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"one",
+            expected_head=0, idempotency_key="selection-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        for kwargs in (
+            {"binding_ids": [binding_id], "kind": "transcript"},
+            {"binding_ids": [binding_id], "shot_ref": shot_id},
+            {"binding_ids": [binding_id, binding_id]},
+            {"slot": "regen-glitch"},
+        ):
+            result = app.shots_service.list_text_bindings(project_id, **kwargs)
+            assert result.ok is False and result.error.code == "validation_error"
+        checkout = app.shots_service.checkout_text_bindings(
+            project_id, tmp_path / "subset", binding_ids=[binding_id]
+        )
+        assert checkout.ok
+        subset = app.shots_service.status_text_checkout(
+            tmp_path / "subset", binding_ids=["not-a-member"]
+        )
+        assert subset.ok is False and subset.error.code == "validation_error"
+
+
+def test_status_diff_cover_missing_invalid_utf8_and_stale_head(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"base\n",
+            expected_head=0, idempotency_key="states-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        checkout_dir = tmp_path / "states"
+        assert app.shots_service.checkout_text_bindings(
+            project_id, checkout_dir, binding_ids=[binding_id]
+        ).ok
+        path = checkout_dir / "text" / shot_id / "transcript.txt"
+        path.write_bytes(b"edited\n")
+        assert app.shots_service.status_text_checkout(checkout_dir).data["entries"][0]["local_state"] == "modified"
+        assert app.shots_service.diff_text_checkout(checkout_dir).data["entries"][0]["diff"]
+        assert app.shots_service.set_text_binding(
+            project_id, binding_id=binding_id, text=b"authoritative\n", expected_head=1,
+            idempotency_key="states-stale",
+        ).ok
+        stale = app.shots_service.status_text_checkout(checkout_dir).data["entries"][0]
+        assert stale["head_state"] == "stale"
+        path.unlink()
+        assert app.shots_service.diff_text_checkout(checkout_dir).data["entries"][0]["diff"] is None
+        path.write_bytes(b"\xff")
+        invalid = app.shots_service.status_text_checkout(checkout_dir).data["entries"][0]
+        assert invalid["local_state"] == "invalid_utf8" and invalid["local_content_hash"] is None
+
+
+def test_batch_apply_orders_digest_materialization_then_binding_events(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        made = []
+        for kind, key in (("transcript", "batch-a"), ("voiceover_script", "batch-b")):
+            result = app.shots_service.set_text_binding(
+                project_id, shot_ref=shot_id, kind=kind, text=b"old", expected_head=0,
+                idempotency_key=key,
+            )
+            made.append(result.data["binding"]["binding_id"])
+        checkout_dir = tmp_path / "batch"
+        assert app.shots_service.checkout_text_bindings(
+            project_id, checkout_dir, binding_ids=made
+        ).ok
+        for binding_id in made:
+            entry = next(e for e in json.loads(
+                (checkout_dir / ".astrid-text-checkout.json").read_text())["entries"]
+                if e["binding_id"] == binding_id)
+            (checkout_dir / entry["file"]).write_bytes(b"same-new")
+        applied = app.shots_service.apply_text_checkout(checkout_dir, idempotency_key="batch-apply")
+        assert applied.ok and applied.data["changed"] is True
+        assert applied.data["changed_binding_ids"] == sorted(made)
+        receipt = applied.receipt
+        assert receipt is not None
+        persisted_receipt = app.writer.submit(lambda s: s.query_one(
+            "SELECT primary_stream_id FROM command_receipts "
+            "WHERE project_id = ? AND idempotency_key = ?",
+            (project_id, "batch-apply"),
+        ))
+        assert persisted_receipt["primary_stream_id"] is None
+        event_kinds = app.writer.submit(lambda s: [
+            row[0] for row in s.query(
+                "SELECT kind FROM events WHERE project_id = ? ORDER BY project_seq",
+                (project_id,),
+            )
+        ])
+        batch = event_kinds[-3:]
+        assert batch[0] == "core.media.imported"
+        assert batch[1:] == ["shot.text_binding.rebound"] * 2
+
+
+def test_apply_replay_mismatch_base_guard_and_manifest_immutability(tmp_path: Path) -> None:
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"base",
+            expected_head=0, idempotency_key="guard-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        checkout_dir = tmp_path / "guard"
+        assert app.shots_service.checkout_text_bindings(project_id, checkout_dir, binding_ids=[binding_id]).ok
+        manifest_path = checkout_dir / ".astrid-text-checkout.json"
+        before_manifest = manifest_path.read_bytes()
+        entry = json.loads(before_manifest)["entries"][0]
+        (checkout_dir / entry["file"]).write_bytes(b"changed")
+        first = app.shots_service.apply_text_checkout(checkout_dir, idempotency_key="guard-apply")
+        assert first.ok
+        assert manifest_path.read_bytes() == before_manifest
+        assert app.shots_service.apply_text_checkout(checkout_dir, idempotency_key="guard-apply").as_dict() == first.as_dict()
+        (checkout_dir / entry["file"]).write_bytes(b"different")
+        mismatch = app.shots_service.apply_text_checkout(checkout_dir, idempotency_key="guard-apply")
+        assert mismatch.ok is False and mismatch.error.code == "idempotency_mismatch"
+        # Tampering with the frozen base is detected before any new event.
+        value = json.loads(before_manifest)
+        value["entries"][0]["content_hash"] = "0" * 64
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        base_error = app.shots_service.status_text_checkout(checkout_dir)
+        assert base_error.ok is False and base_error.error.code == "integrity_error"
+
+
+def test_apply_freezes_file_before_uow_and_noop_checks_all_heads(tmp_path: Path, monkeypatch) -> None:
+    from astrid.packs.shots import text_checkout
+
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project_id, shot_id = _seed(app)
+        created = app.shots_service.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"one", expected_head=0,
+            idempotency_key="freeze-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        checkout_dir = tmp_path / "freeze"
+        assert app.shots_service.checkout_text_bindings(project_id, checkout_dir, binding_ids=[binding_id]).ok
+        manifest = json.loads((checkout_dir / ".astrid-text-checkout.json").read_text())
+        path = checkout_dir / manifest["entries"][0]["file"]
+        path.write_bytes(b"admitted")
+        original = text_checkout.prepare_apply
+
+        def freeze_then_mutate(*args, **kwargs):
+            value = original(*args, **kwargs)
+            path.write_bytes(b"late-mutation")
+            return value
+
+        monkeypatch.setattr(text_checkout, "prepare_apply", freeze_then_mutate)
+        result = app.shots_service.apply_text_checkout(checkout_dir, idempotency_key="freeze-apply")
+        assert result.ok
+        binding = app.shots_service.list_text_bindings(project_id, binding_ids=[binding_id]).data[0]
+        assert binding["content_hash"] == hashlib.sha256(b"admitted").hexdigest()

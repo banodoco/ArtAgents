@@ -1,7 +1,7 @@
 """Product CLI surface tests (m4 plan step 24, task T25).
 
 Proves the product-family registry contract: exactly five families,
-manifest-declared nested mounts (shots under timelines, references under
+manifest-declared nested mounts (shots/text under timelines, references under
 media), rejection of missing/duplicate/unexpected/dynamic mounts, the
 exclusion of operational/legacy/singular-run commands from product
 dispatch, and the ``AstridClient``-passing handler boundary. Task T26
@@ -82,6 +82,7 @@ def test_is_product_family_validation() -> None:
 def test_is_registered_family_includes_nested_mounts() -> None:
     assert all(is_registered_family(family) for family in PRODUCT_FAMILIES)
     assert is_registered_family("shots")
+    assert is_registered_family("text")
     assert is_registered_family("references")
     assert not is_registered_family("serve")
     assert not is_registered_family("run")
@@ -92,7 +93,7 @@ def test_is_registered_family_includes_nested_mounts() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_mounts_include_core_and_the_two_nested_mounts() -> None:
+def test_mounts_include_core_and_the_three_nested_mounts() -> None:
     mounts = build_product_mounts()
     by_family = {mount.family: mount for mount in mounts}
     assert set(by_family) == {
@@ -102,6 +103,7 @@ def test_mounts_include_core_and_the_two_nested_mounts() -> None:
         "runs",
         "timelines",
         "shots",
+        "text",
         "references",
     }
     # Core families mount at their own top-level token.
@@ -111,9 +113,11 @@ def test_mounts_include_core_and_the_two_nested_mounts() -> None:
     # Manifest-owned timelines.
     assert by_family["timelines"].mount_path == ("timelines",)
     assert by_family["timelines"].declared_by == "manifest:timeline"
-    # Exactly the two declared nested mounts.
+    # Exactly the three declared nested mounts.
     assert by_family["shots"].mount_path == ("timelines", "shots")
     assert by_family["shots"].declared_by == "manifest:shots"
+    assert by_family["text"].mount_path == ("timelines", "text")
+    assert by_family["text"].declared_by == "manifest:shots"
     assert by_family["references"].mount_path == ("media", "references")
     assert by_family["references"].declared_by == "manifest:references"
 
@@ -124,6 +128,7 @@ def test_manifest_mounts_come_from_in_tree_declarations() -> None:
     assert declared == {
         "timelines": "timelines",
         "shots": "timelines shots",
+        "text": "timelines text",
         "references": "media references",
     }
 
@@ -720,6 +725,7 @@ def test_product_help_text_declares_exact_census_and_mounts() -> None:
     for operational in ("serve", "doctor", "backup"):
         assert operational in text
     assert "timelines shots" in text
+    assert "timelines text" in text
     assert "media references" in text
     for excluded in EXCLUDED_FROM_PRODUCT_CENSUS:
         assert excluded in text

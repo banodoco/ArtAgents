@@ -17,7 +17,6 @@ from astrid.core.migrations.runner import MigrationTooNewError, probe_database
 from astrid.core.schema_packs.standard import build_standard_registry
 from scripts.reshape.installed_artifact import build_once
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_FAMILIES = "projects timelines media tasks runs serve doctor backup"
 EXPECTED_RUNTIME_MODULES = {
@@ -40,6 +39,8 @@ EXPECTED_RUNTIME_MODULES = {
     "astrid/packs/timeline/repository.py",
     "astrid/packs/shots/__init__.py",
     "astrid/packs/shots/repository.py",
+    "astrid/packs/shots/text_bindings.py",
+    "astrid/packs/shots/text_cli.py",
     "astrid/packs/references/__init__.py",
     "astrid/packs/references/repository.py",
 }
@@ -49,6 +50,7 @@ EXPECTED_RESOURCES = {
     "astrid/packs/timeline/migrations/0001_initial.sql",
     "astrid/packs/shots/schema-pack.yaml",
     "astrid/packs/shots/migrations/0001_initial.sql",
+    "astrid/packs/shots/migrations/0002_text_bindings.sql",
     "astrid/packs/references/schema-pack.yaml",
     "astrid/packs/references/migrations/0001_initial.sql",
     "astrid/core/rendering/schemas/v1/request.json",
@@ -216,6 +218,7 @@ def test_wheel_contains_complete_resource_matrix_and_excludes_authoring_material
     assert {
         "astrid/packs/timeline/schema-pack.yaml",
         "astrid/packs/shots/schema-pack.yaml",
+        "astrid/packs/shots/migrations/0002_text_bindings.sql",
         "astrid/packs/references/schema-pack.yaml",
     } <= names
 
@@ -268,6 +271,7 @@ def test_installed_help_exposes_exact_eight_family_ownership_census(
     assert "doctor      [kernel]" in text
     assert "backup      [kernel]" in text
     assert "timelines shots       [pack: shots]" in text
+    assert "timelines text        [pack: shots]" in text
     assert "media references      [pack: references]" in text
     assert "Family census (exactly eight families):" in text
     assert "references [kernel]" not in text

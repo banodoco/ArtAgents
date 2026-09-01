@@ -24,23 +24,40 @@ from astrid.core.contracts.errors import (
     wrap_degraded_error,
 )
 from astrid.core.gateway.dispatch import (
-    _TOP_LEVEL_HANDLERS,
-    _build_dispatch_parser,
-    _dispatch_backup,
-    _dispatch_doctor,
-    _dispatch_product,
-    _dispatch_serve,
-    _top_level_commands,
+    _TOP_LEVEL_HANDLERS as _TOP_LEVEL_HANDLERS,
+)
+from astrid.core.gateway.dispatch import (
+    _build_dispatch_parser as _build_dispatch_parser,
+)
+from astrid.core.gateway.dispatch import (
+    _dispatch_backup as _dispatch_backup,
+)
+from astrid.core.gateway.dispatch import (
+    _dispatch_doctor as _dispatch_doctor,
+)
+from astrid.core.gateway.dispatch import (
+    _dispatch_product as _dispatch_product,
+)
+from astrid.core.gateway.dispatch import (
+    _dispatch_serve as _dispatch_serve,
+)
+from astrid.core.gateway.dispatch import (
+    _top_level_commands as _top_level_commands,
 )
 from astrid.core.gateway.help import (
-    _packs_subcommand_list,
-    _print_entrypoint_help,
-    _print_product_help,
-    _product_help_text,
+    _packs_subcommand_list as _packs_subcommand_list,
+)
+from astrid.core.gateway.help import (
+    _print_entrypoint_help as _print_entrypoint_help,
+)
+from astrid.core.gateway.help import (
+    _print_product_help as _print_product_help,
+)
+from astrid.core.gateway.help import (
+    _product_help_text as _product_help_text,
 )
 
 from . import dispatch as _gateway_dispatch
-
 
 # Canonical accepted unbound contract for the eight-family gateway. Only the
 # three operational families (which must run before any session exists) and

@@ -40,6 +40,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from astrid.core.conformance import (
     CommandSpec,
     ConformanceContext,
@@ -55,6 +57,61 @@ from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import register_standard_schema_packs
 from astrid.packs.timeline.repository import TimelineRepository
+
+
+@pytest.mark.parametrize("failure", ["materialize", "event", "receipt"])
+def test_text_checkout_apply_rolls_back_media_binding_and_receipt_on_failures(
+    tmp_path: Path, monkeypatch, failure
+) -> None:
+    """Each injected post-validation failure leaves the complete old state."""
+    from astrid.application import compose_standard_application
+
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project = app.shots_service  # keep the service path explicit in this matrix
+        project_row = UnitOfWork(app.writer).run(
+            lambda uow: app.projects.create(
+                uow, slug="crash-text", name="Crash Text", settings={},
+                idempotency_key="crash-text-project",
+            )
+        )
+        project_id = project_row.id
+        shot_row = UnitOfWork(app.writer).run(
+            lambda uow: app.shots.create(
+                uow, project_id=project_id, name="Opening",
+                idempotency_key="crash-text-shot",
+            )
+        )
+        shot_id = shot_row.id
+        created = project.set_text_binding(
+            project_id, shot_ref=shot_id, kind="transcript", text=b"before",
+            expected_head=0, idempotency_key="crash-text-create",
+        )
+        binding_id = created.data["binding"]["binding_id"]
+        checkout = tmp_path / "crash-checkout"
+        assert project.checkout_text_bindings(project_id, checkout, binding_ids=[binding_id]).ok
+        import json
+
+        manifest = json.loads((checkout / ".astrid-text-checkout.json").read_text())
+        (checkout / manifest["entries"][0]["file"]).write_bytes(b"after")
+        before = _text_apply_snapshot(app, project_id, binding_id)
+        if failure == "materialize":
+            monkeypatch.setattr(app.text_bindings, "materialize_absent_text",
+                                lambda *a, **k: (_ for _ in ()).throw(RuntimeError("materialize")))
+        elif failure == "event":
+            original = app.text_bindings._events.append
+
+            def append(uow, **kwargs):
+                if kwargs["event_kind"] == "shot.text_binding.rebound":
+                    raise RuntimeError("event")
+                return original(uow, **kwargs)
+
+            monkeypatch.setattr(app.text_bindings._events, "append", append)
+        else:
+            monkeypatch.setattr(app.text_bindings._receipts, "record",
+                                lambda *a, **k: (_ for _ in ()).throw(RuntimeError("receipt")))
+        result = project.apply_text_checkout(checkout, idempotency_key=f"crash-{failure}")
+        assert result.ok is False
+        assert _text_apply_snapshot(app, project_id, binding_id) == before
 
 TS = "2026-08-15T00:00:00.000000+00:00"
 _CRASH_EXIT_CODE = 137
@@ -78,6 +135,26 @@ _SNAPSHOT_TABLES = (
     "task_outputs",
     "evidence_items",
 )
+
+
+def _text_apply_snapshot(app, project_id: str, binding_id: str) -> tuple:
+    """Small authoritative snapshot used by the B2 rollback injections."""
+    return app.writer.submit(lambda s: tuple(
+        tuple(row) for row in s.query(
+            "SELECT media_id, event_stream_id FROM shot_text_bindings WHERE id = ?",
+            (binding_id,),
+        )
+    ) + tuple(
+        tuple(row) for row in s.query(
+            "SELECT kind, idempotency_key FROM events WHERE project_id = ? ORDER BY project_seq",
+            (project_id,),
+        )
+    ) + tuple(
+        tuple(row) for row in s.query(
+            "SELECT idempotency_key, command_kind FROM command_receipts WHERE project_id = ? ORDER BY idempotency_key",
+            (project_id,),
+        )
+    ))
 """Every mutable kernel table whose row count participates in old/complete
 state (m1 tables plus the m2 task/media/run tables, plan step 16)."""
 

@@ -55,11 +55,10 @@ from astrid.packs.references.repository import (
     REFERENCE_ARCHIVED_EVENT_KIND,
     REFERENCE_CREATE_COMMAND_KIND,
     REFERENCE_CREATED_EVENT_KIND,
-    REFERENCE_KINDS,
     REFERENCE_STREAM_TYPE,
     ReferenceAlreadyExistsError,
-    ReferenceArchiveReadModel,
     ReferenceArchivedError,
+    ReferenceArchiveReadModel,
     ReferenceMediaError,
     ReferenceNotFoundError,
     ReferenceReadModel,
@@ -678,7 +677,7 @@ def test_reference_archive_replay(env) -> None:
     assert second.to_dict() == first.to_dict()
     assert _counts(env.writer) == counts
     # A changed request under the same key fails before any mutation.
-    with pytest.raises(ReceiptMismatchError):
+    with pytest.raises(ReferenceNotFoundError):
         _archive_reference(
             env,
             project_id=project.id,
@@ -824,8 +823,7 @@ def test_reference_lifecycle_leaves_catalog_unchanged(env) -> None:
         }
     )
     # The frozen standard catalog: 14 kernel tables + timelines + shots +
-    # shot_items + bindings + the three reference tables = 21, with no
-    # plan/step tables.
+    # shot_items + the three reference tables = 20, with no plan/step tables.
     assert len(present) == 21
     for table in (
         "project_references",

@@ -31,6 +31,7 @@ repositories.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from astrid.core.receipts.canonical import request_hash
@@ -39,6 +40,7 @@ from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.packs.shots import text_checkout
 from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
     SHOT_CREATE_COMMAND_KIND,
@@ -47,8 +49,8 @@ from astrid.packs.shots.repository import (
 from astrid.packs.shots.text_bindings import (
     SHOT_TEXT_BINDING_REBIND_COMMAND_KIND,
     SHOT_TEXT_BINDING_SET_COMMAND_KIND,
-    ShotTextBindingValidationError,
     ShotTextBindingRepository,
+    ShotTextBindingValidationError,
     freeze_text_bytes,
 )
 from astrid.sdk.contracts import (
@@ -539,6 +541,79 @@ class ShotsService:
             receipt=self._committed_receipt(project_id, key),
             idempotency_key=key,
         )
+
+    def checkout_text_bindings(self, project: str, checkout_dir: str | Path, *, binding_ids: Sequence[str] | None = None, shot_ref: str | None = None, kind: str | None = None, slot: str | None = None, all_project: bool = False) -> DomainResult[dict[str, Any]]:
+        try:
+            project_id = self._projects.resolve(self._writer, project)
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            data = text_checkout.checkout(self._text_bindings, self._writer, project_id=project_id, checkout_dir=checkout_dir, binding_ids=binding_ids, shot_ref=shot_ref, kind=kind, slot=slot, all_project=all_project)
+            return DomainResult.success(data)
+        except ValueError as exc:
+            return DomainResult.failure(
+                map_error(ServiceValidationError(str(exc)))
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+
+    def status_text_checkout(self, checkout_dir: str | Path, *, binding_ids: Sequence[str] | None = None) -> DomainResult[dict[str, Any]]:
+        try:
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            data = text_checkout.status(self._text_bindings, self._writer, checkout_dir, binding_ids)
+            return DomainResult.success({"entries": data})
+        except ValueError as exc:
+            return DomainResult.failure(
+                map_error(ServiceValidationError(str(exc)))
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+
+    def diff_text_checkout(self, checkout_dir: str | Path, *, binding_ids: Sequence[str] | None = None) -> DomainResult[dict[str, Any]]:
+        try:
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            data = text_checkout.diff(self._text_bindings, self._writer, checkout_dir, binding_ids)
+            return DomainResult.success({"entries": data})
+        except ValueError as exc:
+            return DomainResult.failure(
+                map_error(ServiceValidationError(str(exc)))
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+
+    def apply_text_checkout(self, checkout_dir: str | Path, *, binding_ids: Sequence[str] | None = None, idempotency_key: str | None = None) -> DomainResult[dict[str, Any]]:
+        key = idempotency_key if isinstance(idempotency_key, str) else ""
+        try:
+            key = self._resolve_key(idempotency_key)
+            if self._text_bindings is None:
+                raise ServiceValidationError(
+                    "text binding support is unavailable in this composition"
+                )
+            _root, manifest, payloads = text_checkout.prepare_apply(
+                checkout_dir, binding_ids=binding_ids
+            )
+            project_id = self._projects.resolve(self._writer, manifest["project_id"])
+            result = UnitOfWork(self._writer).run(
+                lambda u: self._text_bindings.apply(
+                    u, project_id=project_id, entries=payloads,
+                    idempotency_key=key,
+                )
+            )
+            return DomainResult.success(result, receipt=self._committed_receipt(project_id,key), idempotency_key=key)
+        except ValueError as exc:
+            return DomainResult.failure(
+                map_error(ServiceValidationError(str(exc))),
+                idempotency_key=key,
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
 
     # -- private helpers ---------------------------------------------------
 

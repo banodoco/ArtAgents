@@ -1057,6 +1057,8 @@ class ShotTextBindingRepository:
         idempotency_key: str,
         actor_kind: str,
         prepared: _PreparedTextBindingCommand | None = None,
+        desired_media: MediaReadModel | None = None,
+        event_command_kind: str = SHOT_TEXT_BINDING_SET_COMMAND_KIND,
     ) -> _MutationOutcome:
         project_id = _require_project(project_id)
         expected_head = _require_head(expected_head)
@@ -1163,9 +1165,11 @@ class ShotTextBindingRepository:
                     txn_id="",
                 )
 
-        desired = self._resolve_desired_media(
-            uow, project_id=project_id, desired_digest=frozen.digest
-        )
+        desired = desired_media
+        if desired is None:
+            desired = self._resolve_desired_media(
+                uow, project_id=project_id, desired_digest=frozen.digest
+            )
         materialized_event = None
         if desired is None:
             media_key = f"{idempotency_key}:media:{frozen.digest}"
@@ -1207,7 +1211,7 @@ class ShotTextBindingRepository:
                 event_kind=SHOT_TEXT_BINDING_CREATED_EVENT_KIND, data=data,
                 changes=changes, idempotency_key=idempotency_key,
                 txn_id=txn_id, actor_kind=actor_kind,
-                command_kind=SHOT_TEXT_BINDING_SET_COMMAND_KIND,
+                command_kind=event_command_kind,
                 expected_head_seq=0, created_at=stamp,
             )
             event_ids.append(event.event_id)
@@ -1236,7 +1240,7 @@ class ShotTextBindingRepository:
                     "updated_at": stamp,
                 }, changes=["media_id", "updated_at"],
                 idempotency_key=idempotency_key, txn_id=txn_id,
-                actor_kind=actor_kind, command_kind=SHOT_TEXT_BINDING_SET_COMMAND_KIND,
+                actor_kind=actor_kind, command_kind=event_command_kind,
                 expected_head_seq=expected_head, created_at=stamp,
             )
             event_ids.append(event.event_id)
@@ -1447,6 +1451,215 @@ class ShotTextBindingRepository:
             resulting_stream_seq=mutation.binding.head,
         )
         return mutation
+
+    def apply(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        entries: Sequence[Mapping[str, Any]],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Apply a frozen checkout batch in one transaction and one receipt.
+
+        Preparation (manifest parsing, bounded reads, and byte freezing) is
+        performed by the SDK before this callback.  This method then validates
+        every current head/base before looking for a no-op or materializing a
+        byte.  Distinct absent digests are materialized in digest order; only
+        after that are binding events appended in binding-id order.
+        """
+        project_id = _require_project(project_id)
+        idempotency_key = _require_key(idempotency_key)
+        if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence) or not entries:
+            raise ShotTextBindingValidationError("apply entries must be non-empty")
+        ordered = sorted(entries, key=lambda entry: str(entry.get("binding_id", "")))
+        if any(not isinstance(entry, Mapping) for entry in ordered):
+            raise ShotTextBindingValidationError("apply entries must be objects")
+        if len({entry.get("binding_id") for entry in ordered}) != len(ordered):
+            raise ShotTextBindingValidationError("apply entries must have unique binding ids")
+        facts = []
+        for entry in ordered:
+            frozen = entry.get("frozen")
+            if not isinstance(frozen, FrozenTextBytes):
+                raise ShotTextBindingValidationError("apply entries must contain frozen bytes")
+            binding_id = _require_key(entry.get("binding_id"))
+            stream_id = derive_text_binding_stream_id(binding_id)
+            facts.append({
+                "binding_id": binding_id,
+                "event_stream_id": stream_id,
+                "expected_head": _require_head(entry.get("expected_head")),
+                "base_media_id": _require_key(entry.get("media_id")),
+                "base_content_hash": _require_key(entry.get("content_hash")),
+                "desired_content_hash": frozen.digest,
+            })
+        digest = request_hash(
+            SHOT_TEXT_BINDING_APPLY_COMMAND_KIND,
+            {"project_id": project_id, "entries": facts},
+        )
+        replay = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=digest,
+            command_kind=SHOT_TEXT_BINDING_APPLY_COMMAND_KIND,
+        )
+        if replay is not None:
+            return replay
+        if self._media is None:
+            raise ShotTextBindingValidationError("a Core MediaRepository is required")
+
+        states: list[dict[str, Any]] = []
+        desired_by_digest: dict[str, MediaReadModel | None] = {}
+        # Full-head validation is its own pass.  In particular, a stale later
+        # entry wins over corruption/no-op handling for an earlier entry, and
+        # no desired lookup, temp, event, or pointer write occurs until every
+        # selected head has passed.
+        for entry, fact in zip(ordered, facts, strict=True):
+            binding_id = fact["binding_id"]
+            row = self._resolve_binding(uow, project_id=project_id, binding_id=binding_id)
+            stream = uow.query_one(
+                "SELECT head_seq FROM event_streams WHERE id = ? AND project_id = ?",
+                (row["event_stream_id"], project_id),
+            )
+            actual_head = int(stream["head_seq"]) if stream is not None else -1
+            if actual_head != fact["expected_head"]:
+                raise ShotTextBindingStaleError(
+                    expected_head=fact["expected_head"], actual_head=actual_head,
+                    binding_id=binding_id,
+                )
+            states.append({"entry": entry, "fact": fact, "row": row})
+
+        # With all heads pinned, verify every current/base row and resolve
+        # every desired digest before deciding whether this is a no-op.
+        for state in states:
+            entry = state["entry"]
+            fact = state["fact"]
+            row = state["row"]
+            binding_id = fact["binding_id"]
+            current = self._media.read_project_media(
+                uow, project_id=project_id, media_id=str(row["media_id"])
+            )
+            if current is None:
+                raise ShotTextBindingIntegrityError(
+                    detail="bound_media_missing", media_id=str(row["media_id"])
+                )
+            current_verified = self._verify_managed_text(current, current=True)
+            self._verify_fingerprint(current_verified)
+            if str(row["media_id"]) != fact["base_media_id"] or current.content_hash != fact["base_content_hash"]:
+                raise ShotTextBindingIntegrityError(
+                    detail="manifest_base_mismatch", media_id=str(row["media_id"])
+                )
+            desired_digest = entry["frozen"].digest
+            if desired_digest not in desired_by_digest:
+                desired_by_digest[desired_digest] = self._resolve_desired_media(
+                    uow, project_id=project_id, desired_digest=desired_digest
+                )
+                desired = desired_by_digest[desired_digest]
+                if desired is not None:
+                    verified = self._verify_managed_text(desired, current=False)
+                    self._verify_fingerprint(verified)
+            state["current"] = current
+            state["changed"] = desired_digest != current.content_hash
+
+        # An entirely unchanged batch must not materialize, append, allocate,
+        # or record a receipt.  Its result is nevertheless evaluated fresh.
+        if not any(state["changed"] for state in states):
+            outcomes = [
+                ShotTextBindingMutation(
+                    changed=False,
+                    binding=self._binding_row(uow, state["row"]),
+                ).to_dict()
+                for state in states
+            ]
+            return {
+                "changed": False,
+                "recheckout_required": False,
+                "entries": outcomes,
+                "changed_binding_ids": [],
+                "unchanged_binding_ids": [outcome["binding"]["binding_id"] for outcome in outcomes],
+            }
+
+        media_event_ids: list[str] = []
+        media_project_seqs: list[int] = []
+        # Materialize each genuinely absent digest exactly once, in digest
+        # order, before the first binding event.
+        for desired_digest in sorted(
+            digest for digest, media in desired_by_digest.items() if media is None
+        ):
+            frozen = next(state["entry"]["frozen"] for state in states if state["entry"]["frozen"].digest == desired_digest)
+            media_key = f"{idempotency_key}:media:{desired_digest}"
+            media = self.materialize_absent_text(
+                uow, project_id=project_id, frozen=frozen,
+                idempotency_key=media_key, actor_kind="local",
+            )
+            desired_by_digest[desired_digest] = media
+            event = uow.query_one(
+                "SELECT event_id, project_seq FROM events WHERE project_id = ? AND idempotency_key = ?",
+                (project_id, media_key),
+            )
+            if event is None:
+                raise ShotTextBindingIntegrityError(detail="materialized_event_missing")
+            media_event_ids.append(str(event["event_id"]))
+            media_project_seqs.append(int(event["project_seq"]))
+
+        outcomes: list[dict[str, Any]] = []
+        binding_event_ids: list[str] = []
+        binding_project_seqs: list[int] = []
+        txn_id = uuid.uuid4().hex
+        for state in states:
+            entry = state["entry"]
+            binding_id = state["fact"]["binding_id"]
+            desired = desired_by_digest[entry["frozen"].digest]
+            prepared = _PreparedTextBindingCommand(
+                project_id=project_id,
+                natural_tuple=(project_id, str(state["row"]["shot_id"]), str(state["row"]["kind"]), state["row"]["slot"]),
+                binding_id=binding_id,
+                event_stream_id=str(state["row"]["event_stream_id"]),
+                expected_head=state["fact"]["expected_head"],
+                desired_content_hash=entry["frozen"].digest,
+            )
+            outcome = self._write_set(
+                uow,
+                project_id=project_id,
+                frozen=entry["frozen"],
+                expected_head=state["fact"]["expected_head"],
+                binding_id=binding_id,
+                shot_ref=None, kind=None, slot=None,
+                idempotency_key=f"{idempotency_key}:binding:{binding_id}",
+                actor_kind="local", prepared=prepared,
+                desired_media=desired,
+                event_command_kind=SHOT_TEXT_BINDING_APPLY_COMMAND_KIND,
+            )
+            outcomes.append(outcome.mutation.to_dict())
+            binding_event_ids.extend(outcome.event_ids)
+            binding_project_seqs.extend(outcome.project_seqs)
+        changed = any(outcome["changed"] for outcome in outcomes)
+        result = {
+            "changed": changed,
+            "recheckout_required": changed,
+            "entries": outcomes,
+            "changed_binding_ids": [outcome["binding"]["binding_id"] for outcome in outcomes if outcome["changed"]],
+            "unchanged_binding_ids": [outcome["binding"]["binding_id"] for outcome in outcomes if not outcome["changed"]],
+        }
+        if not changed:
+            return result
+        event_ids = media_event_ids + binding_event_ids
+        project_seqs = media_project_seqs + binding_project_seqs
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=digest,
+            command_kind=SHOT_TEXT_BINDING_APPLY_COMMAND_KIND,
+            txn_id=txn_id,
+            first_project_seq=min(project_seqs),
+            last_project_seq=max(project_seqs),
+            event_ids=event_ids,
+            result=result,
+            primary_stream_id=(states[0]["row"]["event_stream_id"] if len(states) == 1 else None),
+            resulting_stream_seq=(outcomes[0]["binding"]["head"] if len(states) == 1 else None),
+        )
+        return result
 
 
 __all__ = [

@@ -30,7 +30,7 @@ and whose assertions hold under *any* subset of the three packs:
 Deliberately excluded suites (asserted separately, see below):
 
 - ``test_registry.py`` / ``test_catalog_migrations.py`` assert the exact
-  *standard* 3-pack composition (e.g. the 20-table catalog), so they cannot
+  *standard* 3-pack composition (e.g. the 21-table catalog), so they cannot
   run under a reduced composition; the check's own catalog verification step
   re-derives the remaining manifest-derived catalog from the modified
   registration instead.
@@ -70,22 +70,26 @@ uninstalled.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrid.core.migrations.catalog import CORE_MIGRATIONS
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from astrid.core.migrations.catalog import (  # noqa: E402 - sys.path is prepared above for direct execution
+    CORE_MIGRATIONS,
+)
+
 """The repository root the check copies from (read-only)."""
 
 DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
@@ -93,7 +97,7 @@ DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
     "timeline": ("timelines",),
-    "shots": ("shots", "shot_items"),
+    "shots": ("shots", "shot_items", "shot_text_bindings"),
     "references": ("project_references", "media_references", "reference_links"),
 }
 """Tables each domain pack declares through its manifest migrations (frozen
@@ -111,21 +115,26 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "bridge_mounts": ("timelines",),
     },
     "shots": {
-        "stream_types": ("shot.shot",),
+        "stream_types": ("shot.shot", "shot.text_binding"),
         "event_kinds": (
             "shot.created",
             "shot.item_added",
             "shot.item_removed",
             "shot.reordered",
+            "shot.text_binding.created",
+            "shot.text_binding.rebound",
         ),
         "command_kinds": (
             "shot.create",
             "shot.add_item",
             "shot.remove_item",
             "shot.reorder",
+            "shot.text_binding.set",
+            "shot.text_binding.rebind",
+            "shot.text_binding.apply",
         ),
-        "repositories": ("ShotRepository",),
-        "cli_mounts": ("shots",),
+        "repositories": ("ShotRepository", "ShotTextBindingRepository"),
+        "cli_mounts": ("shots", "text"),
         "bridge_mounts": (),
     },
     "references": {
@@ -561,10 +570,17 @@ try:
         repositories.append(timelines)
     if "shots" in remaining:
         from astrid.packs.shots.repository import ShotRepository
+        from astrid.packs.shots.text_bindings import ShotTextBindingRepository
         from astrid.sdk.shots import ShotsService
         shots = ShotRepository(events=events, receipts=receipts)
-        services.append(ShotsService(writer, projects, shots, receipts))
-        repositories.append(shots)
+        text_bindings = ShotTextBindingRepository(events=events, receipts=receipts)
+        services.append(
+            ShotsService(
+                writer, projects, shots, receipts,
+                text_bindings=text_bindings,
+            )
+        )
+        repositories.extend((shots, text_bindings))
     if "references" in remaining:
         from astrid.packs.references.repository import ReferenceRepository
         from astrid.sdk.references import ReferencesService

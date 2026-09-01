@@ -1,7 +1,7 @@
 """Shot repository tests: immutable shot containers and position-aware item
 mutations (m3 plan steps 10-11, T11 + T12).
 
-This suite proves the shots pack repository over the frozen two-table schema
+This suite proves the shots pack repository over the frozen three-table schema
 (``shots``, ``shot_items``) with exact kernel media ids only:
 
 - ``create`` atomicity: one ``BEGIN IMMEDIATE`` command writes the
@@ -30,7 +30,7 @@ This suite proves the shots pack repository over the frozen two-table schema
 - reads are transaction-free on a separate read-only connection with stable
   ``sort_key``/``id`` ordering for both shots and items;
 - the pack never FK's to or imports the timeline pack, and the standard
-  catalog stays exactly the frozen 20 tables.
+  catalog stays exactly the frozen 21 tables.
 
 Every command runs inside the caller's one ``BEGIN IMMEDIATE`` unit of work
 (:class:`astrid.core.store.uow.UnitOfWork`); every read runs on a separate
@@ -70,7 +70,6 @@ from astrid.packs.shots.repository import (
     ShotAlreadyExistsError,
     ShotItemMutationReadModel,
     ShotItemNotFoundError,
-    ShotItemReadModel,
     ShotListRow,
     ShotMediaError,
     ShotNotFoundError,
@@ -1835,8 +1834,8 @@ def test_shot_repository_has_no_timeline_dependency(env) -> None:
     source = Path(repo_module.__file__).read_text(encoding="utf-8")
     assert "astrid.packs.timeline" not in source
 
-    # The frozen standard catalog is exactly 21 tables (14 kernel + timelines
-    # + shots + shot_items + bindings + the three reference tables), with no
+    # The frozen standard catalog is still exactly 21 tables (14 kernel +
+    # timelines + shots + shot_items + shot_text_bindings + the three reference tables), with no
     # plan/step tables.
     present = env.writer.submit(
         lambda session: {

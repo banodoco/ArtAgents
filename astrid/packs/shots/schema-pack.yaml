@@ -59,7 +59,9 @@ conformance:
   - writer_ownership
   - crash_atomicity
   - hash_chain
-  - text_binding
+  - text_binding_identity
+  - text_binding_cas
+  - text_binding_checkout
 cli_mounts:
   shots: timelines shots
   text: timelines text

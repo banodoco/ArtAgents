@@ -9,7 +9,6 @@ import pytest
 
 from scripts.reshape.installed_artifact import InstalledArtifactHarness, build_once
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -69,15 +68,16 @@ def manifest_catalog(relative):
             yaml_section(text, "cli_mounts"),
         )
     )
-    tables_section = re.search(
-        r"(?ms)^migrations:\s*\n.*?^\s+tables:\s*\n((?:^\s+-\s+[^\n]+\n?)+)",
+    tables_sections = re.findall(
+        r"(?m)^ {4}tables:[ \t]*\n((?:^ {6}-[ \t]+[^\n]*(?:\n|$))+)",
         text,
     )
-    if tables_section is None:
+    if not tables_sections:
         raise AssertionError(f"missing migration tables in {relative}")
     tables = tuple(
         line.strip()[2:].strip()
-        for line in tables_section.group(1).splitlines()
+        for section in tables_sections
+        for line in section.splitlines()
         if line.strip().startswith("-")
     )
     return {"mounts": mounts, "tables": tables, "text": text}
@@ -115,7 +115,7 @@ runtime_families = tuple(domain_product.PRODUCT_FAMILIES) + (
 )
 assert set(runtime_families) == set(expected_families), runtime_families
 assert set(domain_product.FAMILY_PARSER_MODULES) == {
-    "projects", "timelines", "media", "tasks", "runs", "shots", "references"
+    "projects", "timelines", "media", "tasks", "runs", "shots", "text", "references"
 }
 
 manifest_files = {
@@ -146,16 +146,17 @@ from astrid.core.schema_packs.registry import RegisteredMigration
 core_sql = "core/migrations/sql/core/0001_initial.sql"
 core_tables = set(sql_tables(core_sql))
 assert len(core_tables) == 14, sorted(core_tables)
+text_binding_tables = set(
+    sql_tables("packs/shots/migrations/0002_text_bindings.sql")
+)
+assert text_binding_tables == {"shot_text_bindings"}, text_binding_tables
 
 pack_specs = {
     "timeline": "migrations/0001_initial.sql",
     "shots": "migrations/0001_initial.sql",
     "references": "migrations/0001_initial.sql",
 }
-pack_resource_paths = {
-    pack: f"packs/{pack}/{path}"
-    for pack, path in pack_specs.items()
-}
+pack_resource_paths = {pack: f"packs/{pack}/{path}" for pack, path in pack_specs.items()}
 pack_catalog = {
     pack: {
         "manifest_tables": sorted(manifest_catalogs[pack]["tables"]),
@@ -163,6 +164,10 @@ pack_catalog = {
     }
     for pack, path in pack_resource_paths.items()
 }
+pack_catalog["shots"]["sql_tables"].extend(
+    sql_tables("packs/shots/migrations/0002_text_bindings.sql")
+)
+pack_catalog["shots"]["sql_tables"].sort()
 for pack, catalog in pack_catalog.items():
     assert catalog["manifest_tables"] == catalog["sql_tables"], (pack, catalog)
 
@@ -182,17 +187,22 @@ class InstalledRegistry:
         specs.extend(
             (pack, "initial", path) for pack, path in pack_specs.items()
         )
+        specs.append(("shots", "text_bindings", "migrations/0002_text_bindings.sql"))
         self.migrations = tuple(
             RegisteredMigration(
                 pack=pack,
-                version=1,
+                version=2 if name == "text_bindings" else 1,
                 name=name,
                 path=path,
                 tables=tuple(
                     sorted(
                         core_tables
                         if pack == "core"
-                        else manifest_catalogs[pack]["tables"]
+                        else (
+                            text_binding_tables
+                            if name == "text_bindings"
+                            else manifest_catalogs[pack]["tables"]
+                        )
                     )
                 ),
             )
@@ -246,7 +256,7 @@ expected_tables = core_tables | {
     for table in catalog["manifest_tables"]
 }
 assert tables == expected_tables, sorted(tables ^ expected_tables)
-assert migration_rows == {("core", 1), ("timeline", 1), ("shots", 1), ("references", 1)}
+assert migration_rows == {("core", 1), ("timeline", 1), ("shots", 1), ("shots", 2), ("references", 1)}
 assert {(row.pack, row.version) for row in applied} == migration_rows
 
 
@@ -313,6 +323,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
     assert payload["manifest_mounts"] == {
         "timelines": "timelines",
         "shots": "timelines shots",
+        "text": "timelines text",
         "references": "media references",
     }
     assert payload["kernel_table_count"] == 14
@@ -320,6 +331,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
         ("core", 1),
         ("timeline", 1),
         ("shots", 1),
+        ("shots", 2),
         ("references", 1),
     }
     for evidence in payload["too_new"].values():

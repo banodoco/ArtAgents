@@ -16,7 +16,6 @@ import unittest
 
 from astrid.core.cli.registration import CommandSpec, register_commands
 
-
 # ── Phased allowlist ────────────────────────────────────────────────────────
 #
 # Every entry under _ALLOWLISTED names a CLI module that has adopted
@@ -33,8 +32,8 @@ from astrid.core.cli.registration import CommandSpec, register_commands
 # planned in this epic).  They are no longer in any gate list.
 
 _ALLOWLISTED: tuple[str, ...] = (
-    # m6 teardown: the seven product-family CLI modules (five product
-    # families + the two manifest-declared nested mounts) are the pruned
+    # m6 teardown: the eight product-family CLI modules (five product
+    # families + the three manifest-declared nested mounts) are the pruned
     # allowlist. The legacy session/timeline/project CLI modules were
     # deleted by the m6 cutover (T5/T6-T9).
     "astrid.core.cli.domain_projects",
@@ -43,6 +42,7 @@ _ALLOWLISTED: tuple[str, ...] = (
     "astrid.core.cli.domain_runs",
     "astrid.packs.timeline.cli",
     "astrid.packs.shots.cli",
+    "astrid.packs.shots.text_cli",
     "astrid.packs.references.cli",
 )
 
@@ -210,7 +210,7 @@ class PhasedAllowlistTest(unittest.TestCase):
 class ProductRegistryConformanceTest(unittest.TestCase):
     """The m4 product registry (plan step 24, task T25) conforms exactly.
 
-    Exactly five product families; shots/references attach as nested
+    Exactly five product families; shots/text/references attach as nested
     mounts from the explicit in-tree manifest declarations; serve, doctor,
     and backup stay outside the product census and product dispatch
     (m6 cutover); handlers receive the composed AstridClient.
@@ -237,6 +237,7 @@ class ProductRegistryConformanceTest(unittest.TestCase):
 
         by_family = {mount.family: mount.mount_path for mount in build_product_mounts()}
         self.assertEqual(by_family["shots"], ("timelines", "shots"))
+        self.assertEqual(by_family["text"], ("timelines", "text"))
         self.assertEqual(by_family["references"], ("media", "references"))
         # Nested families are not top-level product commands.
         self.assertNotIn("shots", product_top_level_commands())
@@ -251,6 +252,7 @@ class ProductRegistryConformanceTest(unittest.TestCase):
             {
                 "timelines": "timelines",
                 "shots": "timelines shots",
+                "text": "timelines text",
                 "references": "media references",
             },
         )
@@ -336,10 +338,11 @@ class ProductRegistryConformanceTest(unittest.TestCase):
         base = (
             ManifestMount("timelines", "timelines", "timeline"),
             ManifestMount("shots", "timelines shots", "shots"),
+            ManifestMount("text", "timelines text", "shots"),
             ManifestMount("references", "media references", "references"),
         )
         # Valid base registry builds.
-        self.assertEqual(len(_validate_mounts(PRODUCT_FAMILIES, base)), 7)
+        self.assertEqual(len(_validate_mounts(PRODUCT_FAMILIES, base)), 8)
 
         # Missing declaration.
         with self.assertRaises(ProductRegistryError):

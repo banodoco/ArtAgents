@@ -16,9 +16,10 @@ runtime semantics:
   media→references) recorded as documented composition exemptions — any
   other error fails closed;
 - **forbidden drift rejection**: schema/catalog composition drift (the frozen
-  v10 20-table catalog: kernel 14 + timeline 1 + shots 2 + references 3),
-  product surface drift (exactly five top-level families, two
-  manifest-declared nested mounts, no ``timelines copy`` route), SDK surface
+  v10 21-table catalog: kernel 14 + timeline 1 + shots 3 + references 3),
+  product surface drift (exactly five top-level families, three
+  manifest-declared nested mounts, no
+  ``timelines copy`` route), SDK surface
   drift (no public raw runner promises), and sentinel-secret persistence in
   retained evidence;
 - **feasibility admission**: a present, parseable, accepted
@@ -53,7 +54,6 @@ retained admission document was written and re-validated.
 from __future__ import annotations
 
 import argparse
-import ast
 import datetime
 import hashlib
 import json
@@ -75,13 +75,6 @@ if str(REPO_ROOT) not in sys.path:
 GATE_SCHEMA = "astrid.m4_finalizer_admission.v1"
 DEFAULT_OUT = REPO_ROOT / "artifacts" / "m4" / "finalizer-admission.json"
 DEFAULT_EVIDENCE_DIR = REPO_ROOT / "out" / "m4-gate" / "latest"
-DEFAULT_FEASIBILITY = (
-    REPO_ROOT
-    / ".megaplan"
-    / "plans"
-    / "m4-bridge-sdk-and-cli-domains-20260818-0642"
-    / "task_feasibility.json"
-)
 
 BASELINE_SCHEMA = "astrid.m4_baseline.v1"
 DISPOSITION_SCHEMA = "astrid.reigh_external_gate_disposition.v1"
@@ -91,11 +84,11 @@ DISPOSITION_SCHEMA = "astrid.reigh_external_gate_disposition.v1"
 # retained m4 evidence artifact for it.
 SENTINEL = "astrid-sentinel-secret-7f3c9d"
 
-# Frozen v10 composition: kernel 14 + timeline 1 + shots 2 + references 3 = 20.
+# Frozen composition: kernel 14 + timeline 1 + shots 3 + references 3 = 21.
 FROZEN_CORE_TABLE_COUNT = 14
 FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
     "timeline": frozenset({"timelines"}),
-    "shots": frozenset({"shots", "shot_items"}),
+    "shots": frozenset({"shots", "shot_items", "shot_text_bindings"}),
     "references": frozenset(
         {"project_references", "media_references", "reference_links"}
     ),
@@ -104,15 +97,19 @@ FROZEN_STANDARD_PACKS = ("timeline", "shots", "references")
 
 # Frozen product surface (m4 plan step 24 / sense check SC25).
 FROZEN_PRODUCT_FAMILIES = ("projects", "media", "tasks", "runs", "timelines")
-FROZEN_EXCLUDED_CENSUS = frozenset({"serve", "doctor", "run"})
+FROZEN_EXCLUDED_CENSUS = frozenset({"serve", "doctor", "backup"})
 FROZEN_MANIFEST_MOUNTS: dict[str, tuple[str, ...]] = {
     "timelines": ("timelines",),
     "shots": ("timelines", "shots"),
+    "text": ("timelines", "text"),
     "references": ("media", "references"),
 }
-FROZEN_NESTED_FAMILIES = frozenset({"shots", "references"})
-FROZEN_PRODUCT_TIMELINE_VERBS = frozenset(
-    {"create", "list", "show", "save", "archive", "history", "diff"}
+FROZEN_NESTED_FAMILIES = frozenset({"shots", "text", "references"})
+FROZEN_TIMELINE_OPERATIONS = frozenset(
+    {
+        "create", "list", "show", "save", "archive", "unarchive", "history",
+        "diff", "visualize", "render",
+    }
 )
 
 # Frozen SDK surface: the curated public exports keep lazy discovery, typed
@@ -146,11 +143,7 @@ PRIMARY_PYTHON_ALLOWED = ((3, 11), (3, 12))
 # itself is outside T37's write set, so the exemption is enforced here.)
 CLI_MOUNT_IMPORT_EXEMPTIONS: frozenset[tuple[str, str]] = frozenset(
     {
-        # The shots pack parser embedded beneath the timelines family.
-        ("astrid/packs/timeline/cli.py", "astrid.packs.shots"),
         ("astrid/packs/timeline/cli.py", "astrid.packs.shots.cli"),
-        # The references pack parser embedded beneath the media family.
-        ("astrid/core/cli/domain_media.py", "astrid.packs.references"),
         ("astrid/core/cli/domain_media.py", "astrid.packs.references.cli"),
     }
 )
@@ -190,7 +183,6 @@ LANES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_cli_registration_conformance.py",
             "tests/test_canonical_aliases.py",
             "tests/test_canonical_entrypoint.py",
-            "tests/session/test_cli_gate.py",
         ),
     ),
     (
@@ -381,6 +373,15 @@ def _run_lane(
             passed, failed, skipped = 1, 0, 0
         else:
             passed, failed, skipped = 0, 1, 0
+    try:
+        log_ref = str(log_path.relative_to(repo_root))
+        junit_ref = str(junit_path.relative_to(repo_root))
+    except ValueError:
+        # Programmatic probes may deliberately keep evidence outside the
+        # checkout; retain an absolute reference instead of crashing after
+        # the lane itself completed.
+        log_ref = str(log_path)
+        junit_ref = str(junit_path)
     return LaneResult(
         name=name,
         selectors=selectors,
@@ -390,8 +391,8 @@ def _run_lane(
         status=_lane_status(passed, failed, skipped),
         returncode=completed.returncode,
         duration_seconds=duration_seconds,
-        log=str(log_path.relative_to(repo_root)),
-        junit=str(junit_path.relative_to(repo_root)),
+        log=log_ref,
+        junit=junit_ref,
     )
 
 
@@ -458,13 +459,84 @@ def _discover_secondary() -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _check_feasibility(path: Path) -> tuple[dict[str, object], list[str]]:
-    """Require a present, parseable, accepted feasibility admission.
+FEASIBILITY_SCHEMA = "megaplan-task-feasibility-v2"
+_FEASIBILITY_FIELDS = frozenset(
+    {"schema_version", "plan_hash", "task_contract_hash", "task_count", "admitted"}
+)
+_CANONICAL_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_TASK_ID_RE = re.compile(r"^B[1-5]-T[0-9]{2}$")
+_TASK_HEADER = ("Task ID", "Batch", "Depends on", "Classification", "Model")
 
-    Returns ``(record, problems)``; problems are non-empty (fail closed)
-    when the admission is absent, malformed, or not accepted.
+
+def _sha256_prefixed(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _split_table_row(line: str) -> tuple[str, ...] | None:
+    """Split one Markdown row, preserving empty cells for strict checks."""
+    if not line.startswith("|") or not line.rstrip().endswith("|"):
+        return None
+    cells = tuple(cell.strip() for cell in line.strip()[1:-1].split("|"))
+    return cells
+
+
+def _count_canonical_tasks(tasklist: Path) -> int:
+    """Count the unique valid rows in this run's exact canonical task table.
+
+    This intentionally remains task-specific: it recognizes only the frozen
+    five-column table headed ``Canonical task table`` and fails closed on a
+    missing/duplicate/malformed record.
     """
+    lines = tasklist.read_text(encoding="utf-8").splitlines()
+    try:
+        heading = next(i for i, line in enumerate(lines) if line.strip() == "## Canonical task table")
+    except StopIteration as exc:
+        raise ValueError("canonical task table heading is missing") from exc
+    header_indices = [
+        i for i in range(heading + 1, len(lines))
+        if _split_table_row(lines[i]) == _TASK_HEADER
+    ]
+    if len(header_indices) != 1:
+        raise ValueError("canonical task table must contain exactly one required header")
+    start = header_indices[0] + 1
+    separator = _split_table_row(lines[start]) if start < len(lines) else None
+    if separator != ("---", "---", "---", "---", "---"):
+        raise ValueError("canonical task table separator is malformed")
+    ids: set[str] = set()
+    rows = 0
+    saw_data = False
+    for line in lines[start + 1:]:
+        if not line.strip():
+            if saw_data:
+                break
+            continue
+        if line.startswith("## "):
+            break
+        cells = _split_table_row(line)
+        if cells is None:
+            # The canonical table must be contiguous.  A non-table line
+            # before the first row is just as malformed as one between rows;
+            # prose is only allowed after a blank delimiter (handled above).
+            raise ValueError("malformed canonical task row")
+        if len(cells) != 5 or any(not cell for cell in cells):
+            raise ValueError("malformed canonical task row")
+        task_id = cells[0]
+        if _TASK_ID_RE.fullmatch(task_id) is None:
+            raise ValueError(f"malformed task id {task_id!r}")
+        if task_id in ids:
+            raise ValueError(f"duplicate task id {task_id!r}")
+        ids.add(task_id)
+        rows += 1
+        saw_data = True
+    if rows == 0:
+        raise ValueError("canonical task table has no task rows")
+    return rows
+
+
+def _check_feasibility(path: Path) -> tuple[dict[str, object], list[str]]:
+    """Strictly validate one explicit task-bound feasibility record."""
     problems: list[str] = []
+    path = path.expanduser().resolve()
     record: dict[str, object] = {"path": str(path)}
     if not path.is_file():
         problems.append(
@@ -485,22 +557,63 @@ def _check_feasibility(path: Path) -> tuple[dict[str, object], list[str]]:
         record["present"] = True
         record["parseable"] = False
         return record, problems
+    record.update({key: data.get(key) for key in _FEASIBILITY_FIELDS})
     record["present"] = True
     record["parseable"] = True
-    record["schema_version"] = data.get("schema_version")
-    record["plan_hash"] = data.get("plan_hash")
-    record["task_contract_hash"] = data.get("task_contract_hash")
-    record["task_count"] = data.get("task_count")
+    missing = sorted(_FEASIBILITY_FIELDS - set(data))
+    extra = sorted(set(data) - _FEASIBILITY_FIELDS)
+    if missing:
+        problems.append(f"feasibility schema missing field(s): {missing}")
+    if extra:
+        problems.append(f"feasibility schema has unexpected field(s): {extra}")
+    if data.get("schema_version") != FEASIBILITY_SCHEMA:
+        problems.append(f"feasibility schema_version must be {FEASIBILITY_SCHEMA!r}")
+    for field in ("plan_hash", "task_contract_hash"):
+        value = data.get(field)
+        if not isinstance(value, str) or _CANONICAL_HASH_RE.fullmatch(value) is None:
+            problems.append(f"feasibility {field} is not canonical sha256 hash")
+    count = data.get("task_count")
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        problems.append("feasibility task_count must be a positive non-boolean integer")
     admitted = data.get("admitted")
-    if not isinstance(admitted, bool) or not admitted:
-        problems.append(
-            f"feasibility admission at {path} is not accepted "
-            f"(admitted={admitted!r})"
-        )
-        record["admitted"] = admitted
-        return record, problems
-    record["admitted"] = True
-    record["accepted"] = True
+    if admitted is not True or not isinstance(admitted, bool):
+        problems.append("feasibility admitted must be exactly true")
+
+    # The explicit record must live below its run's evidence directory, with
+    # the frozen authorities as exact siblings of that evidence directory.
+    evidence_dir = next((parent for parent in (path, *path.parents) if parent.name == "evidence"), None)
+    run_root = evidence_dir.parent if evidence_dir is not None else None
+    plan_path = run_root / "plan.md" if run_root else None
+    tasklist_path = run_root / "tasklist.md" if run_root else None
+    if evidence_dir is None:
+        problems.append("feasibility path must be beneath the run evidence directory")
+    if plan_path is None or not plan_path.is_file():
+        problems.append("frozen sibling plan.md is missing beside evidence/")
+    if tasklist_path is None or not tasklist_path.is_file():
+        problems.append("frozen sibling tasklist.md is missing beside evidence/")
+    if plan_path is not None and plan_path.is_file():
+        try:
+            observed_plan_hash = _sha256_prefixed(plan_path)
+            record["observed_plan_hash"] = observed_plan_hash
+            if data.get("plan_hash") != observed_plan_hash:
+                problems.append("feasibility plan_hash does not match frozen plan.md")
+        except OSError as exc:
+            problems.append(f"frozen plan.md unreadable: {exc}")
+    if tasklist_path is not None and tasklist_path.is_file():
+        try:
+            observed_task_hash = _sha256_prefixed(tasklist_path)
+            record["observed_task_contract_hash"] = observed_task_hash
+            if data.get("task_contract_hash") != observed_task_hash:
+                problems.append("feasibility task_contract_hash does not match frozen tasklist.md")
+            observed_count = _count_canonical_tasks(tasklist_path)
+            record["observed_task_count"] = observed_count
+            if data.get("task_count") != observed_count:
+                problems.append("feasibility task_count does not match canonical task table")
+        except (OSError, ValueError) as exc:
+            problems.append(f"canonical tasklist validation failed: {exc}")
+    if not problems:
+        record["accepted"] = True
+        record["authority_validated"] = True
     return record, problems
 
 
@@ -535,15 +648,48 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
     Returns ``(ok, violations, exemptions)`` where *exemptions* are the
     exactly-two documented nested-mount parser composition edges.
     """
-    from scripts.reshape.authority_lint import run_authority_lint
+    from scripts.reshape.authority_lint import (
+        FROZEN_BASELINE_WRITER_CALL_SITES,
+        _imported_modules,
+        _writer_call_sites,
+        lint_writer_authority,
+        run_authority_lint,
+    )
 
     report = run_authority_lint(REPO_ROOT)
-    violations, exemptions = _classify_authority_errors(report.errors)
+    writer_errors = set(lint_writer_authority(REPO_ROOT))
+    observed_writers = set(_writer_call_sites(REPO_ROOT))
+    added_writers = sorted(observed_writers - FROZEN_BASELINE_WRITER_CALL_SITES)
+    missing_writers = sorted(FROZEN_BASELINE_WRITER_CALL_SITES - observed_writers)
+    writer_violations = [
+        f"unbaselined writable call site: {identity}" for identity in added_writers
+    ]
+    if missing_writers:
+        writer_violations.append(
+            "frozen writable baseline call site drift; missing: "
+            + ", ".join(missing_writers)
+        )
+    non_writer_errors = [error for error in report.errors if error not in writer_errors]
+    violations, exemptions = _classify_authority_errors(non_writer_errors)
+    violations.extend(writer_violations)
+    # The source lint intentionally suppresses the two manifest-declared
+    # parser edges. Account for their actual presence here so the M4 record
+    # cannot claim an edge that disappeared or admit a new one implicitly.
+    for rel, module in sorted(CLI_MOUNT_IMPORT_EXEMPTIONS):
+        path = REPO_ROOT / rel
+        try:
+            present = module in _imported_modules(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            present = False
+        if present:
+            exemptions.append(f"{rel}: accepted parser edge {module}")
+        else:
+            violations.append(f"missing accepted parser edge: {rel} -> {module}")
     return not violations, violations, exemptions
 
 
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
-    """Reject schema/catalog drift from the frozen v10 20-table composition."""
+    """Reject schema/catalog drift from the frozen 21-table composition."""
     violations: list[str] = []
     from astrid.core.migrations.catalog import CORE_TABLES, FORBIDDEN_TABLES
     from astrid.core.schema_packs.manifest import load_schema_pack_manifest
@@ -559,13 +705,18 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
     packs_root = REPO_ROOT / "astrid" / "packs"
     declared: dict[str, str] = {}
     manifest_pack_ids: list[str] = []
-    for pack_dir in sorted(p for p in packs_root.iterdir() if p.is_dir()):
+    # Only the explicit standard composition is part of this active census;
+    # capability/experimental schema manifests such as ``runaway`` are
+    # intentionally unregistered and remain outside the standard catalog.
+    for pack_id in STANDARD_SCHEMA_PACKS:
+        pack_dir = packs_root / pack_id
         manifest_path = pack_dir / "schema-pack.yaml"
         if not manifest_path.is_file():
             continue
         manifest = load_schema_pack_manifest(manifest_path)
         manifest_pack_ids.append(manifest.id)
-        declared.update({table: manifest.id for table in manifest.migrations[0].tables})
+        for migration in manifest.migrations:
+            declared.update({table: manifest.id for table in migration.tables})
     if tuple(sorted(manifest_pack_ids)) != tuple(sorted(STANDARD_SCHEMA_PACKS)):
         violations.append(
             f"schema-pack drift: found packs {sorted(manifest_pack_ids)} != "
@@ -580,8 +731,8 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
                 f"pack {pack_id!r} table drift: {sorted(actual)} != {sorted(expected)}"
             )
     total = len(CORE_TABLES) + len(declared)
-    if total != 20:
-        violations.append(f"composition table count {total} != frozen 20")
+    if total != 21:
+        violations.append(f"composition table count {total} != frozen 21")
     forbidden_hit = sorted(set(declared) & set(FORBIDDEN_TABLES))
     if forbidden_hit:
         violations.append(
@@ -605,7 +756,12 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
 
     record: dict[str, object] = {
         "core_table_count": core_count,
-        "pack_tables": {k: sorted(v) for k, v in sorted(declared.items())},
+        "pack_tables": {
+            pack_id: sorted(
+                table for table, owner in declared.items() if owner == pack_id
+            )
+            for pack_id in sorted(manifest_pack_ids)
+        },
         "pack_ids": sorted(manifest_pack_ids),
         "total_table_count": total,
         "registry_frozen": registry_ok,
@@ -645,14 +801,27 @@ def _check_cli_surface() -> tuple[bool, list[str], dict[str, object]]:
             f"{sorted(FROZEN_PRODUCT_FAMILIES)}"
         )
     try:
+        from astrid.core.gateway.dispatch import _top_level_commands
+
+        gateway_families = set(_top_level_commands())
+    except Exception as exc:  # noqa: BLE001 - import failure is drift
+        gateway_families = set()
+        violations.append(f"cannot inspect gateway family census: {exc}")
+    expected_gateway = set(FROZEN_PRODUCT_FAMILIES) | {"serve", "doctor", "backup"}
+    if gateway_families != expected_gateway:
+        violations.append(
+            f"gateway family census {sorted(gateway_families)} != "
+            f"{sorted(expected_gateway)}"
+        )
+    try:
         mounts = product.build_product_mounts()
     except Exception as exc:  # noqa: BLE001 - registry validation failed
         violations.append(f"product mount registry failed to build: {exc}")
         mounts = ()
-    if len(mounts) != 7:
+    if len(mounts) != 8:
         violations.append(
-            f"product mount count {len(mounts)} != frozen 7 "
-            "(five families + shots + references)"
+            f"product mount count {len(mounts)} != frozen 8 "
+            "(five families + shots + text + references)"
         )
     mount_tokens = [mount.mount_token for mount in mounts]
     if "shots" in top_level or "references" in top_level:
@@ -666,6 +835,7 @@ def _check_cli_surface() -> tuple[bool, list[str], dict[str, object]]:
         "runs",
         "timelines",
         "timelines shots",
+        "timelines text",
         "media references",
     }
     if set(mount_tokens) != expected_tokens:
@@ -674,45 +844,47 @@ def _check_cli_surface() -> tuple[bool, list[str], dict[str, object]]:
             f"{sorted(expected_tokens)}"
         )
 
-    # ``timelines copy`` is reserved for m6: it must not be a product verb.
-    dispatch_src = (REPO_ROOT / "astrid/core/gateway/dispatch.py").read_text(
-        encoding="utf-8"
-    )
+    # Inspect the real Timeline parser.  Nested mounts are parser choices but
+    # are not Timeline operations in the product census.
+    parser_choices: set[str] = set()
     verbs: set[str] = set()
     try:
-        tree = ast.parse(dispatch_src)
-        for node in tree.body:
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            if isinstance(node, ast.Assign):
-                targets = list(node.targets)
-                value = node.value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                targets = [node.target]
-                value = node.value
-            if not any(
-                isinstance(target, ast.Name)
-                and target.id == "_PRODUCT_TIMELINE_VERBS"
-                for target in targets
-            ):
-                continue
-            if isinstance(value, ast.Call) and value.args:
-                verbs = set(ast.literal_eval(value.args[0]))
-    except (ValueError, SyntaxError) as exc:  # pragma: no cover - parse issue
-        violations.append(f"cannot parse product timeline verbs: {exc}")
-    if verbs != FROZEN_PRODUCT_TIMELINE_VERBS:
+        import argparse
+
+        from astrid.packs.timeline.cli import build_parser
+
+        parser = build_parser(object())
+        action = next(
+            action for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        parser_choices = set(action.choices)
+        nested = {"shots", "text"}
+        verbs = parser_choices - nested
+    except Exception as exc:  # noqa: BLE001 - parser failure is gate drift
+        violations.append(f"cannot inspect Timeline parser: {type(exc).__name__}: {exc}")
+        nested = set()
+    observed_nested = parser_choices & {"shots", "text"}
+    if observed_nested != {"shots", "text"}:
+        violations.append(
+            f"Timeline nested parser mounts {sorted(observed_nested)} != ['shots', 'text']"
+        )
+    if verbs != FROZEN_TIMELINE_OPERATIONS:
         violations.append(
             f"product timeline verbs {sorted(verbs)} != "
-            f"{sorted(FROZEN_PRODUCT_TIMELINE_VERBS)}"
+            f"{sorted(FROZEN_TIMELINE_OPERATIONS)}"
         )
-    if "copy" in verbs:
-        violations.append("forbidden 'timelines copy' product route present")
+    if "copy" in parser_choices:
+        violations.append("forbidden 'timelines copy' parser route present")
 
     record: dict[str, object] = {
         "product_families": list(product.PRODUCT_FAMILIES),
+        "gateway_families": sorted(gateway_families),
         "nested_families": sorted(product.NESTED_FAMILIES),
         "mounts": mount_tokens,
+        "product_timeline_parser_choices": sorted(parser_choices),
         "product_timeline_verbs": sorted(verbs),
+        "product_timeline_nested_mounts": sorted(observed_nested),
     }
     return not violations, violations, record
 
@@ -951,6 +1123,8 @@ def _validate_admission(data: object) -> list[str]:
         errors.append("admission missing feasibility")
     elif feasibility.get("accepted") is not True:
         errors.append("admission feasibility not accepted")
+    elif feasibility.get("authority_validated") is not True:
+        errors.append("admission feasibility missing authority_validated=true")
     if not isinstance(data.get("python_matrix"), dict):
         errors.append("admission missing python_matrix")
     lanes = data.get("lanes")
@@ -970,12 +1144,18 @@ def _validate_admission(data: object) -> list[str]:
                 continue
             if entry.get("status") not in ("pass", "fail", "skip"):
                 errors.append(f"lane {name!r} has no valid status")
+            elif entry.get("status") == "fail":
+                errors.append(f"lane {name!r} is failed")
     authority = data.get("authority_lint")
     if not isinstance(authority, dict) or not isinstance(authority.get("ok"), bool):
         errors.append("admission missing authority_lint.ok")
+    elif authority.get("ok") is not True:
+        errors.append("admission authority_lint is not clean")
     drift = data.get("drift")
     if not isinstance(drift, dict) or not isinstance(drift.get("ok"), bool):
         errors.append("admission missing drift.ok")
+    elif drift.get("ok") is not True:
+        errors.append("admission drift is not clean")
     if not isinstance(data.get("ok"), bool):
         errors.append("admission missing boolean ok")
     if not isinstance(data.get("timestamp"), dict) or not data.get("timestamp", {}).get(
@@ -1001,7 +1181,6 @@ def run_gate(
 ) -> tuple[dict[str, object], int]:
     """Run the m4 gate and retain the schema-validated admission evidence."""
     out_path = (out or DEFAULT_OUT).expanduser().resolve()
-    feasibility = (feasibility_path or DEFAULT_FEASIBILITY).expanduser().resolve()
     evidence = (evidence_dir or DEFAULT_EVIDENCE_DIR).expanduser().resolve()
     evidence.mkdir(parents=True, exist_ok=True)
     primary = python or sys.executable
@@ -1040,7 +1219,13 @@ def run_gate(
         )
 
     # --- Feasibility admission (fail closed) -------------------------------
-    feasibility_record, feasibility_problems = _check_feasibility(feasibility)
+    if feasibility_path is None:
+        feasibility_record = {"path": "<required>", "present": False}
+        feasibility_problems = ["explicit --feasibility path is required"]
+    else:
+        feasibility_record, feasibility_problems = _check_feasibility(
+            feasibility_path
+        )
     for problem in feasibility_problems:
         print(f"ERROR: {problem}", file=sys.stderr)
 
@@ -1093,7 +1278,9 @@ def run_gate(
         lane_names = [name for name in lane_names if name in lane_map]
 
     results: dict[str, LaneResult] = {}
-    for name in lane_names:
+    # Invalid task-bound input cannot admit or execute selected lanes.  Keep a
+    # failed admission document for diagnostics, but never a successful one.
+    for name in lane_names if not feasibility_problems else ():
         lane_selectors = lane_map[name]
         print(f"=== lane {name}: {' '.join(lane_selectors)} ===")
         result = _run_lane(
@@ -1147,26 +1334,31 @@ def run_gate(
                 else "<unknown>"
             ),
         }
-        print(
-            f"=== lane matrix_secondary: {' '.join(SECONDARY_MATRIX_SELECTORS)} ==="
-        )
-        secondary_result = _run_lane(
-            "matrix_secondary",
-            SECONDARY_MATRIX_SELECTORS,
-            python=secondary,
-            repo_root=REPO_ROOT,
-            evidence_dir=evidence,
-        )
-        secondary_record["status"] = secondary_result.status
-        secondary_record["result"] = secondary_result.as_dict()
-        python_matrix["secondary"] = secondary_record
-        print(
-            f"=== lane matrix_secondary: {secondary_result.status} "
-            f"({secondary_result.passed} passed, {secondary_result.failed} "
-            f"failed, {secondary_result.skipped} skipped) in "
-            f"{secondary_result.duration_seconds:.2f}s "
-            f"(exit {secondary_result.returncode}) ==="
-        )
+        if feasibility_problems:
+            secondary_record["status"] = "skip"
+            secondary_record["reason"] = "explicit feasibility validation failed"
+            python_matrix["secondary"] = secondary_record
+        else:
+            print(
+                f"=== lane matrix_secondary: {' '.join(SECONDARY_MATRIX_SELECTORS)} ==="
+            )
+            secondary_result = _run_lane(
+                "matrix_secondary",
+                SECONDARY_MATRIX_SELECTORS,
+                python=secondary,
+                repo_root=REPO_ROOT,
+                evidence_dir=evidence,
+            )
+            secondary_record["status"] = secondary_result.status
+            secondary_record["result"] = secondary_result.as_dict()
+            python_matrix["secondary"] = secondary_record
+            print(
+                f"=== lane matrix_secondary: {secondary_result.status} "
+                f"({secondary_result.passed} passed, {secondary_result.failed} "
+                f"failed, {secondary_result.skipped} skipped) in "
+                f"{secondary_result.duration_seconds:.2f}s "
+                f"(exit {secondary_result.returncode}) ==="
+            )
 
     # --- Retained evidence references (reporting-only) ---------------------
     retained_reference: dict[str, object] = {
@@ -1214,8 +1406,17 @@ def run_gate(
     return document, exit_code
 
 
-def check_admission(out: Path | None = None) -> tuple[dict[str, object], int]:
-    """Validate an existing retained admission without re-running lanes."""
+def check_admission(
+    out: Path | None = None,
+    *,
+    feasibility_path: Path | None = None,
+) -> tuple[dict[str, object], int]:
+    """Validate retained admission plus fresh explicit current feasibility.
+
+    This is deliberately read-only: it never executes lanes and never rewrites
+    the retained admission.  Retained feasibility fields are evidence to
+    compare, not authority that can substitute for the explicit record.
+    """
     out_path = (out or DEFAULT_OUT).expanduser().resolve()
     if not out_path.exists():
         print(
@@ -1224,8 +1425,41 @@ def check_admission(out: Path | None = None) -> tuple[dict[str, object], int]:
             file=sys.stderr,
         )
         return {}, 1
-    data = json.loads(out_path.read_text(encoding="utf-8"))
+    if feasibility_path is None:
+        print("ERROR: explicit --feasibility path is required for check-only", file=sys.stderr)
+        return {}, 1
+    try:
+        data = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: retained admission unreadable: {exc}", file=sys.stderr)
+        return {}, 1
     errors = _validate_admission(data)
+    fresh, feasibility_errors = _check_feasibility(feasibility_path)
+    errors.extend(feasibility_errors)
+    if isinstance(data, dict) and isinstance(data.get("feasibility"), dict):
+        retained = data["feasibility"]
+        for field in (
+            "path", "schema_version", "plan_hash", "observed_plan_hash",
+            "task_contract_hash", "observed_task_contract_hash", "task_count",
+            "observed_task_count", "admitted", "authority_validated",
+        ):
+            if retained.get(field) != fresh.get(field):
+                errors.append(f"retained admission feasibility mismatch: {field}")
+    else:
+        errors.append("retained admission missing feasibility object")
+    if fresh.get("authority_validated") is not True:
+        errors.append("explicit feasibility has not been authority-validated")
+    # Re-check current static authorities so an old retained admission cannot
+    # bless a changed registry/parser/schema snapshot.
+    authority_ok, authority_errors, _ = _run_authority_lint()
+    if not authority_ok:
+        errors.extend(f"current authority lint: {error}" for error in authority_errors)
+    schema_ok, schema_errors, _ = _check_schema_composition()
+    cli_ok, cli_errors, _ = _check_cli_surface()
+    if not schema_ok:
+        errors.extend(f"current schema drift: {error}" for error in schema_errors)
+    if not cli_ok:
+        errors.extend(f"current CLI drift: {error}" for error in cli_errors)
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
     ok = bool(data.get("ok")) and not errors
@@ -1251,7 +1485,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--feasibility",
         type=Path,
-        help="Feasibility admission path (default: the m4 plan task_feasibility.json).",
+        required=True,
+        help="Explicit task-bound feasibility-v2 record beneath the run evidence directory.",
     )
     parser.add_argument(
         "--python",
@@ -1281,7 +1516,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.check_only:
-        _data, exit_code = check_admission(args.out)
+        _data, exit_code = check_admission(
+            args.out, feasibility_path=args.feasibility
+        )
         return exit_code
     selectors = None
     if args.selectors:

@@ -201,7 +201,7 @@ class StandardApplication(CoreApplication):
 
     @property
     def shot_text_bindings(self) -> ShotTextBindingRepository:
-        """Compatibility alias for the Shots-owned text-binding repository."""
+        """Compatibility alias for the shots text-binding repository."""
         return self.text_bindings
 
 
@@ -410,7 +410,7 @@ def compose_standard_application(
             shots,
             receipts,
             media,
-            text_bindings,
+            text_bindings=text_bindings,
         )
         return StandardApplication(
             projects_root=root,

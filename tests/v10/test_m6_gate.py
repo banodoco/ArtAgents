@@ -44,7 +44,7 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 )
 """The exactly-eight top-level families (five product + three operational)."""
 
-EXPECTED_TABLE_COUNT = 20
+EXPECTED_TABLE_COUNT = 21
 """The frozen v10 schema table count (core + timeline/shots/references)."""
 
 
@@ -185,7 +185,7 @@ def test_backup_destroy_restore_reopens_with_matching_state(tmp_path: Path) -> N
     assert len(before["stream_heads"]) >= 2  # project stream + timeline stream
 
     dest = tmp_path / "backup"
-    result = create_backup(projects_root=tmp_path, dest_path=dest)
+    create_backup(projects_root=tmp_path, dest_path=dest)
     assert (dest / "astrid.sqlite3").is_file()
     assert (dest / "backup.json").is_file()
 

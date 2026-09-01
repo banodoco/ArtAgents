@@ -51,7 +51,7 @@ from astrid.sdk.client import AstridClient
 
 # The bridge/CLI handler modules the authority claim covers: the bridge
 # HTTP handler plus every product-family CLI parser (the five core
-# families and the two manifest-declared nested mounts).
+# families and the three manifest-declared nested mounts).
 _HANDLER_MODULES: tuple[str, ...] = (
     "astrid/core/integrations/reigh/local_bridge_server.py",
     "astrid/packs/timeline/cli.py",
