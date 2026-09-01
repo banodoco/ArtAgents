@@ -55,6 +55,7 @@ def _run_provider(host: GenericPackHost, task: dict, *, lease_token: str = "fixt
     task_data = task.setdefault("task", task)
     task_data.setdefault("attempt_id", f"attempt-{task_data['id']}")
     task_data.setdefault("fence", 1)
+    task_data.setdefault("project_id", "fixture-project")
     raw_spec = task_data.get("spec", {})
     if isinstance(raw_spec, dict) and "spec" not in raw_spec:
         task_data["spec"] = {
@@ -176,10 +177,14 @@ def test_external_pack_command_imports_from_its_admitted_pack_root(
         assert host.capabilities[record.id].ready
 
         host.register()
+        project = generated.create_project(
+            "Provider fixture", slug="provider-http", idempotency_key="provider-http-project"
+        )
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,
             input_object_ids=[],
+            project_id=project.project_id,
             idempotency_key="provider-task",
         )
         settled = host.run(once=True)
@@ -653,7 +658,10 @@ def test_clean_pinned_hivemind_pack_publishes_through_real_runtime(tmp_path: Pat
             if item.capability_id == record.id
         )
         assert capability.definition_digest == record.capability_digest
-        task = generated.admit_task(capability_id=record.id, capability_digest=record.capability_digest, input_object_ids=[], idempotency_key="hivemind-fixture-task")
+        project = generated.create_project(
+            "Hivemind fixture", slug="hivemind-fixture", idempotency_key="hivemind-fixture-project"
+        )
+        task = generated.admit_task(capability_id=record.id, capability_digest=record.capability_digest, input_object_ids=[], project_id=project.project_id, idempotency_key="hivemind-fixture-task")
         settled = runtime_host.run(once=True)
         assert len(settled) == 1 and settled[0].state == "succeeded"
         payload = b'{"hits": []}'

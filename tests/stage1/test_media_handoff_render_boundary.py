@@ -73,7 +73,11 @@ def test_generic_host_materializes_registry_ids_once_under_attempt(tmp_path: Pat
     host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
     attempt = tmp_path / "attempt"
     values = host._materialize_inputs(
-        {"spec": {"inputs": {"assets_registry": str(registry)}}}, attempt
+        {
+            "input_object_ids": [runtime.digest],
+            "spec": {"inputs": {"assets_registry": str(registry)}},
+        },
+        attempt,
     )
 
     root = Path(values["materialized_root"])
@@ -183,7 +187,11 @@ def test_host_derived_registry_executes_canonical_ffmpeg_executor(tmp_path: Path
         attempt_root=attempt,
     )
     values = host._materialize_inputs(
-        {"spec": {"inputs": {"assets_registry": str(registry)}}}, attempt
+        {
+            "input_object_ids": [runtime.digest],
+            "spec": {"inputs": {"assets_registry": str(registry)}},
+        },
+        attempt,
     )
     project_root = tmp_path / "projects" / "demo"
     project_root.mkdir(parents=True)
@@ -301,6 +309,7 @@ def test_host_derived_registry_reaches_canonical_remotion_executor_process(tmp_p
     )
     values = host._materialize_inputs(
         {
+            "input_object_ids": [theme_digest, digest],
             "spec": {"inputs": {
                 "assets_registry": str(registry),
                 "theme": {"object_id": "theme-default", "digest": theme_digest},

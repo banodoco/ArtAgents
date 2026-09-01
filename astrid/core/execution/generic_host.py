@@ -421,6 +421,17 @@ def _source_digest(root: Path) -> str:
     return _canonical_digest(entries)
 
 
+def source_checkout_digest(checkout: str | Path) -> str:
+    """Return the source identity used by the generic-host boundary.
+
+    The checkout itself can contain build artefacts and unrelated work.  The
+    pack corpus is the executable input to this process, so hash that exact
+    tree (using the same file hashing rules as capability admission).
+    """
+    pack_root = Path(checkout).expanduser().resolve() / "astrid" / "packs"
+    return _source_digest(pack_root)
+
+
 def _admitted_source_roots(root: Path, definition: Any) -> tuple[Path, ...]:
     """Return every executable root admitted for one capability."""
     roots: list[Path] = [root.resolve()]
@@ -785,13 +796,19 @@ class RuntimeProtocolClient:
         response = self.generated.get_object(digest)
         return response.data
 
-    def upload_object(self, path: Path, *, media_type: str, filename: str | None = None):
+    def upload_object(self, path: Path, *, project_id: str, media_type: str, filename: str | None = None):
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise HostError("project-scoped output upload requires project_id")
         with path.open("rb") as stream:
             data = stream.read()
-            return self.generated.ingest_object(
+            return self.generated.ingest_project_object(
+                project_id,
                 data,
                 media_type=media_type,
-                idempotency_key=f"output-{hashlib.sha256(data).hexdigest()}",
+                idempotency_key=(
+                    f"output-{hashlib.sha256(project_id.encode()).hexdigest()}-"
+                    f"{hashlib.sha256(data).hexdigest()}"
+                ),
                 filename=filename,
             )
 
@@ -828,6 +845,35 @@ class GenericPackHost:
         # their signing key never crosses into a child or runtime payload.
         self._provider_grants = ProviderRouteGrantAuthority()
         self._pending_provider_grants: dict[str, str] = {}
+        self._active_processes: set[subprocess.Popen] = set()
+        self._process_lock = threading.RLock()
+        self._shutdown = threading.Event()
+
+    def _track_process(self, process: subprocess.Popen) -> None:
+        with self._process_lock:
+            self._active_processes.add(process)
+        # A signal can arrive between Popen and registration in the set.  Do
+        # not let that small window leave an owned child running after host
+        # shutdown has begun.
+        if self._shutdown.is_set():
+            _terminate_process_group(process)
+
+    def _untrack_process(self, process: subprocess.Popen) -> None:
+        with self._process_lock:
+            self._active_processes.discard(process)
+
+    def shutdown(self) -> None:
+        """Stop the host and every currently owned capability process."""
+        self._shutdown.set()
+        with self._process_lock:
+            active = tuple(self._active_processes)
+        for process in active:
+            try:
+                _terminate_process_group(process, grace_seconds=1.0)
+            except (OSError, subprocess.SubprocessError):
+                # The process may have exited between the census and cleanup;
+                # the group helper is deliberately best effort at shutdown.
+                pass
 
     def _client_operation(self, name: str):
         if self.client is None:
@@ -1216,9 +1262,17 @@ class GenericPackHost:
             "protocol": actual_protocol,
             "schema_digest": actual_schema,
             "runtime_epoch": runtime_epoch,
+            "runtime_instance_id": value.get("runtime_instance_id") or value.get("instance_id"),
+            "coordinator_epoch": value.get("coordinator_epoch"),
         }
 
-    def _materialize_inputs(self, spec: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
+    def _materialize_inputs(
+        self,
+        spec: Mapping[str, Any],
+        attempt: Path,
+        *,
+        authorized_input_object_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         """Materialize digest inputs and managed registry objects in *attempt*.
 
         Runtime object ids/digests are the only authority for live media.  A
@@ -1231,6 +1285,30 @@ class GenericPackHost:
         # the task envelope alongside input_object_ids/schema metadata. The
         # nested document is the one canonical managed-input shape shared by
         # task admission and this host.
+        raw_authorized = authorized_input_object_ids
+        if raw_authorized is None:
+            raw_authorized = spec.get("input_object_ids", ())
+        if not isinstance(raw_authorized, (list, tuple)):
+            raise HostError("runtime task input_object_ids must be a list")
+        authorized_digests: set[str] = set()
+        for object_id in raw_authorized:
+            if not isinstance(object_id, str):
+                raise HostError("runtime task input_object_ids must contain strings")
+            normalized = object_id.removeprefix("sha256:")
+            if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
+                raise HostError("runtime task input_object_ids must contain sha256 object IDs")
+            if normalized in authorized_digests:
+                raise HostError("runtime task input_object_ids must be unique")
+            authorized_digests.add(normalized)
+
+        def require_authorized(digest: str, name: str) -> str:
+            normalized = str(digest).removeprefix("sha256:")
+            if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
+                raise HostError(f"invalid managed digest for {name}")
+            if normalized not in authorized_digests:
+                raise HostError(f"managed input {name!r} is not authorized by task input_object_ids")
+            return normalized
+
         admitted = spec.get("spec")
         if not isinstance(admitted, Mapping):
             raise HostError("runtime task is missing its immutable spec envelope")
@@ -1284,9 +1362,7 @@ class GenericPackHost:
         def fetch_object(reference: str, digest: str, name: str, *, filename: str | None = None) -> Path:
             if self.client is None:
                 raise HostError(f"runtime client is required to materialize managed input {name}")
-            normalized = str(digest).removeprefix("sha256:")
-            if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
-                raise HostError(f"invalid managed digest for {name}")
+            normalized = require_authorized(digest, name)
             cache_key = (str(reference), normalized)
             cached = fetched_objects.get(cache_key)
             if cached is not None:
@@ -1321,6 +1397,7 @@ class GenericPackHost:
                     raise HostError(
                         f"runtime client is required to materialize digest input {name}"
                     )
+                normalized = require_authorized(str(digest), str(name))
                 if str(name) == "theme":
                     destination = fetch_object(
                         str(value.get("object_id") or "theme"),
@@ -1337,10 +1414,10 @@ class GenericPackHost:
                 path = (input_root / input_name).resolve()
                 if not path.is_relative_to(input_root):
                     raise HostError(f"input name escapes the attempt directory: {name!r}")
-                data = self.client.get_object(str(digest).removeprefix("sha256:"))
+                data = self.client.get_object(normalized)
                 if not isinstance(data, (bytes, bytearray)):
                     data = getattr(data, "data", None)
-                if not isinstance(data, (bytes, bytearray)) or hashlib.sha256(bytes(data)).hexdigest() != str(digest).removeprefix("sha256:"):
+                if not isinstance(data, (bytes, bytearray)) or hashlib.sha256(bytes(data)).hexdigest() != normalized:
                     raise HostError(f"input object hash mismatch for {name}")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(bytes(data))
@@ -1656,7 +1733,7 @@ class GenericPackHost:
             (attempt / "network-evidence.json").write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
             return value
 
-    def _upload_outputs(self, outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _upload_outputs(self, outputs: list[dict[str, Any]], *, project_id: str) -> list[dict[str, Any]]:
         """Publish staged outputs and return settlement-safe object refs."""
         upload_object = getattr(self.client, "upload_object", None)
         if not callable(upload_object):
@@ -1671,7 +1748,12 @@ class GenericPackHost:
                 raise HostError("generated output is missing its staged path")
             path = Path(str(raw_path))
             media_type = str(descriptor.get("artifact_type") or "application/octet-stream")
-            object_row = upload_object(path, media_type=media_type, filename=path.name)
+            object_row = upload_object(
+                path,
+                project_id=project_id,
+                media_type=media_type,
+                filename=path.name,
+            )
             digest = getattr(object_row, "digest", None)
             if not digest:
                 raise HostError("generated object upload returned no canonical digest")
@@ -1773,6 +1855,7 @@ class GenericPackHost:
             stderr=subprocess.PIPE,
             text=True,
         )
+        self._track_process(process)
         try:
             while process.poll() is None:
                 if cancelled is not None and cancelled():
@@ -1780,6 +1863,8 @@ class GenericPackHost:
                     raise HostCancelled(f"capability {record.id!r} cancelled")
                 time.sleep(0.05)
             stdout, stderr = process.communicate()
+            if cancelled is not None and cancelled():
+                raise HostCancelled(f"capability {record.id!r} cancelled")
             if process.returncode != 0:
                 detail = self._scrub_secret_text((stderr or stdout).strip(), secrets)
                 raise HostError(f"capability {record.id!r} exited {process.returncode}: {detail}")
@@ -1797,6 +1882,7 @@ class GenericPackHost:
                     outputs[output.name] = str(candidate)
             return type("CommandResult", (), {"outputs": outputs, "payload": {"returncode": process.returncode, "capability_digest": record.capability_digest, "process_id": process.pid}})()
         finally:
+            self._untrack_process(process)
             _release_owned_group(process)
             env.clear()
             secrets.clear()
@@ -1895,6 +1981,7 @@ class GenericPackHost:
             stderr=subprocess.PIPE,
             text=True,
         )
+        self._track_process(process)
         try:
             while process.poll() is None:
                 if cancelled is not None and cancelled():
@@ -1902,6 +1989,8 @@ class GenericPackHost:
                     raise HostCancelled(f"capability {capability_id!r} cancelled")
                 time.sleep(0.05)
             stdout, stderr = process.communicate()
+            if cancelled is not None and cancelled():
+                raise HostCancelled(f"capability {capability_id!r} cancelled")
             if process.returncode != 0:
                 secret_values = {
                     key: value for key, value in env.items()
@@ -1938,6 +2027,7 @@ class GenericPackHost:
                 process_id=process.pid,
             )
         finally:
+            self._untrack_process(process)
             _release_owned_group(process)
             env.clear()
             request_path.unlink(missing_ok=True)
@@ -1955,6 +2045,8 @@ class GenericPackHost:
     ) -> Mapping[str, Any]:
         if self.client is None:
             raise HostError("runtime client is required to execute a task")
+        if self._shutdown.is_set():
+            raise HostCancelled("generic host is shutting down")
         for operation in ("heartbeat", "task", "settle", "fail", "upload_object"):
             if not callable(getattr(self.client, operation, None)):
                 raise HostError(
@@ -1979,6 +2071,7 @@ class GenericPackHost:
         if not record.ready:
             raise HostError(f"capability {capability_id!r} is unavailable: {record.preflight}")
         spec = task_data.get("spec", {})
+        authorized_input_object_ids = task_data.get("input_object_ids")
         root = self.attempt_root or Path(tempfile.mkdtemp(prefix=f"astrid-attempt-{task_id}-")).resolve()
         root.mkdir(parents=True, exist_ok=True)
         settled = False
@@ -1997,7 +2090,11 @@ class GenericPackHost:
             "allowed_routes": list((_network_policy(record) or {}).get("allowed_routes", (_network_policy(record) or {}).get("allowed_destinations", ()))),
         }
         try:
-            inputs = self._materialize_inputs(spec, root)
+            inputs = self._materialize_inputs(
+                spec,
+                root,
+                authorized_input_object_ids=authorized_input_object_ids,
+            )
             if record.adapter.family == "provider" and record.definition.isolation.network:
                 policy = _network_policy(record)
                 descriptor = (policy or {}).get("broker", {})
@@ -2056,7 +2153,7 @@ class GenericPackHost:
             pump_thread.start()
 
             def cancelled():
-                if cancel_signal.is_set():
+                if self._shutdown.is_set() or cancel_signal.is_set():
                     return True
                 current = self.client.task(task_id)
                 current_task = current.get("task", current) if isinstance(current, Mapping) else current
@@ -2087,7 +2184,7 @@ class GenericPackHost:
                             request={
                                 "out": str(output_root),
                                 "inputs": inputs,
-                                "project": task_data.get("project"),
+                                "project": task_data.get("project_id"),
                                 "project_was_auto_resolved": True,
                                 "python_exec": sys.executable,
                                 "run_id": task_id,
@@ -2112,7 +2209,13 @@ class GenericPackHost:
             state = current_task.get("status") if isinstance(current_task, Mapping) else getattr(current_task, "state", None)
             if state == "cancelled":
                 return {"task_id": task_id, "status": "cancelled", "cancelled": True}
-            outputs = self._upload_outputs(self._typed_outputs(record, result, root))
+            typed_outputs = self._typed_outputs(record, result, root)
+            project_id = task_data.get("project_id")
+            if typed_outputs and (not isinstance(project_id, str) or not project_id.strip()):
+                raise HostError(
+                    "runtime task is missing project_id for project-scoped output publication"
+                )
+            outputs = self._upload_outputs(typed_outputs, project_id=project_id) if typed_outputs else []
             payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
             network_evidence = self._network_evidence(
                 root,
@@ -2172,6 +2275,8 @@ class GenericPackHost:
 
     def claim_once(self) -> Mapping[str, Any] | None:
         """Claim and execute one queued task through the generated boundary."""
+        if self._shutdown.is_set():
+            return None
         claim_next = self._client_operation("claim_next")
         # Readiness is an admission predicate, not merely registration
         # metadata.  Credentials, binaries, and external-pack provenance can
@@ -2207,7 +2312,9 @@ class GenericPackHost:
             "lease_id": getattr(claim, "lease_id", None),
             "fence": getattr(claim, "fence", None),
             "runtime_epoch": getattr(claim, "runtime_epoch", None),
+            "input_object_ids": list(getattr(claim, "input_object_ids", ()) or ()),
             "spec": getattr(claim, "spec", None),
+            "project_id": getattr(claim, "project_id", None),
         }
         if not claim_data.get("task_id"):
             raise HostError("generated claim operation returned no task_id")
@@ -2219,6 +2326,7 @@ class GenericPackHost:
             task_data = {
                 "id": getattr(task, "task_id", task_id),
                 "capability": getattr(task, "capability_id", ""),
+                "project_id": getattr(task, "project_id", None),
                 "spec": {},
             }
         task_data.update(
@@ -2228,6 +2336,10 @@ class GenericPackHost:
                 "fence": claim_data.get("fence"),
             }
         )
+        if claim_data.get("project_id") is not None:
+            task_data["project_id"] = claim_data["project_id"]
+        if claim_data.get("input_object_ids") is not None:
+            task_data["input_object_ids"] = claim_data["input_object_ids"]
         # The claim response is the execution snapshot.  Preserve it over
         # the convenience task read so a worker cannot accidentally execute a
         # later/forked spec (and so claim-to-execute is a single immutable
@@ -2258,7 +2370,7 @@ class GenericPackHost:
     def run(self, *, once: bool = False, poll_seconds: float = 1.0, max_tasks: int | None = None) -> list[Mapping[str, Any]]:
         """Run the bounded worker claim loop; ``once`` is the test-friendly form."""
         results: list[Mapping[str, Any]] = []
-        while max_tasks is None or len(results) < max_tasks:
+        while not self._shutdown.is_set() and (max_tasks is None or len(results) < max_tasks):
             result = self.claim_once()
             if result is not None:
                 results.append(result)
@@ -2267,7 +2379,7 @@ class GenericPackHost:
                 continue
             if once:
                 break
-            time.sleep(max(0.0, float(poll_seconds)))
+            self._shutdown.wait(max(0.0, float(poll_seconds)))
         return results
 
 
@@ -2276,7 +2388,6 @@ def _cli() -> int:
     parser.add_argument("command", nargs="?", choices=("run",), help="run the registered worker claim loop")
     parser.add_argument("--pack-root", action="append", required=True, help="pack/executor root to discover")
     parser.add_argument("--runtime-endpoint")
-    parser.add_argument("--credential")
     parser.add_argument("--credential-file", help="owner-only file containing the worker bearer credential")
     parser.add_argument("--executor-id", default="astrid-pack-host")
     parser.add_argument("--max-concurrency", type=int, default=1)
@@ -2290,10 +2401,11 @@ def _cli() -> int:
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--ready-file", help="write host registration/readiness metadata before entering the claim loop")
+    parser.add_argument("--source-checkout", help="absolute source checkout bound to this host")
+    parser.add_argument("--runtime-instance-id", help="runtime instance identity bound to this host")
     args = parser.parse_args()
-    if args.credential and args.credential_file:
-        parser.error("--credential and --credential-file are mutually exclusive")
-    credential = args.credential
+    credential = None
+    credential_path = None
     if args.credential_file:
         credential_path = Path(args.credential_file).expanduser()
         try:
@@ -2310,6 +2422,18 @@ def _cli() -> int:
     host = GenericPackHost(pack_roots=args.pack_root, client=client, executor_id=args.executor_id, max_concurrency=args.max_concurrency, attempt_root=args.attempt_root, capability_matrix=args.capability_matrix)
     host.discover()
     host.preflight()
+    if args.source_checkout:
+        source_checkout = Path(args.source_checkout).expanduser()
+        if not source_checkout.is_absolute() or source_checkout.is_symlink() or not source_checkout.is_dir():
+            parser.error("--source-checkout must be an absolute non-symlink directory")
+    else:
+        source_checkout = None
+
+    def handle_shutdown(_signum, _frame):
+        host.shutdown()
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
     registration = None
     if args.register or not args.run_task:
         registration = host.register() if args.register else {"capabilities": [record.manifest() for record in host.capabilities.values()]}
@@ -2327,18 +2451,26 @@ def _cli() -> int:
             "ready_capabilities": sorted(record.id for record in host.capabilities.values() if record.ready),
             "unready_capabilities": sorted(record.id for record in host.capabilities.values() if not record.ready),
             "registration": registration,
+            "ready_file": str(ready_path),
+            "credential_file": str(credential_path) if credential_path else None,
+            "source_checkout": str(source_checkout) if source_checkout else None,
+            "source_checkout_digest": source_checkout_digest(source_checkout) if source_checkout else None,
+            "source_epoch": host.source_epoch,
+            "runtime_instance_id": args.runtime_instance_id,
+            "runtime_epoch": host.runtime_state.get("runtime_epoch"),
+            "schema_digest": host.runtime_state.get("schema_digest"),
         }
         temporary = ready_path.with_name(f".{ready_path.name}.{os.getpid()}.tmp")
         temporary.write_text(json.dumps(ready_payload, sort_keys=True, default=_json_safe), encoding="utf-8")
         temporary.replace(ready_path)
     if args.run_task:
         if client is None or not args.lease_token:
-            parser.error("--run-task requires --runtime-endpoint, --credential/--credential-file, and --lease-token")
+            parser.error("--run-task requires --runtime-endpoint, --credential-file, and --lease-token")
         task = client.task(args.run_task)
         print(json.dumps(host.run_task(task, lease_token=args.lease_token, keep_attempt=args.keep_attempt), indent=2, sort_keys=True))
     if args.command == "run":
         if client is None:
-            parser.error("run requires --runtime-endpoint and --credential/--credential-file")
+            parser.error("run requires --runtime-endpoint and --credential-file")
         if not args.register:
             host.register()
         print(json.dumps(host.run(once=args.once, poll_seconds=args.poll_seconds, max_tasks=args.max_tasks), indent=2, sort_keys=True, default=str))

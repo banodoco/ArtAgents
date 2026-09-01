@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 RUNTIME_WORKTREE = Path(__file__).parents[3] / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "587316a85a68a25bf81513bca295379d504d437a"
+RUNTIME_COMMIT = "60670d942f7b5c6b843398ab2a11d038a6bf195a"
 _RUNTIME_TMP = tempfile.TemporaryDirectory(prefix="astrid-runtime-archive-")
 RUNTIME = Path(_RUNTIME_TMP.name)
 archive = subprocess.run(

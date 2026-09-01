@@ -65,7 +65,7 @@ class FakeRuntime:
         self.claim_payload = payload
         return None
 
-    def upload_object(self, path, *, media_type, filename=None):
+    def upload_object(self, path, *, project_id, media_type, filename=None):
         data = Path(path).read_bytes()
         return SimpleNamespace(
             object_id=f"object-{hashlib.sha256(data).hexdigest()[:12]}",
@@ -73,6 +73,7 @@ class FakeRuntime:
             size=len(data),
             media_type=media_type,
             filename=filename,
+            project_id=project_id,
         )
 
     def withdraw_capability(self, capability_id, *, digest, reason):
@@ -195,6 +196,37 @@ def test_input_materialization_rejects_traversal_names(tmp_path):
             },
             tmp_path / "attempt",
         )
+
+
+def test_input_materialization_rejects_foreign_nested_digest(tmp_path):
+    authorized = hashlib.sha256(b"authorized").hexdigest()
+    foreign = hashlib.sha256(b"foreign").hexdigest()
+    registry = tmp_path / "assets.json"
+    registry.write_text(
+        json.dumps({"assets": {"foreign": {"object_id": "foreign-object", "digest": foreign}}}),
+        encoding="utf-8",
+    )
+
+    class Objects(FakeRuntime):
+        def __init__(self):
+            super().__init__()
+            self.fetches = []
+
+        def get_object(self, digest):
+            self.fetches.append(digest)
+            return b"foreign"
+
+    runtime = Objects()
+    host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
+    with pytest.raises(HostError, match="not authorized"):
+        host._materialize_inputs(
+            {
+                "input_object_ids": [authorized],
+                "spec": {"inputs": {"assets_registry": str(registry)}},
+            },
+            tmp_path / "attempt",
+        )
+    assert runtime.fetches == []
 
 
 def test_command_cwd_must_stay_in_attempt_or_source_scope(tmp_path):
@@ -653,7 +685,7 @@ def test_register_and_run_uses_attempt_local_typed_output_and_cleanup(tmp_path):
         "task": {
             "id": "task-1",
             "capability": "test.echo",
-            "project": "demo",
+            "project_id": "demo",
             "attempt_id": "attempt-1",
             "fence": 1,
             "spec": {"spec": {"inputs": {}}},

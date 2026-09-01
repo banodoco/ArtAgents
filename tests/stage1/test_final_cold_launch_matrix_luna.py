@@ -39,7 +39,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
-RUNTIME_COMMIT = "587316a85a68a25bf81513bca295379d504d437a"
+RUNTIME_COMMIT = "60670d942f7b5c6b843398ab2a11d038a6bf195a"
 
 
 def _archive_runtime(destination: Path) -> Path:
@@ -183,7 +183,10 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert discovery["active_realm"] == started["realm_id"]
         assert discovery["endpoint"].startswith("http://127.0.0.1:")
         serialized_discovery = json.dumps(discovery)
-        assert "token" not in serialized_discovery.lower()
+        # Runtime advertises the worker credential *path* so the pack host can
+        # bootstrap with its least-privilege actor.  The bearer value itself
+        # must never appear in discovery.
+        assert discovery.get("worker_credential_file")
         assert "database" not in serialized_discovery.lower()
 
         credential_file = Path(started["credential_file"])
@@ -194,6 +197,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert owner_token_file.is_file()
         owner_token = owner_token_file.read_text(encoding="utf-8").strip()
         assert owner_token
+        assert owner_token not in serialized_discovery
 
         # A second real launch with the first-run manifest removed exercises
         # persisted-profile/env-less relaunch rather than mocked delegation.
@@ -252,7 +256,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         object_id = str(media_data.get("object_id") or media_data["digest"])
         source.unlink()
         worker_seed = tmp_path / "worker-seed.txt"
-        worker_seed.write_text("cold worker", encoding="utf-8")
+        worker_seed.write_text("cold input", encoding="utf-8")
         seed_result = _assert_cli_ok(
             _run(
                 [sys.executable, "-m", "astrid", "media", "import", str(worker_seed), "--project", project_id, "--idempotency-key", "cold-worker-seed", "--json"],
@@ -327,10 +331,10 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             record = host.discover()[0]
             assert host.preflight(record.id)[0].ready is True
             host.register()
-            # The seed object is already attached to this project and the
-            # fixture executor emits identical bytes. That lets the current
-            # host's upload-before-settlement path exercise a project-scoped
-            # task without introducing a second output-association API.
+            # The input is already attached to this project, while the
+            # fixture executor emits a distinct output. This proves the host
+            # uses the claimed task project_id for output ingest rather than
+            # relying on a duplicate-input association shortcut.
             admitted = client.tasks.create(
                 project_id=project_id,
                 capability=record.id,
@@ -466,6 +470,7 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             capability_id=render_record.id,
             capability_digest=render_record.capability_digest,
             input_object_ids=[],
+            project_id=project_id,
             idempotency_key="cold-ffmpeg-task",
             spec={},
         )

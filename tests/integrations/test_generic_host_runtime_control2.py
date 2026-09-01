@@ -82,10 +82,14 @@ def test_generated_host_echo_claim_cas_settlement_and_restart(tmp_path: Path) ->
         )
         assert capability.definition_digest == record.capability_digest
 
+        project = generated.create_project(
+            "Generic host", slug="generic-host", idempotency_key="generic-host-project"
+        )
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,
             input_object_ids=[],
+            project_id=project.project_id,
             idempotency_key="echo-task",
         )
         results = host.run(once=True)
@@ -225,10 +229,14 @@ def test_provider_fixture_is_credential_gated_then_settles_offline(
         assert capability_cursor is None
         capability = next(item for item in capability_page if item.capability_id == record.id)
         assert capability.status == "ready"
+        project = generated.create_project(
+            "Provider fixture", slug="provider-fixture", idempotency_key="provider-fixture-project"
+        )
         task = generated.admit_task(
             capability_id=record.id,
             capability_digest=record.capability_digest,
             input_object_ids=[],
+            project_id=project.project_id,
             idempotency_key="provider-fixture-ready-task",
         )
         settled = host.run(once=True)
