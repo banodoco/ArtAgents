@@ -288,20 +288,20 @@ def test_composition_exemption_is_the_only_kernel_to_pack_allowed(
     _write(
         tmp_path,
         "astrid/core/gateway/dispatch.py",
-        "from astrid.packs import register_standard_schema_packs\n",
+        "import astrid.packs.timeline.cli\n",
     )
     # Any other kernel file importing a pack is a violation.
     _write(
         tmp_path,
         "astrid/core/not_exempt.py",
-        "from astrid.packs import register_standard_schema_packs\n",
+        "import astrid.packs.timeline.cli\n",
     )
     errors = lint_import_boundaries(tmp_path)
     assert not any(
         "astrid/core/gateway/dispatch.py" in error for error in errors
     ), errors
     assert any(
-        "astrid/core/not_exempt.py: kernel-to-pack import 'astrid.packs'"
+        "astrid/core/not_exempt.py: kernel-to-pack import 'astrid.packs.timeline.cli'"
         in error
         for error in errors
     ), errors
@@ -503,8 +503,7 @@ def test_canonical_read_only_uri_probe_is_not_a_writer(tmp_path: Path) -> None:
         tmp_path,
         "astrid/core/reader.py",
         "import sqlite3\n"
-        "from astrid.core.migrations.runner import read_only_uri\n"
-        "conn = sqlite3.connect(read_only_uri('/tmp/db.sqlite3'), uri=True)\n",
+        "conn = sqlite3.connect('file:/tmp/db.sqlite3?mode=ro', uri=True)\n",
     )
     errors = lint_writer_authority(tmp_path)
     assert errors == [], errors

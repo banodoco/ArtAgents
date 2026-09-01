@@ -1,7 +1,7 @@
 """Product CLI surface tests (m4 plan step 24, task T25).
 
 Proves the product-family registry contract: exactly five families,
-manifest-declared nested mounts (shots under timelines, references under
+runtime-declared nested mounts (shots under timelines, references under
 media), rejection of missing/duplicate/unexpected/dynamic mounts, the
 exclusion of operational/legacy/singular-run commands from product
 dispatch, and the ``AstridClient``-passing handler boundary. Task T26
@@ -29,7 +29,7 @@ from astrid.core.cli.domain_output import (
 from astrid.core.cli.domain_product import (
     EXCLUDED_FROM_PRODUCT_CENSUS,
     PRODUCT_FAMILIES,
-    ManifestMount,
+    RuntimeMount,
     ProductRegistryError,
     _validate_mounts,
     build_product_mounts,
@@ -37,7 +37,7 @@ from astrid.core.cli.domain_product import (
     is_product_family,
     is_registered_family,
     product_top_level_commands,
-    read_manifest_cli_mounts,
+    read_runtime_cli_mounts,
     run_product_family,
 )
 from astrid.core.cli.registration import CommandSpec, register_product_commands
@@ -108,19 +108,19 @@ def test_mounts_include_core_and_the_two_nested_mounts() -> None:
     for family in ("projects", "media", "tasks", "runs"):
         assert by_family[family].mount_path == (family,)
         assert by_family[family].declared_by == "core"
-    # Manifest-owned timelines.
+    # Runtime-owned timelines.
     assert by_family["timelines"].mount_path == ("timelines",)
-    assert by_family["timelines"].declared_by == "manifest:timeline"
+    assert by_family["timelines"].declared_by == "runtime:runtime"
     # Exactly the two declared nested mounts.
     assert by_family["shots"].mount_path == ("timelines", "shots")
-    assert by_family["shots"].declared_by == "manifest:shots"
+    assert by_family["shots"].declared_by == "runtime:runtime"
     assert by_family["references"].mount_path == ("media", "references")
-    assert by_family["references"].declared_by == "manifest:references"
+    assert by_family["references"].declared_by == "runtime:runtime"
 
 
-def test_manifest_mounts_come_from_in_tree_declarations() -> None:
-    """The loader reads only the three fixed in-tree pack manifests."""
-    declared = {mount.family: mount.token for mount in read_manifest_cli_mounts()}
+def test_runtime_mounts_come_from_reviewed_declarations() -> None:
+    """The loader reads only the three fixed runtime mount declarations."""
+    declared = {mount.family: mount.token for mount in read_runtime_cli_mounts()}
     assert declared == {
         "timelines": "timelines",
         "shots": "timelines shots",
@@ -130,7 +130,7 @@ def test_manifest_mounts_come_from_in_tree_declarations() -> None:
 
 def test_family_mount_resolves_and_rejects() -> None:
     assert family_mount("shots").mount_path == ("timelines", "shots")
-    assert family_mount("timelines").declared_by == "manifest:timeline"
+    assert family_mount("timelines").declared_by == "runtime:runtime"
     with pytest.raises(ProductRegistryError):
         family_mount("serve")
 
@@ -140,55 +140,55 @@ def test_family_mount_resolves_and_rejects() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_missing_required_manifest_mount_is_rejected() -> None:
-    """A shipped manifest that omits a required cli_mounts entry fails closed."""
+def test_missing_required_runtime_mount_is_rejected() -> None:
+    """A runtime declaration that omits a required mount fails closed."""
     with pytest.raises(ProductRegistryError, match="missing mount"):
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "timelines", "timeline"),
-                ManifestMount("shots", "timelines shots", "shots"),
+                RuntimeMount("timelines", "timelines", "runtime"),
+                RuntimeMount("shots", "timelines shots", "runtime"),
                 # references declaration is missing entirely.
             ),
         )
 
 
-def test_empty_manifest_mount_is_rejected() -> None:
+def test_empty_runtime_mount_is_rejected() -> None:
     with pytest.raises(ProductRegistryError, match="missing mount"):
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "timelines", "timeline"),
-                ManifestMount("shots", "", "shots"),
-                ManifestMount("references", "media references", "references"),
+                RuntimeMount("timelines", "timelines", "runtime"),
+                RuntimeMount("shots", "", "runtime"),
+                RuntimeMount("references", "media references", "runtime"),
             ),
         )
 
 
-def test_duplicate_manifest_family_is_rejected() -> None:
-    """Two manifests declaring the same family are a duplicate mount."""
+def test_duplicate_runtime_family_is_rejected() -> None:
+    """Two runtime declarations for one family are a duplicate mount."""
     with pytest.raises(ProductRegistryError, match="duplicate mount"):
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "timelines", "timeline"),
-                ManifestMount("shots", "timelines shots", "shots"),
-                ManifestMount("references", "media references", "references"),
-                ManifestMount("shots", "timelines shots", "another-pack"),
+                RuntimeMount("timelines", "timelines", "runtime"),
+                RuntimeMount("shots", "timelines shots", "runtime"),
+                RuntimeMount("references", "media references", "runtime"),
+                RuntimeMount("shots", "timelines shots", "runtime-other"),
             ),
         )
 
 
-def test_unexpected_manifest_family_is_rejected() -> None:
-    """A manifest declaring a family outside the frozen registry is rejected."""
+def test_unexpected_runtime_family_is_rejected() -> None:
+    """A runtime declaration outside the frozen registry is rejected."""
     with pytest.raises(ProductRegistryError, match="unexpected mount"):
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "timelines", "timeline"),
-                ManifestMount("shots", "timelines shots", "shots"),
-                ManifestMount("references", "media references", "references"),
-                ManifestMount("sixth-family", "projects sixth-family", "extra"),
+                RuntimeMount("timelines", "timelines", "runtime"),
+                RuntimeMount("shots", "timelines shots", "runtime"),
+                RuntimeMount("references", "media references", "runtime"),
+                RuntimeMount("sixth-family", "projects sixth-family", "runtime-extra"),
             ),
         )
 
@@ -199,9 +199,9 @@ def test_unexpected_mount_path_is_rejected() -> None:
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "timelines", "timeline"),
-                ManifestMount("shots", "media references", "shots"),
-                ManifestMount("references", "media references", "references"),
+                RuntimeMount("timelines", "timelines", "runtime"),
+                RuntimeMount("shots", "media references", "runtime"),
+                RuntimeMount("references", "media references", "runtime"),
             ),
         )
 
@@ -211,15 +211,15 @@ def test_core_family_re_mounted_at_other_path_is_rejected() -> None:
         _validate_mounts(
             PRODUCT_FAMILIES,
             (
-                ManifestMount("timelines", "media timelines", "timeline"),
-                ManifestMount("shots", "timelines shots", "shots"),
-                ManifestMount("references", "media references", "references"),
+                RuntimeMount("timelines", "media timelines", "runtime"),
+                RuntimeMount("shots", "timelines shots", "runtime"),
+                RuntimeMount("references", "media references", "runtime"),
             ),
         )
 
 
 def test_no_dynamic_mount_source_exists() -> None:
-    """Mounts can only come from the fixed in-tree manifest declarations.
+    """Mounts can only come from the fixed runtime declarations.
 
     ``build_product_mounts`` has no injection point and the loader accepts
     no root argument: a mount from any other directory is impossible by
@@ -229,7 +229,7 @@ def test_no_dynamic_mount_source_exists() -> None:
 
     from astrid.core.cli import domain_product
 
-    loader = inspect.signature(domain_product.read_manifest_cli_mounts)
+    loader = inspect.signature(domain_product.read_runtime_cli_mounts)
     assert loader.parameters == {}
     builder = inspect.signature(domain_product.build_product_mounts)
     assert builder.parameters == {}

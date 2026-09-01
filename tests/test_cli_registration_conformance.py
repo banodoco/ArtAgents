@@ -34,7 +34,7 @@ from astrid.core.cli.registration import CommandSpec, register_commands
 
 _ALLOWLISTED: tuple[str, ...] = (
     # m6 teardown: the seven product-family CLI modules (five product
-    # families + the two manifest-declared nested mounts) are the pruned
+    # families + the two runtime-declared nested mounts) are the pruned
     # allowlist. The legacy session/timeline/project CLI modules were
     # deleted by the m6 cutover (T5/T6-T9).
     "astrid.core.cli.domain_projects",
@@ -242,10 +242,10 @@ class ProductRegistryConformanceTest(unittest.TestCase):
         self.assertNotIn("shots", product_top_level_commands())
         self.assertNotIn("references", product_top_level_commands())
 
-    def test_manifest_mounts_declared_in_tree(self) -> None:
-        from astrid.core.cli.domain_product import read_manifest_cli_mounts
+    def test_runtime_mounts_declared_in_tree(self) -> None:
+        from astrid.core.cli.domain_product import read_runtime_cli_mounts
 
-        declared = {mount.family: mount.token for mount in read_manifest_cli_mounts()}
+        declared = {mount.family: mount.token for mount in read_runtime_cli_mounts()}
         self.assertEqual(
             declared,
             {
@@ -328,15 +328,15 @@ class ProductRegistryConformanceTest(unittest.TestCase):
     def test_product_registry_rejects_invalid_mounts(self) -> None:
         from astrid.core.cli.domain_product import (
             PRODUCT_FAMILIES,
-            ManifestMount,
+            RuntimeMount,
             ProductRegistryError,
             _validate_mounts,
         )
 
         base = (
-            ManifestMount("timelines", "timelines", "timeline"),
-            ManifestMount("shots", "timelines shots", "shots"),
-            ManifestMount("references", "media references", "references"),
+            RuntimeMount("timelines", "timelines", "runtime"),
+            RuntimeMount("shots", "timelines shots", "runtime"),
+            RuntimeMount("references", "media references", "runtime"),
         )
         # Valid base registry builds.
         self.assertEqual(len(_validate_mounts(PRODUCT_FAMILIES, base)), 7)
@@ -352,16 +352,16 @@ class ProductRegistryConformanceTest(unittest.TestCase):
             _validate_mounts(
                 PRODUCT_FAMILIES,
                 base
-                + (ManifestMount("extra", "projects extra", "extra-pack"),),
+                + (RuntimeMount("extra", "projects extra", "runtime-extra"),),
             )
         # Unexpected path for a declared family.
         with self.assertRaises(ProductRegistryError):
             _validate_mounts(
                 PRODUCT_FAMILIES,
                 (
-                    ManifestMount("timelines", "timelines", "timeline"),
-                    ManifestMount("shots", "media references", "shots"),
-                    ManifestMount("references", "media references", "references"),
+                    RuntimeMount("timelines", "timelines", "runtime"),
+                    RuntimeMount("shots", "media references", "runtime"),
+                    RuntimeMount("references", "media references", "runtime"),
                 ),
             )
 

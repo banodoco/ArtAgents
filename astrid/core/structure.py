@@ -631,8 +631,8 @@ def _is_concrete_pack_implementation_module(module: str) -> bool:
 
 
 # astrid/core/gateway/dispatch.py is the m1 serve composition root: the one
-# documented kernel-to-pack composition exemption (plan step 22) — it imports
-# the standard pack composition (astrid.packs.compose_standard_bridge).
+# documented kernel-to-pack composition exemption (plan step 22) — it is the
+# generic runtime composition root for the reviewed product mount edges.
 _IMPORT_LAYERING_EXEMPT_REL = frozenset(
     {
         "astrid/core/gateway/dispatch.py",
