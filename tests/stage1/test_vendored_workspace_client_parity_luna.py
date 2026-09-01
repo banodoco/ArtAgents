@@ -33,12 +33,12 @@ GENERATED_PATH = ROOT / "banodoco_workspace_client" / "generated.py"
 # future runtime contract refresh must update the source commit, digest, and
 # this test in one reviewed change; no ambient sibling checkout can silently
 # alter the shipped transport.
-PINNED_SOURCE_COMMIT = "52eab4ab96a54b6a1196d93e2f6f7cb0f0565baa"
+PINNED_SOURCE_COMMIT = "6cf5715d9cd371e3e46005be2010aac61b3d55bf"
 PINNED_SOURCE_REPOSITORY = "https://github.com/banodoco/banodoco-workspace-runtime.git"
 PINNED_PROTOCOL = "workspace.v1"
-PINNED_SCHEMA_DIGEST = "sha256:8560e9cf98bda529314a620dd47650dc0a7d85ba8a7ead988f5f76f2b4932acb"
-PINNED_GENERATED_CLIENT_SHA256 = "sha256:f3ddeaaf29e894ba87df80e3b82a33b839b675fc77d295fc06e4d2a8490c0f90"
-PINNED_SIGNATURE_SHA256 = "sha256:85903d1bd1e79438632af084445dfc3121a34d57fe45faec89f4798dce37bd3c"
+PINNED_SCHEMA_DIGEST = "sha256:d0d427f4695f3d2a4b494f0ae6e2fdca511ab9f5773ab2378ed474742e4f4325"
+PINNED_GENERATED_CLIENT_SHA256 = "sha256:29069e93ce9d9bc7bf89f62424f88346224256125d094c44bad74907c13eda80"
+PINNED_SIGNATURE_SHA256 = "sha256:bd6ac93403814e2230523946d0369ce7b751be61de871357f79ada6717d13bbf"
 
 
 def _signature_digest() -> str:
@@ -80,10 +80,10 @@ def test_vendored_client_operation_catalog_matches_typed_methods() -> None:
         if not name.startswith("_")
     }
     operation_methods = {_camel_to_snake(operation) for operation in OPERATIONS}
-    # These are generated typed compositions, not independent OpenAPI
-    # operation IDs: they compose updateDocument/ingestObject while retaining
-    # a convenient resource-scoped method for product adapters.
-    composed_helpers = {"update_timeline_document", "ingest_project_object"}
+    # This is a generated typed composition, not an independent OpenAPI
+    # operation ID: it composes updateDocument while retaining a convenient
+    # resource-scoped method for product adapters.
+    composed_helpers = {"update_timeline_document"}
     assert methods - operation_methods == composed_helpers
     assert operation_methods <= methods
 

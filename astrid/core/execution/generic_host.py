@@ -671,7 +671,7 @@ class RuntimeProtocolClient:
         }
         return self.generated.register_executor(
             payload,
-            idempotency_key=f"executor:{executor_id}:{_canonical_digest(payload)}",
+            idempotency_key=f"executor-{executor_id}-{_canonical_digest(payload)}",
         )
 
     def register_capability(
@@ -698,7 +698,7 @@ class RuntimeProtocolClient:
             digest,
             **registration,
             idempotency_key=(
-                f"capability:{capability_id}:{digest}:"
+                f"capability-{capability_id}-{digest}-"
                 f"{_canonical_digest(registration)}"
             ),
         )
@@ -711,7 +711,7 @@ class RuntimeProtocolClient:
             required_resource_keys=[],
             status="unavailable",
             unavailable_reason=reason,
-            idempotency_key=f"capability-withdraw:{capability_id}:{digest}",
+            idempotency_key=f"capability-withdraw-{capability_id}-{digest}",
         )
 
     def heartbeat(self, task_id: str, lease_token: str, *, attempt_id: str | None = None, fence: int | None = None):
@@ -721,7 +721,7 @@ class RuntimeProtocolClient:
             attempt_id,
             lease_id=lease_token,
             fence=int(fence),
-            idempotency_key=f"heartbeat:{attempt_id}:{fence}",
+            idempotency_key=f"heartbeat-{attempt_id}-{fence}",
             runtime_epoch=self._current_runtime_epoch(),
         )
 
@@ -754,7 +754,7 @@ class RuntimeProtocolClient:
         return self.generated.settle_attempt(
             attempt_id,
             settlement,
-            idempotency_key=f"settle:{attempt_id}:{fence}",
+            idempotency_key=f"settle-{attempt_id}-{fence}",
         )
 
     def fail(self, task_id: str, lease_token: str, error: str, *, retryable: bool = False, attempt_id: str | None = None, fence: int | None = None):
@@ -767,11 +767,11 @@ class RuntimeProtocolClient:
             fence=int(fence),
             error=payload,
             runtime_epoch=self._current_runtime_epoch(),
-            idempotency_key=f"fail:{attempt_id}:{fence}",
+            idempotency_key=f"fail-{attempt_id}-{fence}",
         )
 
     def cancel(self, task_id: str):
-        return self.generated.cancel_task(task_id, idempotency_key=f"cancel:{task_id}")
+        return self.generated.cancel_task(task_id, idempotency_key=f"cancel-{task_id}")
 
     def get_object(self, digest: str) -> bytes:
         response = self.generated.get_object(digest)
@@ -783,7 +783,7 @@ class RuntimeProtocolClient:
             return self.generated.ingest_object(
                 data,
                 media_type=media_type,
-                idempotency_key=f"output:{hashlib.sha256(data).hexdigest()}",
+                idempotency_key=f"output-{hashlib.sha256(data).hexdigest()}",
                 filename=filename,
             )
 
@@ -2187,7 +2187,7 @@ class GenericPackHost:
         claim = claim_next(
             executor_id=self.executor_id,
             capability_ids=capability_ids,
-            idempotency_key=f"claim:{self.executor_id}:{time.time_ns()}",
+            idempotency_key=f"claim-{self.executor_id}-{time.time_ns()}",
         )
         if claim is None:
             return None
