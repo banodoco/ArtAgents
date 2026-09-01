@@ -229,6 +229,24 @@ class GenerationFacade:
         )
         from astrid.core.generation.preflight import validate_generation_request
 
+        recipe = inputs.get("shot_generation_recipe")
+        if recipe is not None:
+            from astrid.packs.generation.executors.generate_image.task_adapter import (
+                GenerateImageAdapterError,
+                validate_shot_generation_recipe,
+            )
+
+            try:
+                validate_shot_generation_recipe(
+                    recipe,
+                    model=model,
+                    mode=resolved_mode,
+                    execution=resolved_execution,
+                    resolved_settings=inputs,
+                )
+            except GenerateImageAdapterError as exc:
+                raise CapabilityValidationError(str(exc)) from exc
+
         validate_generation_request(
             registry,
             model=model,
@@ -236,9 +254,9 @@ class GenerationFacade:
             execution=resolved_execution,
             inputs={"model": model, "mode": resolved_mode, **inputs},
             modality="image",
-            # Keep the image facade's historic deferred prompt validation: the
-            # executor owns image prompt semantics, while the matrix and local
-            # readiness checks remain pre-admission.
+            # Keep the image facade's historic deferred prompt validation:
+            # executor-owned prompt semantics (including prompt-less upscale)
+            # remain compatible while matrix/readiness checks happen here.
             required_features=(),
         )
         if resolved_execution == "local":

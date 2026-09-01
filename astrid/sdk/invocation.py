@@ -1416,6 +1416,25 @@ def invoke(
             validate_generation_request,
         )
 
+        if capability.id == "generation.generate_image":
+            recipe = request_inputs.get("shot_generation_recipe")
+            if recipe is not None:
+                from astrid.packs.generation.executors.generate_image.task_adapter import (
+                    GenerateImageAdapterError,
+                    validate_shot_generation_recipe,
+                )
+
+                try:
+                    validate_shot_generation_recipe(
+                        recipe,
+                        model=request_inputs.get("model"),
+                        mode=request_inputs.get("mode"),
+                        execution=request_inputs.get("execution"),
+                        resolved_settings=request_inputs,
+                    )
+                except GenerateImageAdapterError as exc:
+                    raise CapabilityValidationError(str(exc)) from exc
+
         model_entry, _mode_spec = validate_generation_request(
             model_registry,
             model=request_inputs.get("model"),

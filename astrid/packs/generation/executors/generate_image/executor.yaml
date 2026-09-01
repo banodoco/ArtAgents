@@ -192,6 +192,13 @@
       "name": "loras",
       "required": false,
       "type": "string"
+    },
+    {
+      "default": null,
+      "description": "Closed shot-generation recipe preserving prompt bindings, ordered references, generator identity, and content hashes.",
+      "name": "shot_generation_recipe",
+      "required": false,
+      "type": "json"
     }
   ],
   "isolation": {

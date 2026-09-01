@@ -42,7 +42,10 @@ nothing in the kernel imports this module.
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -69,6 +72,126 @@ _OPTIONAL_STRING_FIELDS = frozenset(
 )
 _REQUIRED_STRING_FIELDS = ("model", "mode", "execution", "prompt")
 
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_RECIPE_KEYS = frozenset({
+    "schema", "project_id", "shot_id", "target_role", "prompt_binding",
+    "generator", "inputs", "parent_media_id", "parent_content_sha256",
+})
+_RECIPE_BINDING_KEYS = frozenset({"id", "head", "media_id", "content_sha256"})
+_RECIPE_GENERATOR_KEYS = frozenset({"capability_id", "model", "backend", "mode", "settings"})
+_RECIPE_INPUT_KEYS = frozenset({"ordinal", "role", "reference_id", "media_id", "content_sha256"})
+_RECIPE_SETTING_KEYS = frozenset({
+    "count", "seed", "timeout", "steps", "strength", "guidance_scale",
+    "negative_prompt", "size", "image_ref", "quality", "background", "loras",
+    "upscale_mode", "upscale_factor", "target_resolution", "noise_scale", "env_file",
+})
+
+
+def _recipe_mapping(value: object, field: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise GenerateImageAdapterError(f"shot_generation_recipe field {field!r} must be an object")
+    return value
+
+
+def _reject_unknown(mapping: Mapping[str, Any], allowed: frozenset[str], field: str) -> None:
+    unknown = sorted(set(mapping) - allowed)
+    if unknown:
+        raise GenerateImageAdapterError(
+            f"shot_generation_recipe field {field!r} contains unknown key(s): {', '.join(unknown)}"
+        )
+
+
+def _recipe_string(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise GenerateImageAdapterError(f"shot_generation_recipe field {field!r} must be a non-empty string")
+    return value
+
+
+def _recipe_hash(value: object, field: str) -> str:
+    if not isinstance(value, str) or not _HASH_RE.fullmatch(value):
+        raise GenerateImageAdapterError(f"shot_generation_recipe field {field!r} must be a SHA-256 hash")
+    return value
+
+
+def validate_shot_generation_recipe(
+    value: object,
+    *,
+    project_id: str | None = None,
+    model: str | None = None,
+    mode: str | None = None,
+    execution: str | None = None,
+    capability_id: str = PACK_ID,
+    resolved_settings: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate and deep-copy a closed, immutable shot-generation recipe."""
+    recipe = _recipe_mapping(value, "recipe")
+    _reject_unknown(recipe, _RECIPE_KEYS, "recipe")
+    if recipe.get("schema") != "astrid.shot-generation-recipe/v1":
+        raise GenerateImageAdapterError("shot_generation_recipe.schema must be 'astrid.shot-generation-recipe/v1'")
+    recipe_project = _recipe_string(recipe.get("project_id"), "project_id")
+    if project_id is not None and recipe_project != project_id:
+        raise GenerateImageAdapterError("shot_generation_recipe.project_id does not match the task project")
+    _recipe_string(recipe.get("shot_id"), "shot_id")
+    if _recipe_string(recipe.get("target_role"), "target_role") != "primary_visual":
+        raise GenerateImageAdapterError("shot_generation_recipe.target_role must be 'primary_visual'")
+
+    binding = _recipe_mapping(recipe.get("prompt_binding"), "prompt_binding")
+    _reject_unknown(binding, _RECIPE_BINDING_KEYS, "prompt_binding")
+    _recipe_string(binding.get("id"), "prompt_binding.id")
+    head = binding.get("head")
+    if isinstance(head, bool) or not isinstance(head, int) or head < 0:
+        raise GenerateImageAdapterError("shot_generation_recipe.prompt_binding.head must be a non-negative integer")
+    _recipe_string(binding.get("media_id"), "prompt_binding.media_id")
+    _recipe_hash(binding.get("content_sha256"), "prompt_binding.content_sha256")
+
+    generator = _recipe_mapping(recipe.get("generator"), "generator")
+    _reject_unknown(generator, _RECIPE_GENERATOR_KEYS, "generator")
+    if _recipe_string(generator.get("capability_id"), "generator.capability_id") != capability_id:
+        raise GenerateImageAdapterError("shot_generation_recipe.generator.capability_id does not match the generation capability")
+    for field, expected in (("model", model), ("mode", mode), ("backend", execution)):
+        actual = _recipe_string(generator.get(field), f"generator.{field}")
+        if expected is not None and actual != expected:
+            raise GenerateImageAdapterError(f"shot_generation_recipe.generator.{field} does not match the resolved generation input")
+    settings = _recipe_mapping(generator.get("settings"), "generator.settings")
+    _reject_unknown(settings, _RECIPE_SETTING_KEYS, "generator.settings")
+    try:
+        json.dumps(settings)
+    except (TypeError, ValueError) as exc:
+        raise GenerateImageAdapterError(f"shot_generation_recipe.generator.settings must be JSON-safe: {exc}") from exc
+    if resolved_settings is not None:
+        for name, expected in settings.items():
+            if name not in resolved_settings or resolved_settings[name] != expected:
+                raise GenerateImageAdapterError(f"shot_generation_recipe.generator.settings does not match resolved setting {name!r}")
+
+    references = recipe.get("inputs")
+    if not isinstance(references, list):
+        raise GenerateImageAdapterError("shot_generation_recipe.inputs must be an ordered array")
+    seen_reference_ids: set[str] = set()
+    seen_media_ids: set[str] = set()
+    for ordinal, raw_reference in enumerate(references):
+        reference = _recipe_mapping(raw_reference, f"inputs[{ordinal}]")
+        _reject_unknown(reference, _RECIPE_INPUT_KEYS, f"inputs[{ordinal}]")
+        actual_ordinal = reference.get("ordinal")
+        if isinstance(actual_ordinal, bool) or not isinstance(actual_ordinal, int) or actual_ordinal != ordinal:
+            raise GenerateImageAdapterError("shot_generation_recipe.inputs ordinals must be contiguous from zero")
+        reference_id = _recipe_string(reference.get("reference_id"), f"inputs[{ordinal}].reference_id")
+        media_id = _recipe_string(reference.get("media_id"), f"inputs[{ordinal}].media_id")
+        _recipe_string(reference.get("role"), f"inputs[{ordinal}].role")
+        _recipe_hash(reference.get("content_sha256"), f"inputs[{ordinal}].content_sha256")
+        if reference_id in seen_reference_ids or media_id in seen_media_ids:
+            raise GenerateImageAdapterError("shot_generation_recipe.inputs reference and media ids must be unique")
+        seen_reference_ids.add(reference_id)
+        seen_media_ids.add(media_id)
+
+    parent_media = recipe.get("parent_media_id")
+    parent_hash = recipe.get("parent_content_sha256")
+    if (parent_media is None) != (parent_hash is None):
+        raise GenerateImageAdapterError("shot_generation_recipe parent_media_id and parent_content_sha256 must be supplied together")
+    if parent_media is not None:
+        _recipe_string(parent_media, "parent_media_id")
+        _recipe_hash(parent_hash, "parent_content_sha256")
+    return copy.deepcopy(dict(recipe))
+
 
 class GenerateImageAdapterError(RuntimeError):
     """Raised when the real generator cannot produce a valid result manifest.
@@ -90,6 +213,7 @@ class GenerationInputs:
     count: int
     seed: int | None
     features: tuple[tuple[str, str | int | float], ...]
+    shot_generation_recipe: dict[str, Any] | None = None
 
     def to_argv(self, staging_dir: Path) -> list[str]:
         """Translate the decoded spec into ``run_sdk`` capability argv."""
@@ -103,6 +227,8 @@ class GenerationInputs:
         ]
         if self.seed is not None:
             argv.extend(["--seed", str(self.seed)])
+        if self.shot_generation_recipe is not None:
+            argv.extend(["--shot-generation-recipe", json.dumps(self.shot_generation_recipe)])
         for name, value in self.features:
             argv.extend([f"--{name.replace('_', '-')}", str(value)])
         return argv
@@ -136,7 +262,9 @@ def _coerce_float(value: object, field: str) -> float:
     return float(value)
 
 
-def _decode_inputs(spec: Mapping[str, Any]) -> GenerationInputs:
+def _decode_inputs(
+    spec: Mapping[str, Any], *, project_id: str | None = None, capability_id: str = PACK_ID
+) -> GenerationInputs:
     """Decode and validate the adapter's inputs from one immutable spec."""
     if not isinstance(spec, Mapping):
         raise GenerateImageAdapterError(
@@ -172,6 +300,13 @@ def _decode_inputs(spec: Mapping[str, Any]) -> GenerationInputs:
         if value is None:
             continue
         features.append((name, _coerce_float(value, name)))
+    recipe = None
+    if spec.get("shot_generation_recipe") is not None:
+        recipe = validate_shot_generation_recipe(
+            spec["shot_generation_recipe"], project_id=project_id, model=model,
+            mode=mode, execution=execution, capability_id=capability_id,
+            resolved_settings=spec,
+        )
     return GenerationInputs(
         model=model,
         mode=mode,
@@ -180,6 +315,7 @@ def _decode_inputs(spec: Mapping[str, Any]) -> GenerationInputs:
         count=count,
         seed=seed,
         features=tuple(features),
+        shot_generation_recipe=recipe,
     )
 
 
@@ -201,7 +337,10 @@ class GenerateImageAdapter:
         created. All writes land under ``staging_dir``.
         """
         staging_dir = Path(staging_dir)
-        inputs = _decode_inputs(task.spec)
+        inputs = _decode_inputs(
+            task.spec, project_id=getattr(task, "project_id", None),
+            capability_id=getattr(task, "capability", PACK_ID),
+        )
         argv = inputs.to_argv(staging_dir)
 
         # Lazy import inside the sanctioned canonical runtime context: the
@@ -338,6 +477,11 @@ class GenerateImageAdapter:
                 "count": inputs.count,
                 "seed": inputs.seed,
                 "features": dict(inputs.features),
+                **(
+                    {"shot_generation_recipe": copy.deepcopy(inputs.shot_generation_recipe)}
+                    if inputs.shot_generation_recipe is not None
+                    else {}
+                ),
             },
             "outputs": outputs,
             "created": created,
