@@ -33,6 +33,15 @@ def _open_client(daemon: RuntimeDaemon) -> AstridClient:
     )
 
 
+def _register_render_basic(daemon: RuntimeDaemon) -> None:
+    """Seed the capability catalog required by task-admission journeys."""
+    daemon.service.register_capability({
+        "capability_id": "render.basic",
+        "definition_digest": "sha256:" + hashlib.sha256(b"render.basic").hexdigest(),
+        "status": "ready",
+    })
+
+
 def _use_explicit_gateway_connection(monkeypatch: pytest.MonkeyPatch, daemon: RuntimeDaemon) -> None:
     """Keep gateway integration online without asking the launcher to boot."""
     monkeypatch.setattr(
@@ -51,6 +60,7 @@ def test_product_client_requires_bootstrap_with_exact_next_action(tmp_path, monk
 
 def test_product_client_crosses_real_daemon_and_returns_stable_envelopes(tmp_path, monkeypatch):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    _register_render_basic(daemon)
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
@@ -134,6 +144,7 @@ def test_documented_minimal_timeline_create_defaults_empty_document_on_real_gate
 
 def test_cold_mutations_expose_server_receipts_on_cli_sdk_replay(tmp_path, monkeypatch, capsys):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    _register_render_basic(daemon)
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     _use_explicit_gateway_connection(monkeypatch, daemon)
@@ -438,6 +449,7 @@ def test_doctor_and_backup_never_open_local_storage(capsys, monkeypatch, tmp_pat
 
 def test_remote_domains_use_generated_runtime_and_reopen(tmp_path, monkeypatch):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    _register_render_basic(daemon)
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
@@ -471,6 +483,7 @@ def test_remote_domains_use_generated_runtime_and_reopen(tmp_path, monkeypatch):
 
 def test_editor_domain_reads_and_media_relations_use_generated_operations(tmp_path, monkeypatch):
     daemon = RuntimeDaemon(tmp_path / "realm", support_root=tmp_path / "support").start()
+    _register_render_basic(daemon)
     monkeypatch.setenv("BANODOCO_RUNTIME_ENDPOINT", daemon.endpoint)
     monkeypatch.setenv("BANODOCO_RUNTIME_CREDENTIAL", str(tmp_path / "support" / "credentials" / "owner.token"))
     try:
