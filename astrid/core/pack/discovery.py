@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -29,6 +28,12 @@ from astrid.core.pack import (
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
+)
+from astrid.core.pack.canonical import (
+    CanonicalPackEntry,
+    CanonicalPackValidationError,
+    ExternalPackSource,
+    read_normalize_validate,
 )
 
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
@@ -82,6 +87,83 @@ class DiscoveredPack:
         return tuple(roots)
 
 
+@dataclass(frozen=True)
+class CanonicalDiscoveredPack:
+    """A strict-v2 capability pack from a read-only discovery layer."""
+
+    entry: CanonicalPackEntry
+    source_kind: str
+    priority_index: int
+
+    @property
+    def id(self) -> str:
+        return self.entry.id
+
+    @property
+    def pack_dir(self) -> Path:
+        return self.entry.root
+
+
+def discover_canonical_pack_metadata(
+    *,
+    project_root: str | Path = REPO_ROOT,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = False,
+) -> tuple[CanonicalDiscoveredPack, ...]:
+    """Discover capability-only v2 packs through source/local/extra/env.
+
+    ``include_installed`` remains a compatibility-shaped argument for callers
+    migrating from the old API, but installed overlays are never consulted:
+    Stage1 has no installed-pack authority.
+    """
+    del include_installed
+    project_root = Path(project_root).expanduser().resolve()
+    discovered: list[CanonicalDiscoveredPack] = []
+    seen: set[tuple[str, str]] = set()
+    scanned: set[Path] = set()
+
+    def add(path: Path, source: ExternalPackSource) -> None:
+        entry = read_normalize_validate(path, source=source)
+        if entry.definition.visibility == "hidden":
+            return
+        key = (source.value, entry.id)
+        if key in seen:
+            raise CanonicalPackValidationError(
+                f"duplicate canonical pack ID {entry.id!r} in {source.value}"
+            )
+        seen.add(key)
+        discovered.append(CanonicalDiscoveredPack(entry, source.value, len(discovered)))
+
+    def scan(raw_root: str | Path, source: ExternalPackSource) -> None:
+        root = Path(raw_root).expanduser()
+        if not root.is_absolute():
+            root = project_root / root
+        root = root.resolve()
+        if root in scanned or not root.is_dir():
+            return
+        scanned.add(root)
+        for child in sorted(root.iterdir(), key=lambda p: p.name):
+            if child.is_symlink() or not child.is_dir() or child.name.startswith("."):
+                continue
+            manifest = child / "pack.yaml"
+            if manifest.is_file():
+                add(manifest, source)
+
+    local = project_root / "astrid" / "packs" / "local" / "pack.yaml"
+    if local.is_file():
+        add(local, ExternalPackSource.LOCAL)
+    for root in extra_pack_roots:
+        scan(root, ExternalPackSource.EXTRA)
+    for root in os.environ.get(ASTRID_PACKS_PATH_ENV, "").split(os.pathsep):
+        if root:
+            scan(root, ExternalPackSource.ENV)
+    return tuple(discovered)
+
+
+def discover_canonical_packs_ordered(**kwargs: Any) -> tuple[CanonicalPackEntry, ...]:
+    return tuple(item.entry for item in discover_canonical_pack_metadata(**kwargs))
+
+
 def discover_pack_metadata(
     *,
     project_root: str | Path = REPO_ROOT,
@@ -100,15 +182,13 @@ def discover_pack_metadata(
     working. Defaults to :func:`astrid.core.pack.discover_packs`.
     """
     scan = discover_packs_fn if discover_packs_fn is not None else discover_packs
-    repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
     project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
     # Discovery is observational. Do not materialize a project-local pack just
     # because a registry was loaded; only an explicitly-authored manifest is
     # eligible for the local layer.
     local_pack_root = project_pack_root / "local"
     if not any(
-        (local_pack_root / name).is_file()
-        for name in ("pack.yaml", "pack.yml", "pack.json")
+        (local_pack_root / name).is_file() for name in ("pack.yaml", "pack.yml", "pack.json")
     ):
         local_pack_root = None
 
@@ -162,11 +242,7 @@ def discover_pack_metadata(
         seen: dict[str, Path] = {}
         for child in children:
             try:
-                if (
-                    not child.is_dir()
-                    or child.name.startswith(".")
-                    or child.name == "__pycache__"
-                ):
+                if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
                     continue
                 manifest_path = pack_manifest_path(child)
             except OSError as exc:
@@ -198,8 +274,7 @@ def discover_pack_metadata(
                 continue
             if pack.id in seen:
                 _LOGGER.warning(
-                    "skipping duplicate pack id %r in %s root %s "
-                    "(%s and %s)",
+                    "skipping duplicate pack id %r in %s root %s (%s and %s)",
                     pack.id,
                     source_kind,
                     resolved,
@@ -263,6 +338,9 @@ __all__ = [
     "ASTRID_PACKS_PATH_ENV",
     "SOURCE_KINDS",
     "DiscoveredPack",
+    "CanonicalDiscoveredPack",
     "discover_pack_metadata",
+    "discover_canonical_pack_metadata",
+    "discover_canonical_packs_ordered",
     "discover_packs_ordered",
 ]
