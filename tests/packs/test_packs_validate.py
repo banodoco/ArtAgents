@@ -39,7 +39,11 @@ def _mirror_first_party_packs_root(dest: Path) -> None:
             continue
         if not _has_tracked_files(child):
             continue
-        (dest / child.name).symlink_to(child, target_is_directory=True)
+        shutil.copytree(
+            child,
+            dest / child.name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+        )
 
 
 def _has_tracked_files(path: Path) -> bool:
@@ -57,16 +61,18 @@ def _has_tracked_files(path: Path) -> bool:
 class MinimalPackTestCase(unittest.TestCase):
     """Shared helpers for pack test cases."""
 
-    def make_pack_root(self) -> Path:
-        path = Path(tempfile.mkdtemp(prefix="test-validate-"))
-        self.addCleanup(shutil.rmtree, path, ignore_errors=True)
+    def make_pack_root(self, pack_id: str = "test_pack") -> Path:
+        base = Path(tempfile.mkdtemp(prefix="test-validate-"))
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        path = base / pack_id
+        path.mkdir()
         return path
 
     def write_valid_pack(self, root: Path, pack_id: str = "test_pack") -> None:
-        """Write a minimal valid v1 pack."""
+        """Write a minimal valid v2 capability pack."""
         _write(
             root / "pack.yaml",
-            f"""schema_version: 1
+            f"""schema_version: 2
 id: {pack_id}
 name: Test Pack
 version: 0.1.0
@@ -171,12 +177,11 @@ class TestValidPack(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
-agent:
-  purpose: Testing
+capabilities: [testing]
 """,
         )
         errors, warnings = validate_pack(root)
@@ -184,31 +189,29 @@ agent:
         # (content roots are optional in the schema)
         self.assertEqual(errors, [])
 
-    def test_valid_pack_schema_version_float(self) -> None:
-        """schema_version: 1 (float in YAML) should be accepted."""
+    def test_pack_schema_version_float_is_rejected(self) -> None:
+        """Canonical v2 requires the exact integer version token."""
         root = self.make_pack_root()
         self.write_valid_pack(root)
         # YAML safe_load parses `1` as int by default, but let's also
         # verify that a float 1.0 works
         _write(
             root / "pack.yaml",
-            """schema_version: 1.0
+            """schema_version: 2.0
 id: test_pack
 name: Test Pack
 version: 0.1.0
-agent:
-  purpose: Testing
+capabilities: [testing]
 """,
         )
         errors, warnings = validate_pack(root)
-        # 1.0 should be accepted as it equals int 1
-        self.assertEqual(errors, [])
+        self.assertTrue(errors)
 
     def test_discovery_pack_definition_preserves_taxonomy_fields(self) -> None:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -236,7 +239,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -265,10 +268,10 @@ agent:
 
     def test_docs_scaffold_templates_validate_in_minimal_pack(self) -> None:
         """Scaffold templates should validate together in a minimal pack shell."""
-        root = self.make_pack_root()
+        root = self.make_pack_root("example_pack")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: example_pack
 name: Example Pack
 version: 0.1.0
@@ -307,7 +310,7 @@ class TestPermissionValidation(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -338,7 +341,7 @@ class TestLayoutValidation(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -456,7 +459,7 @@ metadata:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -467,6 +470,7 @@ agent:
   purpose: Testing
 """,
         )
+        (root / "strange").mkdir()
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [])
         self.assertTrue(any("unsupported content root" in warning for warning in warnings), warnings)
@@ -477,7 +481,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -504,7 +508,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -551,7 +555,7 @@ dependencies: {}
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -614,7 +618,7 @@ dependencies: {}
         self.write_valid_orchestrator(root, "orchestrators/test_orch", "test_pack.test_orch")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -628,8 +632,6 @@ aliases:
   - kind: executor
     alias: test_pack.legacy_exec
     canonical_id: test_pack.test_exec
-    deprecated: true
-    deprecation_message: Use test_pack.test_exec instead.
   - kind: orchestrator
     alias: test_pack.legacy_orch
     canonical_id: test_pack.test_orch
@@ -641,10 +643,10 @@ aliases:
     def test_non_builtin_pack_rejects_executor_with_wrong_pack_prefix(self) -> None:
         """An executor in a non-builtin pack whose qualified id prefix does not
         match the containing pack should be rejected with a clear error."""
-        root = self.make_pack_root()
+        root = self.make_pack_root("other_pack")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: other_pack
 name: Other Pack
 version: 0.1.0
@@ -668,10 +670,10 @@ agent:
     def test_non_builtin_pack_rejects_orchestrator_with_wrong_pack_prefix(self) -> None:
         """An orchestrator in a non-builtin pack whose qualified id prefix does not
         match the containing pack should be rejected."""
-        root = self.make_pack_root()
+        root = self.make_pack_root("other_pack")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: other_pack
 name: Other Pack
 version: 0.1.0
@@ -695,10 +697,10 @@ agent:
 
     def test_non_builtin_pack_rejects_element_with_wrong_pack_id(self) -> None:
         """An element whose pack_id does not match the containing pack should be rejected."""
-        root = self.make_pack_root()
+        root = self.make_pack_root("other_pack")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: other_pack
 name: Other Pack
 version: 0.1.0
@@ -803,7 +805,7 @@ class TestMissingRequiredFields(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 name: Test Pack
 version: 0.1.0
 agent:
@@ -821,11 +823,10 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 version: 0.1.0
-agent:
-  purpose: Testing
+capabilities: [testing]
 """,
         )
         errors, _ = validate_pack(root)
@@ -974,7 +975,7 @@ class TestUndeclaredContentRoots(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -987,7 +988,7 @@ agent:
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
         self.assertTrue(
-            any("nonexistent_executors" in e and "declared content root" in e for e in errors),
+            any("nonexistent_executors" in e and "resource" in e for e in errors),
             f"Expected content root error, got errors={errors}, warnings={warnings}",
         )
 
@@ -995,7 +996,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1008,7 +1009,7 @@ agent:
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
         self.assertTrue(
-            any("nonexistent_orchestrators" in e and "declared content root" in e for e in errors),
+            any("nonexistent_orchestrators" in e and "resource" in e for e in errors),
             f"Expected content root error for orchestrators, got errors={errors}, warnings={warnings}",
         )
 
@@ -1016,7 +1017,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1029,15 +1030,15 @@ agent:
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
         self.assertTrue(
-            any("nonexistent_elements" in e and "declared content root" in e for e in errors),
+            any("nonexistent_elements" in e and "resource" in e for e in errors),
             f"Expected content root error for elements, got errors={errors}, warnings={warnings}",
         )
 
-    def test_missing_schemas_root_is_only_warning(self) -> None:
+    def test_missing_schemas_root_is_rejected_by_resource_closure(self) -> None:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1049,10 +1050,9 @@ agent:
         )
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
-        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
         self.assertTrue(
-            any("nonexistent_schemas" in w for w in warnings),
-            f"Expected content root warning for schemas, got: {warnings}",
+            any("nonexistent_schemas" in error and "resource" in error for error in errors),
+            f"Expected content-root closure error for schemas, got: {errors}",
         )
 
 
@@ -1063,7 +1063,7 @@ class TestTaxonomyEnumRejection(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            f"""schema_version: 1
+            f"""schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1075,7 +1075,11 @@ agent:
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, _warnings = validate_pack(root)
         self.assertTrue(
-            any(f"{field}" in e and "must be one of" in e for e in errors),
+            any(
+                field in e
+                and ("must be one of" in e or "unknown field" in e or "not valid" in e)
+                for e in errors
+            ),
             f"Expected enum rejection for {field}={bad_value!r}, got errors={errors}",
         )
 
@@ -1105,7 +1109,7 @@ class TestFileSpecificErrors(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1260,7 +1264,7 @@ Path({sentinel!r}).write_text('imported')
             "IMPORT SENTINEL: run.py was IMPORTED during validation!",
         )
 
-    def test_validate_handles_unreadable_run_py(self) -> None:
+    def test_validate_rejects_unreadable_run_py(self) -> None:
         """Even if run.py exists but can't be read, validation shouldn't crash."""
         # This is just confirming we only do existence check, not reading
         root = self.make_pack_root()
@@ -1273,7 +1277,7 @@ Path({sentinel!r}).write_text('imported')
 
         # Validation should succeed because we only check existence
         errors, _ = validate_pack(root)
-        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertTrue(any("cannot be read" in error for error in errors), errors)
 
 
 class TestPackValidatorClass(MinimalPackTestCase):
@@ -1316,7 +1320,7 @@ class TestLayoutContractExceptions(MinimalPackTestCase):
         _write(root / "legacy.py", "# legacy shim\n")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1335,7 +1339,7 @@ metadata:
 """,
         )
         errors, _warnings = validate_pack(root)
-        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertTrue(any("unknown field" in error for error in errors), errors)
 
     def test_layout_exceptions_fail_under_single_aggregate_surface(self) -> None:
         root = self.make_pack_root()
@@ -1344,7 +1348,7 @@ metadata:
         _write(root / "legacy.py", "# legacy shim\n")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1365,20 +1369,7 @@ metadata:
 """,
         )
         errors, _warnings = validate_pack(root)
-        self.assertGreaterEqual(len(errors), 3, errors)
-        self.assertEqual(errors[0], "pack layout contract failed (2 issues)")
-        self.assertTrue(
-            any("legacy.py" in error and "class must be one of" in error for error in errors[1:]),
-            errors,
-        )
-        self.assertTrue(
-            any(
-                "executors/test_exec/run.py" in error
-                and "already matches the canonical pack layout" in error
-                for error in errors[1:]
-            ),
-            errors,
-        )
+        self.assertTrue(any("unknown field" in error for error in errors), errors)
 
 
 class TestFirstPartyPacksRootValidation(MinimalPackTestCase):
@@ -1393,7 +1384,7 @@ class TestFirstPartyPacksRootValidation(MinimalPackTestCase):
         root = self.make_pack_root() / "packs"
         root.mkdir()
         _mirror_first_party_packs_root(root)
-        (root / "blender").unlink()
+        shutil.rmtree(root / "blender")
         _write(
             root / "blender" / "pack.yaml",
             """id: blender
@@ -1430,7 +1421,7 @@ agent:
         _write(root / "domain.txt", "domain-specific note\n")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1449,9 +1440,7 @@ metadata:
 """,
         )
         errors, _warnings = validate_pack(root)
-        self.assertEqual(errors[0], "pack layout contract failed (1 issue)")
-        self.assertIn("domain.txt", errors[1])
-        self.assertIn("must be permanent", errors[1])
+        self.assertTrue(any("unknown field" in error for error in errors), errors)
 
 
 class TestInvalidPackIdPattern(MinimalPackTestCase):
@@ -1461,7 +1450,7 @@ class TestInvalidPackIdPattern(MinimalPackTestCase):
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: my-pack
 name: My Pack
 version: 0.1.0
@@ -1481,7 +1470,7 @@ agent:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: MyPack
 name: My Pack
 version: 0.1.0
@@ -1532,7 +1521,7 @@ class TestPackLevelAliases(MinimalPackTestCase):
         self.write_valid_executor(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1558,7 +1547,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1592,7 +1581,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1622,7 +1611,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1643,7 +1632,7 @@ aliases:
         error_text = " ".join(errors)
         self.assertTrue(
             "kind" in error_text.lower()
-            and any(t in error_text.lower() for t in ("enum", "invalid", "not valid")),
+            and any(t in error_text.lower() for t in ("enum", "invalid", "not valid", "must be one of")),
             f"Expected schema enum error for kind, got: {errors}",
         )
 
@@ -1653,7 +1642,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1681,7 +1670,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1707,7 +1696,7 @@ aliases: not_an_array
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1738,7 +1727,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1777,7 +1766,7 @@ extensions:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1800,7 +1789,7 @@ extensions:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1825,7 +1814,7 @@ extensions:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1858,7 +1847,7 @@ extensions:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1903,7 +1892,7 @@ runtime:
         _write(orch_dir / "STAGE.md", "# Test Orchestrator\n")
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1930,7 +1919,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1957,7 +1946,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1976,12 +1965,12 @@ aliases:
         errors, _warnings = validate_pack(root)
         self.assertTrue(any("unknown executor id 'test_pack.missing_exec'" in error for error in errors), errors)
 
-    def test_pack_alias_qualified_cross_pack_target_is_allowed(self) -> None:
+    def test_pack_alias_qualified_cross_pack_target_is_rejected(self) -> None:
         root = self.make_pack_root()
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -1998,7 +1987,7 @@ aliases:
 """,
         )
         errors, _warnings = validate_pack(root)
-        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertTrue(any("owned by 'test_pack'" in error for error in errors), errors)
 
     # -- non-object shapes inside the aliases array -----------------------
 
@@ -2008,7 +1997,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2039,7 +2028,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2070,7 +2059,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2103,7 +2092,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2126,7 +2115,7 @@ aliases:
         self.assertTrue(
             any(
                 term in error_text.lower()
-                for term in ("deprecated", "boolean", "string", "type")
+                for term in ("deprecated", "boolean", "string", "type", "unknown field")
             ),
             f"Expected error about non-boolean deprecated, got: {errors}",
         )
@@ -2137,7 +2126,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2160,7 +2149,7 @@ aliases:
         self.assertTrue(
             any(
                 term in error_text.lower()
-                for term in ("deprecated", "boolean", "integer", "type")
+                for term in ("deprecated", "boolean", "integer", "type", "unknown field")
             ),
             f"Expected error about non-boolean deprecated, got: {errors}",
         )
@@ -2171,7 +2160,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2195,7 +2184,7 @@ aliases:
         self.assertTrue(
             any(
                 term in error_text.lower()
-                for term in ("deprecation_message", "string", "integer", "type")
+                for term in ("deprecation_message", "string", "integer", "type", "unknown field")
             ),
             f"Expected error about non-string deprecation_message, got: {errors}",
         )
@@ -2206,7 +2195,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0
@@ -2230,7 +2219,7 @@ aliases:
         self.assertTrue(
             any(
                 term in error_text.lower()
-                for term in ("deprecation_message", "string", "boolean", "type")
+                for term in ("deprecation_message", "string", "boolean", "type", "unknown field")
             ),
             f"Expected error about non-string deprecation_message, got: {errors}",
         )
@@ -2243,7 +2232,7 @@ aliases:
         self.write_valid_pack(root)
         _write(
             root / "pack.yaml",
-            """schema_version: 1
+            """schema_version: 2
 id: test_pack
 name: Test Pack
 version: 0.1.0

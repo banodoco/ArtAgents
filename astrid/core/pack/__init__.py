@@ -99,11 +99,9 @@ from astrid.core.pack.walkers import (
 )
 from astrid.core.pack.canonical import (
     BundledCatalog,
-    CanonicalDatabaseProjection,
     CanonicalPackEntry,
     CanonicalPackValidationError,
     catalog_from_root,
-    project_catalog_database,
     read_normalize_validate,
     validate_canonical_pack,
 )
@@ -128,11 +126,9 @@ __all__ = [
     "validate_content_id_in_pack",
     "validate_element_pack_id",
     "BundledCatalog",
-    "CanonicalDatabaseProjection",
     "CanonicalPackEntry",
     "CanonicalPackValidationError",
     "catalog_from_root",
-    "project_catalog_database",
     "read_normalize_validate",
     "validate_canonical_pack",
 ]

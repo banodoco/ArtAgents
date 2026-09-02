@@ -6,7 +6,6 @@ from pathlib import Path
 import jsonschema
 import pytest
 import yaml
-from referencing import Registry, Resource
 
 from astrid.core.pack import PackValidationError, load_pack_manifest
 from astrid.core.pack.alias_resolver import extract_pack_aliases
@@ -15,7 +14,7 @@ from astrid.core.pack.validate import validate_pack
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEMAS_ROOT = REPO_ROOT / "astrid" / "core" / "pack" / "schemas" / "v1"
+PACK_SCHEMA = REPO_ROOT / "astrid" / "core" / "pack" / "schemas" / "v2" / "pack.json"
 RENDERING_OPERATIONS = {
     "renderer": "render",
     "planner": "plan",
@@ -32,10 +31,9 @@ def _write_pack(tmp_path: Path, body: str, *, pack_id: str = "render_pack") -> P
 
 
 def _schema_errors(body: str) -> list[str]:
-    pack_schema = json.loads((SCHEMAS_ROOT / "pack.json").read_text(encoding="utf-8"))
-    defs_schema = json.loads((SCHEMAS_ROOT / "_defs.json").read_text(encoding="utf-8"))
-    registry = Registry().with_resource("_defs.json", Resource.from_contents(defs_schema))
-    validator = jsonschema.Draft7Validator(pack_schema, registry=registry)
+    pack_schema = json.loads(PACK_SCHEMA.read_text(encoding="utf-8"))
+    validator_cls = jsonschema.validators.validator_for(pack_schema)
+    validator = validator_cls(pack_schema)
     return [error.message for error in validator.iter_errors(yaml.safe_load(body))]
 
 
@@ -44,19 +42,19 @@ def _write_valid_rendering_pack(tmp_path: Path, *, aliases: bool) -> Path:
     if aliases:
         alias_block = """aliases:
   - kind: renderer
-    alias: renderpack.legacy-renderer
-    canonical_id: renderpack.compat-renderer
+    alias: renderpack.legacy_renderer
+    canonical_id: renderpack.compat_renderer
   - kind: renderer
-    alias: renderpack.compat-renderer
-    canonical_id: renderpack.primary-renderer
+    alias: renderpack.compat_renderer
+    canonical_id: renderpack.primary_renderer
   - kind: planner
-    alias: renderpack.legacy-planner
-    canonical_id: renderpack.primary-planner
+    alias: renderpack.legacy_planner
+    canonical_id: renderpack.primary_planner
   - kind: finalizer
-    alias: renderpack.legacy-finalizer
-    canonical_id: renderpack.primary-finalizer
+    alias: renderpack.legacy_finalizer
+    canonical_id: renderpack.primary_finalizer
 """
-    body = f"""schema_version: 1
+    body = f"""schema_version: 2
 id: renderpack
 name: Rendering Pack
 version: 1.0.0
@@ -75,7 +73,7 @@ version: 1.0.0
     for kind, operation in RENDERING_OPERATIONS.items():
         (manifests_root / f"{kind}.yaml").write_text(
             f"""schema_version: 1
-id: renderpack.primary-{kind}
+id: renderpack.primary_{kind}
 name: Primary {kind.title()}
 version: 1.0.0
 protocol_version: 1
@@ -92,7 +90,7 @@ operations: [{operation}]
 
 
 def test_rendering_extensions_round_trip_through_schema_and_normalizer(tmp_path: Path) -> None:
-    body = """schema_version: 1
+    body = """schema_version: 2
 id: render_pack
 name: Rendering Pack
 version: 1.0.0
@@ -124,7 +122,7 @@ extensions:
 def test_rendering_extensions_reject_unknown_keys_in_schema_and_normalizer(
     tmp_path: Path,
 ) -> None:
-    body = """schema_version: 1
+    body = """schema_version: 2
 id: render_pack
 name: Rendering Pack
 version: 1.0.0
@@ -134,7 +132,9 @@ extensions:
     backends: []
 """
 
-    assert _schema_errors(body)
+    # Canonical v2 reserves ``extensions`` as a typed consumer namespace;
+    # the rendering projection owns the deeper shape validation.
+    assert _schema_errors(body) == []
     with pytest.raises(
         PackValidationError,
         match=r"pack\.extensions\.rendering has unknown field\(s\): backends",
@@ -147,7 +147,7 @@ def test_rendering_manifest_paths_reject_pack_root_escapes(
     tmp_path: Path,
     declared_path: str,
 ) -> None:
-    body = f"""schema_version: 1
+    body = f"""schema_version: 2
 id: render_pack
 name: Rendering Pack
 version: 1.0.0
@@ -166,7 +166,7 @@ extensions:
 
 
 def test_rendering_manifest_paths_resolve_relative_to_pack_root(tmp_path: Path) -> None:
-    body = """schema_version: 1
+    body = """schema_version: 2
 id: render_pack
 name: Rendering Pack
 version: 1.0.0
@@ -188,10 +188,11 @@ extensions:
 
 
 def test_extract_pack_aliases_recognizes_rendering_alias_kinds(tmp_path: Path) -> None:
-    body = """schema_version: 1
+    body = """schema_version: 2
 id: render_pack
 name: Rendering Pack
 version: 1.0.0
+capabilities: [rendering]
 aliases:
   - kind: renderer
     alias: render_pack.legacy_renderer

@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
+from astrid.core.pack import PackValidationError, discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack.discovery import DiscoveredPack
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
@@ -83,7 +83,7 @@ def _write_renderer_pack(
         for permission in declared_permissions
     )
     pack_lines = [
-        "schema_version: 1",
+        "schema_version: 2",
         f"id: {pack_id}",
         f"name: {pack_id}",
         "version: 1.0.0",
@@ -248,7 +248,7 @@ def test_alias_cycle_is_rejected_as_structured_registry_error(tmp_path: Path) ->
     assert caught.value.to_dict()["capability_kind"] == "renderer"
 
 
-def test_alias_to_ineligible_direct_target_does_not_shadow_eligible_alias(
+def test_cross_pack_shared_alias_is_rejected_by_v2_ownership(
     tmp_path: Path,
 ) -> None:
     source_root = tmp_path / "source"
@@ -272,19 +272,17 @@ def test_alias_to_ineligible_direct_target_does_not_shadow_eligible_alias(
             manifest.read_text(encoding="utf-8")
             + "aliases:\n"
             + "  - kind: renderer\n"
-            + "    alias: shared.renderer-alias\n"
+            + "    alias: shared.renderer_alias\n"
             + f"    canonical_id: {target}\n",
             encoding="utf-8",
         )
 
-    with _load_with_source(tmp_path / "project", source_root) as (renderers, _, _):
-        selected = renderers.get("shared.renderer-alias")
-
-    assert selected.id == "bgood.renderer"
-    assert selected.manifest.name == "Eligible"
+    with pytest.raises(PackValidationError, match="owned by"):
+        with _load_with_source(tmp_path / "project", source_root):
+            pass
 
 
-def test_two_hop_alias_to_ineligible_env_renderer_falls_through(
+def test_cross_pack_two_hop_alias_to_env_is_rejected_by_v2_ownership(
     tmp_path: Path,
 ) -> None:
     source_root = tmp_path / "source"
@@ -307,26 +305,17 @@ def test_two_hop_alias_to_ineligible_env_renderer_falls_through(
         ("shared.transitive", "trustedfallback.renderer"),
     )
 
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-        env_pack_roots=(str(env_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-        denied = renderers.inspect("envdenied.renderer")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "trustedfallback.renderer",
-    ]
-    assert len(denied) == 1
-    assert denied[0].execution_eligible is False
+    with pytest.raises(PackValidationError, match="owned by"):
+        with _load_with_source(
+            tmp_path / "project",
+            source_root,
+            extra_pack_roots=(str(extra_root),),
+            env_pack_roots=(str(env_root),),
+        ):
+            pass
 
 
-def test_two_hop_alias_to_missing_terminal_falls_through(tmp_path: Path) -> None:
+def test_cross_pack_two_hop_alias_to_missing_is_rejected_by_v2_ownership(tmp_path: Path) -> None:
     source_root = tmp_path / "source"
     extra_root = tmp_path / "extra"
     high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
@@ -345,22 +334,16 @@ def test_two_hop_alias_to_missing_terminal_falls_through(tmp_path: Path) -> None
         ("shared.transitive", "trustedfallback.renderer"),
     )
 
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "trustedfallback.renderer",
-    ]
+    with pytest.raises(PackValidationError, match="owned by"):
+        with _load_with_source(
+            tmp_path / "project",
+            source_root,
+            extra_pack_roots=(str(extra_root),),
+        ):
+            pass
 
 
-def test_alias_chain_uses_eligible_fallback_for_ineligible_intermediate_hop(
+def test_cross_pack_alias_fallback_is_rejected_by_v2_ownership(
     tmp_path: Path,
 ) -> None:
     source_root = tmp_path / "source"
@@ -383,21 +366,14 @@ def test_alias_chain_uses_eligible_fallback_for_ineligible_intermediate_hop(
         ("shared.middle", "trustedfallback.renderer"),
     )
 
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-        env_pack_roots=(str(env_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "shared.middle",
-        "trustedfallback.renderer",
-    ]
+    with pytest.raises(PackValidationError, match="owned by"):
+        with _load_with_source(
+            tmp_path / "project",
+            source_root,
+            extra_pack_roots=(str(extra_root),),
+            env_pack_roots=(str(env_root),),
+        ):
+            pass
 
 
 @pytest.mark.skip(reason="programmatic renderer aliases are retired")

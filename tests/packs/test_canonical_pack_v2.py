@@ -60,15 +60,15 @@ def test_v1_alternate_and_database_manifests_fail_closed(tmp_path: Path) -> None
         validate_canonical_pack(alternate)
 
 
-def test_catalog_skips_stage1_v1_payload_until_payload_lane(tmp_path: Path) -> None:
+def test_catalog_rejects_v1_payload_after_atomic_cutover(tmp_path: Path) -> None:
     _pack(tmp_path, "demo")
     v1 = tmp_path / "runtime_v1"
     v1.mkdir()
     (v1 / "pack.yaml").write_text(
         "schema_version: 1\nid: runtime_v1\nname: Runtime\nversion: 1.0.0\n", encoding="utf-8"
     )
-    catalog = BundledCatalog.from_root(tmp_path)
-    assert tuple(entry.id for entry in catalog.entries) == ("demo",)
+    with pytest.raises(CanonicalPackValidationError, match="schema_version"):
+        BundledCatalog.from_root(tmp_path)
 
 
 def test_external_discovery_is_source_local_extra_env_only(

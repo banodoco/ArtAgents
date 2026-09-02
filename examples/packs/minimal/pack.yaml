@@ -1,8 +1,10 @@
-schema_version: 1
+schema_version: 2
 id: minimal
 name: Minimal Example Pack
 version: 0.1.0
-description: A minimal external pack fixture for install and validation tests.
+description: A minimal external pack fixture for discovery and validation tests.
+
+capabilities: [minimal]
 
 content:
   executors: executors
@@ -11,13 +13,11 @@ content:
 
 agent:
   purpose: Demonstrates the minimal structure required for a valid external pack.
-  entrypoints:
+  normal_entrypoints:
     - validate
-    - install
-
-docs:
-  readme: README.md
-  agents: AGENTS.md
+documentation:
+  kind: agents
+  path: AGENTS.md
 permissions:
   - id: subprocess
     reason: Runs example executor and orchestrator subprocesses.

@@ -20,9 +20,11 @@ def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:
     (pack_root / "pack.yaml").write_text(
         "\n".join(
             [
+                "schema_version: 2",
                 f"id: {pack_id}",
                 f"name: {pack_id.title()} Pack",
-                "version: '1.0'",
+                "version: 1.0.0",
+                "capabilities: [test]",
             ]
         )
         + "\n",
@@ -143,10 +145,10 @@ class PackDiscoveryTest(unittest.TestCase):
             (pack_root / "pack.yaml").write_text(
                 "\n".join(
                     [
-                        "schema_version: 1",
+                        "schema_version: 2",
                         "id: builtin",
                         "name: Builtin Pack",
-                        "version: '1.0'",
+                        "version: 1.0.0",
                         "content:",
                         "  executors: executors",
                         "  orchestrators: orchestrators",
@@ -193,7 +195,7 @@ class PackDiscoveryTest(unittest.TestCase):
             write_pack(packs_root, "builtin")
             hidden_root = write_pack(packs_root, "external")
             hidden_root.joinpath("pack.yaml").write_text(
-                "schema_version: 1\nid: external\nname: External\nversion: '1.0'\nvisibility: hidden\n",
+                "schema_version: 2\nid: external\nname: External\nversion: 1.0.0\nvisibility: hidden\ncapabilities: [hidden]\n",
                 encoding="utf-8",
             )
             self.assertEqual([pack.id for pack in discover_packs(packs_root)], ["builtin"])

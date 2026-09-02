@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: raw_command
 name: Raw Command Fixture Pack
 version: 1.0.0

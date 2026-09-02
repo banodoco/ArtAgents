@@ -21,7 +21,7 @@ from unittest import mock
 
 import pytest
 
-from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
+from astrid.core.pack import PackValidationError, discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import (
     RendererRegistryError,
@@ -83,7 +83,7 @@ def _write_renderer_pack(
         for permission in declared_permissions
     )
     pack_lines = [
-        "schema_version: 1",
+        "schema_version: 2",
         f"id: {pack_id}",
         f"name: {pack_id}",
         "version: 1.0.0",
@@ -426,23 +426,18 @@ def _write_alias_to_absent_pack(packs_root: Path) -> Path:
     return pack_root
 
 
-def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
+def test_cross_pack_alias_to_absent_canonical_fails_v2_admission(
     tmp_path: Path,
 ) -> None:
-    """Without an override, a pack alias to an absent canonical is dropped
-    and resolution reports the missing target."""
+    """Canonical v2 aliases cannot cross pack ownership boundaries."""
     project_root = tmp_path / "project"
     source_root = tmp_path / "source"
     source_root.mkdir()
     _write_alias_to_absent_pack(source_root)
 
-    with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
-        with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("alias_missing.legacy")
-        assert caught.value.code == "unknown_capability"
-        with pytest.raises(RendererRegistryError) as evidence_caught:
-            renderers.resolve_evidence("alias_missing.legacy")
-        assert evidence_caught.value.code == "unknown_capability"
+    with pytest.raises(PackValidationError):
+        with _load_with_source(project_root, source_root=source_root):
+            pass
 
 
 # ---------------------------------------------------------------------------

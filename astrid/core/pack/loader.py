@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from astrid.core.pack._common import (
-    ELEMENT_MANIFEST_NAMES,
-    PACK_MANIFEST_NAMES,
     PackValidationError,
     _optional_string,
-    _require_mapping,
-    _require_string,
-    _validate_pack_id,
 )
 from astrid.core.pack.definition import PackDefinition
+from astrid.core.pack.canonical import (
+    CanonicalPackValidationError,
+    LEGACY_MANIFEST_NAMES,
+    canonical_manifest_path,
+    validate_canonical_pack,
+)
 from astrid.core.pack.permissions import (
     _normalize_pack_permissions,
-    _optional_pack_aliases,
     _optional_pack_extensions,
 )
 
@@ -59,46 +58,35 @@ def discover_packs(
 
 
 def load_pack_manifest(path: str | Path) -> PackDefinition:
+    """Load one strict-v2 capability manifest through the canonical parser."""
     manifest_path = Path(path).expanduser().resolve()
-    raw = _load_manifest_payload(manifest_path)
-    data = _require_mapping(raw, "pack")
-    pack_id = _require_string(data, "id", "pack.id")
-    _validate_pack_id(pack_id, "pack.id")
-    root = manifest_path.parent
-    if root.name != pack_id:
-        raise PackValidationError(f"pack id {pack_id!r} must match folder name {root.name!r}")
-    metadata = data.get("metadata", {})
-    if not isinstance(metadata, dict):
-        raise PackValidationError("pack.metadata must be an object")
-    content = data.get("content", {})
-    if not isinstance(content, dict):
-        raise PackValidationError("pack.content must be an object")
-    agent = data.get("agent", {})
-    if not isinstance(agent, dict):
-        raise PackValidationError("pack.agent must be an object")
-    status = _optional_string(data, "status", "pack.status", default="active")
-    visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
-    schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
-    aliases = _optional_pack_aliases(data.get("aliases"), path="pack.aliases")
-    permissions = _normalize_pack_permissions(data.get("permissions"))
-    extensions = _optional_pack_extensions(data.get("extensions"), path="pack.extensions")
-    taxonomy = pack_taxonomy_from_manifest(data, status=status)
+    if manifest_path.name != "pack.yaml" or not manifest_path.is_file():
+        raise PackValidationError(
+            f"canonical pack admission requires a regular pack.yaml, got {manifest_path}"
+        )
+    try:
+        entry = validate_canonical_pack(manifest_path.parent)
+    except CanonicalPackValidationError as exc:
+        raise PackValidationError(str(exc)) from exc
+    definition = entry.definition
+    data = definition.to_dict()
+    taxonomy = pack_taxonomy_from_manifest(data, status=definition.status)
     return PackDefinition(
-        id=pack_id,
-        name=_optional_string(data, "name", "pack.name", default=pack_id),
-        version=_optional_string(data, "version", "pack.version", default="0.1.0"),
-        root=root,
+        id=definition.id,
+        name=definition.name,
+        version=definition.version,
+        root=entry.root,
         manifest_path=manifest_path,
-        metadata=dict(metadata),
-        description=_optional_string(data, "description", "pack.description", default=""),
-        content=dict(content),
-        agent=dict(agent),
-        status=status,
-        visibility=visibility,
-        schema_version=schema_version,
-        aliases=aliases,
-        permissions=permissions,
-        extensions=extensions,
+        metadata={},
+        description=definition.description,
+        content=dict(definition.content),
+        agent=dict(data["agent"]),
+        status=definition.status,
+        visibility=definition.visibility,
+        schema_version="2",
+        aliases=tuple(dict(alias) for alias in data["aliases"]),
+        permissions=_normalize_pack_permissions(data["permissions"]),
+        extensions=_optional_pack_extensions(data["extensions"], path="pack.extensions"),
         **taxonomy,
     )
 
@@ -134,25 +122,27 @@ def _default_stability_for_status(status: str) -> str:
 
 def pack_manifest_path(root: str | Path) -> Path | None:
     pack_root = Path(root)
-    for name in PACK_MANIFEST_NAMES:
-        candidate = pack_root / name
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _load_manifest_payload(path: Path) -> Any:
+    legacy = sorted(name for name in LEGACY_MANIFEST_NAMES if (pack_root / name).exists())
+    if legacy and not (pack_root / "pack.yaml").exists():
+        raise PackValidationError(
+            f"canonical pack admission requires pack.yaml; found alternate manifest(s): {', '.join(legacy)}"
+        )
     try:
-        text = path.read_text(encoding="utf-8")
+        return canonical_manifest_path(pack_root)
+    except CanonicalPackValidationError as exc:
+        raise PackValidationError(str(exc)) from exc
+
+
+def _load_manifest_payload(path: Path) -> dict[str, Any]:
+    """Read a canonical YAML manifest for static inspection helpers."""
+    if path.name != "pack.yaml":
+        raise PackValidationError(
+            f"canonical pack admission requires pack.yaml, got {path.name!r}"
+        )
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise PackValidationError(f"pack manifest not found: {path}") from exc
-    if path.suffix.lower() == ".json":
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise PackValidationError(f"invalid JSON pack manifest {path}: {exc.msg}") from exc
-    try:
-        data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise PackValidationError(f"invalid YAML pack manifest {path}: {exc}") from exc
     if not isinstance(data, dict):

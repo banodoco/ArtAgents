@@ -1,10 +1,8 @@
-"""Strict, read-only canonical pack v2 catalog.
+"""Strict, read-only canonical pack v2 capability catalog.
 
-This module is the source-side authority for canonical pack manifests.  It is
-deliberately separate from the Stage1 runtime pack loader: Stage1 owns
-execution and persistence, while this module validates a pack's declared
-capabilities, resources, and database projection without importing or
-executing pack code.
+The neutral workspace runtime owns product state, schemas, and migrations.
+This module therefore admits only executable capability, documentation, and
+resource declarations; a ``database`` field fails closed before projection.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 import jsonschema
 import yaml
@@ -42,7 +40,6 @@ LEGACY_MANIFEST_NAMES = frozenset({"pack.yml", "pack.json", "schema-" + "pack.ya
 _SCHEMA_PATH = Path(__file__).with_name("schemas") / "v2" / "pack.json"
 _IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 _QUALIFIED = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
-_VOCAB = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 _RELEASE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -53,10 +50,6 @@ class CanonicalPackError(ValueError):
 
 class CanonicalPackValidationError(CanonicalPackError):
     """A manifest or its declared resource tree violates v2."""
-
-
-class ExternalDatabaseForbidden(CanonicalPackValidationError):
-    """External packs cannot contribute database authority."""
 
 
 def _mapping(value: Any, path: str) -> dict[str, Any]:
@@ -142,42 +135,6 @@ class PackPermission:
 
 
 @dataclass(frozen=True, slots=True)
-class PackDependency:
-    pack: str
-    min_migration: int
-
-    @property
-    def version(self) -> int:
-        return self.min_migration
-
-
-@dataclass(frozen=True, slots=True)
-class MigrationDescriptor:
-    version: int
-    name: str
-    path: str
-    tables: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class DatabaseContribution:
-    default_enabled: bool
-    depends_on: tuple[PackDependency, ...]
-    migrations: tuple[MigrationDescriptor, ...]
-    stream_types: tuple[str, ...]
-    event_kinds: tuple[str, ...]
-    command_kinds: tuple[str, ...]
-    repositories: tuple[str, ...]
-    conformance: tuple[str, ...]
-    cli_mounts: Mapping[str, str]
-    bridge_mounts: tuple[str, ...]
-
-    @property
-    def migration_head(self) -> int:
-        return self.migrations[-1].version if self.migrations else 0
-
-
-@dataclass(frozen=True, slots=True)
 class ResourceDeclaration:
     path: str
     kind: str
@@ -255,7 +212,6 @@ class CanonicalPackDefinition:
     secrets: tuple[Mapping[str, Any], ...]
     dependencies: Mapping[str, tuple[str, ...]]
     astrid_version: str | None
-    database: DatabaseContribution | None
     resources: tuple[ResourceDeclaration, ...]
     authoring_only: tuple[AuthoringExclusion, ...]
 
@@ -301,8 +257,6 @@ class CanonicalPackDefinition:
             }
         if self.astrid_version:
             result["astrid_version"] = self.astrid_version
-        if self.database:
-            result["database"] = _database_dict(self.database)
         return result
 
     @property
@@ -329,12 +283,6 @@ class CapabilityProjection:
 
 
 @dataclass(frozen=True, slots=True)
-class DatabaseProjection:
-    pack_id: str
-    database: DatabaseContribution
-
-
-@dataclass(frozen=True, slots=True)
 class ResourceProjection:
     pack_id: str
     resources: tuple[ResourceHandle, ...]
@@ -358,7 +306,6 @@ class CanonicalPackEntry:
     id = property(lambda self: self.definition.id)
     pack_id = property(lambda self: self.definition.id)
     root = property(lambda self: self.provenance.root)
-    database = property(lambda self: self.definition.database)
     source = property(lambda self: self.provenance.source)
     extensions = property(lambda self: self.definition.extensions)
     documentation = property(lambda self: self.definition.documentation)
@@ -380,9 +327,6 @@ class CanonicalPackEntry:
     def capabilities(self) -> CapabilityProjection:
         return self.capability_projection()
 
-    def database_projection(self) -> DatabaseProjection | None:
-        return DatabaseProjection(self.id, self.database) if self.database else None
-
     def resource_projection(self) -> ResourceProjection:
         return ResourceProjection(self.id, self.resources)
 
@@ -397,8 +341,6 @@ class ExternalPackSource(str, Enum):
     LOCAL = "local"
     EXTRA = "extra"
     ENV = "env"
-    INSTALLED = "installed"
-    GIT = "git"
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
@@ -425,77 +367,6 @@ def _validate_schema(data: dict[str, Any], path: Path) -> None:
         error = errors[0]
         location = ".".join(str(item) for item in error.absolute_path) or "pack"
         raise CanonicalPackValidationError(f"{path}: {location}: {error.message}")
-
-
-def _normalize_database(raw: Any, pack_id: str) -> DatabaseContribution:
-    d = _mapping(raw, "database")
-    dependencies: list[PackDependency] = []
-    for i, item in enumerate(d.get("depends_on", [])):
-        x = _mapping(item, f"database.depends_on[{i}]")
-        pack = _text(x.get("pack"), f"database.depends_on[{i}].pack")
-        minimum = x.get("min_migration")
-        if (
-            pack == pack_id
-            or not isinstance(minimum, int)
-            or isinstance(minimum, bool)
-            or minimum <= 0
-        ):
-            raise CanonicalPackValidationError(f"database.depends_on[{i}] is invalid")
-        if any(p.pack == pack for p in dependencies):
-            raise CanonicalPackValidationError(
-                f"database.depends_on contains duplicate pack ID {pack!r}"
-            )
-        dependencies.append(PackDependency(pack, minimum))
-    migrations: list[MigrationDescriptor] = []
-    previous = 0
-    owned: set[str] = set()
-    for i, item in enumerate(d.get("migrations", [])):
-        x = _mapping(item, f"database.migrations[{i}]")
-        version, name = x.get("version"), _text(x.get("name"), f"database.migrations[{i}].name")
-        path = _relative(x.get("path"), f"database.migrations[{i}].path")
-        if (
-            not isinstance(version, int)
-            or isinstance(version, bool)
-            or version <= previous
-            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name)
-            or not path.endswith(".sql")
-        ):
-            raise CanonicalPackValidationError(
-                "database migrations must be increasing named SQL files"
-            )
-        tables = _strings(x.get("tables"), f"database.migrations[{i}].tables", _IDENT)
-        if owned.intersection(tables):
-            raise CanonicalPackValidationError("database migrations duplicate table ownership")
-        owned.update(tables)
-        previous = version
-        migrations.append(MigrationDescriptor(version, name, path, tables))
-
-    def vals(key: str, pattern: re.Pattern[str] | None = None) -> tuple[str, ...]:
-        return _strings(d.get(key, []), f"database.{key}", pattern)
-
-    mounts = _mapping(d.get("cli_mounts", {}), "database.cli_mounts")
-    normalized_mounts: dict[str, str] = {}
-    for key, value in mounts.items():
-        if (
-            not _IDENT.fullmatch(key)
-            or not isinstance(value, str)
-            or not value
-            or any(not _IDENT.fullmatch(v) for v in value.split())
-        ):
-            raise CanonicalPackValidationError(f"database.cli_mounts has invalid mount {key!r}")
-        normalized_mounts[key] = value
-    return DatabaseContribution(
-        bool(d.get("default_enabled", False)),
-        tuple(sorted(dependencies, key=lambda p: p.pack)),
-        tuple(migrations),
-        vals("stream_types", _VOCAB),
-        vals("event_kinds", _VOCAB),
-        vals("command_kinds", _VOCAB),
-        vals("repositories", re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")),
-        vals("conformance", _IDENT),
-        MappingProxyType(normalized_mounts),
-        vals("bridge_mounts", _IDENT),
-    )
 
 
 def _normalize_definition(data: dict[str, Any]) -> CanonicalPackDefinition:
@@ -606,7 +477,6 @@ def _normalize_definition(data: dict[str, Any]) -> CanonicalPackDefinition:
             }
         ),
         _text(data["astrid_version"], "astrid_version") if "astrid_version" in data else None,
-        _normalize_database(data["database"], pack_id) if "database" in data else None,
         tuple(sorted(resources, key=lambda r: r.path)),
         tuple(sorted(authoring, key=lambda a: a.path)),
     )
@@ -617,8 +487,6 @@ def _declared_paths(definition: CanonicalPackDefinition) -> tuple[tuple[str, str
     paths += [(v, "agent.required_context") for v in definition.agent.get("required_context", ())]
     if definition.documentation and definition.documentation.path:
         paths.append((definition.documentation.path, "documentation"))
-    if definition.database:
-        paths += [(m.path, "database.migration") for m in definition.database.migrations]
     paths += [(r.path, f"resource:{r.kind}") for r in definition.resources]
     paths += [(a.path, f"authoring_only:{a.kind}") for a in definition.authoring_only]
     for path, role in paths:
@@ -640,7 +508,12 @@ def _resource_handle(root: Path, path: str, kind: str) -> ResourceHandle:
         return ResourceHandle(path, root, resolved, kind, "directory", 0, "")
     if not candidate.is_file():
         raise CanonicalPackValidationError(f"resource {path!r} is not a regular file")
-    payload = candidate.read_bytes()
+    try:
+        payload = candidate.read_bytes()
+    except OSError as exc:
+        raise CanonicalPackValidationError(
+            f"resource {path!r} cannot be read: {exc.strerror or exc}"
+        ) from exc
     return ResourceHandle(
         path, root, resolved, kind, "file", len(payload), hashlib.sha256(payload).hexdigest()
     )
@@ -702,7 +575,6 @@ def _admit(
     manifest_path: str | Path,
     *,
     source: str,
-    bundled: bool,
     resolve_resources: bool,
     expected_pack_id: str | None = None,
 ) -> CanonicalPackEntry:
@@ -739,8 +611,6 @@ def _admit(
         raise CanonicalPackValidationError(
             f"pack id {definition.id!r} must match folder name {root.name!r}"
         )
-    if definition.database and not bundled:
-        raise ExternalDatabaseForbidden(f"external pack {definition.id!r} cannot declare database")
     declared = _declared_paths(definition)
     identity = hashlib.sha256(
         json.dumps(
@@ -783,7 +653,6 @@ def read_normalize_validate(
     return _admit(
         manifest_path,
         source=value,
-        bundled=False,
         resolve_resources=resolve_resources,
         expected_pack_id=expected_pack_id,
     )
@@ -793,7 +662,6 @@ def validate_canonical_pack(pack_root: str | Path) -> CanonicalPackEntry:
     return _admit(
         Path(pack_root) / CANONICAL_MANIFEST_NAME,
         source="validation",
-        bundled=True,
         resolve_resources=True,
     )
 
@@ -803,26 +671,6 @@ def canonical_manifest_path(pack_root: str | Path) -> Path | None:
     if not candidate.exists() and not candidate.is_symlink():
         return None
     return _validate_path(candidate)
-
-
-def _database_dict(database: DatabaseContribution) -> dict[str, Any]:
-    return {
-        "default_enabled": database.default_enabled,
-        "depends_on": [
-            {"pack": p.pack, "min_migration": p.min_migration} for p in database.depends_on
-        ],
-        "migrations": [
-            {"version": m.version, "name": m.name, "path": m.path, "tables": list(m.tables)}
-            for m in database.migrations
-        ],
-        "stream_types": list(database.stream_types),
-        "event_kinds": list(database.event_kinds),
-        "command_kinds": list(database.command_kinds),
-        "repositories": list(database.repositories),
-        "conformance": list(database.conformance),
-        "cli_mounts": dict(database.cli_mounts),
-        "bridge_mounts": list(database.bridge_mounts),
-    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -855,80 +703,16 @@ class BundledCatalog:
                     f"legacy/alternate manifest(s) in {child}: {', '.join(sorted(legacy))}"
                 )
             if (child / CANONICAL_MANIFEST_NAME).is_file():
-                # Stage1 still contains v1 runtime manifests.  They remain
-                # owned by the runtime loader and are intentionally outside
-                # this source-side v2 catalog until their payload lane moves.
-                try:
-                    candidate = _read_manifest(child / CANONICAL_MANIFEST_NAME)
-                except CanonicalPackValidationError:
-                    raise
-                if candidate.get("schema_version") == 2:
-                    entries.append(
-                        _admit(
-                            child / CANONICAL_MANIFEST_NAME,
-                            source="bundled",
-                            bundled=True,
-                            resolve_resources=True,
-                        )
+                entries.append(
+                    _admit(
+                        child / CANONICAL_MANIFEST_NAME,
+                        source="bundled",
+                        resolve_resources=True,
                     )
+                )
         ids = [entry.id for entry in entries]
         if len(ids) != len(set(ids)):
             raise CanonicalPackValidationError("catalog contains duplicate pack IDs")
-        by_id = {entry.id: entry for entry in entries}
-        owners: dict[str, str] = {}
-        for entry in entries:
-            if not entry.database:
-                continue
-            declarations = (
-                [t for m in entry.database.migrations for t in m.tables]
-                + list(entry.database.stream_types)
-                + list(entry.database.event_kinds)
-                + list(entry.database.command_kinds)
-                + list(entry.database.repositories)
-                + list(entry.database.cli_mounts)
-                + list(entry.database.bridge_mounts)
-            )
-            for value in declarations:
-                if value in owners:
-                    raise CanonicalPackValidationError(
-                        f"catalog declaration {value!r} is owned by both {owners[value]!r} and {entry.id!r}"
-                    )
-                owners[value] = entry.id
-        for entry in entries:
-            if not entry.database:
-                continue
-            for dep in entry.database.depends_on:
-                target = by_id.get(dep.pack)
-                if dep.pack == "core":
-                    continue
-                if (
-                    target is None
-                    or not target.database
-                    or target.database.migration_head < dep.min_migration
-                ):
-                    raise CanonicalPackValidationError(
-                        f"{entry.id}: database dependency {dep.pack!r} is missing or below migration head"
-                    )
-        visiting: set[str] = set()
-        visited: set[str] = set()
-
-        def visit(pack_id: str) -> None:
-            if pack_id in visiting:
-                raise CanonicalPackValidationError(
-                    f"catalog database dependencies contain a cycle at {pack_id!r}"
-                )
-            if pack_id in visited or not by_id[pack_id].database:
-                visited.add(pack_id)
-                return
-            visiting.add(pack_id)
-            for dep in by_id[pack_id].database.depends_on:
-                if dep.pack != "core":
-                    visit(dep.pack)
-            visiting.remove(pack_id)
-            visited.add(pack_id)
-
-        for pack_id in sorted(by_id):
-            visit(pack_id)
         return cls(resolved, tuple(sorted(entries, key=lambda e: e.id)))
 
     @property
@@ -950,148 +734,12 @@ class BundledCatalog:
         return tuple(e.capability_projection() for e in self.entries)
 
     @property
-    def databases(self) -> tuple[DatabaseProjection, ...]:
-        return tuple(e.database_projection() for e in self.entries if e.database)
-
-    @property
     def resources(self) -> tuple[ResourceProjection, ...]:
         return tuple(e.resource_projection() for e in self.entries)
 
     @property
     def documentation(self) -> tuple[DocumentationProjection, ...]:
         return tuple(e.documentation_projection() for e in self.entries)
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectedMigration:
-    pack: str
-    version: int
-    name: str
-    resource: ResourceHandle | None
-    source_path: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectedDatabasePack:
-    pack_id: str
-    default_enabled: bool
-    database: DatabaseContribution
-    source_path: Path | None
-
-    @property
-    def migrations(self) -> tuple[MigrationDescriptor, ...]:
-        return self.database.migrations
-
-
-@dataclass(frozen=True, slots=True)
-class CanonicalDatabaseProjection:
-    """Immutable database declaration projection for the neutral runtime."""
-
-    packs_by_id: Mapping[str, ProjectedDatabasePack]
-    migrations: tuple[ProjectedMigration, ...]
-    tables: Mapping[str, str]
-    canonical_projection: bool = True
-
-    @property
-    def packs(self) -> tuple[str, ...]:
-        return tuple(sorted(self.packs_by_id))
-
-    def pack(self, pack_id: str) -> ProjectedDatabasePack:
-        return self.packs_by_id[pack_id]
-
-
-def core_database_projection() -> tuple[
-    str, DatabaseContribution, Path, tuple[ResourceHandle, ...]
-]:
-    """Return the reserved core slot; Stage1 persistence remains external."""
-    return (
-        "core",
-        DatabaseContribution(True, (), (), (), (), (), (), (), MappingProxyType({}), ()),
-        Path.cwd(),
-        (),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class DatabasePackProjection:
-    catalog: BundledCatalog
-    additional_pack_ids: tuple[str, ...] = ()
-
-    def project(self) -> CanonicalDatabaseProjection:
-        explicit = tuple(self.additional_pack_ids)
-        if any(not isinstance(pid, str) or not _IDENT.fullmatch(pid) for pid in explicit):
-            raise CanonicalPackValidationError("additional_pack_ids must contain valid pack IDs")
-        if len(set(explicit)) != len(explicit):
-            raise CanonicalPackValidationError("additional_pack_ids contains duplicate pack IDs")
-        if "core" in explicit or "core" in self.catalog.entries_by_id:
-            if "core" in explicit:
-                raise CanonicalPackValidationError("product core is reserved")
-        missing = sorted(pid for pid in explicit if pid not in self.catalog.entries_by_id)
-        if missing:
-            raise CanonicalPackValidationError(
-                "additional_pack_ids contains unknown pack ID(s): " + ", ".join(missing)
-            )
-        selected = [
-            e
-            for e in self.catalog.entries
-            if e.database and (e.database.default_enabled or e.id in explicit)
-        ]
-        for pid in explicit:
-            if not self.catalog.get(pid).database:
-                raise CanonicalPackValidationError(
-                    f"explicit database pack {pid!r} is not database-bearing"
-                )
-        core_id, core_db, _, _ = core_database_projection()
-        packs: dict[str, ProjectedDatabasePack] = {
-            core_id: ProjectedDatabasePack(core_id, True, core_db, None)
-        }
-        packs.update(
-            {
-                e.id: ProjectedDatabasePack(e.id, e.database.default_enabled, e.database, e.root)
-                for e in selected
-                if e.database
-            }
-        )
-        for e in selected:
-            assert e.database
-            for dep in e.database.depends_on:
-                if (
-                    dep.pack not in packs
-                    or packs[dep.pack].database.migration_head < dep.min_migration
-                ):
-                    raise CanonicalPackValidationError(
-                        f"{e.id}: dependency {dep.pack!r} is not selected or below migration head"
-                    )
-        tables: dict[str, str] = {}
-        migrations: list[ProjectedMigration] = []
-        for pid in sorted(packs):
-            item = packs[pid]
-            for migration in item.database.migrations:
-                resource = None
-                if item.source_path:
-                    resource = _resource_handle(
-                        item.source_path, migration.path, "database.migration"
-                    )
-                migrations.append(
-                    ProjectedMigration(
-                        pid,
-                        migration.version,
-                        migration.name,
-                        resource,
-                        migration.path if resource else None,
-                    )
-                )
-                for table in migration.tables:
-                    tables[table] = pid
-        return CanonicalDatabaseProjection(
-            MappingProxyType(packs), tuple(migrations), MappingProxyType(tables)
-        )
-
-
-def project_catalog_database(
-    catalog: BundledCatalog, additional_pack_ids: Sequence[str] = ()
-) -> CanonicalDatabaseProjection:
-    return DatabasePackProjection(catalog, tuple(additional_pack_ids)).project()
 
 
 def catalog_from_root(root: str | Path) -> BundledCatalog:
@@ -1101,31 +749,20 @@ def catalog_from_root(root: str | Path) -> BundledCatalog:
 __all__ = [
     "AuthoringExclusion",
     "BundledCatalog",
-    "CanonicalDatabaseProjection",
     "CanonicalPackDefinition",
     "CanonicalPackEntry",
     "CanonicalPackError",
     "CanonicalPackValidationError",
     "CapabilityProjection",
     "CatalogProvenance",
-    "DatabaseContribution",
-    "DatabasePackProjection",
-    "DatabaseProjection",
     "Documentation",
     "DocumentationProjection",
-    "ExternalDatabaseForbidden",
     "ExternalPackSource",
-    "MigrationDescriptor",
-    "PackDependency",
-    "ProjectedDatabasePack",
-    "ProjectedMigration",
     "ResourceDeclaration",
     "ResourceHandle",
     "ResourceProjection",
     "canonical_manifest_path",
     "catalog_from_root",
-    "core_database_projection",
-    "project_catalog_database",
     "read_normalize_validate",
     "validate_canonical_pack",
 ]

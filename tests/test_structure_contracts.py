@@ -275,14 +275,16 @@ def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_pa
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
-        "astrid/packs/demo/pack.json",
-        '{'
-        '"schema_version":"1",'
-        '"id":"demo",'
-        '"name":"Demo Pack",'
-        '"version":"0.1.0",'
-        '"extensions":{"elements":{"kinds":[{"id":"widgets","singular":"widget"}]}}'
-        '}\n',
+        "astrid/packs/demo/pack.yaml",
+        "schema_version: 2\n"
+        "id: demo\n"
+        "name: Demo Pack\n"
+        "version: 0.1.0\n"
+        "extensions:\n"
+        "  elements:\n"
+        "    kinds:\n"
+        "      - id: widgets\n"
+        "        singular: widget\n",
     )
     _write(
         tmp_path,

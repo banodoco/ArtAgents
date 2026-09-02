@@ -100,7 +100,10 @@ KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
         "renderer": _RENDERING_SCHEMAS_ROOT / "v1" / "renderer-manifest.json",
         "planner": _RENDERING_SCHEMAS_ROOT / "v1" / "planner-manifest.json",
         "finalizer": _RENDERING_SCHEMAS_ROOT / "v1" / "finalizer-manifest.json",
-    }
+    },
+    2: {
+        "pack": _SCHEMAS_ROOT / "v2" / "pack.json",
+    },
 }
 
 KNOWN_VERSIONS_STR = ", ".join(str(v) for v in sorted(KNOWN_SCHEMA_VERSIONS))
@@ -145,7 +148,7 @@ def _normalize_jsonschema_error(
     if path_parts == ["schema_version"]:
         if "schema_version" not in raw_data:
             return f"{prefix}: missing required field schema_version"
-        return f"{prefix}: schema_version must be 1 (known: {KNOWN_VERSIONS_STR})"
+        return f"{prefix}: schema_version must be a known integer ({KNOWN_VERSIONS_STR})"
 
     message = error.message
     # Clean up verbose jsonschema messages
@@ -273,6 +276,17 @@ class PackValidator:
         version = self._validate_manifest(pack_data, "pack", self._rel(pack_yaml))
         if version is None:
             return self.errors  # schema_version error already recorded
+        if version == 2:
+            from astrid.core.pack.canonical import (
+                CanonicalPackValidationError,
+                validate_canonical_pack,
+            )
+
+            try:
+                validate_canonical_pack(self.pack_root)
+            except CanonicalPackValidationError as exc:
+                self.errors.append(str(exc))
+                return self.errors
 
         self._validate_pack_taxonomy()
 
@@ -352,6 +366,11 @@ class PackValidator:
             except ValidationError as e:
                 self.errors.append(str(e))
                 return None
+        if manifest_kind == "pack" and version != 2:
+            self.errors.append(
+                f"{relpath}: pack schema_version must be exactly integer 2"
+            )
+            return None
 
         # Load and validate against JSON Schema
         schema_path = KNOWN_SCHEMA_VERSIONS[version].get(manifest_kind)
@@ -365,7 +384,9 @@ class PackValidator:
             self.errors.append(f"{relpath}: cannot load schema {schema_path} — {e}")
             return None
 
-        validator = jsonschema.Draft7Validator(schema, registry=registry)
+        validator_cls = jsonschema.validators.validator_for(schema)
+        validator_cls.check_schema(schema)
+        validator = validator_cls(schema, registry=registry)
         raw_errors = list(validator.iter_errors(data))
         raw_errors = self._filter_dynamic_element_kind_errors(
             raw_errors,
@@ -524,7 +545,11 @@ class PackValidator:
         )
 
     def _validate_discovered_components(self, content: dict[str, Any]) -> None:
-        pack = self._pack_definition_for_discovery(content)
+        try:
+            pack = self._pack_definition_for_discovery(content)
+        except PackValidationError as exc:
+            self.errors.append(f"pack.yaml: {exc}")
+            return
         for comp_dir in iter_executor_roots(pack):
             manifest_path = find_component_manifest(comp_dir, "executor")
             if manifest_path is not None:

@@ -108,15 +108,8 @@ def discover_canonical_pack_metadata(
     *,
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
-    include_installed: bool = False,
 ) -> tuple[CanonicalDiscoveredPack, ...]:
-    """Discover capability-only v2 packs through source/local/extra/env.
-
-    ``include_installed`` remains a compatibility-shaped argument for callers
-    migrating from the old API, but installed overlays are never consulted:
-    Stage1 has no installed-pack authority.
-    """
-    del include_installed
+    """Discover capability-only v2 packs through source/local/extra/env."""
     project_root = Path(project_root).expanduser().resolve()
     discovered: list[CanonicalDiscoveredPack] = []
     seen: set[tuple[str, str]] = set()

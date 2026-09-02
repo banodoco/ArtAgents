@@ -14,21 +14,21 @@ def test_list_skills_discovers_canonical_executor_skill(tmp_path: Path) -> None:
     (pack_root / "pack.yaml").write_text(
         textwrap.dedent(
             """\
-            schema_version: 1
+            schema_version: 2
             id: demo_pack
             name: Demo Pack
             version: 0.1.0
             content:
               executors: executors
-              orchestrators: orchestrators
             """
         ),
         encoding="utf-8",
     )
     (executor_root / "executor.yaml").write_text(
-        "schema_version: 1\nid: demo_pack.summarize\nname: Summarize\nversion: 0.1.0\n",
+        "schema_version: 1\nid: demo_pack.summarize\nname: Summarize\nkind: built_in\nversion: 0.1.0\nruntime:\n  type: python-cli\n  entrypoint: run.py\n",
         encoding="utf-8",
     )
+    (executor_root / "run.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
     (skill_root / "SKILL.md").write_text(
         textwrap.dedent(
             """\
