@@ -150,6 +150,12 @@ SQLite/CAS tree.
 
 ## The SDK is the pack surface
 
+The current capability catalog contains exactly 18 packs, 59 executors, 12
+orchestrators, and 10 rendering elements. The catalog includes
+`typed_timeline`; `references`, `shots`, and `timeline` are runtime-owned
+product mounts rather than local packs. `runaway`, `reigh`, and the retired
+`builtin` pack are not part of the catalog.
+
 Packs ship capabilities (executors, orchestrators, elements). They are not
 gateway commands. Run them through the SDK:
 

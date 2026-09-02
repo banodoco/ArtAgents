@@ -387,10 +387,9 @@ def test_skill_discovery_finds_pack_skills() -> None:
     )
 
 
-def test_external_origin_packs_are_discoverable() -> None:
-    """Packs marked ``origin: external`` in their pack.yaml must still be
-    discoverable via ``discover_packs``."""
-    external_origin_ids = {
+def test_v2_integration_packs_are_discoverable() -> None:
+    """Former external-origin packs remain discoverable after v2 conversion."""
+    integration_ids = {
         "fal",
         "moirae",
         "runpod",
@@ -399,17 +398,15 @@ def test_external_origin_packs_are_discoverable() -> None:
     }
     discovered = discover_packs(_PACKS_ROOT)
     discovered_ids = {pack.id for pack in discovered}
-    missing = external_origin_ids - discovered_ids
+    missing = integration_ids - discovered_ids
     assert not missing, (
-        f"External-origin packs not discovered: {sorted(missing)}"
+        f"Integration packs not discovered: {sorted(missing)}"
     )
-    # Verify each actually has origin: external in pack.yaml.
+    # Strict v2 intentionally removes the retired origin field.
     import yaml as _yaml
     for pack in discovered:
-        if pack.id in external_origin_ids:
+        if pack.id in integration_ids:
             manifest_path = pack.manifest_path
             data = _yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-            origin = data.get("origin", "")
-            assert origin == "external", (
-                f"Pack {pack.id} expected origin='external', got {origin!r}"
-            )
+            assert data["schema_version"] == 2
+            assert "origin" not in data

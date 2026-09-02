@@ -159,7 +159,8 @@ def test_generic_host_runs_external_python_orchestrator_from_admitted_pack(
     orchestrator_root.mkdir(parents=True)
     module_root.mkdir()
     (pack_root / "pack.yaml").write_text(
-        "schema_version: 1\nid: external_pack\nname: External Pack\nversion: '1.0'\n"
+        "schema_version: 2\nid: external_pack\nname: External Pack\nversion: '1.0'\n"
+        "status: active\ndocumentation:\n  kind: none\n  reason: test fixture\n"
         "content:\n  orchestrators: orchestrators\n",
         encoding="utf-8",
     )
@@ -217,7 +218,8 @@ def test_generic_host_discovers_explicit_astrid_packs_path_without_default_scan(
     executor_root = env_root / "env_pack" / "executors" / "demo"
     executor_root.mkdir(parents=True)
     (env_root / "env_pack" / "pack.yaml").write_text(
-        "schema_version: 1\nid: env_pack\nname: Env Pack\nversion: '1.0'\ncontent:\n  executors: executors\n",
+        "schema_version: 2\nid: env_pack\nname: Env Pack\nversion: '1.0'\nstatus: active\n"
+        "documentation:\n  kind: none\n  reason: test fixture\ncontent:\n  executors: executors\n",
         encoding="utf-8",
     )
     (executor_root / "executor.yaml").write_text(

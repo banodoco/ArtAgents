@@ -1,9 +1,13 @@
-schema_version: 1
+schema_version: 2
 id: text_review
 name: Text Review
 version: 0.1.0
+status: active
 visibility: hidden
 description: A text review pipeline that auto-generates a machine summary (line/word/char counts plus preview) and then asks an agent to attest a human-readable verdict.
+documentation:
+  kind: agents
+  path: AGENTS.md
 content:
   executors: executors
 agent:

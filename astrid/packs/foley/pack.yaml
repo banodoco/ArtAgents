@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: foley
 name: Astrid Foley
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+status: active
 domain: media
 stability: stable
 support: core
@@ -24,3 +22,6 @@ agent:
 content:
   executors: executors
   orchestrators: orchestrators
+documentation:
+  kind: skill
+  path: skill/SKILL.md

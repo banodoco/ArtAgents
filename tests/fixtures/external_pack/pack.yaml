@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: external_pack
 name: External Pack
 version: 1.0.0
-origin: external
-install_tier: optional
-pack_type: capability
+status: active
 domain: editorial
 stability: experimental
 support: community
@@ -21,3 +19,6 @@ extensions:
       description: Custom widget elements from an external pack.
 content:
   elements: elements
+documentation:
+  kind: none
+  reason: Fixture intentionally has no pack skill.

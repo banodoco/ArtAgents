@@ -1,11 +1,9 @@
-schema_version: 1
+schema_version: 2
 id: typed_timeline
 name: Typed Timeline Mapper
 version: "1.0.0"
-origin: builtin
-install_tier: core
-pack_type: capability
-domain: timeline
+status: active
+domain: system
 stability: stable
 support: core
 visibility: visible
@@ -17,7 +15,7 @@ permissions:
 description: Generic typed-row to timeline mapper with Runaway colour and text mappings.
 keywords: [timeline, mapper, typed, runaway, colour]
 capabilities:
-  - typed_timeline.map
+  - map
 agent:
   purpose: Map typed DB rows to validated timelines for the runtime render task.
   do_not_use_for: Direct timeline hand-editing.
@@ -25,3 +23,6 @@ agent:
     - typed_timeline.map
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md
