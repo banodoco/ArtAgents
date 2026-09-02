@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: blender
 name: Astrid Blender
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+status: active
 domain: media
 stability: stable
 support: core
@@ -36,3 +34,6 @@ agent:
   - blender.render
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md

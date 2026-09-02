@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: moirae
 name: Astrid Moirae
 version: 1.0.0
-origin: external
-install_tier: core
-pack_type: capability
+status: active
 domain: integration
 stability: stable
 support: core
@@ -29,6 +27,9 @@ capabilities:
   - produce_terminal_video
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 agent:
   purpose: "Use to turn a Moirae screenplay file into a scripted terminal/CLI demo video (typewriter text, simulated agent Q&A, camera moves). External pack — requires the moirae package plus asciinema, agg, and ffmpeg binaries."
   do_not_use_for: "Not for trimming real video files (use the media pack) or assembling iteration videos from run provenance (use the iteration pack)."

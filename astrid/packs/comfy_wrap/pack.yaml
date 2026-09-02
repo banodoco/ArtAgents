@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: comfy_wrap
 name: Comfy Workflow Wrapper
 version: 0.1.0
-origin: external
-install_tier: core
-pack_type: capability
+status: active
 domain: generation
 stability: experimental
 support: core
@@ -35,3 +33,6 @@ agent:
     - comfy_wrap.run
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md

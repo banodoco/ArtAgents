@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: vibecomfy
 name: Astrid VibeComfy
 version: 1.0.0
-origin: external
-install_tier: core
-pack_type: capability
+status: active
 domain: integration
 stability: stable
 support: core
@@ -39,3 +37,6 @@ agent:
   - vibecomfy.validate
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md

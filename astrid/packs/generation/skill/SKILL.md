@@ -227,7 +227,8 @@ The pack's three executors remain available for direct use through the SDK
 
 | Executor | What it does |
 |---|---|
-| `generation.generate_image` | Generate images from text prompts via local (vibecomfy) or cloud (fal) backends. v2: model→mode→backend taxonomy with a required `mode` input. Supports t2i, i2i, and edit modes. |
+| `generation.generate_audio` | Generate audio from text prompts via local or cloud backends; the current mode is `music`. |
+| `generation.generate_image` | Generate images from text prompts via local (vibecomfy), cloud (fal), or Codex backends. v2: model→mode→backend taxonomy with a required `mode` input. Supports t2i, i2i, and edit modes. |
 | `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v, i2v, and flf (first-last-frame) modes. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. Requires `OPENAI_API_KEY`. |
 

@@ -53,11 +53,11 @@ patterns. These packs are **not** runtime-discovered — you will not see them i
 `packs list` or `packs status` output. They are validated with `packs validate`:
 
 ```bash
-python3 -m astrid packs validate examples/packs/minimal
-python3 -m astrid packs validate examples/packs/file_summarizer
-python3 -m astrid packs validate examples/packs/text_digest
-python3 -m astrid packs validate examples/packs/text_review
-python3 -m astrid packs validate examples/packs/media
+python3 -m astrid.core.pack.cli validate examples/packs/minimal
+python3 -m astrid.core.pack.cli validate examples/packs/file_summarizer
+python3 -m astrid.core.pack.cli validate examples/packs/text_digest
+python3 -m astrid.core.pack.cli validate examples/packs/text_review
+python3 -m astrid.core.pack.cli validate examples/packs/media
 ```
 
 | Pack | Purpose |

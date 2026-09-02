@@ -9,8 +9,8 @@ alpha-stamped layer into transparent ProRes 4444 `.mov`) through the backend-neu
 `RenderService`. This executor is the stable facade: it adapts CLI inputs into
 a protocol-v1 request while the service resolves a qualified renderer or
 planner, validates support and artifacts, performs explicit finalization when
-required, and publishes the final video plus provenance. `hybrid` is a legacy
-planning policy, not a renderer.
+required, and publishes the final video plus provenance. Renderer and planner
+selection uses qualified capability ids and fails closed for shorthand.
 
 A timeline containing one built-in `audio-reactive-colour` effect and one
 coextensive audio clip can be compiled by the FFmpeg renderer to its dedicated

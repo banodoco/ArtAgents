@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: generation
 name: Astrid Generation
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+status: active
 domain: generation
 stability: stable
 support: core
@@ -27,3 +25,6 @@ agent:
   normal_entrypoints: [generation.generate_image, generation.generate_video, generation.generate_image_openai, generation.generate_audio]
 content:
   executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md

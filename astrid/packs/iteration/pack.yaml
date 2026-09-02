@@ -1,10 +1,8 @@
-schema_version: 1
+schema_version: 2
 id: iteration
 name: Astrid Iteration
 version: 1.0.0
-origin: builtin
-install_tier: core
-pack_type: capability
+status: active
 domain: development
 stability: stable
 support: core
@@ -38,6 +36,9 @@ capabilities:
 content:
   executors: executors
   orchestrators: orchestrators
+documentation:
+  kind: skill
+  path: skill/SKILL.md
 agent:
   purpose: "Use to turn runtime-owned run history into an iteration video artifact: discover provenance/quality from the selected project runtime, then assemble the canonical iteration timeline and render-compatible hype inputs."
   do_not_use_for: "Not for raw video editing or clip trimming (use the media pack) or final video rendering (use the rendering pack on the emitted hype adapter)."

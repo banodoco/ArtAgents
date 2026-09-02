@@ -319,7 +319,7 @@ def _regen_args(args: argparse.Namespace, prior_meta: dict[str, Any]) -> SimpleN
         quality_zones=quality_zones_ref,
         shots=_resolve_ref(source_meta.get("shots_ref"), out_dir),
         arrangement=args.arrangement.resolve(),
-        renderer=str(config_snapshot.get("renderer") or "remotion"),
+        renderer=str(config_snapshot.get("renderer") or "rendering.remotion"),
         out=out_dir,
     )
 
