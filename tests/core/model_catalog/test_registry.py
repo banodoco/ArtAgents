@@ -1111,9 +1111,10 @@ class TestModelGetBackwardCompat:
 def _write_extension_pack(root: Path, *, backend_id: str) -> None:
     pack_dir = root / "extension_pack"
     pack_dir.mkdir(parents=True)
-    (pack_dir / "pack.json").write_text(
+    (pack_dir / "pack.yaml").write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "id": "extension_pack",
                 "name": "Extension Pack",
                 "version": "0.1.0",

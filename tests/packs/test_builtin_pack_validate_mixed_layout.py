@@ -18,7 +18,7 @@ def _write_builtin_pack(root: Path) -> Path:
     pack_root = root / "builtin"
     _write(
         pack_root / "pack.yaml",
-        """schema_version: 1
+        """schema_version: 2
 id: builtin
 name: Builtin Test Pack
 version: 0.1.0
@@ -96,7 +96,7 @@ def test_pack_validation_discovers_manifests_via_declared_roots(
     pack_root = tmp_path / "rendering"
     _write(
         pack_root / "pack.yaml",
-        """schema_version: 1
+        """schema_version: 2
 id: rendering
 name: Rendering Test Pack
 version: 0.1.0

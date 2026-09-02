@@ -209,7 +209,7 @@ def test_external_pack_python_executor_manifest_validates() -> None:
         exec_root.mkdir(parents=True)
         (pack_root / "pack.yaml").write_text(
             f"""\
-schema_version: 1
+schema_version: 2
 id: {pack_id}
 name: External Python Executor
 version: 0.1.0

@@ -261,10 +261,10 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
         if capability.handle.pack_id == "editorial"
     )
     assert editorial_capability.handle.safety.permissions == (
-        "subprocess",
-        "project_files",
-        "network",
         "environment",
+        "network",
+        "project_files",
+        "subprocess",
     )
     assert all(
         isinstance(permission_id, str)
@@ -483,13 +483,13 @@ def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_er
         packs_root = Path(tmp) / "packs"
         pack_root = packs_root / "demo"
         pack_root.mkdir(parents=True)
-        (pack_root / "pack.json").write_text(
+        (pack_root / "pack.yaml").write_text(
             json.dumps(
                 {
                     "id": "demo",
                     "name": "Demo Pack",
                     "version": "0.1.0",
-                    "schema_version": "1",
+                    "schema_version": 2,
                     "extensions": {
                         "elements": {
                             "kinds": [
@@ -578,13 +578,13 @@ def test_discover_exposes_pack_declared_extension_metadata() -> None:
         packs_root = Path(tmp) / "packs"
         pack_root = packs_root / "demo"
         pack_root.mkdir(parents=True)
-        (pack_root / "pack.json").write_text(
+        (pack_root / "pack.yaml").write_text(
             json.dumps(
                 {
                     "id": "demo",
                     "name": "Demo Pack",
                     "version": "0.1.0",
-                    "schema_version": "1",
+                    "schema_version": 2,
                     "extensions": {
                         "generation": {
                             "backends": [
@@ -1232,7 +1232,7 @@ def test_capability_safety_permissions_mirror_pack_permission_ids() -> None:
         pack_id = capability.handle.pack_id
         if not pack_id:
             continue
-        expected = tuple(pack_permission_ids.get(pack_id, []))
+        expected = tuple(sorted(pack_permission_ids.get(pack_id, [])))
         actual = capability.handle.safety.permissions
         assert actual == expected, (
             f"capability {capability.id!r} (pack {pack_id!r}) "

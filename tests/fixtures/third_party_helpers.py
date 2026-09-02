@@ -135,13 +135,10 @@ def create_backend_only_pack(
     }
 
     payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "id": pack_id,
         "name": f"{pack_id.replace('-', ' ').title()} Pack",
         "version": "0.1.0",
-        "origin": "external",
-        "install_tier": "optional",
-        "pack_type": "adapter",
         "domain": "generation",
         "stability": "experimental",
         "support": "community",
@@ -190,13 +187,10 @@ def create_element_only_pack(
     }
 
     payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "id": pack_id,
         "name": f"{pack_id.replace('-', ' ').title()} Pack",
         "version": "0.1.0",
-        "origin": "external",
-        "install_tier": "optional",
-        "pack_type": "capability",
         "domain": "editorial",
         "stability": "experimental",
         "support": "community",

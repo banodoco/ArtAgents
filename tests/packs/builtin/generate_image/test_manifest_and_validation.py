@@ -110,7 +110,7 @@ def test_manifest_loads() -> None:
     assert manifest.metadata["runtime_entrypoint"] == "run_sdk"
     # v2 executor inputs include backend controls for Codex in addition to
     # core model/mode generation fields.
-    assert len(manifest.inputs) == 21
+    assert len(manifest.inputs) == 22
     assert len(manifest.outputs) == 2  # generated_images, image_manifest
 
 

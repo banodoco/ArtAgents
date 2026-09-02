@@ -265,13 +265,14 @@ class PackDeclaredArtifactTypeLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
+                        "capabilities": ["artifact_types"],
                         "extensions": {
                             "artifact_types": {
                                 "types": [
@@ -322,13 +323,14 @@ class PackDeclaredArtifactTypeLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
+                        "capabilities": ["testing"],
                     }
                 ),
                 encoding="utf-8",
@@ -347,13 +349,13 @@ class PackDeclaredArtifactTypeLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "artifact_types": {
                                 "types": [
@@ -411,13 +413,13 @@ class PackDeclaredArtifactTypeLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "artifact_types": {
                                 "types": [{"id": "pack/type", "aliases": ["pt"]}]

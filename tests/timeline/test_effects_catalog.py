@@ -105,7 +105,9 @@ class EffectsCatalogTest(unittest.TestCase):
             element = pack / "elements" / "effects" / "hash-probe"
             element.mkdir(parents=True)
             (pack / "pack.yaml").write_text(
-                "id: local\nname: Local\nversion: 0.1.0\n", encoding="utf-8"
+                "schema_version: 2\nid: local\nname: Local\nversion: 0.1.0\n"
+                "capabilities: [elements]\n",
+                encoding="utf-8",
             )
             component = element / "component.tsx"
             component.write_text("export default function HashProbe() { return null; }\n", encoding="utf-8")

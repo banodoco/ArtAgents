@@ -71,7 +71,7 @@ def test_load_default_generation_taxonomy_registry_adds_pack_declared_ids(
     pack_root = extra_root / "vendor_pack"
     _write(
         pack_root / "pack.yaml",
-        """schema_version: 1
+        """schema_version: 2
 id: vendor_pack
 name: Vendor Pack
 version: 0.1.0

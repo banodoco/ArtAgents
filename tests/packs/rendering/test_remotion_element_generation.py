@@ -56,7 +56,8 @@ class RemotionElementGenerationTest(unittest.TestCase):
             assets_root = element_root / "assets"
             assets_root.mkdir(parents=True)
             (local_pack / "pack.yaml").write_text(
-                "id: local\nname: Local\nversion: 0.1.0\n",
+                "schema_version: 2\nid: local\nname: Local\nversion: 0.1.0\n"
+                "capabilities: [elements]\n",
                 encoding="utf-8",
             )
             component = element_root / "component.tsx"

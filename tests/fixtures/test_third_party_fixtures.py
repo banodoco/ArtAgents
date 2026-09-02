@@ -427,13 +427,10 @@ class TestFixtureIsolation:
         import yaml
 
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "id": "combined_pack",
             "name": "Combined Pack",
             "version": "0.1.0",
-            "origin": "external",
-            "install_tier": "optional",
-            "pack_type": "capability",
             "domain": "editorial",
             "stability": "experimental",
             "support": "community",

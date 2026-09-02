@@ -32,7 +32,7 @@ _QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$"
 _DEFAULT_PACK_ID = "rendering"
 
 _PACK_YAML = """\
-schema_version: 1
+schema_version: 2
 id: __PACK_ID__
 name: __DISPLAY_NAME__ Renderer Pack
 version: 1.0.0

@@ -114,17 +114,17 @@ def test_validator_accepts_pack(pack_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Manifest v1 compliance
+# Strict-v2 pack / v1 component compliance
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("pack_id", PORTFOLIO_PACK_IDS)
-def test_pack_manifest_v1_compliant(pack_id: str) -> None:
-    """Pack manifest declares schema_version 1 and content roots."""
+def test_pack_manifest_v2_compliant(pack_id: str) -> None:
+    """Pack manifest declares canonical schema_version 2 and content roots."""
     pack_yaml = PACKS_DIR / pack_id / "pack.yaml"
     doc = _load_manifest(pack_yaml)
-    assert doc.get("schema_version") == 1, (
-        f"{pack_yaml}: schema_version must be 1, got {doc.get('schema_version')!r}"
+    assert doc.get("schema_version") == 2, (
+        f"{pack_yaml}: schema_version must be 2, got {doc.get('schema_version')!r}"
     )
     content_val = doc.get("content")
     assert isinstance(content_val, dict) and content_val, (

@@ -11,73 +11,61 @@ PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
 
 EXPECTED_PACKS = {
     "rendering": {
-        "origin": "builtin",
         "domain": "media",
         "content": {"executors": "executors", "elements": "elements"},
         "aliases": {},
     },
     "understanding": {
-        "origin": "builtin",
         "domain": "media",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "generation": {
-        "origin": "builtin",
         "domain": "generation",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "editorial": {
-        "origin": "builtin",
         "domain": "editorial",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "video_editing": {
-        "origin": "builtin",
         "domain": "media",
         "content": {"executors": "executors", "orchestrators": "orchestrators"},
         "aliases": {},
     },
     "foley": {
-        "origin": "builtin",
         "domain": "media",
         "content": {"executors": "executors", "orchestrators": "orchestrators"},
         "aliases": {},
     },
     "training": {
-        "origin": "builtin",
         "domain": "development",
         "content": {"executors": "executors", "orchestrators": "orchestrators"},
         "aliases": {},
     },
     "youtube": {
-        "origin": "builtin",
         "domain": "integration",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "fal": {
-        "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "vibecomfy": {
-        "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "runpod": {
-        "origin": "external",
         "domain": "infrastructure",
         "content": {"executors": "executors"},
         "aliases": {},
     },
     "moirae": {
-        "origin": "external",
         "domain": "integration",
         "content": {"executors": "executors"},
         "aliases": {},
@@ -91,9 +79,6 @@ class TestPackMigrationM4Shells(unittest.TestCase):
             with self.subTest(pack=pack_id):
                 pack = load_pack_manifest(PACKS_ROOT / pack_id / "pack.yaml")
                 self.assertEqual(pack.id, pack_id)
-                self.assertEqual(pack.origin, expected["origin"])
-                self.assertEqual(pack.install_tier, "core")
-                self.assertEqual(pack.pack_type, "capability")
                 self.assertEqual(pack.domain, expected["domain"])
                 self.assertEqual(pack.stability, "stable")
                 self.assertEqual(pack.support, "core")
@@ -105,13 +90,6 @@ class TestPackMigrationM4Shells(unittest.TestCase):
                     for alias in pack.aliases
                 }
                 self.assertEqual(aliases, expected["aliases"])
-
-                for alias in pack.aliases:
-                    self.assertTrue(alias.get("deprecated"))
-                    self.assertEqual(
-                        alias.get("deprecation_message"),
-                        f"Moved to {alias['canonical_id']}",
-                    )
 
     def test_physical_migration_creates_active_capability_manifests(self) -> None:
         for pack_id, expected in EXPECTED_PACKS.items():

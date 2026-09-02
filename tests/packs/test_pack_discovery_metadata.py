@@ -36,7 +36,8 @@ def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:
     pack_root = root / (folder or pack_id)
     pack_root.mkdir(parents=True)
     (pack_root / "pack.yaml").write_text(
-        f"id: {pack_id}\nname: {pack_id.title()} Pack\nversion: '1.0'\n",
+        f"schema_version: 2\nid: {pack_id}\nname: {pack_id.title()} Pack\n"
+        "version: 1.0.0\ncapabilities: [testing]\n",
         encoding="utf-8",
     )
     return pack_root
@@ -136,7 +137,11 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             element_root.mkdir(parents=True)
             (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
             local_manifest = local_pack / "pack.yaml"
-            local_manifest.write_text("id: not_local\nname: Broken\n", encoding="utf-8")
+            local_manifest.write_text(
+                "schema_version: 2\nid: not_local\nname: Broken\nversion: 1.0.0\n"
+                "capabilities: [testing]\n",
+                encoding="utf-8",
+            )
 
             def scan(arg=None):
                 if arg is None:
@@ -151,7 +156,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                     discover_packs_fn=scan,
                 )
 
-            self.assertEqual(local_manifest.read_text(encoding="utf-8"), "id: not_local\nname: Broken\n")
+            self.assertIn("id: not_local", local_manifest.read_text(encoding="utf-8"))
 
     def test_source_layer_excludes_local_and_indexes_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

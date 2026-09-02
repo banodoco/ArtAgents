@@ -375,16 +375,16 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            # Use pack.json to avoid flat-YAML parser issues with nested
+            # Use pack.yaml to avoid flat-YAML parser issues with nested
             # extensions blocks.
             import json
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -476,13 +476,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "timeline": {
                                 "kinds": [
@@ -528,13 +528,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "timeline": {
                                 "kinds": [
@@ -564,13 +564,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -624,13 +624,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
             import json
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -655,13 +655,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
             import json
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -686,13 +686,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
             import json
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -717,13 +717,13 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
             pack_root = packs_root / "demo"
             pack_root.mkdir(parents=True)
             import json
-            (pack_root / "pack.json").write_text(
+            (pack_root / "pack.yaml").write_text(
                 json.dumps(
                     {
                         "id": "demo",
                         "name": "Demo Pack",
                         "version": "0.1.0",
-                        "schema_version": "1",
+                        "schema_version": 2,
                         "extensions": {
                             "elements": {
                                 "kinds": [
@@ -853,7 +853,8 @@ class ElementKindRegistryTest(unittest.TestCase):
             pack_root = Path(tmp) / "demo"
             pack_root.mkdir(parents=True)
             (pack_root / "pack.yaml").write_text(
-                "id: demo\nname: Demo\nversion: 0.1.0\n",
+                "schema_version: 2\nid: demo\nname: Demo\nversion: 0.1.0\n"
+                "capabilities: [elements]\n",
                 encoding="utf-8",
             )
             element_root = pack_root / "elements" / "effects" / "glow"
