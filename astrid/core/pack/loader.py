@@ -134,17 +134,18 @@ def pack_manifest_path(root: str | Path) -> Path | None:
 
 
 def _load_manifest_payload(path: Path) -> dict[str, Any]:
-    """Read a canonical YAML manifest for static inspection helpers."""
-    if path.name != "pack.yaml":
-        raise PackValidationError(
-            f"canonical pack admission requires pack.yaml, got {path.name!r}"
-        )
+    """Read a YAML mapping for internal static-inspection helpers.
+
+    Pack admission remains strict in :func:`load_pack_manifest`; this helper
+    also reads non-pack catalogs such as ``models.yaml`` and renderer
+    manifests while building the capability ledger.
+    """
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise PackValidationError(f"pack manifest not found: {path}") from exc
+        raise PackValidationError(f"manifest not found: {path}") from exc
     except yaml.YAMLError as exc:
-        raise PackValidationError(f"invalid YAML pack manifest {path}: {exc}") from exc
+        raise PackValidationError(f"invalid YAML manifest {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise PackValidationError(f"pack manifest must contain a YAML object: {path}")
+        raise PackValidationError(f"manifest must contain a YAML object: {path}")
     return data
