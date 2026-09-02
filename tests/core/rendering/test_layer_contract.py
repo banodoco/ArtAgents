@@ -151,7 +151,7 @@ def _plan(
     return RenderPlan(
         schema_version=1,
         request_digest=SHA_D,
-        requested_policy="hybrid",
+        requested_policy="rendering.legacy_hybrid",
         planner=_planner(),
         segments=selected,
         finalizer=_finalizer(),

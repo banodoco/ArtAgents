@@ -10,10 +10,11 @@ a tool, service, or runtime that Astrid does not own or ship. The pack provides
 the manifest, entrypoint, and integration glue; the substrate provides the
 actual work.
 
-Each external substrate now lives in its own direct-child pack (e.g., `fal`,
-`vibecomfy`, `runpod`, `moirae`). The legacy `external` pack definition was
-removed; backward compatibility comes from deprecated pack-level aliases
-declared in those canonical packs (`external.moirae` → `moirae.moirae`, etc.).
+Each external substrate lives in its own direct-child pack (for example,
+`fal`, `vibecomfy`, `runpod`, or `moirae`). The pack's strict-v2 `pack.yaml`
+owns its identity, capability declarations, documentation, permissions, and
+pack-relative resources. External packs are capability-only during beta; a
+declared `database` contribution is rejected.
 
 ## Adapter Packs
 
@@ -28,11 +29,11 @@ Shipped with Astrid. Each pack adapts one external substrate:
 | `youtube` | `youtube.youtube_audio`, `youtube.upload` | YouTube | Video/audio download and upload |
 | `reigh` | `reigh.open_in_reigh`, `reigh.publish`, `reigh.reigh_data`, `reigh.spatial_audio_page` | Reigh | Project handoff and publishing |
 
-Legacy ids under `external.*` (e.g., `external.runpod.session`,
-`external.vibecomfy.run`, `external.moirae`) remain functional only where a
-canonical adapter pack declares the deprecated pack-level alias. See
+Pack ids are canonical and qualified (`runpod.exec`, `vibecomfy.run`,
+`moirae.moirae`). Bundled product packs do not preserve retired aliases or
+alternate manifest forms. See
 [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
-alias mechanics.
+optional strict-v2 alias mechanics.
 
 ## Manifest Conventions
 

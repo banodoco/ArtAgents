@@ -10,7 +10,6 @@ Crockford base32 omits the visually ambiguous letters ``I``, ``L``, ``O``,
 and ``U``, so the alphabet is ``0123456789abcdefghjkmnpqrstvwxyz``. ULIDs are
 self-describing and time-ordered, which makes them stable, sortable project
 identifiers that need no central allocator.
-
 This module has no dependencies on the schema packs, the store, or the
 capability-pack loader; it is safe to import anywhere in the kernel.
 """

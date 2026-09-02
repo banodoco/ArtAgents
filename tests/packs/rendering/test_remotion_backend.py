@@ -472,13 +472,13 @@ def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
             timeline_path,
             assets_path,
             output_path,
-            engine="remotion",
+            engine="rendering.remotion",
         )
 
     assert result == sentinel
     fake_service.render.assert_called_once()
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
 
 
 def test_audio_ownership_enum_remains_protocol_value() -> None:
@@ -1139,7 +1139,7 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(video_path.read_bytes()).hexdigest()
     assert payload["engine"] == "rendering.remotion"
-    assert payload["routing"]["resolved_backend"] == "rendering.remotion"
+    assert payload["resolved_policy"]["renderers"] == ["rendering.remotion"]
     serialized = json.dumps(payload)
     assert "rendering.threejs" not in serialized
     fragment = payload["backend_fragments"]["rendering.remotion"]

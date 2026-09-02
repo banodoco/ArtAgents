@@ -16,25 +16,17 @@ Each pack that wants to be installable contributes one file:
 astrid/packs/<pack>/skill/SKILL.md
 ```
 
-Discovery also understands canonical component roots declared in `pack.yaml`.
-If a pack declares `content.executors: executors` or
-`content.orchestrators: orchestrators`, Astrid will discover nested component
-skills at:
+The canonical catalog reads each pack's strict-v2 `documentation` declaration.
+For bundled packs this is `skill/SKILL.md`; the `_core` skill contains the
+generated 22-pack census and routes agents to each owner. Component manifests
+remain typed runtime contracts, not alternate pack documentation authorities.
 
-```
-astrid/packs/<pack>/executors/<executor>/skill/SKILL.md
-astrid/packs/<pack>/orchestrators/<orchestrator>/skill/SKILL.md
-```
-
-Those nested descriptors use the qualified pack id
-`<pack>.<component_slug>`. Legacy flat component layouts are still scanned for
-packs without canonical `content` roots. Directories that contain a
-`skill/SKILL.md` but lack a `pack.yaml` fall back to Strategy 2 flat-walk
-discovery without error.
-
-Discovery skips packs with `status: deprecated` or `visibility: hidden`
-by default, unless the pack is explicitly requested. This keeps stale
-and development-only packs out of the agent's prompt context.
+Every bundled product pack must have `pack.yaml` with `schema_version: 2` and a
+structured `skill/SKILL.md`. There is no flat skill fallback and no skill
+discovery for a directory lacking a canonical manifest. Discovery skips packs
+with `status: deprecated` or `visibility: hidden` by default, unless the pack
+is explicitly requested. This keeps stale and development-only packs out of
+the agent's prompt context.
 
 The file is a Claude-Code-style skill: YAML frontmatter with at least `name` and `description`, followed by Markdown body content.
 

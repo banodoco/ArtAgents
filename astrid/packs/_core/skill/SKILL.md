@@ -42,10 +42,9 @@ question belongs to, read the census first.
 The canonical beta bundle contains 22 product packs. `_core` is deliberately
 not one of them: it is irreducible, code-owned kernel guidance. The table is a
 deterministic checked-in routing projection, sorted by pack id, with each
-destination fixed to the owning pack's `skill/SKILL.md`. It is not an identity
-or capability authority; the canonical pack catalog and each pack's manifest
-remain authoritative. The five skill roots outside this bounded documentation
-edit are routed here without modifying their documents.
+destination fixed to the owning pack's packaged `skill/SKILL.md`. Pack identity,
+database ownership, documentation, and resource closure remain authoritative in
+the canonical catalog and each strict-v2 `pack.yaml`.
 
 <!-- BEGIN PACK CENSUS (deterministic checked-in routing projection) -->
 
@@ -82,8 +81,9 @@ edit are routed here without modifying their documents.
   from a checkout).
 - The first product command lazily creates
   `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` — the SQLite kernel: 14 core
-  tables plus the timeline/shots/references pack tables, WAL mode, one
-  exclusive-owner lock.
+  tables plus the default-enabled timeline/shots/references pack tables (and
+  optionally Runaway when explicitly composed), WAL mode, one exclusive-owner
+  lock.
 - `python3 -m astrid doctor --json` is the read-only health check. It reports
   `schema_versions`, media paths, a SQLite quick-check, and foreign-key status
   without repairing or rewriting data. On a pristine root it returns
@@ -276,8 +276,7 @@ like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
 a canonical kernel slug/UUID/ULID and optionally enforces `expected_version`;
 use `astrid timelines render <ref>` for the product CLI. Managed visualization
 likewise resolves the canonical kernel timeline and pins its actual stream
-head. Visualization's `timeline_source` remains the explicit legacy filesystem
-compatibility route.
+head. There is no legacy filesystem authority.
 
 ### How capabilities execute
 
@@ -346,16 +345,18 @@ URLs, and obtain explicit user confirmation before calling
 ## Pack Model
 
 Packs are namespace and distribution containers for capabilities (executors,
-orchestrators, elements). Every capability lives in exactly one pack under
-`astrid/packs/<pack>/`, declared in a `pack.yaml` manifest. Capability ids are
-always qualified as `<pack>.<name>`; bare ids are rejected. Executor folders
-use `astrid/packs/<pack>/executors/<slug>/{executor.yaml,STAGE.md,run.py}` and
+orchestrators, elements), optional bundled database ownership, structured agent
+guidance, and pack-relative resources. Every capability lives in exactly one
+pack under `astrid/packs/<pack>/`, declared in a strict-v2 `pack.yaml` manifest.
+Capability ids are always qualified as `<pack>.<name>`; bare ids are rejected.
+Executor folders use
+`astrid/packs/<pack>/executors/<slug>/{executor.yaml,STAGE.md,run.py}` and
 orchestrator folders use
 `astrid/packs/<pack>/orchestrators/<slug>/{orchestrator.yaml,STAGE.md,run.py}`,
 with optional local `src/` modules. Element folders live at
 `astrid/packs/<pack>/elements/<kind>/<id>/{component.tsx,element.yaml}` where
-kind is `effects`, `animations`, or `transitions`. A gitignored `local` pack
-at `astrid/packs/local/` holds user-edited element forks.
+kind is `effects`, `animations`, or `transitions`. Every bundled pack ships
+`skill/SKILL.md`; a gitignored `local` pack holds user-owned forks.
 
 - **Executor** — one concrete, independently runnable unit of work.
 - **Orchestrator** — a workflow that coordinates executors or child

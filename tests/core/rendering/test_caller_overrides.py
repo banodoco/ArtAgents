@@ -85,7 +85,7 @@ def test_rendering_overrides_affect_facade_and_public_service_calls(
 ) -> None:
     transport = FakeTransport()
     transport.plan = replace(
-        _plan("lineage.renderer-alias"),
+        _plan("lineage.renderer-v2"),
         finalizer=_finalizer_resolution("lineage.finalizer-alias"),
     )
     service = _lineage_service(
@@ -102,14 +102,14 @@ def test_rendering_overrides_affect_facade_and_public_service_calls(
             Path(request.timeline_path),
             Path(request.assets_registry_path or ""),
             output,
-            engine="hybrid",
+            engine="rendering.legacy_hybrid",
         )
     else:
         service.render(
             Path(request.timeline_path),
             Path(request.assets_registry_path or ""),
             output,
-            selector="hybrid",
+            selector="rendering.legacy_hybrid",
         )
 
     provenance = json.loads(Path(f"{output}.provenance.json").read_text(encoding="utf-8"))
@@ -118,8 +118,8 @@ def test_rendering_overrides_affect_facade_and_public_service_calls(
         "to": "lineage.planner-v2",
     }
     assert provenance["segments_v2"][0]["renderer"]["override"] == {
-        "from": "lineage.renderer",
-        "to": "lineage.renderer-v2",
+        "from": "lineage.renderer-v2",
+        "to": "lineage.renderer-v3",
     }
     assert provenance["finalizer"]["override"] == {
         "from": "lineage.finalizer",

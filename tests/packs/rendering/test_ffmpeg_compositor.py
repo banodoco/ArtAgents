@@ -107,7 +107,7 @@ def _plan(
     return RenderPlan(
         schema_version=SCHEMA_VERSION,
         request_digest=SHA_C,
-        requested_policy="hybrid",
+        requested_policy="rendering.legacy_hybrid",
         planner=PlannerResolution(
             id="fixture.planner",
             source_pack={"id": "fixture"},

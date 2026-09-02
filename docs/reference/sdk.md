@@ -1,15 +1,14 @@
 # Astrid Python SDK
 
 The `astrid` package exposes a public Python SDK for capability discovery,
-schema inspection, generation, and invocation. Import the top-level package —
+schema inspection, generation, and invocation. Import the top-level package;
 the SDK surface is available directly from `import astrid`.
 
-> **Compatibility policy**: This document is a user-facing walkthrough. The
-> normative v1 compatibility contract lives in
-> [docs/platform-contract.md](../contracts/platform-contract.md). That file defines the
-> supported export list, SemVer rules, deprecation window, DTO stability tiers,
-> manifest schema contract, and disclosure-only trust block. When this doc and
-> `platform-contract.md` differ, the platform contract wins.
+> **Contract policy:** This is a user-facing walkthrough. The normative public
+> SDK and strict-v2 pack contract lives in
+> [platform-contract.md](../contracts/platform-contract.md). The canonical
+> catalog owns pack identity, documentation, resources, and optional database
+> projections; SDK callers must not reconstruct those facts from raw files.
 
 ```python
 import astrid
@@ -75,11 +74,13 @@ import json
 json.dumps(inventory.to_dict())
 ```
 
-`include_installed=False` scopes discovery to the in-tree packs. Externally
-installed packs load with the registry by default. Installed/external pack
-roots are fault-tolerant: a pack whose manifests fail validation is skipped
-with a logged warning instead of failing the whole discovery call, so
-scripted and agent workflows keep working when one external pack is broken.
+`include_installed=False` scopes capability discovery to bundled packs.
+Bundled pack identity, documentation, resources, and optional database
+contributions come from the canonical strict-v2 catalog. Externally installed
+packs use the supported capability discovery seams; external database
+declarations are rejected during admission. A malformed external capability
+pack is skipped with a logged warning instead of failing the whole discovery
+call.
 
 `kind="executor"` (or `"orchestrator"` / `"element"`) filters the returned
 inventory to that capability type — `capabilities` then carries only those

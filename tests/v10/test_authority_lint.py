@@ -5,9 +5,9 @@ representative mutation fixture that must fail exactly that rule, and each
 documented exemption is proven by a fixture that must stay clean:
 
 - **imports**: kernel-to-pack imports (every ``astrid/core`` file except the
-  single composition exemption), pack-to-pack imports between the m1 schema
-  packs, and the documented legacy rendering/builtin prefixes that stay
-  legal in the kernel;
+  single composition exemption), pack-to-pack imports between canonical
+  database packs, and the documented legacy rendering/builtin prefixes that
+  stay legal in the kernel;
 - **writer authority**: ``DatabaseWriter(`` / writable ``sqlite3.connect``
   outside the kernel store fails; ``mode=ro`` probes and the conformance
   kit's scratch writers stay legal;
@@ -115,14 +115,7 @@ def _write(root: Path, rel: str, body: str) -> Path:
 
 
 def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
-    """Minimal lint-scan root: core + packs with valid pack manifests.
-
-    The references pack is always present (it is a frozen m3 schema pack);
-    its migration FK's inward to kernel tables only (projects/media/tasks),
-    mirroring the real pack so the clean baseline proves pack-to-kernel FKs
-    are the allowed kernel currency. The shots pack is opt-in because some
-    m1 fixtures exercise a timeline-only composition.
-    """
+    """Minimal lint-scan root: core + packs with valid pack manifests."""
     _write(root, "astrid/core/__init__.py", "")
     _write(root, "astrid/packs/__init__.py", "")
     _write(root, "astrid/packs/timeline/__init__.py", "")
@@ -226,13 +219,13 @@ def test_composition_exemption_is_the_only_kernel_to_pack_allowed(
     _write(
         tmp_path,
         "astrid/core/gateway/dispatch.py",
-        "from astrid.packs import register_standard_schema_packs\n",
+        "from astrid.packs import compose_standard_pack_database\n",
     )
     # Any other kernel file importing a pack is a violation.
     _write(
         tmp_path,
         "astrid/core/not_exempt.py",
-        "from astrid.packs import register_standard_schema_packs\n",
+        "from astrid.packs import compose_standard_pack_database\n",
     )
     errors = lint_import_boundaries(tmp_path)
     assert not any(

@@ -57,6 +57,7 @@ from astrid.packs.references.repository import (
     REFERENCE_SET_PRIMARY_COMMAND_KIND,
     REFERENCE_STREAM_TYPE,
     REFERENCE_SYMMETRIC_LINK_KIND,
+    ReferenceNotFoundError,
 )
 
 TS2 = "2026-08-15T01:00:00.000000+00:00"
@@ -789,6 +790,9 @@ def reference_command_specs(
     ``reference.set_primary``, and ``reference.link``.
     """
     is_mismatch = lambda exc: isinstance(exc, ReceiptMismatchError)  # noqa: E731
+    is_archive_mismatch = lambda exc: isinstance(  # noqa: E731
+        exc, (ReceiptMismatchError, ReferenceNotFoundError)
+    )
 
     return {
         REFERENCE_CREATE_COMMAND_KIND: CommandSpec(
@@ -816,7 +820,7 @@ def reference_command_specs(
             read=_reference_read,
             seed=_seed_archive,
             prepare=_prepare_archive,
-            is_expected_mismatch=is_mismatch,
+            is_expected_mismatch=is_archive_mismatch,
             result_ref=_reference_id_ref,
             mutable_tables=("project_references",),
             list_other=_reference_list_other,

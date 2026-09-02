@@ -19,9 +19,7 @@ A renderer, planner, or finalizer has a qualified ID with at least one dot,
 such as `rendering.remotion`, `rendering.legacy_hybrid`, or the canonical
 `rendering.ffmpeg-finalizer`. Each dot-separated ID segment matches
 `[a-z0-9][a-z0-9_-]*`: lowercase ASCII letters, digits, hyphens, and
-underscores are valid. Bare `remotion` and `ffmpeg` are legacy selectors
-translated by the host; `hybrid` names a planning policy and is never a
-renderer ID.
+underscores are valid. Unqualified renderer selectors are rejected.
 
 The first ID segment is the contributing pack's `id`. A pack named
 `video_tool` therefore owns ids such as `video_tool.renderer`; it cannot claim
@@ -44,8 +42,8 @@ extensions:
 
 Paths are pack-relative, must stay within the pack root after resolution, and
 are parsed without importing or executing backend code. Normal pack
-precedence, conflicts, aliases, overrides, and permissions apply. Only an
-execution-eligible discovered candidate may run:
+precedence, overrides, and permissions apply. Only an execution-eligible
+discovered candidate may run:
 
 - source and local packs are eligible;
 - an extra pack root is eligible only when explicitly supplied;
@@ -83,12 +81,11 @@ the command surface, converts it into a neutral
 `RenderService` directly. Neither entry point imports a concrete renderer;
 pack commands are discovered from manifests and invoked by the transport.
 
-`engine` remains a compatibility spelling accepted by the facade. `backend`
-is its neutral synonym, and callers must not supply conflicting values.
-`remotion`, `ffmpeg`, and `hybrid` are the only legacy short selectors;
-qualified renderer ids are strict apart from ordinary aliases and overrides.
-New integrations should prefer `backend=<qualified-id>` and place private
-settings in `backend_config[<qualified-id>]`.
+`engine` and `backend` are equivalent spellings for the selected qualified
+renderer or planner id; callers must not supply conflicting values. Unqualified
+selectors are rejected. New integrations should use
+`backend=<qualified-id>` and place private settings in
+`backend_config[<qualified-id>]`.
 
 ## Manifest format
 
@@ -535,8 +532,7 @@ preserved rather than converted into an unrelated exit-code layer.
 
 The host lifecycle is:
 
-1. Resolve legacy selector/policy, aliases, overrides, and the precedence
-   winner.
+1. Resolve the requested qualified renderer or planner id and precedence winner.
 2. Verify trust eligibility, permissions, manifest digest, required binaries,
    and supported protocol version.
 3. Resolve the canonical timeline profile and localize required inputs into a
@@ -570,11 +566,11 @@ Provenance v2 is additive and has `schema_version: 2`. Core owns and writes:
 `request_digest`, `requested_policy`, `planner`, every segment's nested
 `renderer`, and `finalizer` are copied from the validated `RenderPlan`; the
 assembler accepts no parallel singular renderer identity. The nested records
-have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
-distinct source pack, manifest, alias/override, support, and input-hash evidence
-for every renderer invocation. Planner and finalizer records carry the same
-alias/override/trust/support evidence as renderer records. Rendered artifacts
-are REQUIRED in `artifact_profiles` for any positive render plan: exactly one
+have exactly the resolution shapes defined in Planning, so a
+`rendering.legacy_hybrid` plan keeps distinct source pack, manifest,
+override, support, and input-hash evidence for every renderer invocation.
+Planner and finalizer records may additionally carry declared alias metadata.
+Rendered artifacts are REQUIRED in `artifact_profiles` for any positive render plan: exactly one
 hashed lineage entry PER SEGMENT. Multi-segment plans MUST use the ordered
 sequence form (one VideoArtifact or emitted lineage record per segment, in
 segment order); single-segment plans may use a path-keyed mapping. Emitted
@@ -721,10 +717,14 @@ video_tool/
 manifest path:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 id: video_tool
 name: Video Tool Renderer
 version: 1.0.0
+domain: media
+stability: stable
+support: project
+visibility: visible
 permissions:
   - id: project_files
     reason: Reads localized timeline assets and writes an invocation artifact
@@ -734,13 +734,10 @@ extensions:
   rendering:
     renderers:
       - rendering/renderer.yaml
-aliases:
-  - kind: renderer
-    alias: video_tool.legacy
-    canonical_id: video_tool.renderer
-    deprecated: true
-    deprecation_message: Use video_tool.renderer
 ```
+
+This pack declaration is schema v2. The `rendering/renderer.yaml` below is
+the separate renderer-manifest protocol v1.
 
 `video_tool/rendering/renderer.yaml` is static data. Discovery can inspect and
 validate it without importing `run.py`:
@@ -801,13 +798,8 @@ transition clips. It returns:
 
 If the request contains a transition it instead sets `supported: false`, adds
 an actionable reason, and may suggest `rendering.remotion` in `alternatives`.
-It does not invoke another renderer itself. With a qualified selector, Astrid
-fails closed; only an explicit planner or fallback policy may choose an
-alternative.
-
-For `render`, the command reads only
-`backend_config["video_tool.renderer"]`, invokes the vendor executable without
-a shell, probes the generated media, hashes it, and returns a relative path:
+It does not invoke another renderer itself. Astrid fails closed for the
+requested qualified id; only an explicit planner may choose an alternative.
 
 ```json
 {
@@ -872,16 +864,13 @@ result = sdk.invoke(
 )
 ```
 
-Astrid resolves the qualified id and any renderer alias/override, checks trust,
-permissions, binaries, protocol version, and request-sensitive support, invokes
-the command, validates the artifact and profile, then publishes the video plus
-its core-owned provenance sidecar. The sidecar records the source pack,
-manifest digest, alias chain, override, trust eligibility, support decision,
-input hashes, artifact hash/profile, audio ownership, and the namespaced vendor
-fragment. No registry or service edit is needed.
-
-## Renderer author golden path
-
+Astrid resolves the qualified id, checks trust, permissions, binaries, protocol
+version, and request-sensitive support, invokes the command, validates the
+artifact and profile, then publishes the video plus its core-owned provenance
+sidecar. The sidecar records the source pack, manifest digest, override, trust
+eligibility, support decision, input hashes, artifact hash/profile, audio
+ownership, and the namespaced vendor fragment. No registry or service edit is
+needed.
 The fastest way to add a renderer is the four-file scaffold. It produces a
 complete, self-contained, pure-stdlib pack that implements the v1 wire
 protocol deterministically — no ffmpeg, Remotion, GPU, or SDK import — so the
@@ -958,13 +947,10 @@ Astrid resolves `acme_wave.wave`, checks trust/permissions/binaries/protocol
 version, invokes the command, validates the artifact and profile, and
 atomically publishes `./out/hype.mp4` plus its core-owned provenance sidecar
 `./out/hype.mp4.provenance.json`. Read the sidecar to confirm the resolution
-evidence: the source pack, manifest digest, alias chain, override, trust
-eligibility, support decision, input hashes, artifact hash/profile, audio
-ownership, normalization, attachments, and your namespaced
+evidence: the source pack, manifest digest, override, trust eligibility,
+support decision, input hashes, artifact hash/profile, audio ownership,
+normalization, attachments, and your namespaced
 `backend_fragments["acme_wave.wave"]` fragment. If you later edit `render.py`
-to return real media, keep the result shape identical: exactly one primary
-`VideoArtifact`, workspace-relative paths, a matching `audio_ownership`, and
-backend-private data only under your fragment namespace.
 
 A failed invocation never publishes a sidecar; instead the host retains (or
 emits) a self-contained replay bundle — resolved request, localized inputs and
@@ -1053,16 +1039,16 @@ M2 may wrap these types, provide helpers, scaffold code, and improve error
 presentation. It must emit the same JSON. If tooling finds a kernel defect,
 M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 
-## Locked epic decisions (verbatim)
+## Locked epic decisions
 
-1. **Backend, planner, and finalizer are distinct concepts.** `hybrid` is a
-   planning policy, not a renderer backend.
+1. **Backend, planner, and finalizer are distinct concepts.** The qualified
+   `rendering.legacy_hybrid` id names a planning policy, not a renderer backend.
 2. **The timeline remains backend-neutral.** Renderer selection is invocation
    or plan configuration, never an arbitrary module path stored in timeline
    data.
-3. **Backends have qualified IDs.** Built-ins should resolve canonically as
-   names such as `rendering.remotion` and `rendering.ffmpeg`; short legacy names
-   remain compatibility aliases.
+3. **Backends have qualified IDs.** Built-ins resolve only through their
+   canonical qualified ids, such as `rendering.remotion` and
+   `rendering.ffmpeg`; unqualified renderer selectors are rejected.
 4. **Only trusted discovered packs contribute implementations.** Reuse existing
    pack permission, precedence, conflict, alias, and override semantics. Do not
    accept arbitrary CLI import strings.
@@ -1077,10 +1063,9 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 9. **Final assembly is explicit.** Ship an FFmpeg finalizer first, but keep
    finalization behind a contract so arbitrary backends do not become secretly
    coupled to inlined FFmpeg logic.
-10. **Compatibility precedes semantic cleanup.** Preserve current
-    `engine=remotion`, `engine=ffmpeg`, and `engine=hybrid` behavior during the
-    initial rollout. A later deprecation may make explicit Remotion strict and
-    move opportunistic selection to `planner=auto`.
+10. **Canonical identity precedes compatibility.** `engine` and `backend`
+    accept qualified renderer or planner ids, and no short-selector fallback
+    occurs.
 11. **Provenance has core-owned keys and backend-owned fragments.** Backend
     fragments cannot overwrite core identity, routing, input, segment, or
     finalizer fields.

@@ -49,7 +49,6 @@ class MigrationError(RuntimeError):
 class MigrationCycleError(MigrationError):
     """Raised when schema-pack ``depends_on`` declarations contain a cycle."""
 
-
 class MigrationTooNewError(MigrationError):
     """Raised when the database schema is newer than the composed registry.
 

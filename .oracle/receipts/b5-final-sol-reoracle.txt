@@ -1,0 +1,15 @@
+[launch_hermes_agent] model=codex:gpt-5.6-sol → resolved=openai-codex/gpt-5.6-sol toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid
+Working...
+FINAL_SOL_REORACLE: PASS
+IDENTITIES: 95/95, 26/26, wheel PASS — 2,396,407 bytes; SHA-256 892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633
+PRIOR_FINDING_1: PASS — programmatic renderer aliases, unqualified selector normalization, and legacy routing provenance are deleted; qualified manifest-owned IDs resolve and retired short IDs reject
+PRIOR_FINDING_2: PASS — third-party pack guidance uses strict pack schema v2 and explicitly distinguishes renderer-manifest protocol v1
+CRITERIA: 1 PASS; 2 PASS; 3 PASS; 4 PASS; 5 PASS; 6 PASS; 7 PASS; 8 PASS; 9 PASS; 10 PASS; 11 PASS; 12 PASS; 13 PASS; 14 BASELINE-PROVEN; 15 PASS
+BASELINE_JUDGMENT: Criterion 14 BASELINE-PROVEN — authoritative collection stopped at 1870/1 and 7631/2 with zero tests executed; unavailable-schema failures and the affected freeze assertion reproduce their recorded bases, while accepted focused, cumulative, source, M8, authority, conformance, and wheel lanes provide coverage
+MATRIX: Accurate and complete — exactly 15 criteria, corrected affected rows reflect both closed findings, wheel candidate 3, and honest baseline classification
+SCOPE: PASS — North Star, GPT-5.6 Sol assignment, base, linear checkpoints, control HEAD, branch, B1 user control, and explicit exclusions remain intact
+BLOCKERS: none
+[launch_hermes_agent] done in 297.7s (exit=0)
+0

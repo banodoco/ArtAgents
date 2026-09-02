@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: raw_command
 name: Raw Command Fixture Pack
 version: 1.0.0
@@ -12,10 +12,6 @@ permissions:
     reason: Run the pack-owned backend.py command as a subprocess.
   - id: project_files
     reason: Read the invocation request JSON and write the generated video into the request workspace.
-aliases:
-  - kind: renderer
-    alias: raw_command.legacy
-    canonical_id: raw_command.renderer
 extensions:
   rendering:
     renderers:

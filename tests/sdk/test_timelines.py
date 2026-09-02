@@ -32,7 +32,7 @@ from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import build_standard_registry
+from astrid.packs import compose_standard_pack_database
 from astrid.packs.timeline.repository import (
     TIMELINE_ARCHIVED_EVENT_KIND,
     TIMELINE_CREATE_COMMAND_KIND,
@@ -64,8 +64,8 @@ SAVED_ASSETS_V2 = {"a1": {"kind": "image", "src": "a1-v2.png"}}
 
 @pytest.fixture
 def env(tmp_path: Path):
-    """A fresh standard writer, repositories, and timeline service."""
-    registry = build_standard_registry()
+    """A fresh operation-owned canonical database projection and timeline service."""
+    registry = compose_standard_pack_database().registry
     writer = DatabaseWriter(tmp_path / "timelines.sqlite3", registry)
     try:
         events = EventAppendService(registry)
@@ -531,7 +531,7 @@ def test_diff_returns_deterministic_adjacent_diffs(env: SimpleNamespace) -> None
 
 
 def test_restart_reloads_committed_timeline(tmp_path: Path) -> None:
-    registry = build_standard_registry()
+    registry = compose_standard_pack_database().registry
     db_path = tmp_path / "restart.sqlite3"
     events = EventAppendService(registry)
     receipts = ReceiptService()

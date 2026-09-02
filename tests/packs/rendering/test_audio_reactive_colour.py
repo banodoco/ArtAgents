@@ -129,7 +129,9 @@ def test_fast_spec_rejects_ambiguous_markers(
         )
 
 
-@pytest.mark.parametrize("engine", ["remotion", "ffmpeg", "hybrid"])
+@pytest.mark.parametrize(
+    "engine", ["rendering.remotion", "rendering.ffmpeg", "rendering.legacy_hybrid"]
+)
 def test_render_dispatches_compact_effect_to_ffmpeg_specialization(
     tmp_path: Path, engine: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

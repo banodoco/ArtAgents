@@ -209,7 +209,7 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
             assert not result.ok
             assert result.error is not None
             missing_codes.append(result.error.code)
-    assert missing_codes == ["internal_error", "internal_error"]
+    assert missing_codes == ["integrity_error", "integrity_error"]
     assert _tree_snapshot(missing_root) == before_missing
 
     mutated_root = tmp_path / "mutated-media"
@@ -266,8 +266,10 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
     statuses = _doctor_statuses(corrupt_root)
     assert set(statuses) == {
         "python_version",
+        "bundled_census",
         "data_paths",
         "media_paths",
+        "pack_resources",
         "sqlite_quick_check",
         "fk_integrity",
         "schema_versions",
@@ -560,7 +562,7 @@ import sys
 from pathlib import Path
 
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import build_standard_registry
+from astrid.packs import compose_standard_pack_database
 
 database = Path(sys.argv[1])
 log = Path(sys.argv[2])
@@ -584,7 +586,7 @@ def connect(*args, **kwargs):
 
 
 sqlite3.connect = connect
-DatabaseWriter(database, build_standard_registry())
+DatabaseWriter(database, compose_standard_pack_database().registry)
 """
 
 

@@ -39,11 +39,9 @@ _SERVICE: RenderService | None = None
 def _default_service() -> RenderService:
     """Build (once) the backend-neutral service the facade delegates to.
 
-    Legacy engine translation, renderer/planner selection, invocation,
-    validation, audio completion, finalization, and publication all happen
-    inside :class:`RenderService`.  The facade is a thin adapter: it maps the
-    legacy argument surface onto the service call and returns the published
-    output path.
+    Selection, invocation, validation, audio completion, finalization, and
+    publication all happen inside :class:`RenderService`. The facade is a
+    thin adapter over the public qualified-id argument surface.
     """
     global _SERVICE
     if _SERVICE is None:
@@ -61,19 +59,18 @@ def validate_output_name(name: str) -> str:
     return validate_output_basename(name)
 
 
-def _legacy_backend_config(
+def _backend_config_defaults(
     *,
     project_dir: Path | None,
     composition_id: str,
     theme_path: Path | None,
     min_free_gb: float | None,
 ) -> dict[str, dict[str, Any]]:
-    """Map the legacy render kwargs onto namespaced backend configuration.
+    """Map render kwargs onto namespaced backend configuration.
 
-    The facade remains backend-neutral: it only knows the qualified ids that
-    correspond to the historical selector spellings and scopes each legacy
-    value under the backend that understands it.  The service forwards each
-    candidate only its own namespace.
+    The facade remains backend-neutral and scopes each value under the
+    qualified backend that understands it. The service forwards each candidate
+    only its own namespace.
     """
     config: dict[str, dict[str, Any]] = {}
     remotion: dict[str, Any] = {}
@@ -249,7 +246,7 @@ def render(
     assets_path: Path,
     out_path: Path,
     *,
-    engine: str = "remotion",
+    engine: str = "rendering.remotion",
     project_dir: Path | None = None,
     composition_id: str = "TimelineComposition",
     theme_path: Path | None = None,
@@ -261,11 +258,10 @@ def render(
 ) -> Path:
     """Render through :class:`RenderService` and publish one locked pair.
 
-    The facade keeps the historical public signature and capability id.  All
-    dispatch (legacy engine translation, renderer/planner selection, support,
-    invocation, validation, audio completion, finalization, publication)
-    happens in the service; the facade only adapts the legacy argument surface
-    and the caller-selected output name.
+    The facade adapts the public argument surface to the service call and
+    returns the published output path. All dispatch, selection, support,
+    invocation, validation, audio completion, finalization, and publication
+    happen in the service.
     """
     out_path = Path(out_path)
     validate_output_name(out_path.name)
@@ -274,7 +270,7 @@ def render(
         if keep_previous_renders
         else _previous_render_outputs_for_timeline(out_path, timeline_path)
     )
-    config = _legacy_backend_config(
+    config = _backend_config_defaults(
         project_dir=project_dir,
         composition_id=composition_id,
         theme_path=theme_path,
@@ -311,10 +307,9 @@ def render(
 
 _DEFAULT_THEME_PATH = REPO_ROOT / "themes" / "banodoco-default" / "theme.json"
 """Historical default theme, kept when present but never required.
-
-The legacy hybrid/remotion pipeline treats a missing theme as optional: the
-planner falls back to the timeline's own theme (or the built-in canvas), so
-the CLI only injects this path when it actually exists on disk.
+The render pipeline treats a missing theme as optional: the planner falls back
+to the timeline's own theme (or the built-in canvas), so the CLI only injects
+this path when it actually exists on disk.
 """
 
 
@@ -337,12 +332,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--engine",
         default=None,
-        help="Legacy selector (remotion, ffmpeg, hybrid) or a qualified renderer id.",
+        help="Qualified renderer or planner id.",
     )
     parser.add_argument(
         "--backend",
         default=None,
-        help="Neutral alias for --engine: legacy selector or qualified backend id.",
+        help="Neutral synonym for --engine; use a qualified implementation id.",
     )
     parser.add_argument(
         "--backend-config",
@@ -408,7 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         selector = (
             args.backend
             if args.backend is not None
-            else (args.engine if args.engine is not None else "remotion")
+            else (args.engine if args.engine is not None else "rendering.remotion")
         )
         config = _parse_backend_config(args.backend_config)
         profile = _parse_profile(args.profile)

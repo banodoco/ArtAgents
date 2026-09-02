@@ -134,12 +134,31 @@ assert set(runtime_families) == set(expected_families), runtime_families
 assert set(domain_product.FAMILY_PARSER_MODULES) == {
     "projects", "timelines", "media", "tasks", "runs", "shots", "references"
 }
-manifest_files = {
-    "timeline": "packs/timeline/pack.yaml",
-    "shots": "packs/shots/pack.yaml",
-    "references": "packs/references/pack.yaml",
-}
-manifest_catalogs = {pack: manifest_catalog(path) for pack, path in manifest_files.items()}
+pack_ids = (
+    "blender", "comfy_wrap", "editorial", "fal", "foley", "generation",
+    "iteration", "media", "moirae", "references", "reigh", "rendering",
+    "runaway", "runpod", "shots", "stream_content", "timeline", "training",
+    "understanding", "vibecomfy", "video_editing", "youtube",
+)
+manifest_files = {pack: f"packs/{pack}/pack.yaml" for pack in pack_ids}
+manifest_catalogs = {}
+for pack, path in manifest_files.items():
+    text = resource_text(path)
+    assert re.search(r"(?m)^schema_version:\s*2\s*$", text), path
+    assert re.search(rf"(?m)^id:\s*{re.escape(pack)}\s*$", text), path
+    assert "  path: skill/SKILL.md" in text, path
+    assert resource_text(f"packs/{pack}/skill/SKILL.md").lstrip().startswith("---\n")
+    manifest_catalogs[pack] = manifest_catalog(path) if pack in {
+        "timeline", "shots", "references"
+    } else {"mounts": {}, "tables": ()}
+
+pack_root = resources.files("astrid").joinpath("packs")
+assert "core" not in {item.name for item in pack_root.iterdir()}
+for pack in pack_ids:
+    names = {item.name for item in pack_root.joinpath(pack).iterdir()}
+    assert not names.intersection({"pack.yml", "pack.json", "schema-pack.yaml"}), pack
+assert pack_root.joinpath("_core", "skill", "SKILL.md").is_file()
+
 manifest_mounts = {
     family: mount
     for catalog in manifest_catalogs.values()

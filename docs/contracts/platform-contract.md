@@ -1,29 +1,29 @@
-# Astrid Platform Contract — v1
+# Astrid Platform Contract
 
-This document is the normative v1 platform contract for the public Python SDK,
-manifest schemas, and the disclosure-only trust model. If this document and any
-other SDK or pack-system doc disagree, this file wins.
+This document is the normative platform contract for the public Python SDK,
+canonical pack manifests, and the disclosure-only trust model. The active pack
+grammar is strict v2; older manifest forms are not supported.
 
 For user-facing safe-use guidance, see [SECURITY.md](../../SECURITY.md). For a
 friendlier SDK walkthrough, see [docs/sdk.md](../reference/sdk.md).
 
 ## Contract Scope
 
-Astrid v1 has one public Python import boundary:
+Astrid has one public Python import boundary:
 
 ```python
 import astrid
 ```
 
-The v1 contract is defined by:
+The contract is defined by:
 
-- The exact top-level names exported by `astrid.__all__`
-- The documented signatures and DTO categories reachable from `import astrid`
-- The v1 manifest schema files under `astrid/core/pack/schemas/v1/`
-- The disclosure-only trust/install rules in this document
+- the exact top-level names exported by `astrid.__all__`;
+- documented signatures and DTO categories reachable from `import astrid`;
+- the strict-v2 schema at `astrid/core/pack/schemas/v2/pack.json`;
+- disclosure-only trust/install rules in this document.
 
-The v1 contract is **not** defined by internal module layout, lazy-loader
-implementation details, registry internals, or CLI implementation modules.
+The contract is not defined by internal module layout, registry internals, or
+CLI implementation modules.
 
 ## Public SDK Boundary
 
@@ -160,233 +160,99 @@ should not build brittle logic around undocumented nested keys.
 
 ## Manifest And Schema Contract
 
-### Canonical v1 Manifest Files
+### Canonical v2 pack manifest
 
-Astrid v1 recognizes these manifest families:
+Every pack has exactly one `pack.yaml` with `schema_version: 2`. The required
+identity fields are `schema_version`, `id`, `name`, and `version`; the pack
+must declare at least one contribution. `pack.yml`, `pack.json`,
+`schema-pack.yaml`, schema-less YAML, flat legacy mappings, unknown fields, and
+path escapes are rejected.
 
-- Pack manifests: `pack.yaml`, `pack.yml`, or `pack.json`
-- Executor manifests: `executor.yaml`, `executor.yml`, or `executor.json`
-- Orchestrator manifests: `orchestrator.yaml`, `orchestrator.yml`, or
-  `orchestrator.json`
-- Element manifests: `element.yaml`, `element.yml`, or `element.json`
+The normative pack grammar is
+`astrid/core/pack/schemas/v2/pack.json`. It covers identity, taxonomy,
+capabilities/content roots, extensions, optional bundled database ownership,
+structured documentation, standalone resources, dependencies, permissions,
+secrets, and authoring exclusions.
 
-The schema contract for those manifests is defined by the JSON Schema files
-under `astrid/core/pack/schemas/v1/`.
+The canonical loader is the single read-normalize-validate path used by
+`BundledCatalog`. Its projections carry pack identity, provenance, immutable
+database declarations, documentation, and confined resource handles. Consumers
+must use those projections rather than independently reparsing manifests or
+reconstructing ownership.
 
-### Normative v1 Schema Files
+### Component and extension manifests
 
-All v1 manifest schema files are part of the contract:
+Executor, orchestrator, element, renderer, planner, and finalizer manifests
+remain typed component contracts under their existing schemas. They do not
+create another pack identity or database authority. The owning pack's v2
+manifest declares content roots and pack-relative rendering extension paths.
 
-| File | Role |
-|---|---|
-| `astrid/core/pack/schemas/v1/pack.json` | Validates pack manifests and pack-level declarations |
-| `astrid/core/pack/schemas/v1/executor.json` | Validates executor manifests |
-| `astrid/core/pack/schemas/v1/orchestrator.json` | Validates orchestrator manifests |
-| `astrid/core/pack/schemas/v1/element.json` | Validates element manifests |
-| `astrid/core/pack/schemas/v1/_defs.json` | Shared schema definitions referenced by the manifest schemas above |
+### Database contribution
 
-The v1 contract covers the existence and intended roles of these files. It does
-not promise byte-for-byte immutability of schema internals; backward-compatible
-validation additions may land in minor releases.
+Trusted bundled packs may declare a `database` block containing migration
+identity, owned tables, vocabulary, repositories, conformance, CLI mounts,
+bridge mounts, and positive dependency migration heads. Migration SQL remains
+the authority for DDL and transformations. External packs cannot declare a
+database contribution during beta.
 
-### Stable Vs Opaque Manifest Areas
+## Pack Extensions
 
-Stable manifest contract areas include:
+The strict-v2 `extensions` block carries pack-owned typed extensions. Generation
+taxonomy entries and rendering backend/planner/finalizer paths remain typed
+registry inputs; they do not create a second pack identity or database owner.
+The canonical catalog preserves their owning pack and confined resource handles.
 
-- Which manifest families exist
-- Which top-level schema files validate them
-- Pack-level permissions being declared in the pack manifest
-- Executor/orchestrator secrets being declared in their component manifests
-- The existence of alias/deprecation metadata in pack manifests
+Packs may declare generation extensions under
+`pack.extensions.generation.backends`, `features`, and `modes`, and rendering
+extensions under `pack.extensions.rendering.renderers`, `planners`, and
+`finalizers`. The v2 pack schema validates the declaration; the existing typed
+registries consume the corresponding projections.
 
-Opaque or evolving manifest areas include:
+Element-kind extensions use `pack.extensions.elements.kinds`. Element
+capabilities remain scoped by their owning pack and kind. Agents discover them
+through `astrid.discover()` and `astrid.get_capability()`; direct imports from
+internal registries are not part of the public SDK boundary.
 
-- Undocumented nested schema keys
-- Generator-facing metadata used only by internal discovery/build tooling
-- Exact serialized ordering of manifest keys
-- Any internal registry-only normalization details not surfaced through the
-  public SDK
-
-## Element Extension APIs
-
-Astrid v1 supports pack-declared generation and element extensions through the
-pack manifest `extensions` block. The stable v1 contract is the manifest shape,
-external-pack discovery path, and public SDK discovery records described here.
-The internal registries and adapter protocols that consume these records remain
-provisional.
-
-### Generation Extensions
-
-Packs may declare generation extensions under:
-
-- `pack.extensions.generation.backends`
-- `pack.extensions.generation.features`
-- `pack.extensions.generation.modes`
-
-The stable v1 contract for generation extensions is:
-
-- These fields are valid pack-manifest fields under
-  `astrid/core/pack/schemas/v1/pack.json`.
-- `generation.backends` entries declare inert backend descriptors with `id`,
-  `module`, `class`, optional `label`, and optional `init_kwargs`.
-- `generation.features` and `generation.modes` entries may be strings or
-  objects with `id`, optional `label`, and optional `description`.
-- Packs discovered through source packs, explicit SDK `extra_pack_roots`,
-  `ASTRID_PACKS_PATH`, or installed-pack discovery can contribute these
-  declarations.
-- `astrid.discover()` exposes normalized records through
-  `DiscoveryResult.generation_backends`,
-  `DiscoveryResult.generation_features`, and
-  `DiscoveryResult.generation_modes`.
-
-The v1 SemVer guarantee covers the existence of those manifest locations, the
-required/optional field names listed above, and the existence of the matching
-`DiscoveryResult` tuple fields. Minor releases may add optional descriptor
-fields or new built-in records, but will not remove or rename these v1 fields
-without the normal two-minor deprecation window.
-
-The following generation details are provisional or opaque in v1:
-
-- The Python backend adapter base class and registry implementation under
-  `astrid.core.generation.*`
-- The exact constructor/import behavior for backend classes beyond the manifest
-  descriptor fields
-- The complete built-in taxonomy of feature ids, mode ids, backend ids, labels,
-  and descriptions
-- Nested `init_kwargs` contents
-- Ordering of discovery records, except that records are returned as tuples and
-  are safe to serialize
-
-### Element Kind Extensions
-
-Packs may declare element-kind extensions under
-`pack.extensions.elements.kinds`. Each entry declares an `id` and may include
-`singular`, `plural`, `label`, and `description`.
-
-The stable v1 contract for element extensions is:
-
-- `pack.extensions.elements.kinds` is a valid pack-manifest field under
-  `astrid/core/pack/schemas/v1/pack.json`.
-- External packs loaded through `ASTRID_PACKS_PATH` can declare element kinds
-  and elements using those kinds.
-- `astrid.discover()` exposes normalized element-kind records through
-  `DiscoveryResult.element_kinds`.
-- Element capabilities discovered from those packs remain visible through the
-  public SDK as `Capability` DTOs with `capability_type == "element"`.
-
-The v1 SemVer guarantee covers the manifest field names above and the existence
-of `DiscoveryResult.element_kinds`. Minor releases may add optional descriptor
-fields or additional built-in element kinds without deprecation.
-
-The following element details are provisional or opaque in v1:
-
-- The registry/typegen implementation that maps aliases to canonical element
-  kind names
-- Internal React/TypeScript component conventions for element rendering
-- Nested `Capability.schema`, `Capability.defaults`, and
-  `Capability.definition` payload shapes for elements
-
-### Extension Boundary
-
-The generation and element extension APIs are pack-authoring and discovery
-APIs, not a promise that every declared extension can be invoked through
-`astrid.invoke()`. In v1, `astrid.invoke()` supports executors and
-orchestrators; passing an element capability raises `UnsupportedCapabilityError`.
-
-Callers should use `astrid.discover()` and `astrid.get_capability()` for
-extension discovery, serialize opaque payloads rather than depending on nested
-internal keys, and treat direct imports from `astrid.core.*` or
-`astrid.packs.*` as outside the public v1 SDK contract.
+Declared extension paths are pack-relative. The source and installed closure
+checks require every rendering extension file to resolve within its owner root.
 
 ## Disclosure-Only Trust And Security
 
-This section preserves the existing v1 trust/security contract as a first-class
-part of the platform boundary.
-
-### V1 Trust Block Invariants
-
-Every pack trust summary carries this fixed v1 trust block:
+Every pack trust summary carries the fixed disclosure block:
 
 ```python
-V1_TRUST_BLOCK = {
+TRUST_BLOCK = {
     "sandbox": "none",
     "runs_with_user_process_permissions": True,
     "permission_enforcement": "disclosure_only",
 }
 ```
 
-These values are v1 invariants. They will not change within the v1 major
-version.
+Permissions are pack-level disclosure metadata. They require `id` and `reason`,
+may include `access` and `services`, and are validated by the strict-v2 pack
+schema. They do not create sandbox rules, configure `IsolationMetadata`, or
+enforce filesystem, subprocess, network, or environment access.
 
-### Permissions Are Pack-Level Disclosure Metadata
+Secrets are separate component declarations:
 
-Permissions are declared at the pack level only in v1. There is no separate
-per-executor or per-orchestrator permission contract.
-
-The `permissions` field in the pack manifest:
-
-- Requires `id` and `reason`
-- Allows optional `access` and `services`
-- Rejects unknown keys
-- Is validated by `astrid/core/pack/schemas/v1/pack.json`
-
-Permissions are disclosure metadata. They do **not**:
-
-- Create sandbox rules
-- Configure `IsolationMetadata`
-- Enforce runtime allow/deny checks
-- Restrict filesystem, subprocess, network, or environment access
-
-The canonical statement of that boundary is
-`permission_enforcement: disclosure_only`.
-
-### Secrets Are Separate From Permissions
-
-This distinction is part of the v1 contract:
-
-| Concept | Declared In | Meaning |
+| Concept | Declared in | Meaning |
 |---|---|---|
-| Permissions | Pack manifest | Capability domains such as network, files, subprocess, environment |
-| Secrets | Executor/orchestrator manifests | Specific environment variable names |
+| Permissions | v2 pack manifest | Capability domains such as network, files, subprocess, and environment |
+| Secrets | executor/orchestrator manifest | Specific environment variable names |
 
-Permissions answer "what kind of access does this pack claim to use?" Secrets
-answer "which variable names does this component claim to read?"
-
-### Trust-On-Install Contract
-
-Astrid requires explicit trust acknowledgement before installing or updating a
-pack.
-
-- Interactive installs require exact `trust <pack_id>` input
-- `--yes` is not enough by itself
-- `--trust` is the non-interactive trust acknowledgement
-- Git installs follow the same trust rules
-- Updates require renewed trust, even if declared permissions did not change
-
-Trust decisions are persisted in `.astrid/install.json`, including accepted
-permissions and acknowledgement metadata.
-
-### Trust Summary Contract
-
-`extract_trust_summary()` is the canonical source for trust summary data used by
-install, update, inspect, agent-facing views, and SDK discovery.
-
-The trust summary includes:
-
-- Pack identity and version
-- Component counts and entrypoints
-- Declared secrets and dependencies
-- Structured permissions and compact `permission_ids`
-- The v1 trust block
-- Advisory warnings
-
-Consumers must not reconstruct this data independently.
+Trust acknowledgement remains required before installing or updating an
+external pack. `extract_trust_summary()` is the canonical source used by
+install, update, inspect, agent-facing views, and SDK discovery; consumers
+must not reconstruct it independently.
 
 ## Validation Boundary
 
-`python3 -m astrid.core.pack.cli validate` performs static manifest validation. In v1 it
-checks schema/shape validity, not runtime behavior. Validation does not promise
-that a pack behaves safely or only does what its declarations describe.
+`python3 -m astrid.core.pack.cli validate` performs strict-v2 static
+validation. It checks identity, schema shape, declared content roots,
+documentation, resource confinement, and database declaration shape without
+importing or executing pack code. Runtime behavior remains the responsibility
+of the typed capability/database conformance checks.
+
 
 ## References
 
@@ -396,6 +262,6 @@ that a pack behaves safely or only does what its declarations describe.
 - `astrid/__init__.py` — top-level public export list
 - `astrid/sdk/` — public SDK DTOs and function entrypoints
 - `astrid/core/contracts/schema.py` — shared DTO field types
-- `astrid/core/pack/schemas/v1/` — normative v1 manifest schema files
+- `astrid/core/pack/schemas/v2/pack.json` — strict-v2 pack grammar
 - `astrid/core/pack/validate.py` — trust summary extraction and trust block source
 - `astrid/core/pack/install.py` — trust acknowledgement/install behavior

@@ -432,7 +432,7 @@ def test_raw_render_adapter_writes_render_result_json(tmp_path: Path) -> None:
     assert parsed.audio_ownership is AudioOwnership.RENDERED
 
 
-def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
+def test_facade_engine_qualified_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
@@ -444,36 +444,33 @@ def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
             timeline_path,
             assets_path,
             out_path,
-            engine="ffmpeg",
+            engine="rendering.ffmpeg",
         )
 
     assert output == sentinel
     fake_service.render.assert_called_once()
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "ffmpeg"
+    assert kwargs["selector"] == "rendering.ffmpeg"
 
 
-def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> None:
+def test_facade_qualified_remotion_delegates_to_backend_seam(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
     fake_service = mock.Mock()
     fake_service.render.return_value = sentinel
 
-    # The legacy nominal-remotion auto-FFmpeg policy lives inside the
-    # service now; the facade must pass the legacy selector through so the
-    # service can apply it.
     with mock.patch.object(facade, "_default_service", return_value=fake_service):
         output = facade.render(
             timeline_path,
             assets_path,
             out_path,
-            engine="remotion",
+            engine="rendering.remotion",
         )
 
     assert output == sentinel
     kwargs = fake_service.render.call_args.kwargs
-    assert kwargs["selector"] == "remotion"
+    assert kwargs["selector"] == "rendering.remotion"
 
 
 def test_audio_reactive_compatibility_path_is_same_module() -> None:

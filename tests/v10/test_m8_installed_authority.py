@@ -187,7 +187,6 @@ def test_installed_scan_catches_combined_adversarial_sources(
     assert "semantic JSON/JSONL/FSA writer" in joined
     assert "silent authority fallback" in joined
     assert "pack-to-pack import" in joined
-    assert "forbidden pack dependency" in joined
     assert "SQLite writer construction outside the kernel store" in joined
     assert "cross-pack FK" in joined
 

@@ -93,7 +93,7 @@ from astrid.core.store.writer import DatabaseWriter
 TS = "2026-08-17T00:00:00.000000+00:00"
 TS2 = "2026-08-17T01:00:00.000000+00:00"
 
-SPEC_A = {"backend": "remotion", "composition": "main", "fps": 24}
+SPEC_A = {"backend": "rendering.remotion", "composition": "main", "fps": 24}
 MANIFEST_A = ["media_1"]
 
 

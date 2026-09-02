@@ -78,13 +78,43 @@ is in `.oracle/implementation-ledger.md`.
   parser/standard authorities, fixed tuples, raw rereads, and active legacy
   fallback. The bounded gate accepted an 81-path candidate after one finite
   stale-test correction and independent finding-5 delta pass.
+- B5 source/package closure passed over control `HEAD
+  1214ba8f19cc73a6c16e386a6563b7b07cb9dcee`; source closure is `63` paths,
+  `ok=true`, zero errors, and authority lint/active-doc checks pass.
+- The original final Luna review passed. The first final Sol oracle matched all
+  identities and returned two finite renderer/guidance findings. Candidate 2
+  deletes programmatic short-ID aliases/selector/provenance compatibility,
+  migrates direct callers to qualified IDs, and converts the active pack
+  example to strict v2. Its 95-path manifest SHA-256 is
+  `e737d1582b74c3f0bf025684615c483595dd6e13967110e816a8591cf7355356`.
+- One independent affected-criterion Luna delta matched `95/95` and passed both
+  source findings, authority lint, 63-path closure, and affected M8 checks. Its
+  only blocker was an under-provisioned direct build invocation. The bounded
+  wheel closure then used the accepted isolated harness and passed.
+- Corrected wheel candidate 3 is `2,396,407` bytes with SHA-256
+  `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`.
+  Outside-checkout import, exact packaged renderer/skill bytes, 22-pack
+  ownership, qualified-ID resolution/short-ID rejection, and `63/63`
+  source/wheel closure pass. Unaffected candidate-2 installed behavior remains
+  accepted.
+- The single focused/full authoritative invocation stopped during collection:
+  focused `1870 collected / 1 collection error / 0 tests executed`; full
+  `7631 collected / 2 collection errors / 0 tests executed`. Both unavailable-
+  schema paths reproduce exact base. The one affected freeze replay assertion
+  reproduces control HEAD and is not candidate-caused.
+- B5.1–B5.8 are directly evidenced and checked; B5.9 remains pending only for
+  final Sol re-oracle, reviewed checkpoint commit, and push. Candidate-45 and
+  candidate-46 B1 receipts remain intact; no candidate 47, B1 revalidation,
+  broad unchanged validation, or panel was created.
 - Checkpoints: B1 `14f1f7d5f77cb6bd384749941cff6e522b696590`;
   B2 `a293e4c416c0e716154c392c0dd43165344f870d`;
   B3 `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`;
   B4 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`; 4/5 committed.
-- Frozen end-to-end criteria: 0/15 complete; B1–B4 provide accepted
-  implementation evidence, and production now uses canonical v2 only.
-- Cumulative gates 1 and 2: PASS; next action is B5 closure.
+- Frozen end-to-end criteria: 15/15 PASS; criterion 14 is baseline-proven and
+  final Sol re-oracle reports no blockers. Cumulative gates 1 and 2 pass.
+- Next action: commit only candidate 2 and reviewed B5 control/evidence paths,
+  then push the explicit final refspec. No further model dispatch or validation
+  is authorized absent a commit/push failure.
 
 The separately requested pack-aware `astrid update` command is the next project
 after this cutover. It must preserve user edits and pack-applied database

@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -45,15 +46,13 @@ from astrid.core.conformance import (
     ConformanceContext,
     standard_command_specs,
 )
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.database import open_database
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 from astrid.packs.timeline.repository import TimelineRepository
 
 TS = "2026-08-15T00:00:00.000000+00:00"
@@ -87,12 +86,10 @@ state (m1 tables plus the m2 task/media/run tables, plan step 16)."""
 # ---------------------------------------------------------------------------
 
 
-def _build_registry():
-    """Compose core + exactly timeline, shots, and references, then freeze."""
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    return registry.freeze()
+@lru_cache(maxsize=1)
+def _canonical_registry():
+    """Reuse the immutable canonical registry for this test module."""
+    return compose_standard_pack_database().registry
 
 
 def _build_context(db_path: Path, *, managed_root: Path | None = None) -> ConformanceContext:
@@ -103,7 +100,7 @@ def _build_context(db_path: Path, *, managed_root: Path | None = None) -> Confor
     lands under that root — the prepared filesystem fixtures the
     ``core.media.import`` crash matrix needs.
     """
-    registry = _build_registry()
+    registry = _canonical_registry()
     writer = DatabaseWriter(db_path, registry)
     events = EventAppendService(registry)
     receipts = ReceiptService()
@@ -1606,7 +1603,7 @@ def test_project_create_crashes_at_every_boundary_to_old_or_complete() -> None:
         prefix="astrid-crash-project-create-"
     ) as tmp:
         root = Path(tmp)
-        rows = _crash_matrix(_build_registry(), spec, root)
+        rows = _crash_matrix(_canonical_registry(), spec, root)
     assert len(rows) >= 4, f"expected several boundaries, got {len(rows)}"
     assert rows[-1]["kind"] == "commit"
     _emit_diagnostics(spec.command_kind, rows)
@@ -1645,7 +1642,7 @@ def test_timeline_save_crashes_at_every_boundary_to_old_or_complete(
         prefix="astrid-crash-timeline-save-"
     ) as tmp:
         root = Path(tmp)
-        rows = _crash_matrix(_build_registry(), spec, root)
+        rows = _crash_matrix(_canonical_registry(), spec, root)
     assert len(rows) >= 6, f"expected several boundaries, got {len(rows)}"
     assert rows[-1]["kind"] == "commit"
     _emit_diagnostics(spec.command_kind, rows)
@@ -1687,7 +1684,7 @@ def test_media_import_crashes_at_every_boundary_to_old_or_complete() -> None:
         prefix="astrid-crash-media-import-"
     ) as tmp:
         root = Path(tmp)
-        rows = _media_crash_matrix(_build_registry(), root)
+        rows = _media_crash_matrix(_canonical_registry(), root)
     assert len(rows) >= 12, f"expected several boundaries, got {len(rows)}"
     assert rows[-1]["kind"] == "commit"
     _emit_diagnostics("core.media.import", rows)
@@ -1757,7 +1754,7 @@ def test_task_completion_crashes_at_every_boundary_to_old_or_complete() -> None:
         prefix="astrid-crash-task-complete-"
     ) as tmp:
         root = Path(tmp)
-        rows = _completion_crash_matrix(_build_registry(), root)
+        rows = _completion_crash_matrix(_canonical_registry(), root)
     assert len(rows) >= 30, f"expected many boundaries, got {len(rows)}"
     assert rows[-1]["kind"] == "commit"
     _emit_diagnostics("core.task.complete", rows)

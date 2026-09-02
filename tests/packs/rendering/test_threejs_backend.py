@@ -564,7 +564,7 @@ def test_threejs_real_render_empty_timeline_through_public_service(
     # legacy_v1 payload inside the backend fragment.
     assert payload["engine"] == THREEJS_ID
     assert payload["audio_ownership"] == "rendered"
-    assert payload["routing"]["resolved_backend"] == THREEJS_ID
+    assert payload["resolved_policy"]["renderers"] == [THREEJS_ID]
     assert payload["segments_v2"][0]["renderer"]["id"] == THREEJS_ID
     fragment = payload["backend_fragments"][THREEJS_ID]
     assert fragment["renderer"] == "threejs"
@@ -648,7 +648,7 @@ def test_threejs_real_render_text_timeline_through_public_service(
     assert payload["sha256"] == hashlib.sha256(Path(published).read_bytes()).hexdigest()
     assert payload["engine"] == THREEJS_ID
     assert payload["audio_ownership"] == "rendered"
-    assert payload["routing"]["resolved_backend"] == THREEJS_ID
+    assert payload["resolved_policy"]["renderers"] == [THREEJS_ID]
     assert payload["segments_v2"][0]["renderer"]["id"] == THREEJS_ID
     assert payload["backend_fragments"][THREEJS_ID]["renderer"] == "threejs"
     assert payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["engine"] == "threejs"

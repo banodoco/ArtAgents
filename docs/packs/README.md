@@ -5,9 +5,9 @@ defines the model; authoring and reference guides build on it.
 
 ## Canonical Pack Contract
 
-- **[contract.md](contract.md)** — M0 pack contract: vocabulary, capability
-  identity, pack axes, discovery contract, manifest convergence, current pack
-  listing, axes-to-taxonomy mapping, and deferred scope.
+- **[contract.md](contract.md)** — strict-v2 manifest grammar, canonical catalog,
+  contribution axes, documentation/resources, database ownership, and consumer
+  rules.
 
 ## Authoring & Reference
 

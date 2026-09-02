@@ -73,8 +73,8 @@ database; any other failure propagates immediately.
 """
 
 
-def _build_registry():
-    """Compose core plus default-enabled canonical database packs."""
+def _canonical_registry():
+    """Compose the default database projection from the bundled catalog."""
     from astrid.packs import compose_standard_pack_database
 
     return compose_standard_pack_database().registry
@@ -82,7 +82,7 @@ def _build_registry():
 
 def _build_context(db_path: Path) -> ConformanceContext:
     """Build one fresh standard-Astrid conformance context."""
-    registry = _build_registry()
+    registry = _canonical_registry()
     writer = DatabaseWriter(db_path, registry)
     events = EventAppendService(registry)
     receipts = ReceiptService()

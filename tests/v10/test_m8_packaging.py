@@ -15,6 +15,10 @@ import pytest
 from astrid.core.migrations.runner import MigrationTooNewError, probe_database
 from astrid.packs import compose_standard_pack_database
 from scripts.reshape.installed_artifact import build_once
+from scripts.reshape.package_closure import (
+    check_source_resource_closure,
+    declared_source_resource_paths,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,33 +42,25 @@ EXPECTED_RUNTIME_MODULES = {
     "astrid/packs/references/__init__.py",
     "astrid/packs/references/repository.py",
 }
-EXPECTED_RESOURCES = {
-    "astrid/core/migrations/sql/core/0001_initial.sql",
-    "astrid/packs/timeline/pack.yaml",
-    "astrid/packs/timeline/migrations/0001_initial.sql",
-    "astrid/packs/shots/pack.yaml",
-    "astrid/packs/shots/migrations/0001_initial.sql",
-    "astrid/packs/references/pack.yaml",
-    "astrid/packs/references/migrations/0001_initial.sql",
-    "astrid/core/rendering/schemas/v1/request.json",
-    "astrid/core/rendering/fixtures/renderer_parity/remotion_backend_wrapper.py",
-    "astrid/packs/rendering/pack.yaml",
-    "astrid/packs/rendering/backends/remotion/renderer.yaml",
-    "astrid/packs/rendering/elements/effects/text-card/element.yaml",
-    "astrid/packs/rendering/elements/effects/text-card/component.tsx",
-    "astrid/packs/training/orchestrators/dataset_build/review_ui/index.html",
-    "astrid/packs/training/orchestrators/dataset_build/review_ui/styles.css",
-}
+EXPECTED_RESOURCES = set(declared_source_resource_paths(REPO_ROOT))
+EXPECTED_RESOURCES.update(
+    {
+        "astrid/core/rendering/schemas/v1/request.json",
+        "astrid/core/rendering/fixtures/renderer_parity/remotion_backend_wrapper.py",
+        "astrid/packs/rendering/elements/effects/text-card/element.yaml",
+        "astrid/packs/rendering/elements/effects/text-card/component.tsx",
+        "astrid/packs/training/orchestrators/dataset_build/review_ui/index.html",
+        "astrid/packs/training/orchestrators/dataset_build/review_ui/styles.css",
+    }
+)
 FORBIDDEN_WHEEL_MARKERS = (
     ".megaplan/",
     "/tests/",
-    "/skill/",
     "/golden/",
     "/build/",
     "/dist/",
     "__pycache__/",
     ".pyc",
-    "STAGE.md",
     "requirements.txt",
 )
 
@@ -89,6 +85,18 @@ def _snapshot_ignore(_directory: str, names: list[str]) -> set[str]:
     }
     return {name for name in names if name in ignored or name.endswith(".egg-info")}
 
+
+def test_source_declared_resource_and_documentation_closure() -> None:
+    closure = check_source_resource_closure(REPO_ROOT)
+    assert closure.ok, closure.errors
+    assert len(closure.paths) == 63
+    assert sum(path.endswith("/pack.yaml") for path in closure.paths) == 22
+    assert sum(
+        path.endswith("/skill/SKILL.md") and "/packs/_core/" not in path
+        for path in closure.paths
+    ) == 22
+    assert "astrid/packs/_core/skill/SKILL.md" in closure.paths
+    assert sum("/migrations/" in path for path in closure.paths) == 5
 
 @pytest.fixture(scope="module")
 def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -199,22 +207,32 @@ def test_wheel_metadata_entry_points_and_runtime_modules(wheel: Path) -> None:
     assert EXPECTED_RESOURCES <= names
 
 
-def test_wheel_contains_complete_resource_matrix_and_excludes_authoring_material(
+def test_wheel_contains_canonical_pack_manifest_doc_and_resource_closure(
     wheel: Path,
 ) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
     assert EXPECTED_RESOURCES <= names
+    assert sum(name.endswith("/pack.yaml") for name in names if name.startswith("astrid/packs/")) == 22
+    assert sum(
+        name.endswith("/skill/SKILL.md") and "/packs/_core/" not in name
+        for name in names
+        if name.startswith("astrid/packs/")
+    ) == 22
+    assert "astrid/packs/_core/skill/SKILL.md" in names
+    assert {
+        "astrid/packs/references/migrations/0001_initial.sql",
+        "astrid/packs/runaway/migrations/0001_initial.sql",
+        "astrid/packs/shots/migrations/0001_initial.sql",
+        "astrid/packs/timeline/migrations/0001_initial.sql",
+    } <= names
+    assert not any(
+        name.startswith("astrid/packs/")
+        and name.endswith(("/pack.yml", "/pack.json", "/schema-pack.yaml"))
+        for name in names
+    )
     forbidden = [name for name in sorted(names) if any(marker in name for marker in FORBIDDEN_WHEEL_MARKERS)]
     assert not forbidden, forbidden[:20]
-    assert any(name.endswith("/pack.yaml") for name in names)
-    assert {
-        "astrid/packs/timeline/pack.yaml",
-        "astrid/packs/shots/pack.yaml",
-        "astrid/packs/references/pack.yaml",
-    } <= names
-
-
 def test_installed_module_and_console_entry_paths_report_one_version(
     installed: tuple[Path, Path],
 ) -> None:

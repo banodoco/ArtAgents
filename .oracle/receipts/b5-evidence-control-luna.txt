@@ -1,0 +1,8 @@
+EVIDENCE_CONTROL: PASS
+MATRIX: 15/15 completeness; 13 PASS, 1 BASELINE-PROVEN, 1 PENDING
+UPDATED: .oracle/evidence/b5-final-matrix.md, .oracle/implementation-ledger.md, .oracle/tasklist.md, .oracle/plan.md, .oracle/status.md
+B5_CHECKS: B5.1-B5.8 checked; B5.9 pending
+BASELINE_TRUTH: The single focused/full authoritative invocation stopped at two `banodoco_timeline_schema` collection paths; both are exact-base-reproduced baseline failures. Focused: 1870 collected, 1 error, 0 executed; full: 7631 collected, 2 errors, 0 executed.
+NEXT: Frozen candidate HEAD `1214ba8f19cc73a6c16e386a6563b7b07cb9dcee` with corrected wheel SHA `0720feb62563be35bba39a1f7c7e1f0c31fb99f26ea79c1572db9c55e8e9d40b`; final independent Luna/Sol review, then commit/push
+BLOCKERS: Final independent review/oracle and reviewed B5 commit/push remain pending; authoritative suites stopped during collection without test execution
+0

@@ -42,17 +42,16 @@ from astrid.core.conformance import (
     run_all,
     standard_command_specs,
 )
-from astrid.core.events.registry import register_core_vocabulary, validate_command_kind
+from astrid.core.events.registry import validate_command_kind
 from astrid.core.events.service import EventAppendService
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.runs import RunRepository
 from astrid.core.repositories.tasks import TaskRepository
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 from astrid.packs.references.conformance import reference_command_specs
 from astrid.packs.references.repository import ReferenceRepository
 from astrid.packs.shots.conformance import (
@@ -91,10 +90,7 @@ def _build_context(
     (fixed project slugs never collide), and injects only the repositories
     the test asks for so independence of the two pack factories is provable.
     """
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    registry = registry.freeze()
+    registry = compose_standard_pack_database().registry
     writer = DatabaseWriter(db_path, registry)
     events = EventAppendService(registry)
     receipts = ReceiptService()

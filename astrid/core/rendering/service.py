@@ -1,8 +1,5 @@
 """Backend-neutral orchestration for one committed timeline render.
 
-``RenderService`` is the only core component that understands the legacy
-renderer selector spellings.  Everything after that compatibility boundary is
-resolved through the rendering registries and invoked through protocol v1.
 Backends write private artifacts in an invocation workspace; the service
 validates them and performs exactly one locked publication at the end.
 """
@@ -14,10 +11,9 @@ import json
 import math
 import os
 import re
-import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
@@ -111,16 +107,11 @@ def _pack_discovery_scope(extra_pack_roots: Sequence[str]) -> Any:
             os.environ[ASTRID_PACKS_PATH] = previous
 
 
-class LegacyRenderRoutingWarning(UserWarning):
-    """A legacy selector selected a different qualified backend."""
-
-
 @dataclass(frozen=True)
 class _SelectionPolicy:
     requested: str
     kind: Literal["renderer", "planner"]
     targets: tuple[str, ...]
-    auto_route: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,7 +119,6 @@ class _ResolvedCapability:
     candidate: RenderingCandidate[Any]
     evidence: dict[str, Any]
     support: SupportReport
-    rejected: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -149,64 +139,32 @@ class _InvocationContext:
 _REPLAY_VERBS = frozenset({"render", "finalize", "plan", "support"})
 
 
-def _translate_legacy_selector(
+def _selection_policy(
     selector: str | None,
     registries: tuple[Any, Any, Any] | None = None,
 ) -> _SelectionPolicy:
-    """Translate the three historical names, and no other short names.
-
-    The ordered pair for legacy ``remotion`` is its characterized compatibility
-    policy: request-sensitive FFmpeg support gets the first opportunity, then
-    Remotion.  Qualified selectors contain no fallback and are therefore
-    strict (normal registry aliases and overrides still apply).  A qualified
-    id that resolves as a PLANNER (and not as a renderer) is classified as a
-    planner so third-party planner packs are publicly selectable; the renderer
-    classification wins when the id exists in both registries.
-    """
-
-    if selector is None:
-        selector = "remotion"
-    if selector == "ffmpeg":
-        return _SelectionPolicy(selector, "renderer", ("rendering.ffmpeg",))
-    if selector == "remotion":
-        return _SelectionPolicy(
-            selector,
-            "renderer",
-            ("rendering.ffmpeg", "rendering.remotion"),
-            auto_route=True,
+    requested = "rendering.remotion" if selector is None else selector
+    if not isinstance(requested, str) or not _QUALIFIED_ID_RE.fullmatch(requested):
+        raise_unsupported_error(
+            backend=_CORE_BACKEND_ID,
+            message=f"unknown renderer selector {requested!r}",
+            recovery_command="select a qualified renderer or planner id and retry",
+            details={
+                "selector": requested if isinstance(requested, str) else repr(requested),
+            },
         )
-    if selector == "hybrid":
-        return _SelectionPolicy(
-            selector,
-            "planner",
-            ("rendering.legacy_hybrid",),
-        )
-    if isinstance(selector, str) and _QUALIFIED_ID_RE.fullmatch(selector):
-        if registries is not None:
-            renderers, planners, _finalizers = registries
+    if registries is not None:
+        renderers, planners, _finalizers = registries
+        try:
+            renderers.get(requested)
+            return _SelectionPolicy(requested, "renderer", (requested,))
+        except Exception:
             try:
-                renderers.get(selector)
-                return _SelectionPolicy(selector, "renderer", (selector,))
+                planners.get(requested)
+                return _SelectionPolicy(requested, "planner", (requested,))
             except Exception:
                 pass
-            try:
-                planners.get(selector)
-                return _SelectionPolicy(selector, "planner", (selector,))
-            except Exception:
-                pass
-        return _SelectionPolicy(selector, "renderer", (selector,))
-    raise_unsupported_error(
-        backend=_CORE_BACKEND_ID,
-        message=f"unknown renderer selector {selector!r}",
-        recovery_command=(
-            "select a qualified renderer id or one of the legacy selectors: "
-            "remotion, ffmpeg, hybrid"
-        ),
-        details={
-            "selector": selector if isinstance(selector, str) else repr(selector),
-            "legacy_selectors": ["remotion", "ffmpeg", "hybrid"],
-        },
-    )
+    return _SelectionPolicy(requested, "renderer", (requested,))
 
 
 class RenderService:
@@ -409,7 +367,7 @@ class RenderService:
                     recovery_command="choose a distinct .provenance.json sidecar path",
                     details={"path": str(output)},
                 )
-            policy = _translate_legacy_selector(
+            policy = _selection_policy(
                 selector,
                 registries=(
                     self.renderers,
@@ -418,11 +376,10 @@ class RenderService:
                 ),
             )
             self._observe(
-                "legacy_translation",
-                requested=selector,
+                "selection",
+                requested=policy.requested,
                 kind=policy.kind,
-                targets=list(policy.targets),
-                auto_route=policy.auto_route,
+                target=policy.targets[0],
             )
             # Request-sensitive support is a deterministic admission check.
             # Run it in an OS temporary directory before creating anything
@@ -505,7 +462,7 @@ class RenderService:
             raise_protocol_error(
                 backend=_CORE_BACKEND_ID,
                 message="selector, engine, and backend disagree",
-                recovery_command="supply one renderer selector spelling and retry",
+                recovery_command="supply one qualified renderer or planner id and retry",
                 details={"selectors": supplied},
             )
         return supplied[0]
@@ -700,54 +657,21 @@ class RenderService:
         registry: RendererRegistry | PlannerRegistry = (
             self.renderers if policy.kind == "renderer" else self.planners
         )
-        rejected: list[dict[str, Any]] = []
-        for index, target in enumerate(policy.targets):
-            try:
-                candidate, evidence = self._resolve_candidate(
-                    registry,
-                    target,
-                    kind=policy.kind,
-                )
-                report = self._support(
-                    candidate,
-                    request=request,
-                    workspace=workspace,
-                    registry=registry,
-                )
-            except RendererException as exc:
-                if not policy.auto_route or index == len(policy.targets) - 1:
-                    raise
-                if exc.error.kind not in {"unsupported", "binary_missing"}:
-                    raise
-                rejected.append(exc.error.to_dict())
-                continue
-            if not report.supported:
-                rejected.append(report.to_dict())
-                if policy.auto_route and index < len(policy.targets) - 1:
-                    continue
-                self._unsupported_report(report, registry=registry)
-            if policy.auto_route and index == 0:
-                warnings.warn(
-                    f"legacy selector {policy.requested!r} auto-routed this supported "
-                    f"timeline to {candidate.id}; select a qualified renderer "
-                    "id for strict routing",
-                    LegacyRenderRoutingWarning,
-                    stacklevel=4,
-                )
-            return _ResolvedCapability(
-                candidate,
-                evidence,
-                report,
-                rejected=list(rejected),
-            )
-
-        alternatives = self._alternatives(registry)
-        raise_unsupported_error(
-            backend=(policy.targets[-1] if policy.targets else _CORE_BACKEND_ID),
-            message=f"no renderer supports legacy selector {policy.requested!r}",
-            recovery_command=self._recovery_for(alternatives),
-            details={"attempts": rejected, "alternatives": alternatives},
+        target = policy.targets[0]
+        candidate, evidence = self._resolve_candidate(
+            registry,
+            target,
+            kind=policy.kind,
         )
+        report = self._support(
+            candidate,
+            request=request,
+            workspace=workspace,
+            registry=registry,
+        )
+        if not report.supported:
+            self._unsupported_report(report, registry=registry)
+        return _ResolvedCapability(candidate, evidence, report)
 
     def _resolve_candidate(
         self,
@@ -1415,11 +1339,9 @@ class RenderService:
                 message="plan operation did not return a RenderPlan",
                 details={"received_type": type(response).__name__},
             )
-        # The registry selection is authoritative.  A planner response may
-        # still carry the pre-alias/pre-override identity it was asked to
-        # replace (notably during compatibility routing); normalize that
-        # self-description to the selected candidate and its complete
-        # resolution evidence below.
+        # The registry selection is authoritative. Normalize the planner's
+        # self-description to the selected candidate and its resolution
+        # evidence before invoking each renderer.
         planner_resolution = self._planner_resolution(selected)
         normalized_segments: list[RenderSegment] = []
         segment_results: list[RenderResult] = []
@@ -1430,11 +1352,9 @@ class RenderService:
                 segment.renderer.id,
                 kind="renderer",
             )
-            # The planner already resolved aliases/overrides itself and
-            # recorded that lineage on the segment.  Re-resolving the emitted
-            # id from scratch would discard the alias chain, so merge: the
-            # service's resolution is authoritative for identity/trust while
-            # the planner's recorded lineage survives when present.
+            # Renderer identities are canonical qualified ids. The service
+            # resolves each planner-emitted id through the typed registry
+            # before invoking it.
             planner_renderer = segment.renderer
             native_request = replace(
                 request,
@@ -1463,10 +1383,7 @@ class RenderService:
                 source_pack=self._source_pack(candidate, evidence),
                 manifest_digest=candidate.manifest_digest,
                 trust_eligibility=candidate.eligibility.to_dict(),
-                alias_chain=(
-                    planner_renderer.alias_chain
-                    or list(evidence.get("alias_chain") or [])
-                ),
+                alias_chain=list(evidence.get("alias_chain") or []),
                 override=planner_renderer.override or evidence.get("override"),
                 support_decision=report,
             )
@@ -1531,7 +1448,7 @@ class RenderService:
                 or list(finalizer_evidence.get("alias_chain") or [])
             ),
             override=response.finalizer.override or finalizer_evidence.get("override"),
-            # The planner's finalizer support_decision names its pre-alias
+            # The planner's finalizer support_decision names its selected
             # identity; _finish_plan re-evaluates support for the resolved
             # finalizer and records the authoritative decision.
             support_decision=None,
@@ -1841,14 +1758,6 @@ class RenderService:
     ) -> RenderPlan:
         finalizer_resolution = self._direct_finalizer_resolution()
         reasons: dict[str, str] = {"0": "direct renderer selection"}
-        if selected.rejected:
-            # A legacy auto-route selector rejects earlier candidates before
-            # the winning backend succeeds; record that rejection evidence so
-            # provenance explains why this backend rendered the timeline.
-            reasons["0"] = (
-                "direct renderer selection; rejected candidates: "
-                + json.dumps(selected.rejected, sort_keys=True)
-            )
         if request.window is not None:
             if request.window.fps_rational != result.video.profile.fps_rational:
                 raise_invalid_artifact_error(
@@ -2398,4 +2307,4 @@ class RenderService:
             self._stage_observer(stage, details)
 
 
-__all__ = ["LegacyRenderRoutingWarning", "RenderService"]
+__all__ = ["RenderService"]

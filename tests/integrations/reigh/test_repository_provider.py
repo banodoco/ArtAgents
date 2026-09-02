@@ -21,7 +21,6 @@ from typing import Any
 
 import pytest
 
-from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.bridge_service import (
     ASTROID_DATABASE_NAME,
@@ -47,10 +46,9 @@ from astrid.core.integrations.reigh.bridge_service import (
 )
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
-from astrid.core.schema_packs.registry import SchemaPackRegistry
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import register_standard_schema_packs
+from astrid.packs import compose_standard_pack_database
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 
@@ -59,18 +57,15 @@ CONFIG = {"fps": 24, "tracks": [{"id": "V1", "kind": "visual"}]}
 SAVED_CONFIG = {"fps": 30, "tracks": [{"id": "V1", "kind": "visual"}]}
 
 
-def _build_registry():
-    """Compose core + exactly timeline, shots, and references, then freeze."""
-    registry = SchemaPackRegistry()
-    register_core_vocabulary(registry)
-    register_standard_schema_packs(registry)
-    return registry.freeze()
+def _canonical_registry():
+    """Compose the default database projection from the bundled catalog."""
+    return compose_standard_pack_database().registry
 
 
 @pytest.fixture
 def writer(tmp_path: Path):
     """A fresh standard-Astrid writer at ``<tmp>/astrid.sqlite3``."""
-    w = DatabaseWriter(tmp_path / "astrid.sqlite3", _build_registry())
+    w = DatabaseWriter(tmp_path / "astrid.sqlite3", _canonical_registry())
     try:
         yield w
     finally:
@@ -79,7 +74,7 @@ def writer(tmp_path: Path):
 
 def _make_adapter(writer: DatabaseWriter) -> TimelineBridgeAdapter:
     """Build the standard timeline bridge adapter over one writer."""
-    registry = _build_registry()
+    registry = _canonical_registry()
     events = EventAppendService(registry)
     receipts = ReceiptService()
     projects = ProjectRepository(events=events, receipts=receipts)
@@ -609,7 +604,7 @@ def test_adapter_save_survives_writer_restart_with_stale_conflict(
     timeline_ulid = "01jm4k5n7p0000000000000aa1"
     db_path = tmp_path / "astrid.sqlite3"
 
-    writer1 = DatabaseWriter(db_path, _build_registry())
+    writer1 = DatabaseWriter(db_path, _canonical_registry())
     try:
         adapter1 = _make_adapter(writer1)
         project = _create_project(
@@ -638,7 +633,7 @@ def test_adapter_save_survives_writer_restart_with_stale_conflict(
 
     # A brand-new writer reopens the same database file: the committed
     # document, registry, and head survive the restart.
-    writer2 = DatabaseWriter(db_path, _build_registry())
+    writer2 = DatabaseWriter(db_path, _canonical_registry())
     try:
         adapter2 = _make_adapter(writer2)
         loaded = adapter2.load_timeline(project.slug, timeline_id)

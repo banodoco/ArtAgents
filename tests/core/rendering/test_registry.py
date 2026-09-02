@@ -33,7 +33,6 @@ SOURCE_ROOT = FIXTURES / "source"
 ENV_ROOT = FIXTURES / "env"
 EXTRA_ROOT = FIXTURES / "extra"
 INSTALLED_FIXTURES = FIXTURES / "installed"
-CYCLE_ROOT = FIXTURES / "cycle"
 
 
 def _scanner(source_root: Path):
@@ -92,10 +91,14 @@ def _write_renderer_pack(
         for permission in declared_permissions
     )
     pack_lines = [
-        "schema_version: 1",
+        "schema_version: 2",
         f"id: {pack_id}",
         f"name: {pack_id}",
         "version: 1.0.0",
+        "domain: media",
+        "stability: stable",
+        "support: project",
+        "visibility: visible",
     ]
     if permission_lines:
         pack_lines.append("permissions:\n" + permission_lines.rstrip())
@@ -132,24 +135,6 @@ def _write_renderer_pack(
     return pack_root
 
 
-def _append_renderer_aliases(
-    pack_root: Path,
-    *aliases: tuple[str, str],
-) -> None:
-    manifest = pack_root / "pack.yaml"
-    lines = ["aliases:"]
-    for alias, canonical_id in aliases:
-        lines.extend(
-            [
-                "  - kind: renderer",
-                f"    alias: {alias}",
-                f"    canonical_id: {canonical_id}",
-            ]
-        )
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8") + "\n".join(lines) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _stage_installed_fixture(
@@ -274,233 +259,15 @@ def test_same_pack_conflict_report_is_deterministic(tmp_path: Path) -> None:
     assert [candidate.manifest.name for candidate in conflict.shadowed] == ["Second"]
 
 
-def test_alias_chain_and_programmatic_compatibility_aliases(tmp_path: Path) -> None:
-    with _load_with_source(tmp_path) as (renderers, _, _):
-        chained = renderers.get("rendering.legacy")
-        chain_evidence = renderers.resolve_evidence("rendering.legacy")
-        remotion = renderers.get("remotion")
-        ffmpeg = renderers.get("ffmpeg")
-
-    assert chained.id == "rendering.remotion"
-    assert chain_evidence["alias_chain"] == [
-        "rendering.legacy",
-        "rendering.compat",
-        "rendering.remotion",
-    ]
-    assert remotion.id == "rendering.remotion"
-    assert ffmpeg.id == "rendering.ffmpeg"
 
 
-def test_alias_cycle_is_rejected_as_structured_registry_error(tmp_path: Path) -> None:
-    cycle_root = CYCLE_ROOT
-    with (
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(cycle_root),
-        ),
-        mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": ""}, clear=False),
-    ):
-        with pytest.raises(RendererRegistryError) as caught:
-            load_default_registries(tmp_path, include_installed=False)
-
-    assert caught.value.code == "alias_cycle"
-    assert caught.value.to_dict()["capability_kind"] == "renderer"
-
-
-def test_alias_to_ineligible_direct_target_does_not_shadow_eligible_alias(
-    tmp_path: Path,
-) -> None:
-    source_root = tmp_path / "source"
-    bad_root = _write_renderer_pack(
-        source_root,
-        "abad",
-        renderer_name="Denied",
-        required_permissions=("network",),
-    )
-    good_root = _write_renderer_pack(
-        source_root,
-        "bgood",
-        renderer_name="Eligible",
-    )
-    for pack_root, target in (
-        (bad_root, "abad.renderer"),
-        (good_root, "bgood.renderer"),
-    ):
-        manifest = pack_root / "pack.yaml"
-        manifest.write_text(
-            manifest.read_text(encoding="utf-8")
-            + "aliases:\n"
-            + "  - kind: renderer\n"
-            + "    alias: shared.renderer-alias\n"
-            + f"    canonical_id: {target}\n",
-            encoding="utf-8",
-        )
-
-    with _load_with_source(tmp_path / "project", source_root) as (renderers, _, _):
-        selected = renderers.get("shared.renderer-alias")
-
-    assert selected.id == "bgood.renderer"
-    assert selected.manifest.name == "Eligible"
-
-
-def test_two_hop_alias_to_ineligible_env_renderer_falls_through(
-    tmp_path: Path,
-) -> None:
-    source_root = tmp_path / "source"
-    extra_root = tmp_path / "extra"
-    env_root = tmp_path / "env"
-    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
-    fallback = _write_renderer_pack(
-        extra_root,
-        "trustedfallback",
-        renderer_name="Trusted Fallback",
-    )
-    _write_renderer_pack(env_root, "envdenied", renderer_name="Environment Denied")
-    _append_renderer_aliases(
-        high,
-        ("shared.transitive", "highchain.middle"),
-        ("highchain.middle", "envdenied.renderer"),
-    )
-    _append_renderer_aliases(
-        fallback,
-        ("shared.transitive", "trustedfallback.renderer"),
-    )
-
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-        env_pack_roots=(str(env_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-        denied = renderers.inspect("envdenied.renderer")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "trustedfallback.renderer",
-    ]
-    assert len(denied) == 1
-    assert denied[0].execution_eligible is False
-
-
-def test_two_hop_alias_to_missing_terminal_falls_through(tmp_path: Path) -> None:
-    source_root = tmp_path / "source"
-    extra_root = tmp_path / "extra"
-    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
-    fallback = _write_renderer_pack(
-        extra_root,
-        "trustedfallback",
-        renderer_name="Trusted Fallback",
-    )
-    _append_renderer_aliases(
-        high,
-        ("shared.transitive", "highchain.middle"),
-        ("highchain.middle", "missing.renderer"),
-    )
-    _append_renderer_aliases(
-        fallback,
-        ("shared.transitive", "trustedfallback.renderer"),
-    )
-
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "trustedfallback.renderer",
-    ]
-
-
-def test_alias_chain_uses_eligible_fallback_for_ineligible_intermediate_hop(
-    tmp_path: Path,
-) -> None:
-    source_root = tmp_path / "source"
-    extra_root = tmp_path / "extra"
-    env_root = tmp_path / "env"
-    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
-    fallback = _write_renderer_pack(
-        extra_root,
-        "trustedfallback",
-        renderer_name="Trusted Fallback",
-    )
-    _write_renderer_pack(env_root, "envdenied", renderer_name="Environment Denied")
-    _append_renderer_aliases(
-        high,
-        ("shared.transitive", "shared.middle"),
-        ("shared.middle", "envdenied.renderer"),
-    )
-    _append_renderer_aliases(
-        fallback,
-        ("shared.middle", "trustedfallback.renderer"),
-    )
-
-    with _load_with_source(
-        tmp_path / "project",
-        source_root,
-        extra_pack_roots=(str(extra_root),),
-        env_pack_roots=(str(env_root),),
-    ) as (renderers, _, _):
-        selected = renderers.get("shared.transitive")
-        evidence = renderers.resolve_evidence("shared.transitive")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.transitive",
-        "shared.middle",
-        "trustedfallback.renderer",
-    ]
-
-
-def test_dangling_programmatic_alias_falls_through_to_eligible_pack_alias(
-    tmp_path: Path,
-) -> None:
-    source_root = tmp_path / "source"
-    fallback = _write_renderer_pack(
-        source_root,
-        "trustedfallback",
-        renderer_name="Trusted Fallback",
-    )
-    _append_renderer_aliases(
-        fallback,
-        ("shared.programmatic", "trustedfallback.renderer"),
-    )
-
-    with (
-        mock.patch.object(
-            rendering_registry_module,
-            "_PROGRAMMATIC_RENDERER_ALIASES",
-            (("shared.programmatic", "missing.renderer"),),
-        ),
-        _load_with_source(
-            tmp_path / "project",
-            source_root,
-        ) as (renderers, _, _),
-    ):
-        selected = renderers.get("shared.programmatic")
-        evidence = renderers.resolve_evidence("shared.programmatic")
-
-    assert selected.id == "trustedfallback.renderer"
-    assert evidence["alias_chain"] == [
-        "shared.programmatic",
-        "trustedfallback.renderer",
-    ]
-
-
-def test_override_is_applied_after_alias_resolution(tmp_path: Path) -> None:
+def test_override_is_applied_after_canonical_resolution(tmp_path: Path) -> None:
     store = OverrideStore(tmp_path)
     store.set_override("renderer", "rendering.remotion", "rendering.ffmpeg")
 
     with _load_with_source(tmp_path) as (renderers, _, _):
-        selected = renderers.get("remotion")
-        evidence = renderers.resolve_evidence("remotion")
+        selected = renderers.get("rendering.remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
     assert selected.id == "rendering.ffmpeg"
     assert evidence["canonical_id"] == "rendering.remotion"
@@ -527,7 +294,7 @@ def test_invalid_and_facade_override_targets_are_rejected(
 
     with _load_with_source(tmp_path) as (renderers, _, _):
         with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("remotion")
+            renderers.get("rendering.remotion")
 
     assert caught.value.code == code
 
@@ -565,7 +332,7 @@ def test_environment_candidate_is_inspectable_but_not_executable(tmp_path: Path)
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
 
-    inspected = renderers.inspect("env_render.legacy")
+    inspected = renderers.inspect("env_render.renderer")
     assert len(inspected) == 1
     assert inspected[0].source_kind == "env"
     assert inspected[0].execution_eligible is False
@@ -646,15 +413,14 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
-    assert candidate.execution_eligible is False
+    assert renderers.inspect("corrupt_render.renderer") == ()
     with pytest.raises(RendererRegistryError) as caught:
         renderers.get("corrupt_render.renderer")
-    assert caught.value.code == "execution_ineligible"
+    assert caught.value.code == "unknown_capability"
 
 
 @pytest.mark.parametrize("bad_install_root", [None, []])
-def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
+def test_installed_type_corrupt_audit_is_not_discovered(
     tmp_path: Path,
     bad_install_root: object,
 ) -> None:
@@ -680,10 +446,7 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
-    assert candidate.execution_eligible is False
-    assert "install" in candidate.eligibility.reason
-
+    assert renderers.inspect("corrupt_render.renderer") == ()
 
 def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
     astrid_home = tmp_path / "astrid-home"
@@ -757,15 +520,18 @@ def test_manifest_permission_not_declared_by_pack_is_ineligible(tmp_path: Path) 
     assert "not declared" in candidate.eligibility.reason
 
 
-def test_hybrid_is_never_a_renderer_alias(tmp_path: Path) -> None:
+@pytest.mark.parametrize("selector", ["remotion", "ffmpeg", "hybrid"])
+def test_unqualified_renderer_selectors_are_rejected(
+    tmp_path: Path,
+    selector: str,
+) -> None:
     with _load_with_source(tmp_path) as (renderers, planners, _):
         assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
         with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("hybrid")
+            renderers.get(selector)
 
     assert caught.value.code == "unknown_capability"
-    assert renderers.alias_resolver is not None
-    assert renderers.alias_resolver.is_alias("hybrid") is False
+    assert renderers.alias_resolver is None
 
 
 def test_renderer_manifest_cannot_register_the_facade_id(tmp_path: Path) -> None:
@@ -786,7 +552,7 @@ def test_renderer_manifest_cannot_register_the_facade_id(tmp_path: Path) -> None
 
 def test_resolve_evidence_has_required_selection_and_trust_shape(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, _, _):
-        evidence = renderers.resolve_evidence("remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
     assert {
         "source_kind",
@@ -800,7 +566,7 @@ def test_resolve_evidence_has_required_selection_and_trust_shape(tmp_path: Path)
     assert evidence["source_kind"] == "source"
     assert evidence["pack_id"] == "rendering"
     assert len(evidence["manifest_digest"]) == 64
-    assert evidence["alias_chain"] == ["remotion", "rendering.remotion"]
+    assert evidence["alias_chain"] == []
     assert evidence["override"] is None
     assert evidence["priority"] == 0
     assert evidence["execution_eligible"] is True

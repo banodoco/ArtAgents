@@ -574,7 +574,7 @@ def _seed_m2_contention(writer, standard_registry, tmp_path, *, slug_suffix):
             u,
             project_id=project.id,
             capability="rendering.timeline_visualize",
-            spec={"backend": "remotion"},
+            spec={"backend": "rendering.remotion"},
             input_manifest=["m"],
             idempotency_key=f"m2-admit-{slug_suffix}",
             created_at=M2_TS,

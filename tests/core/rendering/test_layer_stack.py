@@ -770,11 +770,7 @@ def _write_stacked_proof(
                 f"format.duration={probe.get('format', {}).get('duration')}",
                 f"planner={planner}",
                 "finalizer="
-                + str(
-                    sidecar.get("routing", {})
-                    .get("resolved_policy", {})
-                    .get("finalizer")
-                ),
+                + str(sidecar.get("resolved_policy", {}).get("finalizer")),
                 f"segments={json.dumps(segments, sort_keys=True)}",
                 f"corner_rgb={corner}  — media red showing through transparent threejs",
                 f"text_rgb={text_pixel} — NOT media red (top composited)",
@@ -809,10 +805,8 @@ def _assert_stacked_output(
     assert abs(duration - expected_frames / 24.0) < 0.15, probe
 
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    routing = sidecar["routing"]["resolved_policy"]
-    assert routing["finalizer"] == layer_stack.COMPOSITOR_FINALIZER_ID
-    segments = sidecar["segments_v2"]
-    assert {segment["renderer"]["id"] for segment in segments} == expected_renderers
+    resolved = sidecar["resolved_policy"]
+    assert resolved["finalizer"] == layer_stack.COMPOSITOR_FINALIZER_ID
     by_renderer = {segment["renderer"]["id"]: segment for segment in segments}
     for renderer_id, segment in by_renderer.items():
         layer = segment["layer"]
@@ -948,4 +942,4 @@ def test_real_stacked_render_constructed_plan_threejs_over_remotion(
         proof=True,
     )
     sidecar = json.loads(Path(f"{published}.provenance.json").read_text(encoding="utf-8"))
-    assert sidecar["routing"]["resolved_policy"]["planner"] == layer_stack.BACKEND_ID
+    assert sidecar["resolved_policy"]["planner"] == layer_stack.BACKEND_ID

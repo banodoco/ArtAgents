@@ -44,7 +44,7 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return timeline, assets, out
 
 
-def test_render_delegates_to_service_with_default_selector(fake_service: _FakeService, tmp_path: Path) -> None:
+def test_render_delegates_to_service_with_default_qualified_selector(fake_service: _FakeService, tmp_path: Path) -> None:
     timeline, assets, out = _inputs(tmp_path)
     sentinel = tmp_path / "sentinel.mp4"
     fake_service.sentinel = sentinel
@@ -55,9 +55,9 @@ def test_render_delegates_to_service_with_default_selector(fake_service: _FakeSe
     assert len(fake_service.calls) == 1
     (call_args, call_kwargs) = fake_service.calls[0]
     assert call_args == (timeline, assets, out)
-    assert call_kwargs["selector"] == "remotion"
+    assert call_kwargs["selector"] == "rendering.remotion"
     assert call_kwargs["previous_outputs"] == ()
-    # Legacy kwargs map onto namespaced backend config.
+    # Public kwargs map onto namespaced backend configuration.
     assert call_kwargs["backend_config"]["rendering.remotion"] == {
         "composition_id": "TimelineComposition"
     }
@@ -65,9 +65,9 @@ def test_render_delegates_to_service_with_default_selector(fake_service: _FakeSe
 
 @pytest.mark.parametrize(
     "engine",
-    ["remotion", "ffmpeg", "hybrid", "rendering.remotion", "rendering.ffmpeg"],
+    ["rendering.remotion", "rendering.ffmpeg", "rendering.legacy_hybrid"],
 )
-def test_render_forwards_legacy_and_qualified_selectors(
+def test_render_forwards_qualified_selectors(
     fake_service: _FakeService, tmp_path: Path, engine: str
 ) -> None:
     timeline, assets, out = _inputs(tmp_path)
@@ -87,7 +87,7 @@ def test_render_maps_legacy_kwargs_into_namespaced_backend_config(
         timeline,
         assets,
         out,
-        engine="hybrid",
+        engine="rendering.legacy_hybrid",
         project_dir=tmp_path / "remotion",
         composition_id="CustomComposition",
         theme_path=tmp_path / "theme.json",
@@ -242,4 +242,4 @@ def test_main_engine_defaults_to_remotion_when_absent(
 
     assert result == 0
     assert len(fake_service.calls) == 1
-    assert fake_service.calls[0][1]["selector"] == "remotion"
+    assert fake_service.calls[0][1]["selector"] == "rendering.remotion"

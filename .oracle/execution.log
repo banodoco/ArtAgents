@@ -1660,3 +1660,135 @@
   reported 279 passed, 78 subtests passed, and three finite B5-only conditions:
   two installed packaging-closure failures and the inherited unavailable
   `banodoco_timeline_schema` SDK lane. B5 may begin.
+- Two disjoint exact-Luna B5 source units completed. Packaging/docs passed:
+  explicit package data, active strict-v2 guidance, 63-path source closure,
+  13 installed-artifact tests, and source validation are green. The active
+  test-authority unit migrated SDK/domain fixtures and passed 66 SDK plus
+  focused authority/conformance tests, but returned four finite closure groups:
+  pre-cutover `test_packs_validate`, reference archive conformance, M7
+  corruption classification, and a task-crash timeout caused by repeated
+  canonical catalog construction. The unavailable `banodoco_timeline_schema`
+  lane is reproduced unchanged and remains baseline-only.
+- One exact-Luna integrated source correction will address only those four
+  groups and reconcile both units. No wheel build, full suite, repeated broad
+  validation, B1 reopening, or candidate 47 is authorized.
+- The bounded B5 source-rework worker completed its focused edits and tests,
+  but its orphaned wrapper left a zero-byte receipt after the inherited Sol
+  owner timed out. The edits are preserved. One read-only exact-Luna delta
+  certification will recover durable evidence for only the four corrected
+  groups and their direct source-closure dependency set; no implementation
+  restart, broad validation, B1 review, candidate 47, or panel is launched.
+- The sole B5 source-rework delta certification returned `PASS`: all 44
+  source/package-authority paths examined, 103 strict-v2 validation tests,
+  five reference-conformance tests, seven M7 hardening tests, the complete
+  task crash matrix, 63-path source closure, 13 M8 tests, 43 authority/
+  projection tests, 66 SDK tests, and adjacent closure passed. The known
+  unavailable `banodoco_timeline_schema` lane remains unchanged baseline-only.
+  There are no finite source blockers; one clean-wheel build/audit is next.
+- The first B5 clean-wheel audit proved 219 GiB free, build 1.6.0, a
+  2,398,804-byte wheel, 22 packs, exact 63-path installed closure, help,
+  doctor, database/default/Runaway/external trust behavior, 13 M8 tests, and
+  the wheel smoke. It found one finite blocker: normal text `pack inspect`
+  calls an undefined `_print_taxonomy_block`; JSON inspect passes. One bounded
+  source correction and affected wheel delta rebuild are required. All
+  unaffected wheel passes remain reusable.
+- The bounded text-inspect correction returned `PASS`. Root cause was a
+  missing import of the existing `_cli_shared._print_taxonomy_block`, not a
+  missing renderer. Two canonical inspect tests, source text/JSON smoke, and
+  two affected M8 checks pass; only `cli_inspect.py` and its focused test
+  changed. One candidate-2 wheel build and affected dependency-closure audit
+  is next; candidate-1 unaffected passes remain valid.
+- Corrected wheel candidate 2 passed its bounded delta audit. Artifact
+  SHA-256 is `0720feb62563be35bba39a1f7c7e1f0c31fb99f26ea79c1572db9c55e8e9d40b`;
+  imports resolve outside the checkout, installed text and JSON inspect pass,
+  exact 63/63 closure remains, two focused inspect tests and 13 M8 tests pass.
+  Candidate-1 help/doctor/database/default/Runaway/external-trust/catalog/smoke
+  passes remain valid. The single focused plus full authoritative source-suite
+  run is next.
+- The single authoritative focused/full invocation stopped during collection:
+  the known unavailable `banodoco_timeline_schema` rendering import remained,
+  and `tests/timeline/test_inverses.py` reached the same missing dependency
+  through timeline schema initialization. Doctor passed with 22 packs, 22/22
+  docs, 551 resource handles, and zero pending migrations. No second full
+  suite is run. One isolated exact-base comparison of only the additional
+  timeline collection path will decide baseline classification.
+- Exact-base comparison returned `PASS`: isolated commit
+  `7ac50c12e8e4d90988fee603ffdb9896e5628792` reproduces the same
+  `TimelineEventSchemaError` caused by unavailable
+  `banodoco_timeline_schema` for `tests/timeline/test_inverses.py`. Both
+  authoritative collection errors are unrelated baseline conditions; no
+  product blocker and no second full run remain. The 15-row evidence matrix
+  and B5 control-document reconciliation are next.
+- B5 evidence/control reconciliation passed: the final matrix has exactly 15
+  complete rows; B5.1–B5.8 are checked and B5.9 remains pending; status stays
+  active. The final source candidate freezes 44 paths in
+  `b5-candidate-1.sha256` (manifest SHA-256
+  `e7fcf2ba64c29db732e015aab0ffa0d12ae95b98ca6cd4f521309a4e37126f92`).
+  The 19-identity review bundle SHA-256 is
+  `c4b820033d4b70404479fa5aec91b29fe410449c01e357ec7369229576b08d59`.
+  One independent final Luna review is next under the recorded bounded cadence.
+- Independent final Luna review returned `PASS`: 44/44 source and 19/19
+  evidence identities plus corrected wheel matched; criteria 1–13 pass,
+  criterion 14 is accepted as exact-base-proven baseline, and criterion 15
+  awaits only the independent Sol oracle. The matrix is complete and scope/
+  exclusions are intact with no findings. One separate exact-Sol oracle
+  disposition against the same frozen identities is next.
+- Independent final Sol oracle returned `REWORK` after all frozen identities
+  matched. Criterion 14 remains accepted as baseline-proven. Two finite groups
+  block criteria 2/3/7/8/11/15: programmatic remotion/ffmpeg compatibility
+  identity and legacy selector/provenance remain outside `pack.yaml`, with
+  tests/docs blessing them; and active `render-backend-v1.md` still shows a
+  schema-v1 pack example. One bounded exact-Luna correction will remove those
+  alternate identities, migrate direct callers/tests/docs to qualified IDs,
+  and run only their dependency closure. No B1 reopening, candidate 47, broad
+  suite, or panel is authorized.
+- The first bounded exact-Luna final-Sol correction reached its 2700-second
+  wrapper deadline after making substantial edits but produced a zero-byte
+  receipt when the inherited owner exited. The edits are preserved. One
+  exact-Luna continuation will inspect and finish only the same two finite
+  renderer/guidance findings and their direct closure; no restart, broad suite,
+  B1 reopening, candidate 47, or panel is launched.
+- The exact-Luna continuation returned `PASS`: renderer identity is qualified-
+  only, legacy selector/provenance compatibility is deleted, active pack
+  guidance uses strict v2, and bounded source/authority/package closure passed.
+  B5 candidate 2 freezes 95 product/test paths (one deletion) in
+  `.oracle/evidence/b5-candidate-2.sha256`; manifest SHA-256 is
+  `e737d1582b74c3f0bf025684615c483595dd6e13967110e816a8591cf7355356`.
+  One independent exact-Luna affected-criterion delta will verify these two
+  findings, the complete affected tests, and one corrected wheel; unaffected
+  final-review and candidate-2 wheel passes remain valid.
+- Independent candidate-2 delta certification matched all 95 identities and
+  passed both Sol source findings, qualified caller rejection, authority lint,
+  63-path source closure, and affected M8 checks. It returned `REWORK` only
+  because direct use of the recorded build environment omitted the successful
+  build-isolation dependency path, so no corrected wheel was produced. One
+  bounded exact-Luna artifact closure will use the accepted candidate-2
+  `build_once(..., install_dependencies=True)` pattern, audit only affected
+  installed bytes/identity, and resolve one focused freeze-test baseline; no
+  source edit or repeated broad validation is authorized.
+- Corrected wheel candidate 3 closure returned `PASS`: 95/95 identities,
+  outside-checkout wheel `astrid-0.1.0-py3-none-any.whl`, 2,396,407 bytes,
+  SHA-256 `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`;
+  exact packaged renderer/skill bytes, 22-pack catalog, qualified-ID
+  resolution, retired-selector rejection, and 63/63 closure pass. The affected
+  freeze assertion reproduces control HEAD and is not candidate-caused.
+- Implementation ledger, tasklist, plan, status, and the 15-row final matrix
+  now reflect candidate-2 final-Sol rework and corrected wheel candidate 3.
+  Original final-Luna unaffected passes and the one independent candidate-2
+  delta remain valid. Final independent Sol re-oracle is the sole review gate
+  before B5 checkpoint commit and explicit push.
+- Final re-oracle identities froze successfully: candidate 2 remains 95/95
+  with manifest SHA-256
+  `e737d1582b74c3f0bf025684615c483595dd6e13967110e816a8591cf7355356`;
+  refreshed 26-entry review bundle SHA-256 is
+  `e78e8471bcaf073c2bffa3a0edc3268b8fbeb50ac2928de5bf693eea7815805b`;
+  corrected wheel SHA-256 is
+  `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`.
+  One separate exact-Sol final re-oracle will disposition the finite 15
+  criteria and the two prior findings without another Luna panel or broad run.
+- Final independent exact-Sol re-oracle returned `PASS`: candidate 2 `95/95`,
+  refreshed bundle `26/26`, corrected wheel identity matched, both prior
+  findings closed, criteria 1–13 and 15 passed, criterion 14 remained
+  baseline-proven, and scope/exclusions held with no blockers. No additional
+  model dispatch or validation is authorized; the reviewed B5 checkpoint
+  commit and explicit final push are next.

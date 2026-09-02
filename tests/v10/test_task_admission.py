@@ -59,9 +59,9 @@ TS2 = "2026-08-16T01:00:00.000000+00:00"
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _UUID4_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
 
-SPEC_A = {"backend": "remotion", "composition": "main", "fps": 24}
-SPEC_A_RENAMED_KEYS = {"composition": "main", "fps": 24, "backend": "remotion"}
-SPEC_B = {"backend": "remotion", "composition": "main", "fps": 30}
+SPEC_A = {"backend": "rendering.remotion", "composition": "main", "fps": 24}
+SPEC_A_RENAMED_KEYS = {"composition": "main", "fps": 24, "backend": "rendering.remotion"}
+SPEC_B = {"backend": "rendering.remotion", "composition": "main", "fps": 30}
 MANIFEST_A = ["media_1", "media_2"]
 MANIFEST_B = ["media_1"]
 

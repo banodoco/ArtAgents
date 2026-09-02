@@ -556,7 +556,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
 
     if isinstance(exc, MediaDecodabilityError):
         recovery = (
-            "install ffprobe (from the ffmpeg package) and retry"
+            "install ffprobe and retry"
             if exc.probe_reason == "ffprobe_unavailable"
             else "replace the file with a valid decodable media file and retry"
         )

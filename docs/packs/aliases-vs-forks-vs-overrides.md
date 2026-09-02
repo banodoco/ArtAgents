@@ -13,7 +13,7 @@ guide builds on the vocabulary in
 | Redirect a capability id to a replacement | Override | `.overrides.json` in local pack | Your project |
 | Shadow a builtin with a local replacement | Override | `.overrides.json` in local pack | Your project |
 | Maintain backward-compat after renaming | Alias | In pack manifest | All consumers |
-| Keep an old renderer/planner/finalizer id working | Alias with the matching rendering `kind` | In pack manifest | All render-service callers |
+| Select a rendering implementation | Qualified renderer/planner/finalizer id | Invocation or plan | Rendering callers |
 | Redirect one rendering implementation to another | Typed override | `.overrides.json` in local pack | Facade and direct-service calls in your project |
 
 ---
@@ -21,44 +21,33 @@ guide builds on the vocabulary in
 ## Aliases
 
 **What:** A one-way mapping from a public alias id to a fully-qualified
-canonical id, declared in the owning pack's manifest.
+canonical id, declared in the owning pack's strict-v2 manifest.
 
-**Where they live:** Aliases are a top-level pack manifest field — they live in
-`pack.yaml` on the canonical pack that owns the target capability, not in the
-capability's own manifest. This keeps alias ownership explicit: the pack that
-provides the canonical capability declares the legacy ids that route to it.
+**Where they live:** Aliases are a top-level `pack.yaml` field on the canonical
+pack that owns the target capability. This keeps alias ownership explicit.
 
-**Schema (pack.json v1):**
+**Schema:** The `aliases` array is defined by
+`astrid/core/pack/schemas/v2/pack.json`. Each entry contains:
 
-Each alias entry is an object with:
 
 | Field | Required | Type | Description |
 |---|---|---|---|
-| `kind` | Yes | `"executor"`, `"orchestrator"`, `"renderer"`, `"planner"`, or `"finalizer"` | The capability kind the alias routes to |
+| `kind` | Yes | `"executor"`, `"orchestrator"`, `"planner"`, or `"finalizer"` | The capability kind the alias routes to |
 | `alias` | Yes | Qualified id (`pack.slug`) | The old or alternate public id |
 | `canonical_id` | Yes | Qualified id (`pack.slug`) | The canonical id this alias points to |
-| `deprecated` | No | `boolean` (default `false`) | Whether the alias is deprecated |
-| `deprecation_message` | No | `string` (default `""`) | Human-readable deprecation note shown in inspect/search |
 
 Both `alias` and `canonical_id` must be qualified ids (e.g. `rendering.render`,
-not bare `render`). Element aliases are still deferred; renderer, planner, and
-finalizer aliases are independent rendering-registry namespaces.
+not bare `render`). Renderer implementation selection is always by the
+qualified id declared by its owning pack.
 
 **Example** in `pack.yaml`:
 
 ```yaml
-# In astrid/packs/rendering/pack.yaml
+# In a pack manifest
 aliases:
   - kind: executor
-    alias: builtin.render
-    canonical_id: rendering.render
-    deprecated: true
-    deprecation_message: "Moved to rendering.render — update your references"
-  - kind: renderer
-    alias: rendering.old-remotion
-    canonical_id: rendering.remotion
-    deprecated: true
-    deprecation_message: "Use rendering.remotion"
+    alias: video_tool.old_executor
+    canonical_id: video_tool.executor
 ```
 
 Multiple aliases can point to the same canonical id, and aliases are resolved
@@ -68,39 +57,23 @@ Cycle detection runs at registration time and rejects invalid alias graphs.
 **How it works:** The `AliasResolver` (in `astrid/core/pack/alias_resolver.py`)
 maintains a registry of `alias → canonical_id` mappings. Aliases are loaded from
 `PackDefinition.aliases` during registry construction, filtered by `kind`, and
-registered with their deprecation metadata and source pack id preserved. Both
-the executor and orchestrator registries wire aliases from discovered packs
-automatically — no separate registration step is needed.
+registered with their source pack id preserved. Executor, orchestrator, planner,
+and finalizer registries wire aliases from discovered packs automatically.
 
-**Backward compatibility:** Old ids like `builtin.*`, `external.*`, and
-declared one-off aliases such as `upload.youtube` remain functional when
-declared as aliases. Registry lookup,
-`inspect --json`, and search all resolve the old id to the canonical definition
-and surface deprecation metadata. The old ids do not need their own capability
-definitions — they are pure alias entries.
+Aliases are optional identity metadata. A declared alias resolves to its
+qualified canonical id and does not create a second capability definition.
 
-**Deprecation metadata is non-fatal.** A deprecated alias still resolves; the
-deprecation flag and message are informational, shown in `inspect` output and
-search records. Consumers can use the message to plan migration without being
-blocked.
+Bundled product packs currently declare no aliases. In particular, do not add
+aliases for `pack.yml`, `pack.json`, `schema-pack.yaml`, or removed bundled
+capability namespaces; those are retired forms, not supported identities.
 
-**What aliases are NOT:**
+**What aliases are not:**
 
-- **Element aliases** — element kinds are not accepted. Element aliasing is
-  deferred to a future milestone.
-- **Component-level `metadata.aliases`** — The `metadata.aliases` field on
-  individual executor/orchestrator manifests (e.g. `executor.yaml`) is legacy
-  validation-only coverage. It is checked during static validation but is not
-  loaded into the alias resolver. Do not use it for new alias declarations;
-  use the pack-level `aliases` field instead.
+- element aliases;
+- component-level `metadata.aliases` as a replacement for the pack-level field;
+- a behavioral fork or a database composition mechanism.
 
-**When to use:** You renamed a capability but old consumers still reference the
-old id. Instead of breaking them, add a pack-level alias.
-
-**When NOT to use:** You want to change behavior. Aliases are identity-only;
-they don't alter execution. Use a fork or override for behavioral changes.
-
----
+Use a fork or typed override when behavior must change.
 
 ## Forks
 
@@ -146,13 +119,10 @@ a thread-safe in-memory mapping of `(type, id) → target_id`, persisted to
 — whenever a registry looks up a capability by id, the override store is
 consulted after alias resolution.
 
-**Canonical-id keying:** Override keys are the *canonical* capability id, not
-the alias. When a caller requests `builtin.render` (a legacy alias), the
-registry first resolves it to `rendering.render` (the canonical id), then
-checks the override store for `("executor", "rendering.render")`. This means
-one override covers all aliases that point to the same canonical target — you
-do not need to set separate overrides for each alias.
-
+**Canonical-id keying:** Override keys are the *canonical* capability id. A
+caller selects the qualified id directly, and the registry checks the override
+store for `("executor", "rendering.render")`. One override therefore targets
+the canonical implementation without any alternate renderer spelling.
 ### Override Mechanisms
 
 Overrides are managed by editing `astrid/packs/local/.overrides.json`, which
@@ -173,9 +143,8 @@ maps canonical ids to their replacement ids per capability kind:
 3. Add the override to `astrid/packs/local/.overrides.json`:
    `{"executor": {"rendering.render": "local.render"}}`.
 
-Now every consumer that references `rendering.render` (or its legacy alias
-`builtin.render`) gets your customized version transparently.
-
+Now every consumer that references `rendering.render` gets your customized
+version transparently.
 **When to use:** You have a fork (or another pack's capability) and want it to
 be the default resolution for a given id.
 
@@ -204,8 +173,11 @@ for informational display.
 
 ## Rendering Implementations
 
-Renderer, planner, and finalizer resolution uses the same ordering, but each is
-its own namespace. These keys are distinct:
+Renderer, planner, and finalizer IDs are separate namespaces. Renderer
+implementation selection is qualified-only: rendering packs declare no renderer
+aliases, and the registry rejects every unqualified renderer selector. Planner
+and finalizer aliases, when declared by their owning pack, follow the normal
+alias/override ordering. These keys are distinct:
 
 ```json
 {
@@ -223,35 +195,24 @@ calls. Changing one kind never redirects another.
 
 The rendering registries apply the following verified rules:
 
-1. Resolve the requested alias transitively to its canonical id.
-2. Apply an override keyed by that canonical id and implementation kind.
-3. Select the highest-precedence execution-eligible candidate for the final id.
-4. Record the requested id, alias chain, `{from,to}` override, source pack,
-   manifest digest, and trust eligibility in resolution evidence and render
-   provenance.
+1. Require the requested renderer, planner, or finalizer id to be qualified.
+2. Resolve only declared planner/finalizer aliases; renderer aliases are not
+   accepted.
+3. Apply an override keyed by that qualified id, when one is configured.
+4. Select the highest-precedence execution-eligible candidate.
+5. Record the requested id, override, source pack, manifest digest, and trust
+   eligibility in resolution evidence and render provenance.
 
-Only aliases from execution-eligible packs can redirect execution. Aliases from
-environment-only or otherwise untrusted packs remain visible to inspection but
-cannot shadow an executable implementation. When a higher-precedence alias
-chain ends at a missing or ineligible target, resolution may use the next
-eligible declaration for that alias. A trusted alias whose canonical target is
-absent remains usable when an override explicitly routes that canonical id to
-an eligible implementation. Alias cycles, missing override targets, and
-ineligible override targets fail closed.
-
-`rendering.render` is reserved for the executor facade. A renderer registration,
-alias terminal, or renderer override that resolves to it is rejected as facade
-recursion. The legacy short names `remotion` and `ffmpeg` are core compatibility
-aliases for renderer lookup, while the facade's legacy selector
-`engine=remotion` retains its characterized auto-route policy. To demand the
-Remotion implementation strictly, select the qualified id
-`backend=rendering.remotion`; qualified selectors have no implicit fallback.
-
+`rendering.render` is reserved for the executor facade. A renderer registration
+or renderer override that resolves to it is rejected as facade recursion.
+Renderer, planner, and finalizer implementations are selected by their
+qualified ids; unqualified renderer selectors are rejected. Typed overrides
+remain available when a project intentionally routes one qualified
+implementation to another.
 Renderer/planner/finalizer overrides are stored by the same project-local
 `OverrideStore` in `astrid/packs/local/.overrides.json`. There is no separate
-backend override file or backend-specific override format. Pack manifests may
-declare aliases of `kind: renderer`, `kind: planner`, and `kind: finalizer`;
-their extension manifests are registered through
+backend override file or backend-specific override format. Their extension
+manifests are registered through
 `extensions.rendering.renderers`, `.planners`, and `.finalizers` respectively.
 Override management for executor, orchestrator, and element ids happens
 through the project-local `OverrideStore` and its

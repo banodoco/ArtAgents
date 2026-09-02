@@ -1,8 +1,8 @@
 """Discovery / eligibility matrix edge cases (T1.5).
 
 Extends ``tests/core/rendering/test_registry.py`` (T1.4) with additional
-edge cases that lock the static discovery, precedence, conflict, alias,
-override, eligibility, and evidence contract of the rendering registries.
+edge cases that lock the static discovery, precedence, conflict, override,
+eligibility, and evidence contract of the rendering registries.
 
 Every test here is fully static: fixture backends are never imported and
 never executed (``backend.py`` / ``backend_should_not_import.py`` files
@@ -94,10 +94,14 @@ def _write_renderer_pack(
         for permission in declared_permissions
     )
     pack_lines = [
-        "schema_version: 1",
+        "schema_version: 2",
         f"id: {pack_id}",
         f"name: {pack_id}",
         "version: 1.0.0",
+        "domain: media",
+        "stability: stable",
+        "support: project",
+        "visibility: visible",
     ]
     if permission_lines:
         pack_lines.append("permissions:\n" + permission_lines.rstrip())
@@ -213,13 +217,13 @@ def test_static_load_and_read_surface_never_imports_fixture_backend_modules(
 
     with _load_with_source(tmp_path / "project") as (renderers, planners, finalizers):
         renderers.get("rendering.remotion")
-        renderers.get("ffmpeg")
+        renderers.get("rendering.ffmpeg")
         renderers.list()
         renderers.inspect("rendering.remotion")
         renderers.candidates()
         renderers.candidates("rendering.remotion", eligible=True)
         renderers.conflicts()
-        renderers.resolve_evidence("remotion")
+        renderers.resolve_evidence("rendering.remotion")
         renderers.validate_all()
         planners.list()
         finalizers.list()
@@ -424,184 +428,6 @@ def test_multiple_conflicts_are_reported_in_deterministic_key_order(
     assert first == second
 
 
-# ---------------------------------------------------------------------------
-# Alias matrix
-# ---------------------------------------------------------------------------
-
-
-def test_env_pack_alias_is_inspectable_but_not_executable(tmp_path: Path) -> None:
-    """Aliases declared by an untrusted env pack fail closed for execution.
-
-    The inspection resolver sees every alias (so ``inspect`` resolves the
-    env candidate); the executable resolver only contains aliases from
-    trusted packs, so ``get`` treats the alias as unknown rather than ever
-    resolving through untrusted metadata.
-    """
-    renderers, _, _ = _load_env_registries(tmp_path / "project")
-
-    inspected = renderers.inspect("env_render.legacy")
-    assert len(inspected) == 1
-    assert inspected[0].manifest.name == "Environment Fixture Renderer"
-    assert inspected[0].source_kind == "env"
-
-    assert renderers.candidates("env_render.legacy", eligible=True) == ()
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("env_render.legacy")
-    assert caught.value.code == "unknown_capability"
-    with pytest.raises(RendererRegistryError) as evidence_caught:
-        renderers.resolve_evidence("env_render.legacy")
-    assert evidence_caught.value.code == "unknown_capability"
-
-
-# ---------------------------------------------------------------------------
-# Override matrix
-# ---------------------------------------------------------------------------
-
-
-def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -> None:
-    """Overriding onto a discoverable-but-ineligible target is rejected.
-
-    The override lands on an env-layer renderer that can never be executed;
-    resolution fails with a structured error that records the override that
-    caused the redirect.
-    """
-    store = OverrideStore(tmp_path / "project")
-    store.set_override("renderer", "rendering.remotion", "env_render.renderer")
-
-    renderers, _, _ = _load_env_registries(tmp_path / "project")
-
-    with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("rendering.remotion")
-
-    assert caught.value.code == "execution_ineligible"
-    details = caught.value.to_dict()["details"]
-    assert details["override"] == {
-        "from": "rendering.remotion",
-        "to": "env_render.renderer",
-    }
-    assert details["target_id"] == "env_render.renderer"
-    assert details["canonical_id"] == "rendering.remotion"
-
-
-def _write_alias_to_absent_pack(packs_root: Path) -> Path:
-    """A source pack whose renderer alias points at a canonical in ANOTHER
-    pack namespace that does not exist in the discovery tree. Cross-pack
-    alias targets are not statically checked (validate.py only validates
-    same-pack targets), so this pack passes validate_pack and can be
-    installed, while resolution still requires the override to supply the
-    implementation."""
-    pack_root = _write_renderer_pack(
-        packs_root,
-        "alias_missing",
-        renderer_name="Alias Missing Renderer",
-        renderer_id="alias_missing.renderer",
-    )
-    pack_yaml = pack_root / "pack.yaml"
-    lines = pack_yaml.read_text(encoding="utf-8").splitlines()
-    alias_block = [
-        "aliases:",
-        "  - kind: renderer",
-        "    alias: alias_missing.legacy",
-        "    canonical_id: other.abstract.renderer",
-    ]
-    # insert aliases before extensions
-    idx = next(i for i, line in enumerate(lines) if line.startswith("extensions:"))
-    lines[idx:idx] = alias_block
-    pack_yaml.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return pack_root
-
-
-def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
-    tmp_path: Path,
-) -> None:
-    """A pack-declared alias whose canonical is absent still routes through
-    an override to an executable implementation.
-
-    The frozen ordering is alias -> canonical -> override: a missing canonical
-    must not silently drop a trusted pack alias when an override supplies the
-    implementation.
-    """
-    project_root = tmp_path / "project"
-    source_root = tmp_path / "source"
-    source_root.mkdir()
-    pack_root = _write_alias_to_absent_pack(source_root)
-
-    # The cross-pack alias must pass static pack validation (the same-pack
-    # target rule does not apply) so the pack remains installable.
-    from astrid.core.pack.validate import validate_pack
-    from astrid.core.pack.install_local import install_pack
-    from astrid.core.pack.store import InstalledPackStore
-
-    errors, warnings = validate_pack(str(pack_root))
-    assert not errors, errors
-
-    astrid_home = tmp_path / "astrid-home"
-    empty_source = tmp_path / "empty-source"
-    empty_source.mkdir()
-    store = InstalledPackStore(astrid_home / "packs")
-    exit_code = install_pack(
-        pack_root,
-        store=store,
-        dry_run=False,
-        skip_confirm=True,
-        trust_acknowledged=True,
-        trust_method="test",
-        trust_actor="test",
-    )
-    assert exit_code == 0, f"install failed with exit {exit_code}"
-
-    override_store = OverrideStore(project_root)
-    override_store.set_override("renderer", "other.abstract.renderer", "alias_missing.renderer")
-
-    # Resolve from the INSTALLED revision (include_installed=True, empty
-    # source tree) so the override route is proven on the installed pack.
-    with (
-        mock.patch.dict(
-            os.environ,
-            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
-            clear=False,
-        ),
-        mock.patch(
-            "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(empty_source),
-        ),
-    ):
-        renderers, _, _ = load_default_registries(project_root, include_installed=True)
-
-    candidate = renderers.get("alias_missing.legacy")
-    assert candidate.id == "alias_missing.renderer"
-    assert candidate.source_kind == "installed"
-    assert candidate.execution_eligible is True
-
-    evidence = renderers.resolve_evidence("alias_missing.legacy")
-    assert evidence["canonical_id"] == "other.abstract.renderer"
-    assert evidence["resolved_id"] == "alias_missing.renderer"
-    assert evidence["override"] == {
-        "from": "other.abstract.renderer",
-        "to": "alias_missing.renderer",
-    }
-
-
-def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
-    tmp_path: Path,
-) -> None:
-    """Without an override, a pack alias to an absent canonical is dropped
-    and resolution reports the missing target."""
-    project_root = tmp_path / "project"
-    source_root = tmp_path / "source"
-    source_root.mkdir()
-    _write_alias_to_absent_pack(source_root)
-
-    with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
-        with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("alias_missing.legacy")
-        assert caught.value.code == "unknown_capability"
-        with pytest.raises(RendererRegistryError) as evidence_caught:
-            renderers.resolve_evidence("alias_missing.legacy")
-        assert evidence_caught.value.code == "unknown_capability"
-
-
-# ---------------------------------------------------------------------------
 # Eligibility matrix
 # ---------------------------------------------------------------------------
 
@@ -718,23 +544,17 @@ def test_permission_deficiency_reason_lists_all_missing_permissions_sorted(
 # ---------------------------------------------------------------------------
 
 
-def test_hybrid_absent_from_every_renderer_surface(tmp_path: Path) -> None:
-    """``hybrid`` never appears under any name in the renderer registry."""
+def test_unqualified_renderer_selectors_absent_from_renderer_surface(
+    tmp_path: Path,
+) -> None:
+    """Unqualified renderer selectors never resolve in the renderer registry."""
     with _load_with_source(tmp_path / "project") as (renderers, planners, _):
-        renderer_ids = [candidate.id for candidate in renderers.list()]
-        mapping = renderers.as_mapping()
-
-        assert all("hybrid" not in renderer_id for renderer_id in renderer_ids)
-        assert "hybrid" not in mapping
-        assert "rendering.hybrid" not in mapping
-        assert renderers.inspect("hybrid") == ()
-        assert renderers.inspect("rendering.hybrid") == ()
-        with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("hybrid")
-        assert caught.value.code == "unknown_capability"
-
-        # The planner registry keeps its own hybrid translation capability.
         assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
+        for selector in ("hybrid", "remotion", "ffmpeg"):
+            assert renderers.inspect(selector) == ()
+            with pytest.raises(RendererRegistryError) as caught:
+                renderers.get(selector)
+            assert caught.value.code == "unknown_capability"
 
 
 # ---------------------------------------------------------------------------
@@ -742,17 +562,17 @@ def test_hybrid_absent_from_every_renderer_surface(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_evidence_records_alias_chain_and_eligibility_for_bare_alias(
+def test_resolve_evidence_records_canonical_id_and_eligibility(
     tmp_path: Path,
 ) -> None:
-    """Bare ``remotion`` evidence carries the full alias chain and trust."""
+    """Canonical renderer evidence has no alias lineage."""
     with _load_with_source(tmp_path / "project") as (renderers, _, _):
-        evidence = renderers.resolve_evidence("remotion")
+        evidence = renderers.resolve_evidence("rendering.remotion")
 
-    assert evidence["requested_id"] == "remotion"
+    assert evidence["requested_id"] == "rendering.remotion"
     assert evidence["canonical_id"] == "rendering.remotion"
     assert evidence["resolved_id"] == "rendering.remotion"
-    assert evidence["alias_chain"] == ["remotion", "rendering.remotion"]
+    assert evidence["alias_chain"] == []
     assert evidence["override"] is None
     assert evidence["priority"] == 0
     assert evidence["manifest_digest"]

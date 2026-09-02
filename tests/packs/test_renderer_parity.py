@@ -33,7 +33,7 @@ from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import AudioOwnership, RenderRequest, SCHEMA_VERSION
 from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.registry import load_default_registries
-from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
+from astrid.core.rendering.service import RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.project.run import step_dir_for
@@ -293,7 +293,7 @@ def test_empty_timeline_is_rejected_and_failure_workspace_is_clean(
         backend_config={},
     )
     with pytest.raises(RendererException) as caught:
-        service.render_request(request, selector="hybrid", out_path=output)
+        service.render_request(request, selector="rendering.legacy_hybrid", out_path=output)
     assert caught.value.error.kind == "unsupported"
     assert not output.exists()
     assert not Path(f"{output}.provenance.json").exists()
@@ -329,9 +329,8 @@ def test_real_remotion_renders_each_semantic_variant(
         return
     duration = 2.0 if fixture == "transition-windows" else 0.6
     _assert_tiny_semantic_video(output, duration=duration)
-    routing = sidecar["routing"]
-    assert routing["requested_engine"] == "rendering.remotion"
-    assert routing["resolved_backends"] == ["rendering.remotion"]
+    assert sidecar["requested_policy"] == "rendering.remotion"
+    assert sidecar["resolved_policy"]["renderers"] == ["rendering.remotion"]
     assert sidecar["audio_ownership"] == "rendered"
 
 
@@ -351,30 +350,12 @@ def test_real_ffmpeg_renders_supported_semantic_variants(
         audio=AudioOwnership.RENDERED,
     )
     _assert_tiny_semantic_video(output, duration=0.6)
-    assert sidecar["routing"]["resolved_backends"] == ["rendering.ffmpeg"]
+    assert sidecar["resolved_policy"]["renderers"] == ["rendering.ffmpeg"]
     assert sidecar["audio_ownership"] == "rendered"
     if fixture == "audio-reactive-colour":
         fragment = sidecar["backend_fragments"]["rendering.ffmpeg"]
         assert fragment["specialization"]["id"] == "audio-reactive-colour/v1"
 
-
-def test_nominal_remotion_auto_routes_supported_media_to_ffmpeg(
-    parity_media: Path,
-    service: RenderService,
-    tmp_path: Path,
-) -> None:
-    with pytest.warns(LegacyRenderRoutingWarning):
-        output, sidecar = _render(
-            service,
-            parity_media,
-            tmp_path,
-            "media-only",
-            "remotion",
-            audio=AudioOwnership.RENDERED,
-        )
-    _assert_tiny_semantic_video(output, duration=0.6)
-    assert sidecar["routing"]["auto_route"] is True
-    assert sidecar["routing"]["resolved_backends"] == ["rendering.ffmpeg"]
 
 
 def test_real_all_ffmpeg_hybrid_plans_and_finalizes(
@@ -387,7 +368,7 @@ def test_real_all_ffmpeg_hybrid_plans_and_finalizes(
         parity_media,
         tmp_path,
         "media-only",
-        "hybrid",
+        "rendering.legacy_hybrid",
         audio=AudioOwnership.RENDERED,
         backend_config={
             "rendering.legacy_hybrid": {"renderers": ["rendering.ffmpeg"]}
@@ -413,7 +394,7 @@ def test_real_mixed_hybrid_uses_transition_windows(
             parity_media,
             tmp_path,
             "transition-windows",
-            "hybrid",
+            "rendering.legacy_hybrid",
             audio=AudioOwnership.RENDERED,
             backend_config={
                 "rendering.legacy_hybrid": {
@@ -463,7 +444,7 @@ def test_raw_fixture_renderer_is_real_deterministic_and_honors_output_names(
             backend_config={"raw_command.renderer": {"mode": "solid"}},
         )
         outputs.append(output)
-        assert sidecar["routing"]["resolved_backends"] == ["raw_command.renderer"]
+        assert sidecar["resolved_policy"]["renderers"] == ["raw_command.renderer"]
         assert sidecar["audio_ownership"] == "rendered"
     assert sha256_file(outputs[0]) == sha256_file(outputs[1])
 

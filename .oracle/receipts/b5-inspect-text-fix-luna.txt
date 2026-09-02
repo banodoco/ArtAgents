@@ -1,0 +1,7 @@
+INSPECT_FIX: PASS
+ROOT_CAUSE: `cli_inspect.py` called `_print_taxonomy_block` without importing it; the helper remained defined in `_cli_shared.py`.
+CHANGED: `astrid/core/pack/cli_inspect.py`, `tests/packs/test_packs_cli.py`
+TEXT_JSON: Normal text inspect now exits 0 and renders taxonomy fields. JSON inspect remains valid with unchanged canonical identity, database, resource, and taxonomy data.
+TESTS: Pre-edit `python3 -m astrid.core.pack.cli inspect timeline` — failed with `NameError`; `python3 -m pytest tests/packs/test_packs_cli.py::TestCanonicalInspect -q` — 2 passed; source text/JSON smoke — `text_rc=0 json_rc=0 json_valid=1`; `python3 -m pytest tests/v10/test_m8_packaging.py::test_source_declared_resource_and_documentation_closure -q` — 1 passed; `python3 -m pytest tests/v10/test_m8_installed_authority.py::test_installed_mode_rejects_empty_and_wrong_roots -q` — 1 passed.
+BLOCKERS: none
+0

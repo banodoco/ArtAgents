@@ -295,37 +295,52 @@ wheel-complete confined resources/docs, canonical inspection, zero legacy, and
 evidence-backed completion. Avoid declaring success with bypasses, creating an
 evidence platform, or reopening marketplace/lifecycle scope.
 
-- [ ] B5.1 Verify zero v1/flat/alternate loaders, `schema-pack.yaml`, fixed
+- [x] B5.1 Verify zero v1/flat/alternate loaders, `schema-pack.yaml`, fixed
   tuples, raw identity reconstruction, alias shims, compatibility-only tests,
-  or active docs teaching old forms remain. Legacy deletion occurred in B4;
-  B5 does not defer it.
-- [ ] B5.2 Update package data for all 22 v2 manifests, four migration trees,
+  or active docs teaching old forms remain. Source authority lint and active
+  documentation checks pass; legacy deletion occurred in B4.
+- [x] B5.2 Update package data for all 22 v2 manifests, four migration trees,
   all 22 pack skills/docs, `_core` census, and every declared runtime resource.
-- [ ] B5.3 Compare the declared runtime-resource set in source and wheel and
-  prove every declared handle resolves within its owner root.
-- [ ] B5.4 Update authoring, database, SDK/CLI, inspect, doctor, backup/restore,
-  and agent-facing docs to teach only the final form.
-- [ ] B5.5 Prove at least **5 GiB free**, create an isolated validation/build
+  Recorded package-data and source-closure checks pass.
+- [x] B5.3 Compare the declared runtime-resource set in source and wheel and
+  prove every declared handle resolves within its owner root. Candidate 2
+  comparison is `63/63` present with missing `[]`.
+- [x] B5.4 Update authoring, database, SDK/CLI, inspect, doctor, backup/restore,
+  and agent-facing docs to teach only the final form. Active-doc authority
+  checks pass.
+- [x] B5.5 Prove at least **5 GiB free**, create an isolated validation/build
   environment, install and record the version of `build`, then build one clean
-  wheel. The current missing local `build` module is a preflight dependency,
-  not a waived criterion.
-- [ ] B5.6 Run clean outside-checkout wheel checks for help, catalog,
+  wheel. Candidate 2 used the isolated environment with `build 1.6.0` and
+  the recorded corrected SHA-256.
+- [x] B5.6 Run clean outside-checkout wheel checks for help, catalog,
   docs/resources, fresh DB, doctor, default composition, and explicit Runaway.
   Re-run the positive external capability-only v2 install/discovery case from
-  the installed-wheel lane.
-- [ ] B5.7 Run focused pack/database/data-pack/consumer/docs tests and the full
+  the installed-wheel lane. Candidate 2 passed these lanes and external
+  database rejection.
+- [x] B5.7 Run focused pack/database/data-pack/consumer/docs tests and the full
   authoritative suite once; classify only reproducible unrelated baselines.
-- [ ] B5.8 Produce a concise 15-row evidence matrix mapping each frozen goal
-  criterion to commands, results, artifacts, and reviewer disposition.
-- [ ] B5.9 Obtain three independent Luna final verdicts and the final
-  independent Sol oracle disposition; commit the reviewed B5 checkpoint and
-  push `HEAD:refs/heads/megado/canonical-pack-beta` only after the gate. Earlier
-  passed batches already have their own reviewed commits. Do not merge, deploy,
-  or release.
+  Focused/full authoritative collection ran once but stopped with `0` tests
+  executed; both `banodoco_timeline_schema` paths are exact-base-reproduced
+  baselines.
+- [x] B5.8 Produce a concise 15-row evidence matrix mapping each frozen goal
+  criterion to commands, results, artifacts, and reviewer disposition. Matrix
+  is `.oracle/evidence/b5-final-matrix.md`.
+- [ ] B5.9 Complete the reviewed checkpoint and push
+  `HEAD:refs/heads/megado/canonical-pack-beta`. Original final Luna review
+  passed; final Sol initially returned two finite renderer/guidance findings;
+  candidate 2 removed them; one independent Luna affected delta matched
+  `95/95` and passed both source findings; corrected wheel candidate 3 closed
+  the sole artifact blocker; and the separate final Sol re-oracle passed all
+  15 criteria with no blockers. Unaffected passes remain valid; no review
+  panel, broad unchanged validation, B1 reopening, or candidate 47 occurred.
+  Only the reviewed B5 checkpoint commit and explicit push remain. Do not
+  merge, deploy, or release.
 
-Gate B5: 22 canonical packs; zero legacy authority; three-pack default plus
-explicit Runaway; complete source/wheel docs and resources; green tests; final
-independent pass.
+Gate B5 review: **PASS**. Source and corrected wheel closure, 22 canonical
+packs, zero active legacy/renderer compatibility authority, three-pack default
+plus explicit Runaway, complete docs/resources, authoritative baselines, and
+all 15 independent dispositions are accepted. Delivery remains pending until
+the checkpoint commit and explicit push succeed.
 
 ## Explicit exclusions
 
@@ -357,8 +372,21 @@ independent pass.
   `cd4dc91a31e4c7127b4023a87dabfdebea276ff1`**.
 - B4 implementation: **8/8 complete; checkpoint
   `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`**.
-- Canonical-v2 implementation checkpoints: **4/5 committed**.
-- Frozen final criteria satisfied end to end: **0/15**; B1–B4 provide accepted
-  implementation evidence, and production now uses canonical v2 only.
+- Canonical-v2 implementation checkpoints: **4/5 committed**; frozen B5
+  candidate 2 and corrected wheel candidate 3 are evidenced but the B5
+  checkpoint is not yet committed.
+- B5.1–B5.8: **8/8 checked with direct evidence**. Candidate 2 has `95/95`
+  independent identity/source-finding closure; wheel candidate 3 has
+  `63/63` source/wheel closure and SHA-256
+  `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`.
+- B5.7 records the focused/full authoritative collection baseline honestly:
+  both stopped during collection with `0` tests executed, both
+  `banodoco_timeline_schema` paths reproduce exact base, and the affected
+  freeze replay assertion reproduces control HEAD.
+- Frozen final criteria: **15/15 PASS**; criterion 14 is independently accepted
+  as baseline-proven and final Sol re-oracle reports no blockers. Operation
+  delivery remains incomplete only until B5 checkpoint commit and push.
 
-Next action: execute B5 source/wheel/docs/test closure.
+Next action: commit only the reviewed candidate-2 and B5 control/evidence paths,
+then push the explicit final refspec. No further model dispatch or validation
+is authorized absent a commit/push failure.

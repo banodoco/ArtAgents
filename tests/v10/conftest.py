@@ -16,7 +16,7 @@ from astrid.core.store.database import open_database
 
 
 
-def build_standard_registry():
+def canonical_database_registry():
     """Compose the canonical bundled default database projection."""
     from astrid.packs import compose_standard_pack_database
 
@@ -32,7 +32,7 @@ def core_registry():
 @pytest.fixture
 def standard_registry():
     """Frozen standard-Astrid registry (core + the three in-tree packs)."""
-    return build_standard_registry()
+    return canonical_database_registry()
 
 
 @pytest.fixture

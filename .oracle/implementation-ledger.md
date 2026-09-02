@@ -53,13 +53,78 @@ tuples, raw rereads, and the active legacy fallback are deleted. The bounded
 gate accepted an 81-path candidate from candidate 2's unaffected passes plus
 candidate 3's independent finding-5 delta pass. B4 checkpoint:
 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`.
+### B5 addendum — final-Sol bounded rework — 2026-09-01
 
-Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-canonical-pack-beta`
+B5 source/package closure is complete over control `HEAD
+1214ba8f19cc73a6c16e386a6563b7b07cb9dcee`. Source closure resolves exactly
+`63` declared paths with `ok=true` and zero errors; authority lint passes; and
+active documentation/package-data checks pass. The initial final Luna review
+passed. The first final Sol oracle matched every frozen identity but returned
+two finite findings: programmatic renderer aliases/selector/provenance outside
+`pack.yaml`, and one active schema-v1 pack-authoring example.
+
+Candidate 2 removes those alternate renderer identities, migrates their direct
+callers/tests/guidance to qualified manifest-owned IDs, and converts the active
+example to strict pack schema v2 while retaining renderer-manifest protocol v1.
+Its frozen manifest contains `95` product/test paths, one deletion, and SHA-256
+`e737d1582b74c3f0bf025684615c483595dd6e13967110e816a8591cf7355356`.
+The independent affected-criterion Luna delta matched `95/95`, passed both Sol
+findings, authority lint, `63`-path source closure, and affected M8 checks. Its
+only `REWORK` was the absence of a newly rebuilt wheel after direct invocation
+of an under-provisioned build environment.
+
+The bounded artifact closure then used the accepted isolated build harness and
+passed. Corrected wheel candidate 3 is
+`astrid-0.1.0-py3-none-any.whl`, `2,396,407` bytes, SHA-256
+`892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`.
+Its import origin is outside the checkout; packaged renderer module/skill bytes
+match source; all 22 packs load; source/wheel closure is `63/63`; qualified
+renderer IDs resolve and retired short IDs reject. The one affected freeze
+replay assertion fails identically at control `HEAD 1214ba8f`, proving it is
+not candidate-caused.
+
+The single focused/full authoritative invocation remains honestly classified:
+focused collection stopped at `1870` items with one
+`banodoco_timeline_schema` collection error, and full collection stopped at
+`7631` items with two such collection errors; both recorded `0` tests
+executed. The two paths are exact-base-reproduced unavailable-dependency
+baselines. Source doctor independently passed with `ok=true`, 22 packs, 22/22
+documents, and 551 resources.
+
+B5.1–B5.8 have direct evidence and remain checked. Candidate-45 approvals and
+candidate-46's user-directed custody delta remain preserved; no candidate 47,
+B1 revalidation, broad unchanged validation, or review panel was created.
+Original final-Luna passes plus the sole candidate-2 affected delta and bounded
+wheel closure cover the rework. B5.9 remains unchecked only until the final
+independent Sol re-oracle accepts the refreshed identities; reviewed B5
+checkpoint commit and push then remain.
+
+| Criterion | B5 reconciled state |
+| --- | --- |
+| 1 | PASS — source and corrected candidate-3 wheel load all 22 packs |
+| 2 | PASS — one catalog authority; renderer identity is manifest-owned and qualified-only |
+| 3 | PASS — zero-unclassified coverage; compatibility renderer identity deleted |
+| 4 | PASS — B3/B4 manifest-derived default and explicit Runaway composition |
+| 5 | PASS — accepted B3/B4 behavior plus source data-pack/conformance closure |
+| 6 | PASS — B3 owner-relative migration/dependency guarantees |
+| 7 | PASS — operation-owned consumers and qualified renderer callers agree |
+| 8 | PASS — 22/22 docs, `_core` census, and corrected rendering guidance/skill |
+| 9 | PASS — source doctor and installed text/JSON inspect |
+| 10 | PASS — candidate-3 source/wheel closure 63/63, no missing paths |
+| 11 | PASS — schema-pack and renderer compatibility authorities/guidance deleted |
+| 12 | PASS — installed external capability admission and database fail-closed |
+| 13 | PASS — B1/B2 capability-only, database-only, and combined forms |
+| 14 | BASELINE-PROVEN — focused/full collection and affected freeze failures reproduce their bases |
+| 15 | PASS — original final Luna, affected Luna delta, corrected wheel, and final Sol re-oracle all pass |
+
+
+Worktree: `/workspace/astrid-canonical-pack-beta-20260831-a1/Astrid`
 
 Branch: `megado/canonical-pack-beta`
 
 Product base: `7ac50c12e8e4d90988fee603ffdb9896e5628792`; current
-reviewed checkpoint: `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`
+reviewed checkpoint: B4 `81a64d64bd0ac0a920ceec69d75dd4ce9bbd1785`;
+B5 candidate 2 is reviewed and remains uncommitted pending checkpoint/push.
 
 This is the authoritative answer to: **what already exists, what this project
 run actually completed, and what remains to reach the one-canonical-pack beta
@@ -83,15 +148,19 @@ the existing migration, collision, checksum, drift, transaction, writer/UoW,
 repository, and conformance machinery. B4 threads that projection through
 every named operational consumer and activates strict v2 atomically.
 
-The current product is therefore the **active canonical cutover awaiting B5
-closure**:
+The current product is therefore the **active canonical cutover with B5
+evidence closure recorded and final gate work pending**:
 
 - exactly 22 bundled packs load from strict v2 `pack.yaml`;
 - database ownership projects through one catalog with no separate
   `schema-pack.yaml` species or fixed standard tuple;
 - migration, repository, SDK, doctor, backup, restore, inspect, CLI, and
-  rendering/media consumers share operation-owned canonical composition; and
-- B5 must still prove final source/wheel/docs/resources/full-suite closure.
+  rendering/media consumers share operation-owned canonical composition;
+- source and corrected candidate-2 wheel closure are proven; and
+- final independent reviews/oracle, checkpoint commit, and push remain
+  pending.
+
+
 
 ## Authority for execution
 
@@ -391,21 +460,23 @@ useful beta dispositions are:
 
 | Goal criterion | Status now | Evidence-based interpretation |
 | --- | --- | --- |
-| 1. Every bundled product pack loads from v2 `pack.yaml` | **B4 active; wheel proof pending B5** | Exactly 22 retained packs production-load from strict v2 with 64 executors, 12 orchestrators, and 10 elements |
-| 2. One parsed authority feeds consumers | **B4 complete** | One operation-owned catalog and frozen database projection feed every named consumer; no independent production parser/registry builder remains |
-| 3. Zero-unclassified customization ledger | **B2 complete** | Offline 22-row ledger maps capability/database/CLI/SDK/bridge/docs/operations/resources, justifies kernel owners, and reports zero unclassified |
+| 1. Every bundled product pack loads from v2 `pack.yaml` | **PASS — source and wheel closure** | Exactly 22 retained packs load from strict v2; corrected candidate-3 wheel import is outside checkout |
+| 2. One parsed authority feeds consumers | **PASS — candidate-2 hard cut** | One operation-owned catalog/projection feeds every named consumer; renderer identity is qualified and manifest-owned with no programmatic alias/selector authority |
+| 3. Zero-unclassified customization ledger | **PASS — B2 plus candidate-2 closure** | Offline 22-row ledger reports zero unclassified; the omitted renderer compatibility identity was deleted rather than added as a second authority |
 | 4. Manifest-derived standard DB composition | **B4 complete** | Default core/timeline/shots/references and explicit Runaway composition derive from canonical manifests; fixed production authorities are deleted |
 | 5. Four data-pack semantics preserved | **B4 focused evidence green** | Fresh/reopen/Runaway/read-only/drift/rollback, registry/writer/repository, and exact table-ownership behavior pass through active canonical composition |
 | 6. Owner-relative migrations and dependencies | **B3 complete** | Canonical migrations carry confined owner handles; positive minimum heads, availability, cycles, core reachability, ordering, checksums, drift, and transactions pass |
-| 7. Operational consumers agree | **B4 complete** | application/SDK/kernel/timeline/doctor/backup/restore/rendering/media/inspect/CLI share the operation-owned projection |
-| 8. Packaged agent docs and `_core` census | **B2 source docs complete; wheel proof pending B5** | 22/22 direct skills validate and deterministic `_core` routing resolves all 22 |
-| 9. Canonical inspect/doctor output | **B4 source behavior complete; final proof pending B5** | inspect and doctor expose canonical identity, capability, database, docs, resources, and migration state |
-| 10. Clean wheel contains all declared resources | **B2 source closure complete; wheel proof pending B5** | Five standalone Blender resources and all content/extension/migration handles resolve confined with no overlap |
-| 11. Legacy authorities deleted | **B4 complete; final absence audit pending B5** | Four schema manifests, separate parser/standard path, fixed tuples, raw rereads, fallback, and stale active tests/tooling are removed |
-| 12. External capability works; external DB fails | **B1 behavior active; installed-wheel rerun pending B5** | External capability admission and pre-resolution external database rejection use the strict path |
-| 13. Three golden pack forms validate | **B1 complete** | Capability-only, database-only, and combined fixtures validate under the strict path |
-| 14. Focused and broad tests pass after cutover | **B4 focused evidence green; B5 suites pending** | Activation passed focused consumer/authority suites; full authoritative suite remains B5 |
-| 15. Final evidence and independent review | **B1–B4 checkpoints complete; final matrix pending B5** | B4 checkpoint `81a64d64` contains the 81-path accepted activation candidate |
+| 7. Operational consumers agree | **PASS — B4 plus candidate-2 caller closure** | application/SDK/kernel/timeline/doctor/backup/restore/rendering/media/inspect/CLI share the projection; renderer callers use qualified canonical IDs |
+| 8. Packaged agent docs and `_core` census | **PASS — source and wheel closure** | 22/22 direct skills validate; corrected rendering guidance teaches only canonical identity; candidate-3 wheel bytes match source |
+| 9. Canonical inspect/doctor output | **PASS — source and corrected wheel proof** | Source doctor passes; candidate-2 installed text and JSON inspect both exit 0 with canonical identity, database, docs, resources, and taxonomy |
+| 10. Clean wheel contains all declared resources | **PASS — corrected wheel candidate 3** | Source/wheel comparison finds 63/63 declared paths present, missing `[]`, with owner-root confinement; SHA-256 `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633` |
+| 11. Legacy authorities deleted | **PASS — candidate-2 affected delta** | Schema-pack/v1 authorities and renderer aliases/selector/provenance compatibility are deleted; authority lint and active docs pass |
+| 12. External capability works; external DB fails | **PASS — installed-wheel proof** | Candidate-2 installed validator passes external capability discovery/install and rejects external database before SQL/resource resolution |
+| 13. Three golden pack forms validate | **PASS — B1/B2 evidence** | Capability-only, database-only, and combined fixtures validate under the strict path; B1/B2 focused gates passed |
+| 14. Focused and broad tests pass after cutover | **BASELINE-PROVEN — collection prevented execution** | Focused: 1870 collected, 1 collection error, 0 executed; full: 7631 collected, 2 collection errors, 0 executed; both `banodoco_timeline_schema` paths reproduce exact-base baseline |
+| 15. Final evidence and independent review | **PASS — final Sol re-oracle** | Original final Luna PASS, candidate-2 affected delta PASS, corrected wheel closure PASS, and final Sol `15/15` PASS are recorded; B5 commit and push remain delivery work |
+
+
 
 ## Direct execution plan
 
@@ -573,6 +644,29 @@ composes; all declared docs/resources resolve; final tests and review pass.
   boundaries. Its bounded command passed 279 tests plus 78 subtests; two
   installed-artifact failures are finite B5 packaging work and the SDK
   rendering failure is the recorded unavailable dependency lane.
+- B5 source/package closure is recorded in
+  `.oracle/receipts/b5-source-rework-delta-luna.txt`:
+  `SOURCE_DELTA: PASS`, 63-path closure, authority lint, and focused source
+  closure. Original corrected wheel candidate 2 remains reusable for unaffected
+  behavior.
+- The first final Sol receipt matched all identities and returned two finite
+  renderer/guidance findings. Candidate 2 freezes 95 paths in
+  `.oracle/evidence/b5-candidate-2.sha256`; its independent affected delta
+  matched `95/95` and passed both findings in
+  `.oracle/receipts/b5-final-sol-delta-certification-luna.txt`.
+- Corrected wheel candidate 3 passed outside-checkout import, exact packaged
+  renderer bytes, 22-pack catalog ownership, retired-selector rejection, and
+  `63/63` source/wheel closure. Receipt:
+  `.oracle/receipts/b5-final-sol-wheel-closure-luna.txt`; SHA-256
+  `892452482a7cffa15c03a8ffcbe8a48384cb3d22674959004c31c38da5290633`.
+- The authoritative focused/full invocation stopped at collection with `0`
+  tests executed; both `banodoco_timeline_schema` paths are exact-base-
+  reproduced. The affected freeze replay assertion also reproduces at control
+  `HEAD 1214ba8f`, so candidate 2 introduces no new failure.
+- Final matrix: `.oracle/evidence/b5-final-matrix.md`. Original final Luna PASS,
+  the affected Luna delta, corrected wheel closure, and final Sol re-oracle
+  `PASS` are recorded. B5 checkpoint commit and push remain pending.
+
 
 ## Honest progress assessment
 
@@ -584,11 +678,14 @@ composes; all declared docs/resources resolve; final tests and review pass.
 - **Canonical v2 product cutover:** B1–B4 checkpoints complete. Production now
   uses one strict-v2 catalog/database authority across every named consumer;
   alternate schema-pack identity and fixed authorities are deleted.
-- **Clarity/reconciliation:** complete; control documents reflect B1–B4 gate
-  truth.
-- **Frozen final criteria:** 0/15 complete end to end; B1–B4 provide accepted
-  implementation evidence, while B5 final closure remains.
-- **Remaining sequence:** B5 closure.
+- **Clarity/reconciliation:** B5 source, candidate-2 affected delta, corrected
+  candidate-3 wheel, and refreshed matrix evidence are current; historical
+  B1–B4 gate truth remains preserved.
+- **Frozen final criteria:** 15/15 PASS; criterion 14 is independently
+  baseline-proven and final Sol re-oracle reports no blockers. Operation
+  delivery remains incomplete only until B5 checkpoint commit and push.
+- **Remaining sequence:** reviewed B5 checkpoint commit and explicit push.
 
-The correct next action is B5 source/wheel/docs/test/evidence closure.
-Cloud capacity and tooling preflight are green.
+The correct next action is to commit only candidate 2 and the reviewed B5
+control/evidence paths, then push the explicit final refspec. No additional
+model dispatch or validation is authorized absent a commit/push failure.

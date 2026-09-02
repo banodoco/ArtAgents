@@ -21,6 +21,7 @@ from astrid.core.pack import (
     read_normalize_validate,
 )
 from astrid.core.pack.discovery import discover_canonical_packs_ordered
+from astrid.core.pack._cli_shared import _print_taxonomy_block
 
 
 def _canonical_resource_row(handle: Any) -> dict[str, Any]:
@@ -487,7 +488,7 @@ def _print_agent_view(view: dict) -> None:
         print(f"  sandbox: {sandbox}")
         print(f"  runs_with_user_process_permissions: {runs_with}")
         print(f"  permission_enforcement: {enforcement}")
-        print("  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in beta.")
 
 
 # ---------------------------------------------------------------------------
@@ -759,7 +760,7 @@ def _print_full_inspect(data: dict) -> None:
         print(f"    sandbox: {sandbox}")
         print(f"    runs_with_user_process_permissions: {runs_with}")
         print(f"    permission_enforcement: {enforcement}")
-        print("    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in beta.")
 
 
 def _inspect_discovered_pack(

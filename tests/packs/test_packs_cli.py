@@ -173,6 +173,17 @@ class TestCanonicalInspect(unittest.TestCase):
         self.assertTrue(data["database"]["owned"])
         self.assertIn("resource_closure", data)
 
+    def test_canonical_inspect_text_prints_taxonomy(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = packs_cli.main(["inspect", "timeline"])
+
+        self.assertEqual(exit_code, 0)
+        rendered = output.getvalue()
+        self.assertIn("taxonomy:", rendered)
+        self.assertIn("  origin: builtin", rendered)
+        self.assertIn("  install_tier: default", rendered)
+
 class TestAgentIndexPermissionsAndTrust(unittest.TestCase):
     """Agent-index output retains canonical trust and permission fields."""
 

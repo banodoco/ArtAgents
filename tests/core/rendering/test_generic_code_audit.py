@@ -1,21 +1,10 @@
 """T7.6 freeze — generic rendering code must not name concrete backends.
 
 The pluggable-renderer epic keeps concrete backend identities out of the
-generic core.  This audit scans the generic-code files enumerated by the
-T7.6 brief (service, provenance, registry, transport, assets, artifacts,
-publication, contracts, profile, sdk) plus the top-level package root
-(``astrid/__init__.py`` and the whole ``astrid/sdk/`` directory) and asserts
-the concrete backend names ``remotion``, ``ffmpeg``, ``legacy_hybrid``, and
-``ffmpeg-finalizer`` appear NOWHERE in them except for:
-
-* registry/default wiring — the qualified-id defaults and the programmatic
-  alias table that wire the legacy short names to qualified renderer ids
-  (``registry._PROGRAMMATIC_RENDERER_ALIASES`` and the
-  ``service._translate_legacy_selector`` fallback pairs);
-* the explicit legacy compatibility shim — legacy-selector translation in
-  ``service`` and the legacy-engine provenance projection in ``provenance``
-  (both exist solely to translate the historical ``remotion|ffmpeg|hybrid``
-  surface onto the pluggable registry).
+generic core. This audit scans the generic-code files enumerated by the T7.6
+brief and the package/SDK public roots. Concrete backend names are allowed
+only where the generic code must carry a qualified default or a documented
+canvas implementation detail.
 
 Concrete backends, planners, and finalizers deliberately live OUTSIDE this
 set (``astrid/packs/rendering/backends|planners|finalizers`` and the legacy
@@ -24,12 +13,12 @@ scanned.
 
 Matching rules (documented so the audit cannot silently relax):
 
-* case-sensitive word-boundary regex: prose capitalization (``Remotion``,
-  ``FFmpeg``) and underscore-joined schema keys (``ffmpeg_specialization``)
-  are not backend-name references and are intentionally not matched;
-* comments and docstrings count: any lowercase backend name in a generic
-  file — even inside a comment — must be justified by the allowlist below.
+* case-sensitive word-boundary regex: prose capitalization and
+  underscore-joined schema keys are not backend-name references;
+* comments and docstrings count: any lowercase backend name in a generic file
+  must be justified by the allowlist below.
 """
+
 
 from __future__ import annotations
 
@@ -45,36 +34,14 @@ BACKEND_NAMES = ("remotion", "ffmpeg", "legacy_hybrid", "ffmpeg-finalizer")
 #: must still match (both directions), so new backend-name leakage fails the
 #: audit and stale allowlist entries are caught.
 ALLOWED: dict[tuple[str, int], str] = {
-    # --- service: legacy-selector compatibility shim ---------------------
-    ("astrid/core/rendering/service.py", 134): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/service.py", 144): "legacy compatibility shim (default selector)",
-    ("astrid/core/rendering/service.py", 145): "legacy compatibility shim (legacy ffmpeg selector)",
     ("astrid/core/rendering/service.py", 146): "registry/default wiring (qualified id)",
-    ("astrid/core/rendering/service.py", 147): "legacy compatibility shim (legacy remotion selector)",
-    ("astrid/core/rendering/service.py", 151): "registry/default wiring (fallback pair)",
-    ("astrid/core/rendering/service.py", 158): "registry/default wiring (legacy_hybrid planner)",
-    ("astrid/core/rendering/service.py", 179): "legacy compatibility shim (recovery text)",
-    ("astrid/core/rendering/service.py", 183): "legacy compatibility shim (legacy_selectors data)",
-    # --- provenance: legacy-engine projection compatibility shim ---------
-    ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/provenance.py", 149): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/provenance.py", 157): "legacy compatibility shim (engine projection)",
-    ("astrid/core/rendering/provenance.py", 159): "legacy compatibility shim (auto-route detection)",
-    ("astrid/core/rendering/provenance.py", 164): "legacy compatibility shim (auto-route reason)",
-    # --- registry: programmatic alias default wiring ---------------------
-    ("astrid/core/rendering/registry.py", 45): "registry/default wiring (remotion alias)",
-    ("astrid/core/rendering/registry.py", 46): "registry/default wiring (ffmpeg alias)",
-    # --- profile: legacy canvas-discovery compatibility shim -------------
-    ("astrid/core/rendering/profile.py", 113): "legacy compatibility shim (remotion canvas discovery)",
+    ("astrid/core/rendering/profile.py", 113): "renderer implementation detail (canvas discovery)",
 }
 
 #: Generic-code files scanned by this audit (T7.6 brief enumeration plus the
 #: Batch 7 rework extension: profile.py, the package root, and the SDK root).
 GENERIC_FILES: tuple[tuple[str, Path], ...] = (
     ("astrid/core/rendering/service.py", REPO_ROOT / "astrid/core/rendering/service.py"),
-    ("astrid/core/rendering/provenance.py", REPO_ROOT / "astrid/core/rendering/provenance.py"),
-    ("astrid/core/rendering/registry.py", REPO_ROOT / "astrid/core/rendering/registry.py"),
     ("astrid/core/rendering/transport.py", REPO_ROOT / "astrid/core/rendering/transport.py"),
     ("astrid/core/rendering/assets.py", REPO_ROOT / "astrid/core/rendering/assets.py"),
     ("astrid/core/rendering/artifacts.py", REPO_ROOT / "astrid/core/rendering/artifacts.py"),
@@ -92,7 +59,7 @@ GENERIC_FILES: tuple[tuple[str, Path], ...] = (
 )
 
 VALID_CATEGORIES = frozenset(
-    {"registry/default wiring", "legacy compatibility shim"}
+    {"registry/default wiring", "renderer implementation detail"}
 )
 
 
@@ -108,7 +75,6 @@ def _collect_matches() -> dict[tuple[str, int], str]:
                     found[(rel_path, lineno)] = name
     return found
 
-
 def test_generic_code_backend_name_audit_exact_allowlist() -> None:
     """No backend name appears in generic code outside the allowlist.
 
@@ -123,15 +89,12 @@ def test_generic_code_backend_name_audit_exact_allowlist() -> None:
         f"  unapproved matches: {sorted(set(found) - set(ALLOWED))}\n"
         f"  stale allowlist entries: {sorted(set(ALLOWED) - set(found))}"
     )
-
-
-def test_allowlisted_occurrences_are_wiring_or_compat_shims_only() -> None:
-    """Every allowed occurrence is registry/default wiring or a compat shim."""
+def test_allowlisted_occurrences_have_approved_categories() -> None:
+    """Every allowed occurrence is approved wiring or implementation detail."""
     for key, reason in ALLOWED.items():
-        assert reason.split(" (", 1)[0] in {
-            "registry/default wiring",
-            "legacy compatibility shim",
-        }, f"{key}: unexpected allowlist category {reason!r}"
+        assert reason.split(" (", 1)[0] in VALID_CATEGORIES, (
+            f"{key}: unexpected allowlist category {reason!r}"
+        )
 
 
 def test_allowlisted_lines_still_contain_the_excused_backend_name() -> None:

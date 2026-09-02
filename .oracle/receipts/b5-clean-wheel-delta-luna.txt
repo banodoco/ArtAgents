@@ -1,0 +1,10 @@
+CLEAN_WHEEL_DELTA: PASS
+ARTIFACT: /workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel-c2/installed-artifact/dist/astrid-0.1.0-py3-none-any.whl, 2398822 bytes, sha256 0720feb62563be35bba39a1f7c7e1f0c31fb99f26ea79c1572db9c55e8e9d40b
+IMPORT_ORIGIN: /workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel-c2/installed-artifact/venv/lib/python3.11/site-packages/astrid/__init__.py; sys_prefix=/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel-c2/installed-artifact/venv; checkout_leak=none
+TEXT_JSON: Installed normal text inspect exited 0 with canonical identity, capabilities, database, documentation, resources, and taxonomy; JSON inspect exited 0, parsed successfully, and exposed schema_version=2, canonical identity, taxonomy, database, documentation, and resources; no traceback
+DEPENDENCY_CLOSURE: TestCanonicalInspect — 2 passed; source-versus-wheel closure — 63/63 present, missing []; M8 packaging/installed-authority/installed-contract — 13 passed
+REUSED: Candidate-1 unaffected help, doctor, database/reopen, default composition, explicit Runaway composition, external-trust checks, 22-pack catalog/docs, 63-path closure identity, wheel smoke, and M8 passes
+EVIDENCE: .oracle/evidence/b5-clean-wheel.md; .oracle/receipts/b5-clean-wheel-luna.txt; .oracle/receipts/b5-inspect-text-fix-luna.txt; /workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel-c2/
+CHANGED: .oracle/evidence/b5-clean-wheel.md
+BLOCKERS: none
+0

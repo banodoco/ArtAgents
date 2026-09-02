@@ -1,0 +1,9 @@
+TIMELINE_BASELINE: PASS
+BASE_IDENTITY: commit `7ac50c12e8e4d90988fee603ffdb9896e5628792`, tree `2c348e96c860f76ba0ce1d5b83d72a423f0d6f8e`, archive SHA-256 `c5286bc2d79d12f8d4ad33f30801dd89c5f820dabacabc5392e252814dd86b53`; export created via `git archive` with no working-tree overlay
+BASE_COMMAND: `python3 -m pytest tests/timeline/test_inverses.py` from isolated export — exit 2; 0 collected; 1 collection error
+CURRENT_COMMAND: `python3 -m pytest tests/timeline/test_inverses.py` — exit 2; 0 collected; 1 collection error
+COMPARISON: same signature — `TimelineEventSchemaError`, caused by `ImportError` for unavailable `banodoco_timeline_schema`, through `tests/timeline/test_inverses.py:259` → `config.py:103` → `banodoco_schema.py:_shared_load_schema`; `full.txt` contains the same timeline error
+EVIDENCE: `.oracle/evidence/b5-timeline-baseline.md`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/timeline-inverses-baseline.txt`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/timeline-inverses.txt`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/full.txt`
+CHANGED: `.oracle/evidence/b5-timeline-baseline.md`
+FINDINGS: none
+0

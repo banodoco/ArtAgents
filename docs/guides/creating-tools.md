@@ -168,18 +168,17 @@ must equal the owning pack's id (e.g. `video_editing.cut` lives in
 ids stay bare and
 are scoped by `kind` (`effects`, `animations`, `transitions`).
 
-Terminology note: pack placement, capability identity, aliases/deprecation,
-adapter versus default-enabled semantics, and local fork/override terminology
-are defined in `docs/packs/contract.md`. Use that contract for identity
-questions; this guide only describes the current folder and authoring
-conventions.
+Terminology note: pack placement, capability identity, database ownership,
+documentation, resources, aliases, and local fork/override terminology are
+defined in [the strict-v2 pack contract](../packs/contract.md). Use that
+contract for identity and ownership questions; this guide describes component
+authoring conventions.
 
-The authoritative layout for every pack is its `pack.yaml` manifest. The
-`content` roots declared there — `executors`, `orchestrators`, `elements` —
-are what the runtime and validation use. Folder scanning is a fallback for
-legacy packs without a `schema_version`; new packs must declare their layout
-explicitly. See [creating-packs.md](../packs/creating-packs.md) for the full pack
-authoring workflow and manifest schemas.
+The authoritative layout for every pack is its strict-v2 `pack.yaml` manifest
+with `schema_version: 2`. The declared `content` roots are what the canonical
+catalog and validation use. There is no folder-scanning fallback or alternate
+pack manifest form. See [creating-packs.md](../packs/creating-packs.md) for the
+full authoring workflow and manifest grammar.
 
 Executor folders use:
 

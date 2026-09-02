@@ -27,7 +27,6 @@ The lock is advisory and process-lifetime:
   only way to drop the lock; the lock file itself is left in place (the
   authority is the ``flock``, never the file's existence), which avoids the
   unlink/recreate race a deleting-lock implementation would introduce.
-
 This module has no dependency on the schema packs, the SDK, or the
 capability-pack loader; it is a kernel store seam.
 """

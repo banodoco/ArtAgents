@@ -35,7 +35,7 @@ from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.packs import build_standard_registry
+from astrid.packs import compose_standard_pack_database
 from astrid.packs.references.repository import (
     REFERENCE_CREATE_COMMAND_KIND,
     REFERENCE_LINKED_EVENT_KIND,
@@ -65,8 +65,8 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 @pytest.fixture
 def env(tmp_path: Path):
-    """A fresh standard writer, repositories, and reference service."""
-    registry = build_standard_registry()
+    """A fresh operation-owned canonical database projection and reference service."""
+    registry = compose_standard_pack_database().registry
     writer = DatabaseWriter(tmp_path / "references.sqlite3", registry)
     try:
         events = EventAppendService(registry)

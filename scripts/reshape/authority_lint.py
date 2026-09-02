@@ -67,8 +67,9 @@ import ast
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -142,11 +143,9 @@ lint error.
 """
 
 # Product paths scanned by ``lint_removed_authorities``: the eight-family
-# dispatch routes, the SDK, the application composition, the bridge
-# composition, and the pack modules — not the entire ``astrid/`` tree. The
-# pack product paths are the standard schema packs only (those shipping a
-# ``schema-pack.yaml``): the m1-m6 legacy capability packs stay in-tree as
-# non-product dead code and keep their own import graph.
+# dispatch routes, SDK, application composition, bridge composition, and
+# canonical bundled packs. Historical modules elsewhere in the source tree
+# are not part of the installed product surface.
 _PRODUCT_PATH_DIRS = (
     "astrid/core/gateway",  # eight-family dispatch routes
     "astrid/sdk",           # SDK modules
@@ -157,11 +156,9 @@ _PRODUCT_PATH_FILES = (
     "astrid/core/integrations/reigh/bridge_service.py",  # bridge composition
 )
 
-# The m1-m6 legacy rendering/builtin capability packs remain in-tree
-# (plan step 22.3): kernel CLI/gateway modules legitimately import them.
-# The m1 schema-pack boundary is about the new repository architecture —
-# the kernel must never import the schema packs (timeline/shots/references)
-# or any other pack module.
+# Historical implementation prefixes remain in-tree only where supported
+# product paths explicitly permit them. Canonical ownership and database
+# projections still come from the bundled catalog.
 _LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.", "astrid.packs.builtin.")
 
 # The kernel conformance kit constructs scratch DatabaseWriters on its own
@@ -230,6 +227,13 @@ def _child_dirs(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(path for path in root.iterdir() if path.is_dir()))
 
 
+@lru_cache(maxsize=8)
+def _canonical_catalog(root: Path) -> BundledCatalog:
+    """Load one canonical catalog per source or installed artifact root."""
+
+    return BundledCatalog.from_root(root / "astrid" / "packs")
+
+
 def _rel(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
@@ -255,14 +259,7 @@ def _imported_modules(source: str) -> set[str]:
 
 
 def _is_legacy_pack_module(module: str) -> bool:
-    """Whether *module* lives in a pre-existing m1-m6 capability pack.
-
-    The legacy rendering/builtin capability packs remain in-tree (plan step
-    22.3); kernel CLI/gateway modules legitimately import them, and the
-    legacy packs form their own pre-existing import graph. The m1 boundary
-    is about the new schema packs (timeline/shots/references) and any other
-    pack module — never the documented legacy prefixes.
-    """
+    """Whether *module* belongs to a retained historical implementation prefix."""
     return any(
         module == prefix.rstrip(".") or module.startswith(prefix)
         for prefix in _LEGACY_PACK_PREFIXES
@@ -272,7 +269,7 @@ def _is_legacy_pack_module(module: str) -> bool:
 def _pack_cli_mount_families(root: Path, pack_id: str) -> frozenset[str]:
     """Return CLI mount families from the canonical bundled catalog."""
     try:
-        catalog = BundledCatalog.from_root(root / "astrid" / "packs")
+        catalog = _canonical_catalog(root)
         entry = catalog.get(pack_id)
     except Exception:
         return frozenset()
@@ -293,20 +290,16 @@ def _kernel_cli_family(rel: str) -> str | None:
         return rel[len(prefix) : -3]
     return None
 
-
 def _is_declared_cli_mount_import(
     root: Path, rel: str, module: str, *, pack_dir_name: str | None = None
 ) -> bool:
     """Whether *module* is a manifest-declared nested CLI mount import.
 
     A kernel family module or a host pack's ``cli`` module may embed another
-    schema pack's ``cli`` module only when the target pack's manifest
-    declares a ``cli_mounts`` entry whose host family matches the importing
-    family (e.g. ``references: media references`` allows
-    ``astrid/core/cli/domain_media.py`` to embed the references parser, and
-    ``shots: timelines shots`` allows ``astrid/packs/timeline/cli.py`` to
-    embed the shots parser). This is declared composition, never a hidden
-    second authority: repository/conformance/service imports stay forbidden.
+    pack's ``cli`` module only when the target pack's manifest declares a
+    ``cli_mounts`` entry whose host family matches the importing family. This
+    is declared composition, never a hidden second authority; repository,
+    conformance, and service imports remain forbidden.
     """
     if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
         return False
@@ -333,9 +326,8 @@ def lint_import_boundaries(root: Path) -> list[str]:
 
     Kernel-to-pack: nothing under ``astrid/core/`` may import a pack module
     except the one composition exemption (``dispatch.py``) and the
-    documented legacy rendering/builtin prefixes. Pack-to-pack: the m1
-    schema packs (those shipping a ``schema-pack.yaml``) may not import any
-    other pack; the pre-existing legacy packs keep their own graph.
+    documented implementation-prefix exemptions. Pack-to-pack imports are
+    otherwise allowed only for manifest-declared CLI mounts.
     """
     errors: list[str] = []
     core_root = root / "astrid" / "core"
@@ -486,7 +478,7 @@ def lint_canonical_manifest_authority(root: Path) -> list[str]:
                     f"{_rel(pack_dir / legacy_name, root)}: legacy manifest is forbidden"
                 )
     try:
-        BundledCatalog.from_root(packs_root)
+        _canonical_catalog(root)
     except Exception as exc:
         errors.append(f"{_rel(packs_root, root)}: invalid strict v2 catalog: {exc}")
     return errors
@@ -497,7 +489,7 @@ def _canonical_database_pack_ids(root: Path) -> frozenset[str]:
     try:
         return frozenset(
             entry.id
-            for entry in BundledCatalog.from_root(root / "astrid" / "packs").entries
+            for entry in _canonical_catalog(root).entries
             if entry.database is not None
         )
     except Exception:
@@ -505,22 +497,42 @@ def _canonical_database_pack_ids(root: Path) -> frozenset[str]:
 
 
 def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
-    """Whether *rel* is one of the eight-family product paths.
-
-    The product surface is exactly: the eight-family dispatch routes
-    (``astrid/core/gateway/``), the SDK modules (``astrid/sdk/``), the
-    application composition (``astrid/application.py``), the bridge
-    composition (``astrid/core/integrations/reigh/bridge_service.py``), and
-    the standard schema-pack modules (``astrid/packs/<schema-pack>``).
-    Everything else in the tree is non-product (legacy dead code that may
-    stay in-tree), including the m1-m6 legacy capability packs.
-    """
+    """Whether *rel* is one of the database-backed product paths."""
     if rel in _PRODUCT_PATH_FILES:
         return True
     if rel == "astrid/packs" or rel.startswith("astrid/packs/"):
         pack_id = rel.split("/")[2]
         return pack_id in _canonical_database_pack_ids(root)
     return any(rel == d or rel.startswith(d + "/") for d in _PRODUCT_PATH_DIRS)
+
+def lint_pack_resource_closure(root: Path) -> list[str]:
+    """Require all bundled v2 manifests and direct guidance in an artifact."""
+
+    errors: list[str] = []
+    try:
+        catalog = _canonical_catalog(root)
+    except Exception as exc:
+        return [f"{_rel(root / 'astrid' / 'packs', root)}: resource closure failed: {exc}"]
+    if len(catalog.entries) != 22:
+        errors.append(f"bundled catalog has {len(catalog.entries)} packs; expected 22")
+    for entry in catalog.entries:
+        manifest = root / "astrid" / "packs" / entry.id / "pack.yaml"
+        skill = root / "astrid" / "packs" / entry.id / "skill" / "SKILL.md"
+        if not manifest.is_file():
+            errors.append(f"{_rel(manifest, root)}: canonical manifest is not packaged")
+        if not skill.is_file():
+            errors.append(f"{_rel(skill, root)}: direct pack guidance is not packaged")
+        for handle in entry.resource_handles:
+            resolved = handle.resolved.resolve()
+            if not resolved.is_relative_to(entry.root.resolve()) or not resolved.is_file():
+                errors.append(
+                    f"{_rel(resolved, root)}: declared {handle.kind} is outside "
+                    f"or missing from pack {entry.id!r}"
+                )
+    core_skill = root / "astrid" / "packs" / "_core" / "skill" / "SKILL.md"
+    if not core_skill.is_file():
+        errors.append(f"{_rel(core_skill, root)}: core census guidance is not packaged")
+    return errors
 
 
 def lint_removed_authorities(root: Path) -> list[str]:
@@ -582,7 +594,7 @@ def _declared_tables(root: Path) -> dict[str, str]:
     """Map every declared table to its canonical owner."""
     declared: dict[str, str] = {table: "core" for table in CORE_TABLES}
     try:
-        catalog = BundledCatalog.from_root(root / "astrid" / "packs")
+        catalog = _canonical_catalog(root)
     except Exception:
         return declared
     for entry in catalog.entries:
@@ -702,7 +714,7 @@ def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
 def _standard_registry(root: Path) -> FrozenSchemaPackRegistry:
     from astrid.core.pack.canonical import project_catalog_database
 
-    return project_catalog_database(BundledCatalog.from_root(root / "astrid" / "packs"))
+    return project_catalog_database(_canonical_catalog(root))
 
 
 # ---------------------------------------------------------------------------
@@ -758,9 +770,7 @@ _INSTALLED_FALLBACK_MARKERS = frozenset(
         "catalog",
         "connection",
         "database",
-        "eventlog",
         "fsa",
-        "json",
         "lease",
         "legacy",
         "localfs",
@@ -842,12 +852,9 @@ def _installed_rel(path: Path, root: Path) -> str:
 def _installed_product_path(root: Path, rel: str) -> bool:
     """Whether an installed Python path is part of the supported product.
 
-    Legacy capability modules remain packageable for compatibility, but they
-    are not an authority in the eight-family product.  The installed scan
-    therefore applies authority-sensitive source rules to the same product
-    boundary as the removed-authority lint, plus every standard schema pack.
-    Pack-owned writer/transaction checks below still scan the complete schema
-    pack directory rather than only its entry modules.
+    Historical implementation modules remain in the source tree, but the
+    installed scan applies authority-sensitive source rules to the canonical
+    product boundary and every bundled pack.
     """
     return _is_removed_authority_product_path(root, rel)
 
@@ -1047,7 +1054,6 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                             "legacy",
                             "localfs",
                             "supabase",
-                            "eventlog",
                             "sidecar",
                             "jsonl",
                             "file system",
@@ -1489,6 +1495,7 @@ def run_installed_authority_lint(
 
     root = layout.root
     errors: list[str] = []
+    errors.extend(_safe_installed_rule("pack resource closure", lint_pack_resource_closure, root))
     errors.extend(_safe_installed_rule("import boundaries", lint_import_boundaries, root))
     errors.extend(_safe_installed_rule("writer authority", lint_writer_authority, root))
     errors.extend(_safe_installed_rule("legacy authorities", lint_legacy_authorities, root))

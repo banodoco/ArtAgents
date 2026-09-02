@@ -2,8 +2,8 @@
 name: rendering
 description: >
   Rendering pack: the stable rendering.render facade, protocol-v1 Remotion
-  and FFmpeg renderers, the legacy hybrid planner, the FFmpeg finalizer, and
-  element escape hatches for custom visual effects.
+  and FFmpeg renderers, the qualified hybrid planner, the FFmpeg finalizer,
+  and element escape hatches for custom visual effects.
 ---
 
 # Rendering
@@ -13,7 +13,7 @@ registries into finished video files. `rendering.render` is a stable neutral
 facade over `RenderService`: the service resolves a renderer or planner from
 pack manifests, probes support, invokes protocol-v1 commands, validates media,
 completes audio/finalization when required, and publishes the video plus
-provenance. `hybrid` is a legacy planning policy, not a renderer.
+provenance. The hybrid planner is selected by its qualified id.
 
 ## Render flow
 
@@ -30,9 +30,8 @@ timeline.json + optional assets.json
 1. **Input**: `hype.timeline.json` (clip sequence, effects, animations,
    transitions) and, when the timeline references media files,
    `hype.assets.json` (asset registry with file paths).
-2. **Selection**: The service resolves a qualified renderer/planner through
-   trust-aware registries. Legacy `remotion`, `ffmpeg`, and `hybrid` selectors
-   are translated only at the compatibility boundary.
+2. **Selection**: The service resolves the requested qualified renderer or
+   planner through trust-aware registries. Unqualified selectors are rejected.
 3. **Invocation**: The selected protocol command receives one request file
    and writes one authoritative result file in an isolated workspace.
 4. **Validation/publication**: Astrid probes the media, validates profile,
@@ -295,15 +294,16 @@ successful `data` includes run/kernel IDs and durable artifact paths, while
 invalid selectors and foreign sources return a typed validation error before
 ledger admission.
 
-Use an `engine` input of `hybrid` only when compatibility with the legacy hybrid
-planning policy is required. Legacy `engine=remotion` preserves its historical
-support-based FFmpeg auto-route; `backend=rendering.remotion` is strict.
+Pass a qualified `engine` or `backend` input such as
+`rendering.remotion`, `rendering.ffmpeg`, or `rendering.legacy_hybrid`.
+Unqualified selectors are rejected; only an explicit planner may choose an
+alternative.
 
 The normal SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`. The sidecar records the resolved plan,
-renderer/planner/finalizer identities, aliases and overrides, manifest and input
-hashes, trust/support evidence, artifact profiles, audio ownership,
-normalization, attachments, and namespaced backend fragments.
+renderer/planner/finalizer identities and overrides, manifest and input hashes,
+trust/support evidence, artifact profiles, audio ownership, normalization,
+attachments, and namespaced backend fragments.
 
 Direct facade-module execution is reserved for debugging executor input
 mapping. It still delegates to `RenderService`; it is not a concrete renderer

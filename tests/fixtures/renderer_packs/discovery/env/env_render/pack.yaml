@@ -1,14 +1,14 @@
-schema_version: 1
+schema_version: 2
 id: env_render
 name: Environment Renderer Fixture
 version: 1.0.0
+domain: media
+stability: stable
+support: project
+visibility: visible
 permissions:
   - id: subprocess
     reason: Run the fixture backend command.
-aliases:
-  - kind: renderer
-    alias: env_render.legacy
-    canonical_id: env_render.renderer
 extensions:
   rendering:
     renderers:

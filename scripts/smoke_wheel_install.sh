@@ -78,17 +78,26 @@ try:
         "resources",
         [
             "-c",
-            "from importlib import resources; "
-            "required=('core/migrations/sql/core/0001_initial.sql',"
-            "'packs/timeline/pack.yaml','packs/shots/pack.yaml',"
-            "'packs/references/pack.yaml'); "
-            "root=resources.files('astrid'); "
-            "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "
-            "assert not missing, missing; print('package resources: OK')",
+            "from pathlib import Path; "
+            "from astrid.core.pack.canonical import BundledCatalog; "
+            "import astrid; "
+            "package_root=Path(astrid.__file__).resolve().parent; "
+            "catalog=BundledCatalog.from_root(package_root / 'packs'); "
+            "assert len(catalog.entries) == 22; "
+            "legacy=[p for pack in (package_root / 'packs').iterdir() if pack.is_dir() "
+            "for p in (pack / 'pack.yml', pack / 'pack.json', pack / 'schema-pack.yaml') if p.exists()]; "
+            "assert not legacy, legacy; "
+            "required=[entry.manifest.resolved for entry in catalog.entries] + "
+            "[handle.resolved for entry in catalog.entries for handle in entry.resource_handles "
+            "if not handle.kind.startswith('content:')]; "
+            "missing=[str(path) for path in required if not path.is_file()]; "
+            "assert not missing, missing; "
+            "assert (package_root / 'packs' / '_core' / 'skill' / 'SKILL.md').is_file(); "
+            "print(f'canonical package resources: {len(required)}')",
         ],
         check=True,
     )
-    assert "package resources: OK" in resource_probe.stdout
+    assert "canonical package resources:" in resource_probe.stdout
 
     # Adversarial lanes prove that a missing resource and a checkout import
     # cannot be mistaken for a passing installed-artifact result.

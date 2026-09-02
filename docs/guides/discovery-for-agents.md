@@ -5,9 +5,10 @@ How a cold agent discovers what Astrid can do — no source grep required.
 ## The Contract
 
 Agents discover capabilities through the SDK (`astrid.sdk.discover`,
-`astrid.sdk.get_capability`), which reads pack manifests. Never inspect
-`astrid/packs/` directory trees, guess ids from filenames, or import Python
-modules directly. The pack system owns discovery; agents consume it.
+`astrid.sdk.get_capability`), which consumes the canonical catalog's typed
+projections of strict-v2 pack manifests. Never inspect `astrid/packs/` directory
+trees, guess ids from filenames, or import Python modules directly. The pack
+system owns discovery; agents consume it.
 
 There is no session binding and no `next`/`status`/`attach` bootstrap: the
 gateway CLI (`python3 -m astrid`) owns exactly the eight families (projects,
@@ -25,9 +26,10 @@ cap = sdk.get_capability(
 )  # typed lookup of one capability
 ```
 
-Pin `include_installed=False` in scripted/agent workflows: externally
-installed packs load with the registry by default, and one broken installed
-manifest fails the whole discovery call.
+Pin `include_installed=False` in scripted/agent workflows when the bundled
+catalog is intended. External packs use the supported capability admission
+seams; malformed manifests are rejected or skipped according to that seam, and
+external database declarations fail closed.
 
 Every discoverable capability (executor, orchestrator, element) belongs to a
 pack and is exposed through a consistent discovery surface.
@@ -35,9 +37,9 @@ pack and is exposed through a consistent discovery surface.
 See the formal vocabulary in
 [docs/packs/contract.md](../packs/contract.md).
 
-For the taxonomy fields that classify packs for discovery and filtering
-(`origin`, `install_tier`, `pack_type`, `domain`, `stability`, `support`),
-see [docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
+For the v2 taxonomy fields that classify packs (`domain`, `status`, `visibility`,
+`stability`, and `support`), see
+[docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
 
 ## Three Capability Kinds
 

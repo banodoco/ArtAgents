@@ -1,0 +1,10 @@
+CLEAN_WHEEL: BLOCKED
+DISK_BUILD: 219G free on /workspace; env `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel/build-env`; build 1.6.0
+ARTIFACT: `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel/installed-artifact/dist/astrid-0.1.0-py3-none-any.whl`, 2,398,804 bytes, sha256 `db189cd317951843681e636a00122a4c2cb8882ec86f04dc046594379c310c8b`
+INSTALLED_CLOSURE: 22 packs; exact 63-path declared resource/docs/migrations closure present in wheel; owner-root confinement passed
+BEHAVIOR: `python -m astrid --help`, doctor, fresh DB/reopen, default composition, explicit Runaway composition, JSON inspect, external capability discovery/install, and external database fail-closed checks passed; normal text inspect blocked by packaged `NameError: name '_print_taxonomy_block' is not defined`
+TESTS: `tests/v10/test_m8_packaging.py tests/v10/test_m8_installed_authority.py tests/v10/test_m8_installed_contract.py -q` — 13 passed in 87.74s; `scripts/smoke_wheel_install.sh` — PASSED; source/wheel closure — 63/63, missing `[]`
+EVIDENCE: `.oracle/evidence/b5-clean-wheel.md`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-wheel/`
+CHANGED: `.oracle/evidence/b5-clean-wheel.md`
+BLOCKERS: Installed normal text `astrid.core.pack.cli inspect timeline` fails in `astrid/core/pack/cli_inspect.py` because `_print_taxonomy_block` is undefined; product edits were prohibited by task controls
+0

@@ -398,9 +398,11 @@ indicates a real problem. An unavailable local service or owner lock is reported
 `astrid serve` owns the store: use `GET /routes` and its HTTP routes while it
 runs, or wait for a clean shutdown. Reads may retry after release; writes must
 preserve the exact payload and idempotency key, then verify state. Do not open
-a second writer. A doctor result with `schema_versions: fail` indicates a
-too-new migration or schema incompatibility. Keep the original project and
-select a compatible checkout or restore a compatible backup.
+a second writer. Doctor and all operational open/read paths use the same
+operation-owned canonical bundled catalog and frozen database projection. A
+result with `schema_versions: fail` indicates a too-new migration or schema
+incompatibility. Keep the original project and select a compatible checkout or
+restore a compatible backup.
 
 Timeline saves are compare-and-swap operations. A stale expected version is
 an HTTP `409 timeline_version_conflict` (or SDK `stale_version`) and changes
@@ -430,10 +432,13 @@ locations remain unchanged. A mixed result is a typed `integrity_error` whose
 details include both successes and failures, plus recovery commands. Repair a
 specific location and retry with `--location-id <id>` or `--locator <path>`.
 
-Backups are staged and validated before publication. If a restore process is
-interrupted, run the same restore command again or start the local bridge; the
-startup path reads its durable journal before opening the writer and accepts
-only the previous complete state or the complete restored state:
+Backups are staged and validated before publication. Backup and restore use
+the same canonical catalog/database projection as application and doctor; they
+do not rebuild a fixed pack list or independently parse pack manifests. If a
+restore process is interrupted, run the same restore command again or start
+the local bridge; the startup path reads its durable journal before opening the
+writer and accepts only the previous complete state or the complete restored
+state:
 
 ```bash
 python3 -m astrid backup create --projects-root ./projects --out ./backup

@@ -41,10 +41,6 @@ from .contracts import FinalizerManifest, PlannerManifest, RendererManifest
 ManifestT = TypeVar("ManifestT", RendererManifest, PlannerManifest, FinalizerManifest)
 
 _FACADE_EXECUTOR_ID = "rendering.render"
-_PROGRAMMATIC_RENDERER_ALIASES: tuple[tuple[str, str], ...] = (
-    ("remotion", "rendering.remotion"),
-    ("ffmpeg", "rendering.ffmpeg"),
-)
 _INSTALL_WARNING_VERSION = 1
 _INSTALL_TRUST_METHODS = frozenset({"interactive", "cli_flag", "api", "test"})
 
@@ -172,6 +168,7 @@ class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]],
     manifest_type: ClassVar[type[Any]]
     error_type: ClassVar[type[RenderingRegistryError]]
     rejects_facade: ClassVar[bool] = False
+    accepts_aliases: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -181,6 +178,9 @@ class _RenderingRegistry(CapabilityRegistry[str, RenderingCandidate[ManifestT]],
         inspection_alias_resolver: AliasResolver | None = None,
         override_store: OverrideStore | None = None,
     ) -> None:
+        if not self.accepts_aliases:
+            alias_resolver = None
+            inspection_alias_resolver = None
         super().__init__(alias_resolver=alias_resolver, override_store=override_store)
         self.inspection_alias_resolver = inspection_alias_resolver or alias_resolver
         self._discovered: dict[str, list[RenderingCandidate[ManifestT]]] = {}
@@ -480,6 +480,7 @@ class RendererRegistry(_RenderingRegistry[RendererManifest]):
     manifest_type = RendererManifest
     error_type = RendererRegistryError
     rejects_facade = True
+    accepts_aliases = False
 
 
 class PlannerRegistry(_RenderingRegistry[PlannerManifest]):
@@ -618,14 +619,6 @@ def load_default_registries(
             pack_trust[item.priority_index],
         )
 
-    renderer_resolver, renderer_inspection_resolver = _build_alias_resolvers(
-        discovered,
-        kind="renderer",
-        pack_trust=pack_trust,
-        registry=renderers,
-        programmatic_aliases=_PROGRAMMATIC_RENDERER_ALIASES,
-        error_type=RendererRegistryError,
-    )
     planner_resolver, planner_inspection_resolver = _build_alias_resolvers(
         discovered,
         kind="planner",
@@ -640,8 +633,6 @@ def load_default_registries(
         registry=finalizers,
         error_type=FinalizerRegistryError,
     )
-    renderers.alias_resolver = renderer_resolver
-    renderers.inspection_alias_resolver = renderer_inspection_resolver
     planners.alias_resolver = planner_resolver
     planners.inspection_alias_resolver = planner_inspection_resolver
     finalizers.alias_resolver = finalizer_resolver
@@ -942,10 +933,9 @@ def _build_alias_resolvers(
     discovered: tuple[DiscoveredPack, ...],
     *,
     kind: str,
-    pack_trust: Mapping[int, _PackTrust],
+    pack_trust: dict[int, _PackTrust],
     registry: _RenderingRegistry[Any],
     error_type: type[RenderingRegistryError],
-    programmatic_aliases: Iterable[tuple[str, str]] = (),
 ) -> tuple[AliasResolver, AliasResolver]:
     # Validate every discovered alias graph, including inspect-only packs.  A
     # separate trusted resolver is then built so environment/corrupt install
@@ -959,7 +949,6 @@ def _build_alias_resolvers(
             eligible_only=False,
             pack_trust=pack_trust,
             registry=registry,
-            programmatic_aliases=programmatic_aliases,
         )
         resolver = create_shared_alias_resolver()
         _populate_alias_resolver(
@@ -969,7 +958,6 @@ def _build_alias_resolvers(
             eligible_only=True,
             pack_trust=pack_trust,
             registry=registry,
-            programmatic_aliases=programmatic_aliases,
         )
         inspection_resolver.validate_no_cycles()
         resolver.validate_no_cycles()
@@ -988,9 +976,8 @@ def _populate_alias_resolver(
     *,
     kind: str,
     eligible_only: bool,
-    pack_trust: Mapping[int, _PackTrust],
+    pack_trust: dict[int, _PackTrust],
     registry: _RenderingRegistry[Any],
-    programmatic_aliases: Iterable[tuple[str, str]] = (),
 ) -> None:
     if eligible_only:
         _populate_executable_alias_resolver(
@@ -999,7 +986,6 @@ def _populate_alias_resolver(
             kind=kind,
             pack_trust=pack_trust,
             registry=registry,
-            programmatic_aliases=programmatic_aliases,
         )
         return
 
@@ -1013,12 +999,6 @@ def _populate_alias_resolver(
         ]
         if aliases:
             resolver.register_pack_aliases(item.id, aliases)
-    for alias, canonical_id in programmatic_aliases:
-        resolver.register_alias(
-            alias,
-            canonical_id,
-            source_pack_id="astrid.core",
-        )
 
 
 def _populate_executable_alias_resolver(
@@ -1026,9 +1006,8 @@ def _populate_executable_alias_resolver(
     discovered: tuple[DiscoveredPack, ...],
     *,
     kind: str,
-    pack_trust: Mapping[int, _PackTrust],
+    pack_trust: dict[int, _PackTrust],
     registry: _RenderingRegistry[Any],
-    programmatic_aliases: Iterable[tuple[str, str]],
 ) -> None:
     """Register the highest-precedence executable declaration per alias.
 
@@ -1037,11 +1016,6 @@ def _populate_executable_alias_resolver(
     to the declaration it would otherwise have overwritten.  Peeling the
     deepest dangling hop first preserves upstream aliases when an
     intermediate alias has a usable lower-precedence declaration.
-
-    A core compatibility alias may also terminate at a canonical id with an
-    explicit override.  That alias remains only as the routing key needed to
-    apply the override; normal winner selection still enforces eligibility on
-    the override target.
     """
 
     declarations: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
@@ -1059,13 +1033,6 @@ def _populate_executable_alias_resolver(
                 )
             declarations.setdefault(str(alias_name), []).append((item.id, alias))
 
-    for alias_name, canonical_id in programmatic_aliases:
-        declarations.setdefault(alias_name, []).append(
-            (
-                "astrid.core",
-                {"alias": alias_name, "canonical_id": canonical_id},
-            )
-        )
 
     selected_indexes = {
         alias_name: len(candidates) - 1

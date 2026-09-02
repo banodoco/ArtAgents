@@ -93,8 +93,12 @@ from tests.core.rendering.test_service import (
             "rendering.ffmpeg",
             id="audio-reactive",
         ),
-        pytest.param("hybrid", (5, 5), {}, True, "hybrid", id="hybrid"),
-        pytest.param("hybrid", (10,), {}, True, "hybrid", id="single-segment"),
+        pytest.param(
+            "rendering.legacy_hybrid", (5, 5), {}, True, "rendering.legacy_hybrid", id="hybrid"
+        ),
+        pytest.param(
+            "rendering.legacy_hybrid", (10,), {}, True, "rendering.legacy_hybrid", id="single-segment"
+        ),
     ],
 )
 def test_freeze_builtin_paths_one_video_one_committed_sidecar(
@@ -129,8 +133,7 @@ def test_freeze_builtin_paths_one_video_one_committed_sidecar(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == expected_engine
-    assert payload["routing"]["auto_route"] is False
+    assert payload["requested_policy"] == expected_engine
     if expect_finalize:
         assert ("finalize", "rendering.ffmpeg-finalizer") in transport.calls
     else:
@@ -168,7 +171,7 @@ def test_freeze_failure_paths_clean_temps_and_never_commit_sidecar(
             renderer_ids=("fixture.window",),
             planner_ids=("rendering.legacy_hybrid",),
         )
-        selector = "hybrid"
+        selector = "rendering.legacy_hybrid"
     else:
         transport.fail_support = "rendering.ffmpeg"
         service = _service(tmp_path, transport)
@@ -219,7 +222,7 @@ def test_freeze_real_ffmpeg_transport_one_video_one_committed_sidecar(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert payload["output"] == str(output.resolve())
-    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert payload["requested_policy"] == "rendering.ffmpeg"
     assert not list(tmp_path.glob(".*.render-service-*"))
     assert not list(tmp_path.rglob("outputs"))
 

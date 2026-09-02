@@ -72,12 +72,9 @@ include-package-data = false
 [tool.setuptools.packages.find]
 include = ["astrid*"]
 exclude = [
-    # Tests are not part of the installed product.  Keeping this exclusion
-    # explicit prevents a future in-tree pack test package from becoming a
-    # runtime dependency by accident.
+    # Tests, golden providers, and skill directories are not Python packages;
+    # their explicitly released data is listed under package-data below.
     "astrid.*.tests*",
-    # Golden provider examples and pack skills are authoring material, not
-    # installed runtime modules.
     "astrid.*.golden*",
     "astrid.*.skill*",
     "astrid.skills*",
@@ -85,42 +82,94 @@ exclude = [
 
 [tool.setuptools.exclude-package-data]
 astrid = [
-    # Defensive exclusions for non-package directories that may be surfaced
-    # by a source/VCS manifest in a future setuptools release.
     "**/__pycache__/*",
+    "**/*.pyc",
     "packs/**/tests/*",
     "packs/**/golden/*",
-    "packs/**/skill/*",
     "packs/**/build/*",
 ]
 
 [tool.setuptools.package-data]
+
 astrid = [
     # Core data consumed through Path(__file__) or importlib.resources.
-    # Python modules are discovered above; these patterns deliberately name
-    # data formats rather than copying documentation, skills, tests, caches,
-    # or build/planning material into the wheel.
     "core/**/*.json",
     "core/**/*.sql",
     "core/**/*.yaml",
     "core/rendering/fixtures/renderer_parity/*",
     "core/rendering/schemas/v1/*.json",
 
-    # The frozen schema-pack composition: core plus timeline, shots, and
-    # references.  The three manifests and their migrations are required for
-    # a first installed run and for too-new-schema refusal.
-    "core/migrations/sql/core/*.sql",
-    "packs/timeline/schema-pack.yaml",
-    "packs/timeline/migrations/*.sql",
-    "packs/shots/schema-pack.yaml",
-    "packs/shots/migrations/*.sql",
-    "packs/references/schema-pack.yaml",
+    # The canonical bundled-pack declarations and database migrations.
+    "packs/blender/pack.yaml",
+    "packs/comfy_wrap/pack.yaml",
+    "packs/editorial/pack.yaml",
+    "packs/fal/pack.yaml",
+    "packs/foley/pack.yaml",
+    "packs/generation/pack.yaml",
+    "packs/iteration/pack.yaml",
+    "packs/media/pack.yaml",
+    "packs/moirae/pack.yaml",
+    "packs/references/pack.yaml",
+    "packs/reigh/pack.yaml",
+    "packs/rendering/pack.yaml",
+    "packs/runaway/pack.yaml",
+    "packs/runpod/pack.yaml",
+    "packs/shots/pack.yaml",
+    "packs/stream_content/pack.yaml",
+    "packs/timeline/pack.yaml",
+    "packs/training/pack.yaml",
+    "packs/understanding/pack.yaml",
+    "packs/vibecomfy/pack.yaml",
+    "packs/video_editing/pack.yaml",
+    "packs/youtube/pack.yaml",
     "packs/references/migrations/*.sql",
+    "packs/runaway/migrations/*.sql",
+    "packs/shots/migrations/*.sql",
+    "packs/timeline/migrations/*.sql",
 
-    # Capability manifests and their runtime data.  STAGE.md, skill files,
-    # requirements files, golden logs, and other authoring-only material are
-    # intentionally not included by these patterns.
-    "packs/**/pack.yaml",
+    # Every bundled product pack and the irreducible kernel publish direct
+    # structured agent guidance.
+    "packs/blender/skill/SKILL.md",
+    "packs/comfy_wrap/skill/SKILL.md",
+    "packs/editorial/skill/SKILL.md",
+    "packs/fal/skill/SKILL.md",
+    "packs/foley/skill/SKILL.md",
+    "packs/generation/skill/SKILL.md",
+    "packs/iteration/skill/SKILL.md",
+    "packs/media/skill/SKILL.md",
+    "packs/moirae/skill/SKILL.md",
+    "packs/references/skill/SKILL.md",
+    "packs/reigh/skill/SKILL.md",
+    "packs/rendering/skill/SKILL.md",
+    "packs/runaway/skill/SKILL.md",
+    "packs/runpod/skill/SKILL.md",
+    "packs/shots/skill/SKILL.md",
+    "packs/stream_content/skill/SKILL.md",
+    "packs/timeline/skill/SKILL.md",
+    "packs/training/skill/SKILL.md",
+    "packs/understanding/skill/SKILL.md",
+    "packs/vibecomfy/skill/SKILL.md",
+    "packs/video_editing/skill/SKILL.md",
+    "packs/youtube/skill/SKILL.md",
+    "packs/_core/skill/SKILL.md",
+
+    # Standalone runtime resources declared by the Blender manifest.
+    "packs/blender/render_core.py",
+    "packs/blender/renders/wink_turn.py",
+    "packs/blender/server/blender_render_server.py",
+    "packs/blender/server/blender-render-api.service",
+
+    # Rendering extension resources declared by the rendering manifest.
+    "packs/rendering/backends/remotion/renderer.yaml",
+    "packs/rendering/backends/ffmpeg/renderer.yaml",
+    "packs/rendering/backends/threejs/renderer.yaml",
+    "packs/rendering/planners/legacy_hybrid/planner.yaml",
+    "packs/rendering/planners/threejs_hybrid/planner.yaml",
+    "packs/rendering/planners/layer_stack/planner.yaml",
+    "packs/rendering/finalizers/ffmpeg/finalizer.yaml",
+    "packs/rendering/finalizers/compositor/finalizer.yaml",
+
+    # Component and UI data loaded by typed registries and renderers.
     "packs/**/*.yaml",
     "packs/**/*.json",
     "packs/text_analysis/fixtures/*.txt",

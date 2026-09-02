@@ -164,7 +164,7 @@ def _format_trust_summary(
         f"{trust['permission_enforcement']}"
     )
     lines.append("  Disclosure:")
-    lines.append("    - Astrid v1 does not sandbox installed packs.")
+    lines.append("    - Astrid does not sandbox installed packs.")
     lines.append("    - Permission declarations are disclosure-only and not enforced.")
     lines.append("    - Installed pack code runs with your user's process permissions.")
 

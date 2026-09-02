@@ -1345,46 +1345,51 @@ def test_giant_file_inventory_matches_rationale() -> None:
 # ---------------------------------------------------------------------------
 
 
-_SCHEMA_PACK_MANIFEST = """\
+_TIMELINE_PACK_MANIFEST = """\
+schema_version: 2
 id: timeline
-version: 1
-depends_on:
-  - core >= 1
-migrations:
-  - version: 1
-    name: initial
-    path: migrations/0001_initial.sql
-    tables:
-      - timelines
-stream_types:
-  - timeline.timeline
-event_kinds:
-  - timeline.created
-  - timeline.saved
-  - timeline.config_replaced
-command_kinds:
-  - timeline.create
-  - timeline.save
-  - timeline.replace_config
-repositories:
-  - TimelineRepository
-conformance:
-  - replay
-cli_mounts:
-  timelines: timelines
-bridge_mounts:
-  - timelines
+name: Timeline
+version: 1.0.0
+database:
+  default_enabled: true
+  depends_on:
+    - pack: core
+      min_migration: 1
+  migrations:
+    - version: 1
+      name: initial
+      path: migrations/0001_initial.sql
+      tables:
+        - timelines
+  stream_types:
+    - timeline.timeline
+  event_kinds:
+    - timeline.created
+    - timeline.saved
+    - timeline.config_replaced
+  command_kinds:
+    - timeline.create
+    - timeline.save
+    - timeline.replace_config
+  repositories:
+    - TimelineRepository
+  conformance:
+    - replay
+  cli_mounts:
+    timelines: timelines
+  bridge_mounts:
+    - timelines
 """
 
 
 def _bootstrap_authority_root(root: Path) -> None:
-    """Minimal lint-scan root with a valid declared timeline schema pack."""
+    """Minimal lint-scan root with a valid canonical timeline pack."""
     _bootstrap_structure_root(root)
     _write(root, "astrid/packs/timeline/__init__.py", "")
     _write(
         root,
-        "astrid/packs/timeline/schema-pack.yaml",
-        _SCHEMA_PACK_MANIFEST,
+        "astrid/packs/timeline/pack.yaml",
+        _TIMELINE_PACK_MANIFEST,
     )
     _write(
         root,
@@ -1459,7 +1464,7 @@ def test_validate_repo_structure_authority_exemptions_stay_green(
     _write(
         tmp_path,
         "astrid/core/gateway/dispatch.py",
-        "from astrid.packs import register_standard_schema_packs\n",
+        "from astrid.packs import compose_standard_pack_database\n",
     )
     # Legacy files stay in-tree and are never scanned for authority markers.
     _write(

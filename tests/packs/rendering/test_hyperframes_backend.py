@@ -283,7 +283,7 @@ def test_hyperframes_real_render_through_public_service(tmp_path: Path) -> None:
     assert sidecar.is_file()
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["engine"] == HYPERFRAMES_ID
-    assert payload["routing"]["resolved_backend"] == HYPERFRAMES_ID
+    assert payload["resolved_policy"]["renderers"] == [HYPERFRAMES_ID]
     assert payload["audio_ownership"] == "none"
     assert payload["backend_fragments"][HYPERFRAMES_ID]["renderer"] == "hyperframes"
     probe = subprocess.run(
@@ -548,8 +548,8 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
     sidecar = Path(f"{published}.provenance.json")
     assert sidecar.is_file()
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
-    assert payload["routing"]["resolved_policy"]["planner"] == "hyperframes.planner"
-    assert payload["routing"]["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
+    assert payload["resolved_policy"]["planner"] == "hyperframes.planner"
+    assert payload["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
     segments = payload["segments_v2"]
     windows = [(s["renderer"]["id"], s["window"]["start_frame"], s["window"]["end_frame"]) for s in segments]
     # text -> HyperFrames; media-with-transition -> Remotion; silent media -> HyperFrames

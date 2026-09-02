@@ -6,10 +6,10 @@ error signaling, output format, or ledger guarantees.
 
 ## Precedence Rule
 
-**[platform-contract.md](platform-contract.md) is the normative v1
-platform contract and wins on any disagreement with other SDK or
-pack-system documents.**  When two contracts appear to conflict, the
-platform contract is the final authority.
+**[platform-contract.md](platform-contract.md) is the normative platform
+contract for the public SDK and strict-v2 pack grammar.** When contracts
+appear to conflict, that document and the canonical pack contract are the
+authorities.
 
 ## Capability & Composition
 
@@ -22,15 +22,13 @@ platform contract is the final authority.
 
 ## Normative Contracts
 
-- **[platform-contract.md](platform-contract.md)** — The normative v1
-  SDK boundary: public exports, SemVer rules, deprecation window, DTO
-  stability tiers, manifest schema contract, element extensions, and
-  disclosure-only trust model.  Wins on disagreement.
+- **[platform-contract.md](platform-contract.md)** — Public SDK boundary,
+  strict-v2 canonical pack manifests, typed projections, and disclosure-only
+  trust model. Wins on disagreement.
 
-- **[cli-contract.md](cli-contract.md)** — Stable contract between the
-  CLI and agentic consumers: stdout/stderr stream discipline, JSON mode
-  schema, exit-code taxonomy, and the verb reference for `next`,
-  `status`, `start`, `abort`, `ack`, `skip`, and `attach`.
+- **[cli-contract.md](cli-contract.md)** — Stable eight-family CLI boundary:
+  stdout/stderr discipline, JSON mode, exit codes, nested
+  manifest-declared mounts, and operational doctor/backup commands.
 
 - **[error-model.md](error-model.md)** — Runtime error policy: the
   canonical three-code exit taxonomy (0=success, 1=degraded bug,

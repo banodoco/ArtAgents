@@ -141,14 +141,14 @@
       "artifact_type": null
     },
     {
-      "description": "Render selector. Accepts a legacy selector or a qualified backend id resolved through the rendering registry. Do not combine with backend.",
+      "description": "Render selector. Accepts only a qualified renderer or planner id resolved through the rendering registry. Do not combine with backend.",
       "name": "engine",
       "required": false,
       "type": "string",
       "artifact_type": null
     },
     {
-      "description": "Neutral selector synonym for engine. Prefer a qualified backend id for strict renderer selection. Do not combine with engine.",
+      "description": "Neutral selector synonym for engine. Use a qualified renderer or planner id. Do not combine with engine.",
       "name": "backend",
       "required": false,
       "type": "string",

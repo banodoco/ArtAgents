@@ -159,7 +159,7 @@ def _plan(
     return RenderPlan(
         schema_version=1,
         request_digest=SHA_D,
-        requested_policy="hybrid",
+        requested_policy="rendering.legacy_hybrid",
         planner=planner or _planner(),
         segments=selected,
         finalizer=finalizer or _finalizer(),
@@ -542,7 +542,7 @@ def _compatibility() -> dict[str, Any]:
 def test_provenance_requires_always_emitted_v1_projection() -> None:
     with pytest.raises(ValueError, match="v1_compatibility is required"):
         assemble_provenance_v2(
-            engine="remotion",
+            engine="rendering.remotion",
             output="/workspace/video.mp4",
             timeline="/workspace/timeline.json",
             assets_registry=None,
@@ -560,7 +560,7 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
         ]
     )
     kwargs = {
-        "engine": "hybrid",
+        "engine": "rendering.legacy_hybrid",
         "output": "/workspace/out/video.mp4",
         "timeline": "/workspace/timeline.json",
         "assets_registry": "/workspace/assets.json",
@@ -590,7 +590,7 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
     payload = assemble_provenance_v2(**kwargs)
     assert payload["schema_version"] == 2
     assert payload["request_digest"] == SHA_D
-    assert payload["requested_policy"] == "hybrid"
+    assert payload["requested_policy"] == "rendering.legacy_hybrid"
     assert payload["planner"] == _planner().to_dict()
     assert [segment["renderer"]["id"] for segment in payload["segments_v2"]] == [
         "acme.first",
@@ -622,7 +622,7 @@ def test_provenance_rejects_spoofed_segment_projection_in_plan_mapping() -> None
     plan["segments"][0]["engine"] = "spoofed"
     with pytest.raises(RendererProtocolError):
         assemble_provenance_v2(
-            engine="hybrid",
+            engine="rendering.legacy_hybrid",
             output="out/video.mp4",
             timeline="timeline.json",
             assets_registry=None,
@@ -694,7 +694,7 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
 
     # Provenance sidecar carries the same evidence
     payload = assemble_provenance_v2(
-        engine="hybrid",
+        engine="rendering.legacy_hybrid",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
@@ -764,7 +764,7 @@ def test_provenance_emits_hashed_artifact_lineage() -> None:
         },
     )
     payload = assemble_provenance_v2(
-        engine="hybrid",
+        engine="rendering.legacy_hybrid",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
@@ -818,7 +818,7 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
     """Artifact lineage must carry a real sha256; profile-only entries and
     null hashes are rejected rather than stringified."""
     base = dict(
-        engine="hybrid",
+        engine="rendering.legacy_hybrid",
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,

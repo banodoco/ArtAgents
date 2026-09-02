@@ -680,9 +680,9 @@ def test_threejs_hybrid_mixed_real_render(tmp_path: Path) -> None:
     assert payload["sha256"] == first_hash
     assert payload["engine"] == "rendering.threejs-hybrid"
     assert payload["audio_ownership"] == "rendered"
-    routing = payload["routing"]
-    assert routing["resolved_policy"]["planner"] == "rendering.threejs-hybrid"
-    assert routing["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
+    resolved_policy = payload["resolved_policy"]
+    assert resolved_policy["planner"] == "rendering.threejs-hybrid"
+    assert resolved_policy["finalizer"] == "rendering.ffmpeg-finalizer"
     segments = payload["segments_v2"]
     assert [
         (s["renderer"]["id"], s["window"]["start_frame"], s["window"]["end_frame"])

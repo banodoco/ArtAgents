@@ -173,13 +173,13 @@ def test_engine_ffmpeg_delegates_to_service(tmp_path: Path, monkeypatch: pytest.
     sentinel = tmp_path / "sentinel.mp4"
     fake = _patch_service(monkeypatch, sentinel)
 
-    result = render_run.render(timeline_path, assets_path, out_path, engine="ffmpeg")
+    result = render_run.render(timeline_path, assets_path, out_path, engine="rendering.ffmpeg")
 
     assert result == sentinel
     assert len(fake.calls) == 1
     (call_args, call_kwargs) = fake.calls[0]
     assert call_args == (timeline_path, assets_path, out_path)
-    assert call_kwargs["selector"] == "ffmpeg"
+    assert call_kwargs["selector"] == "rendering.ffmpeg"
     assert call_kwargs["backend_config"]["rendering.remotion"] == {
         "composition_id": "TimelineComposition"
     }
@@ -197,7 +197,7 @@ def test_engine_hybrid_delegates_to_service(tmp_path: Path, monkeypatch: pytest.
         timeline_path,
         assets_path,
         out_path,
-        engine="hybrid",
+        engine="rendering.legacy_hybrid",
         project_dir=tmp_path / "remotion",
         composition_id="CustomComposition",
         theme_path=tmp_path / "theme.json",
@@ -208,7 +208,7 @@ def test_engine_hybrid_delegates_to_service(tmp_path: Path, monkeypatch: pytest.
     assert len(fake.calls) == 1
     (call_args, call_kwargs) = fake.calls[0]
     assert call_args == (timeline_path, assets_path, out_path)
-    assert call_kwargs["selector"] == "hybrid"
+    assert call_kwargs["selector"] == "rendering.legacy_hybrid"
     assert call_kwargs["backend_config"]["rendering.legacy_hybrid"] == {
         "theme_path": str(tmp_path / "theme.json")
     }
@@ -233,13 +233,13 @@ def test_engine_remotion_delegates_to_service(tmp_path: Path, monkeypatch: pytes
     sentinel = tmp_path / "sentinel.mp4"
     fake = _patch_service(monkeypatch, sentinel)
 
-    result = render_run.render(timeline_path, assets_path, out_path, engine="remotion")
+    result = render_run.render(timeline_path, assets_path, out_path, engine="rendering.remotion")
 
     assert result == sentinel
     assert len(fake.calls) == 1
     (call_args, call_kwargs) = fake.calls[0]
     assert call_args == (timeline_path, assets_path, out_path)
-    assert call_kwargs["selector"] == "remotion"
+    assert call_kwargs["selector"] == "rendering.remotion"
 
 
 def test_engine_remotion_complex_timeline_still_delegates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,16 +250,16 @@ def test_engine_remotion_complex_timeline_still_delegates(tmp_path: Path, monkey
     sentinel = tmp_path / "sentinel.mp4"
     fake = _patch_service(monkeypatch, sentinel)
 
-    result = render_run.render(timeline_path, assets_path, out_path, engine="remotion")
+    result = render_run.render(timeline_path, assets_path, out_path, engine="rendering.remotion")
 
     assert result == sentinel
     assert len(fake.calls) == 1
-    assert fake.calls[0][1]["selector"] == "remotion"
+    assert fake.calls[0][1]["selector"] == "rendering.remotion"
 
 
 def test_unknown_engine_rejected(tmp_path: Path) -> None:
-    """Legacy translation lives in the service: an unknown selector is a
-    structured unsupported error, not a facade ValueError."""
+    """An unknown unqualified selector is a structured unsupported error,
+    not a facade ValueError."""
     from astrid.core.rendering.errors import RendererUnsupportedError
 
     timeline_path = _write_timeline(tmp_path, _media_only_timeline())
@@ -279,11 +279,11 @@ def test_engine_selection_does_not_short_circuit_in_facade(tmp_path: Path, monke
     sentinel = tmp_path / "audio_reactive.mp4"
     fake = _patch_service(monkeypatch, sentinel)
 
-    result = render_run.render(timeline_path, assets_path, out_path, engine="hybrid")
+    result = render_run.render(timeline_path, assets_path, out_path, engine="rendering.legacy_hybrid")
 
     assert result == sentinel
     assert len(fake.calls) == 1
-    assert fake.calls[0][1]["selector"] == "hybrid"
+    assert fake.calls[0][1]["selector"] == "rendering.legacy_hybrid"
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +348,7 @@ def test_audio_reactive_selection_precedes_engine_dispatch(tmp_path: Path, monke
     with patch.object(
         legacy_engine, "_render_audio_reactive_colour_if_supported", return_value=sentinel
     ) as specialized, patch.object(legacy_engine, "_render_hybrid") as hybrid:
-        result = render_run.render(timeline_path, assets_path, out_path, engine="hybrid")
+        result = render_run.render(timeline_path, assets_path, out_path, engine="rendering.legacy_hybrid")
 
     # The facade forwards to the service; the specialization helper is not
     # consulted by render() anymore.

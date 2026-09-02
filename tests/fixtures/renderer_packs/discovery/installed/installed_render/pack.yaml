@@ -1,7 +1,11 @@
-schema_version: 1
+schema_version: 2
 id: installed_render
 name: Installed Renderer Fixture
 version: 1.0.0
+domain: media
+stability: stable
+support: project
+visibility: visible
 permissions:
   - id: subprocess
     reason: Run the installed fixture backend.

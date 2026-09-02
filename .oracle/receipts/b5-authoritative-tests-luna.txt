@@ -1,0 +1,10 @@
+AUTHORITATIVE_TESTS: BLOCKED
+FOCUSED: `python3 -m pytest tests/packs tests/v10/test_catalog_migrations.py tests/v10/test_m8_packaging.py tests/v10/test_pack_factoring.py tests/v10/test_reference_repository.py tests/sdk/test_references.py tests/sdk/test_extended_composition.py` — exit 2; 1870 collected, 1 collection error, 0 tests executed; unchanged `banodoco_timeline_schema` rendering failure; 5.06s pytest / 6.06s wall; no adaptation.
+DOCTOR: `python3 -m astrid doctor` — PASS, exit 0; state ready; migrations expected/applied core/1, references/1, shots/1, timeline/1; pending 0; 22 product packs; documentation 22/22; 551 resource handles; 0.54s.
+FULL: `python3 -m pytest` — exit 2; 7631 collected, 2 collection errors, 0 tests executed; 19.90s pytest / 21.75s wall.
+BASELINE: Unchanged unavailable `banodoco_timeline_schema` rendering-lane failure; proof in focused/full artifacts and `.oracle/receipts/b5-test-authority-luna.txt`.
+NEW_FAILURES: `tests/timeline/test_inverses.py` collection failure via `TimelineEventSchemaError` caused by unavailable `banodoco_timeline_schema`; reproduced once with `python3 -m pytest tests/timeline/test_inverses.py`.
+EVIDENCE: `.oracle/evidence/b5-authoritative-tests.md`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/focused.txt`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/doctor.txt`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/full.txt`; `/workspace/runs/astrid-canonical-pack-beta-20260831-a1/b5-validation/timeline-inverses.txt`
+CHANGED: `.oracle/evidence/b5-authoritative-tests.md`
+BLOCKERS: Full authoritative suite blocked by the additional `tests/timeline/test_inverses.py` collection failure; no second full suite run.
+0

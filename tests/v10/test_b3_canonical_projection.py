@@ -63,7 +63,7 @@ def _catalog_root(tmp_path: Path) -> Path:
         shutil.copytree(
             PACKS_ROOT / pack_id,
             root / pack_id,
-            ignore=shutil.ignore_patterns("schema-pack.yaml", "__pycache__"),
+            ignore=shutil.ignore_patterns("__pycache__"),
         )
     return root
 
