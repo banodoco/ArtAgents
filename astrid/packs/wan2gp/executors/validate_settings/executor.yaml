@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.wan2gp.executors.validate_settings.run",
+      "--prompt",
+      "{prompt}",
+      "--model",
+      "{model}"
+    ]
+  },
+  "conditions": [
+    {
+      "input": "prompt",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Validate and compile Wan2GP settings without executing the engine.",
+  "graph": {
+    "consumes": [
+      "prompt"
+    ],
+    "provides": [
+      "wan2gp_settings",
+      "portable_digest"
+    ]
+  },
+  "id": "wan2gp.validate_settings",
+  "inputs": [
+    {
+      "description": "Text prompt.",
+      "name": "prompt",
+      "required": true,
+      "type": "string",
+      "artifact_type": "prompt"
+    },
+    {
+      "default": "wan-2.2",
+      "description": "Model id.",
+      "name": "model",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Negative prompt.",
+      "name": "negative_prompt",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Resolution WxH.",
+      "name": "resolution",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Frames / video_length.",
+      "name": "frames",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "Seed.",
+      "name": "seed",
+      "required": false,
+      "type": "integer"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "requirements": []
+  },
+  "keywords": [
+    "wan2gp",
+    "validate",
+    "settings"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "pack_id": "wan2gp",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.wan2gp.executors.validate_settings.run"
+  },
+  "name": "Wan2GP Validate Settings",
+  "short_description": "Compile and validate Wan2GP settings (no engine execution).",
+  "version": "0.1.0"
+}

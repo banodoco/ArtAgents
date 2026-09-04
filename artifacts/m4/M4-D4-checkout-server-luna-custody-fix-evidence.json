@@ -1,0 +1,11 @@
+{
+  "receipt": "M4-D4-checkout-server-luna-custody-fix",
+  "scope": ["nested comfy_outputs descriptor extraction", "empty output subfolder validation"],
+  "before_after_hashes": {
+    "before": {"vibecomfy.py": "b18d1179866ae67eb54e6e5fad0fd09b88018865e5f3bc8b25063ac8772f4a06", "test_checkout_server.py": "06afcb044245f9475794bd9062fbb5407e933f9c5a520cdb9e4a8c2deed5a62b"},
+    "after": {"vibecomfy.py": "d7406b345d8890e7cf25f7d8850a6ba090a0c340fcff7e8155dee3434aa20b2d", "test_checkout_server.py": "3a04e8fd971ddacce54347e2a2cb04e79b8effb52ded2f053a170fed944459bc"}
+  },
+  "diff_hashes": {"before_file_content_sha256": "b18d1179866ae67eb54e6e5fad0fd09b88018865e5f3bc8b25063ac8772f4a06", "after_file_content_sha256": "d7406b345d8890e7cf25f7d8850a6ba090a0c340fcff7e8155dee3434aa20b2d"},
+  "tests": {"command": "python -m pytest -q tests/core/generation/backends/test_checkout_server.py tests/core/generation/backends/test_param_map_fallback.py", "result": "33 passed, 5 skipped"},
+  "status": "PASS"
+}

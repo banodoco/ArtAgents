@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-wan2gp-execution",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "status": "SUCCEEDED_CANDIDATE",
+  "abi_fixed": true,
+  "no_native_settings_update": true,
+  "parent": {
+    "head": "318e2cd04f05ff6875dbe8c58ad5d4373dd3e329",
+    "tree": "703df37ffdd12be93d1579f17daaf046ed39e6ee"
+  },
+  "protected_pod": {
+    "pod_id": "o0glkh8fjvogi6",
+    "protected_pid": 12369,
+    "pid_preserved": true,
+    "pid_probe": "ps -p 12369 reported 12369 Sl python",
+    "pod_lifecycle_touched": false,
+    "queue_after": {
+      "running": 0,
+      "pending": 0
+    }
+  },
+  "inputs": {
+    "prompt": "a paper kite over a quiet lake at dawn",
+    "model": "wan-2.2",
+    "resolution": "320x240",
+    "video_length": 17,
+    "seed": 17,
+    "guidance_scale": 5.0,
+    "force_fps": 16,
+    "compiled_model_type": "vace_fun_14B_2_2",
+    "compiled_image_refs_strengths": [],
+    "portable_digest": "bbbd2039eed273476051677a31491663b640125839442becde68e3582e75fd15",
+    "machine_local_excluded_from_digest": [
+      "wan2gp_path",
+      "attempt_root",
+      "output_dir",
+      "device",
+      "wan2gp_pin",
+      "wan2gp_sha"
+    ]
+  },
+  "execution": {
+    "runner": "one_shot_run",
+    "executor_pid": 470764,
+    "executor_pid_note": "Luna PID 470764 observed via launcher470700 chain; AgentBox SSH471422 -> pod sshd20079 -> pod Python20096",
+    "launcher_pid": 470700,
+    "luna_pid": 470764,
+    "luna_session": "01a0692e-6f37-7000-bceb-aaf09939ca9a",
+    "agent_box_ssh_pid": 471422,
+    "pod_sshd_pid": 20079,
+    "pod_python_pid": 20096,
+    "correction_note": "amended from null/not-visible to observed chain per Director evidence",
+    "ssh_endpoint": "213.173.103.43:39036",
+    "python": "/workspace/Reigh-Worker/venv.pre-uv-20260410012556/bin/python",
+    "adapter_source": "/tmp/astrid-c5/astrid/packs/wan2gp/src",
+    "adapter_source_note": "Adapter source was staged at /tmp/astrid-c5/astrid/packs/wan2gp/src then used for compilation; remote pod had no Astrid worktree at the requested path, without changing the protected pod process",
+    "attempt_root": "/tmp/wan2gp-c5-abifix-1788471328",
+    "spool": "/tmp/wan2gp-c5-abifix-1788471328/outputs",
+    "duration_ms": 451170,
+    "duration": "00:07:31.170",
+    "total_tasks": 1,
+    "successful_tasks": 1,
+    "failed_tasks": 0,
+    "succeeded": true,
+    "native_settings_update_used": false
+  },
+  "generated_output": {
+    "path": "/tmp/wan2gp-c5-abifix-1788471328/outputs/2026-09-03-21h42m42s_seed17_a paper kite over a quiet lake at dawn.mp4",
+    "size_bytes": 203484,
+    "sha256": "669901f4a26e9262f8282eb87efc46a70f5fcd604b42fd591f10346dbef40a51",
+    "pulled_evidence_path": "/tmp/wan2gp-c5-abifix-output.mp4",
+    "pulled_sha256": "669901f4a26e9262f8282eb87efc46a70f5fcd604b42fd591f10346dbef40a51",
+    "pulled_size_bytes": 203484,
+    "is_symlink": false,
+    "spool_contained": true
+  },
+  "engine": {
+    "disclosed_engine": "wan2gp",
+    "pin_sha": "181bb71a21008032e4771e11663f33e4489c4512",
+    "pin_ref": "refs/remotes/origin/reigh-sprint-3",
+    "seam": "shared.api.init / WanGPSession.submit_task",
+    "wan2gp_root": "/workspace/Reigh-Worker/Wan2GP"
+  },
+  "custody_refs": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06",
+    "all14_exact_size_and_identity_pass": true
+  },
+  "recorded_at": "2026-09-03T21:44:13Z"
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-wan2gp-abi-fix",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "parent": {
+    "head": "2d1e5968ccb6133c071bb69909fff19d25670416",
+    "tree": "8ca86650eaa219fdbb9a8ec0d2bd2577c7b5c123"
+  },
+  "patch": {
+    "head": "04453adb08e945b773475ff3fbe08b502c563c99",
+    "tree": "8fd1558c00a49fca53a3ab1223d474d904c6ad9b",
+    "commit_message": "C-5 ABI: default model_type vace_fun_14B_2_2 and image_refs_strengths [] in compiler (native generate_video 5811/5812 required positions) + regression tests",
+    "file": "astrid/packs/wan2gp/src/compiler.py",
+    "diff_summary": "Added model_type and image_refs_strengths to PORTABLE_KEYS; added compile_settings keyword parameters and deterministic setdefault mappings after extra assembly; compile_from_inputs continues passing these values through extra.",
+    "defaults": {
+      "model_type": "vace_fun_14B_2_2",
+      "image_refs_strengths": []
+    },
+    "explicit_values_preserved": true
+  },
+  "installed_signature_evidence": {
+    "path": "/workspace/Reigh-Worker/Wan2GP/wgp.py",
+    "generate_video": "line 5766",
+    "required_positional_arguments": [
+      {
+        "line": 5811,
+        "name": "image_refs",
+        "default": "none"
+      },
+      {
+        "line": 5812,
+        "name": "image_refs_strengths",
+        "default": "none"
+      }
+    ],
+    "model_type": "required positional argument",
+    "evidence_command": "sed -n '5766,5920p' /workspace/Reigh-Worker/Wan2GP/wgp.py"
+  },
+  "tests": {
+    "new_regression_tests": 3,
+    "abi_test_command": "python -m pytest tests/test_wan2gp_abifix.py -v",
+    "abi_result": "3 passed",
+    "lifecycle_test_command": "python -m pytest tests/test_wan2gp_lifecycle.py -q",
+    "lifecycle_result": "6 passed"
+  },
+  "portable_digest": {
+    "before": "6d77bfe01d3f64e5d138629abe4ea908d9ed7fa860a4c6cf8592338ec1ec6c1c",
+    "after": "bbbd2039eed273476051677a31491663b640125839442becde68e3582e75fd15"
+  },
+  "custody_refs_unchanged": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06"
+  },
+  "native_settings_update_used": false,
+  "protected_pid": 12369,
+  "pod_lifecycle_touched": false
+}

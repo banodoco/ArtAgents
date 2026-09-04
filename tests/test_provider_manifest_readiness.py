@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from astrid.core.execution.generic_host import GenericPackHost
 
 
@@ -70,6 +72,14 @@ def test_all_supported_provider_routes_are_ready_and_grantable_with_declared_inp
         protocols = {str(value).lower() for value in record.definition.metadata["network_policy"]["allowed_protocols"]}
         if not protocols & {"udp", "quic"}:
             tcp_providers.append(record)
+            if record.id == "editorial.script_pipeline" and not record.ready:
+                assert record.preflight["sandbox"]["reason"] == (
+                    "host-managed provider broker requires an OS network sandbox"
+                )
+                pytest.skip(
+                    "LINUX_SANDBOX: editorial.script_pipeline requires "
+                    "darwin sandbox-exec for its host-managed broker"
+                )
             assert record.ready, (record.id, record.preflight)
 
     assert len(tcp_providers) == 22

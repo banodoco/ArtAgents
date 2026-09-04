@@ -238,3 +238,51 @@ _TOP_LEVEL_HANDLERS = {
     "doctor": _dispatch_doctor,
     "backup": _dispatch_backup,
 }
+
+
+def compose_profile_handoff(
+    state_path: str | "Path",
+    *,
+    registry: "Mapping[str, Any] | None" = None,
+    fixtures: "Iterable[Any] | None" = None,
+) -> dict[str, Any]:
+    """Verify-or-stamp the B-6 handoff at the application composition root.
+
+    This is intentionally separate from transport dispatch.  The generic host
+    consumes the resulting stamp, but never discovers profiles or emits it.
+    """
+
+    from astrid.core.integrations.reigh.boot_manifest import (
+        boot_manifest_path,
+        manifest_hash,
+        stamp_boot_manifest,
+        validate_state_path,
+    )
+    from astrid.packs.shots.conformance import (
+        VIBE_PROFILE_REGISTRY,
+        vibe_profile_specs,
+    )
+    validated_state_path = validate_state_path(state_path)
+
+    active_registry = VIBE_PROFILE_REGISTRY if registry is None else registry
+    active_fixtures = vibe_profile_specs() if fixtures is None else fixtures
+    manifest = stamp_boot_manifest(
+        validated_state_path,
+        registry=active_registry,
+        fixtures=active_fixtures,
+    )
+    return {
+        "path": str(boot_manifest_path(validated_state_path)),
+        "sha256": manifest_hash(manifest),
+        "manifest": manifest,
+    }
+
+
+def emit_boot_manifest(
+    state_path: str | "Path",
+    *,
+    registry: "Mapping[str, Any] | None" = None,
+    fixtures: "Iterable[Any] | None" = None,
+) -> dict[str, Any]:
+    """Explicit composition-root name for callers that do not need routing."""
+    return compose_profile_handoff(state_path, registry=registry, fixtures=fixtures)

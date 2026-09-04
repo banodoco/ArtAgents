@@ -85,7 +85,7 @@ models:
         backends:
           local:
             template: image/z_image
-            template_hash: "sha256:a8bb7f5397bbafef1e9545b7c0ebbb196db88027de94b3c417cd9c2ee4b8b70b"
+            template_hash: "sha256:1021529f44192360dd5ff1724a3a72697993d1bbe40c795e1f0bdb2afe24156a"
           cloud:
             endpoint: fal-ai/z-image/turbo
             lora_endpoint: fal-ai/z-image/turbo/lora
@@ -115,7 +115,7 @@ models:
         backends:
           local:
             template: image/z_image_img2img
-            template_hash: "sha256:32d0319740738742b9320f810b6ead9bd47a0196c5008ed4476913d3b32dd880"
+            template_hash: "sha256:46d93e4e3895e0eda3576fe9008020025a08e8a494d8aaa21c99068d40d0dd31"
           cloud:
             endpoint: fal-ai/z-image/turbo/image-to-image
           codex:
@@ -161,7 +161,7 @@ models:
         backends:
           local:
             template: image/qwen_image_2512
-            template_hash: "sha256:c0716acf518923907b78c1d8e3f9bc0ab1c2dae54589c2a3a289998e8d4baf44"
+            template_hash: "sha256:89c9ae6fe90232215d9ba1cd664bdb9d31082c08f211ed8b142c8fc27df90b86"
           cloud:
             endpoint: fal-ai/qwen-image
           codex:
@@ -207,7 +207,7 @@ models:
         backends:
           local:
             template: edit/qwen_image_edit
-            template_hash: "sha256:2620132e816257fe7ad3ab06e5c226ca0f59438161e48dedc6364267820f5b37"
+            template_hash: "sha256:f3179414abb47fbf7387226dc1da76b0db2d288e606e852133fbfd35fc8adefd"
           cloud:
             endpoint: fal-ai/qwen-image-edit
           codex:
@@ -557,7 +557,7 @@ models:
         backends:
           local:
             template: video/wan22_i2v_comfy_lightx2v
-            template_hash: "sha256:272d03627814489a707c4d98553611072244a0b40f9657ed29330dd5c06afc77"
+            template_hash: "sha256:e62a5d079bf291a437feb1e2a222d003408c53a54a1e484b3f224a74b0d18a1f"
           cloud:
             endpoint: fal-ai/wan/v2.2-a14b/image-to-video/turbo
       flf:
@@ -630,7 +630,7 @@ models:
         backends:
           local:
             template: video/ltx2_3_t2v
-            template_hash: "sha256:572de0f257257305dd5b2e8c099e4076434801c286fa8a4666dee2f9671e3261"
+            template_hash: "sha256:d4144d3cf4af04b25cf833ba9208c53b6a81fe63e2bbf07e4afe75f7a1ed2526"
           cloud:
             endpoint: fal-ai/ltx-2.3/text-to-video/fast
       i2v:
@@ -653,7 +653,7 @@ models:
         backends:
           local:
             template: video/ltx2_3_i2v
-            template_hash: "sha256:b093fd5e439a2f862789c50661bc3d4ba4500791be6b954661f12db3ccc9cc31"
+            template_hash: "sha256:a00b7af6825cecd4972d56d20877d5227cb92896dacd10f20c4c917e649b98f8"
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video/fast
             # When LoRAs are requested the backend routes to this quality
@@ -678,7 +678,7 @@ models:
         backends:
           local:
             template: video/ltx2_3_runexx_first_last_frame
-            template_hash: "sha256:7ec63b4662cacbd7105858d4284939af70b29f4c8c6893134c97f5dcaacc41ab"
+            template_hash: "sha256:c2d5b722a94d2282226343cd5712dcd347ed9dec5da0a27e6a1075903cdf16ec"
   # =========================================================================
   # ltx-2.3-pro — LTX-2.3 pro endpoints (cloud-only t2v + i2v)
   # =========================================================================

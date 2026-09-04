@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-wan2gp-transport-auth-blocked",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "status": "BLOCKED_ON_PROTECTED_POD_SSH_AUTH",
+  "parent_head": "e37391ab0188d19e5a154ca2d0e85488cf52c243",
+  "parent_tree": "be7d9386e01423927900d717d40fe52dcb237eaa",
+  "brief_sha256": "2bfa2125391c2c7e8187a3ba663b6be4f8240a14611a8a1f09c407dee26cdcf6",
+  "custody": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06",
+    "all14_exact_size_and_identity_pass": true,
+    "c5_launch_ready": true
+  },
+  "protected_pod": {
+    "pod_id": "o0glkh8fjvogi6",
+    "network_volume_id": "m6ccu1lodp",
+    "ckpts_root": "/workspace/Reigh-Worker/Wan2GP/ckpts",
+    "protected_pid": 12369,
+    "protected_pid_preserved": true,
+    "pod_lifecycle_touched": false,
+    "queue_or_gpu_touched": false
+  },
+  "portable_request": {
+    "prompt": "a paper kite over a quiet lake at dawn",
+    "model": "wan-2.2",
+    "resolution": "320x240",
+    "video_length": 17,
+    "seed": 17,
+    "guidance_scale": 5.0,
+    "force_fps": "16",
+    "model_quant_selection": "bf16 VACE",
+    "portable_digest": "6d77bfe01d3f64e5d138629abe4ea908d9ed7fa860a4c6cf8592338ec1ec6c1c",
+    "machine_local_excluded_from_digest": ["wan2gp_path", "attempt_root", "output_dir", "device", "wan2gp_pin", "wan2gp_sha"]
+  },
+  "engine": {
+    "disclosed_engine": "wan2gp",
+    "pin_sha": "181bb71a21008032e4771e11663f33e4489c4512",
+    "pin_ref": "refs/remotes/origin/reigh-sprint-3",
+    "seam": "shared.api.init / WanGPSession.submit_task",
+    "checkout_presence": "not locally mounted; custody receipt identifies protected pod checkout and ckpts root"
+  },
+  "transport_attempt": {
+    "endpoint": "213.173.103.43:39036",
+    "username": "root",
+    "authorized_key_fingerprint": "SHA256:BBhwcaCXmng6PlYmfdspw/f+ZElm+lDEwT6kQGEZRMg",
+    "ssh_exit_code": 255,
+    "observed_error": "Permission denied (publickey,password)",
+    "attempted_at": "2026-09-03T20:53:48Z",
+    "recovery_attempts": [
+      "RunPod REST/GraphQL metadata read-only inspection",
+      "RunPod SSH endpoint probe using the custody-era Peter key fingerprint",
+      "No pod stop, resume, restart, terminate, or environment reconfiguration"
+    ]
+  },
+  "execution": {
+    "one_shot_run_invoked": false,
+    "generated_files": [],
+    "output_sha256": null,
+    "output_size_bytes": null,
+    "spool": null,
+    "duration_ms": null,
+    "reason": "Cannot reach the protected checkout/engine because the pod rejects the authorized Peter SSH key; no output was fabricated and no alternate pod was created."
+  },
+  "tests": {
+    "lifecycle_expected": "6/6 existing C-4 CPU/fake tests preserved",
+    "lifecycle_run": false
+  },
+  "new_head": null,
+  "new_tree": null,
+  "recorded_at": "2026-09-03T20:53:48Z"
+}

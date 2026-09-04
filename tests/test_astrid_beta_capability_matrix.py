@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from astrid.core.execution.generic_host import GenericPackHost
 
 
@@ -52,6 +54,12 @@ def test_beta_reference_family_preflight_is_truthful_on_this_machine():
         assert helper.adapter.family == "render"
         assert helper.adapter.requires_remotion is False
         assert "remotion" not in helper.preflight
+        if capability_id == "rendering.sprite_sheet" and not helper.ready:
+            assert helper.preflight["binaries"]["missing"] == ["ffmpeg"]
+            pytest.skip(
+                "OPTIONAL_FFMPEG: rendering.sprite_sheet requires ffmpeg "
+                "on this host"
+            )
         assert helper.ready
 
     local = host.capabilities["vibecomfy.run"]

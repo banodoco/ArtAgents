@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.wan2gp.executors.generate_video.run",
+      "--prompt",
+      "{prompt}",
+      "--model",
+      "{model}",
+      "--out",
+      "{out}"
+    ]
+  },
+  "conditions": [
+    {
+      "input": "prompt",
+      "kind": "requires_input"
+    },
+    {
+      "input": "model",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Generate a short video via the native Wan2GP engine (one-shot, private spool, typed capability).",
+  "graph": {
+    "consumes": [
+      "prompt"
+    ],
+    "provides": [
+      "generated_videos",
+      "video_manifest"
+    ]
+  },
+  "id": "wan2gp.generate_video",
+  "inputs": [
+    {
+      "description": "Text prompt for video generation.",
+      "name": "prompt",
+      "required": true,
+      "type": "string",
+      "artifact_type": "prompt"
+    },
+    {
+      "default": "wan-2.2",
+      "description": "Wan2GP model identifier (e.g. wan-2.2).",
+      "name": "model",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Negative prompt.",
+      "name": "negative_prompt",
+      "required": false,
+      "type": "string",
+      "artifact_type": "prompt"
+    },
+    {
+      "default": "",
+      "description": "Output resolution WxH (e.g. 1280x720).",
+      "name": "resolution",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Number of frames / video_length.",
+      "name": "frames",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "Frames per second (stringified to force_fps).",
+      "name": "fps",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Deterministic seed.",
+      "name": "seed",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "Guidance scale.",
+      "name": "guidance_scale",
+      "required": false,
+      "type": "number"
+    },
+    {
+      "default": "",
+      "description": "Sampling steps (num_inference_steps alias).",
+      "name": "steps",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "LoRAs JSON or path.",
+      "name": "loras",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "requirements": []
+  },
+  "keywords": [
+    "wan2gp",
+    "wan",
+    "video",
+    "generate",
+    "gpu"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "pack_id": "wan2gp",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.wan2gp.executors.generate_video.run"
+  },
+  "name": "Wan2GP Generate Video",
+  "short_description": "One-shot native Wan2GP video generation with private spool.",
+  "version": "0.1.0"
+}

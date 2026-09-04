@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-wan2gp-custody-verification",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "status": "PASS_CANDIDATE",
+  "parent_head": "df83c44545724a570a423b1eac0d375c028e3adb",
+  "parent_tree": "39ebcee0bf895fb6bd3c1065aa4366b86b608b6d",
+  "evidence_commit": {
+    "head": "a90b5b983579da1997475d44f67604bbec2fe712",
+    "tree": "42ae33ad41ab958558645222e20af030178f7862"
+  },
+  "all14_pass": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06",
+    "all14_exact_size_and_identity_pass": true,
+    "c5_launch_ready": true
+  },
+  "protected_pod": {
+    "pod_id": "o0glkh8fjvogi6",
+    "network_volume_id": "m6ccu1lodp",
+    "ckpts_root": "/workspace/Reigh-Worker/Wan2GP/ckpts",
+    "protected_pid": 12369,
+    "protected_pid_preserved": true,
+    "pod_lifecycle_touched": false,
+    "queue_after": {
+      "running": 0,
+      "pending": 0
+    }
+  },
+  "generated_output": {
+    "spool": "/tmp/wan2gp-c5-attempt-1788470027/outputs",
+    "path": "/tmp/wan2gp-c5-attempt-1788470027/outputs/2026-09-03-21h20m08s_seed17_a paper kite over a quiet lake at dawn.mp4",
+    "size_bytes": 203484,
+    "sha256": "590dccb1c9c67c66ac3a9a5a3a35dffda6fafda9b591920491decddc91104d16",
+    "is_symlink": false,
+    "resolved_path": "/tmp/wan2gp-c5-attempt-1788470027/outputs/2026-09-03-21h20m08s_seed17_a paper kite over a quiet lake at dawn.mp4",
+    "spool_contained": true,
+    "pulled_evidence_sha256": "590dccb1c9c67c66ac3a9a5a3a35dffda6fafda9b591920491decddc91104d16",
+    "pulled_evidence_size_bytes": 203484
+  },
+  "request": {
+    "portable_digest": "6d77bfe01d3f64e5d138629abe4ea908d9ed7fa860a4c6cf8592338ec1ec6c1c",
+    "model_quant_selection": "bf16 VACE",
+    "engine_pin": "181bb71a21008032e4771e11663f33e4489c4512",
+    "runner": "one_shot_run"
+  },
+  "recorded_at": "2026-09-03T21:22:00Z"
+}

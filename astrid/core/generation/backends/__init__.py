@@ -15,14 +15,14 @@ from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
 
-# VibeComfyBackend is lazy-imported via module __getattr__ (SD-009) so
+# VibeComfy adapters are lazy-imported via module __getattr__ (SD-009) so
 # that ``import astrid`` never pulls in the vibecomfy module tree.
-# The public name is preserved: ``from astrid.core.generation.backends
-# import VibeComfyBackend`` still works and triggers the lazy load.
+# Their public names are preserved and trigger the lazy load.
 
 __all__ = [
     "BackendAdapter",
-    "CodexBackend",
+    "CheckoutServerAdapter",
+    "VibeComfyEngine",
     "discover_generation_backend_descriptors",
     "FalBackend",
     "GenerationBackendDescriptor",
@@ -35,10 +35,18 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    if name == "VibeComfyBackend":
-        from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
+    if name in {"CheckoutServerAdapter", "VibeComfyEngine", "VibeComfyBackend"}:
+        from astrid.core.generation.backends.vibecomfy import (
+            CheckoutServerAdapter,
+            VibeComfyBackend,
+            VibeComfyEngine,
+        )
 
-        return VibeComfyBackend
+        return {
+            "CheckoutServerAdapter": CheckoutServerAdapter,
+            "VibeComfyEngine": VibeComfyEngine,
+            "VibeComfyBackend": VibeComfyBackend,
+        }[name]
     if name == "WavespeedBackend":
         try:
             from astrid.core.generation.backends.wavespeed import WavespeedBackend

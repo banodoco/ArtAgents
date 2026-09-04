@@ -1,0 +1,58 @@
+[launch_omp_agent] model=grok/grok-4.6 cwd=/workspace/astrid-reigh-gpu-meta-20260902-a1/worktrees/astrid-gpu-c-wan2gp-20260901/Astrid
+Working...
+**GO-with-notes**
+
+Candidate `c8edc84ee63841ddf4cf6042772fc898e377824a` tree `45d203fb8b64765420aa118d72141d234071390b`. Parent chain `04453adb` → `318e2cd0` → `0a536582` → `2687365d` → `c8edc84e`. Diff vs `2d1e5968` is five files, +224/−0.
+
+### ABI patch (owned, not injection)
+`astrid/packs/wan2gp/src/compiler.py` only: `model_type` and `image_refs_strengths` added to `PORTABLE_KEYS`; `compile_settings` kwargs; `setdefault("vace_fun_14B_2_2")` and `setdefault([])` after extra merge. Explicit values win; extra-path `compile_from_inputs` still works. Driver `one_shot_run` is `session.submit_task(settings)` with no `native_settings.update`. Receipts record `no_native_settings_update: true`.
+
+Portable handling is correct. Digest shift is exactly those two keys:
+- before `6d77bfe01d3f64e5d138629abe4ea908d9ed7fa860a4c6cf8592338ec1ec6c1c`
+- after `bbbd2039eed273476051677a31491663b640125839442becde68e3582e75fd15` (recomputed here)
+
+### Tests
+`python -m pytest tests/test_wan2gp_abifix.py tests/test_wan2gp_lifecycle.py -q` → **9 passed**.
+- ABI 3: defaults, explicit preserve, missing prompt.
+- Lifecycle 6: unchanged since C-4 `e37391ab`.
+No grep in tests.
+
+### Custody
+Unchanged across ABI/execution/correction:
+- `515569f3…` manifest correction
+- `d1eb5a9e…` custody pass
+- `f00edb1c…` manifest
+- `2413554b…` asset14
+Pod `o0glkh8fjvogi6` PID **12369** preserved, `pod_lifecycle_touched: false`.
+
+### Correction
+`2687365d` amends only timestamp/PID chain; output SHA/size/duration/digest unchanged.
+- before SHA `051ae7bbe2a25570d3003361b3973e606a376faad65b7bb7b1c4da860b1529f0` (matches `0a536582` blob)
+- after SHA `166526b8f093e8687efb7d00ee48e3c352fa07a5ee2de1e1218359904a3a9617` (matches working tree)
+- `recorded_at` `2026-09-03T21:50:00Z` → `2026-09-03T21:44:13Z` = `0a536582` commit date
+- chain: launcher `470700` → Luna `470764` / `01a0692e-6f37-7000-bceb-aaf09939ca9a` → AgentBox SSH `471422` → pod sshd `20079` → pod Python `20096`
+- `no_rerender: true`
+
+Working-tree mtimes: abifix `21:47:36Z` (correction commit `21:47:57Z`), correction receipt `21:48:40Z` (commit `21:48:48Z`). Pulled MP4 mtime `21:43:20Z` sits before `0a536582` `21:44:13Z`. Brief cited `21:44:06` as file mtime; that stamp is not on the current receipt file (rewritten at correction). Timestamp in the receipt is still truthful vs the execution commit.
+
+### Output
+Pulled evidence `/tmp/wan2gp-c5-abifix-output.mp4`: size **203484**, SHA **669901f4a26e9262f8282eb87efc46a70f5fcd604b42fd591f10346dbef40a51**, ISO `ftypisom`. Remote spool `/tmp/wan2gp-c5-abifix-1788471328/outputs/...` is not on this host; durable local copy matches recorded identity. Duration 451170 ms.
+
+### Manifest (2d1e5968..c8edc84e)
+| File | Role |
+|---|---|
+| `astrid/packs/wan2gp/src/compiler.py` | owned ABI |
+| `tests/test_wan2gp_abifix.py` | 3 tests |
+| `receipts/C-5-abi-fix.json` | ABI receipt |
+| `receipts/C-5-execution-abifix.json` | rerun + correction |
+| `receipts/C-5-execution-correction.json` | correction meta |
+
+### Notes (non-blocking)
+1. `compile_from_inputs` still does not pass `model_type`/`image_refs_strengths` as kwargs; they ride `extra`. Defaults still apply. Keyword params are unused by the canonical path.
+2. `PORTABLE_KEYS` is documentation-only; `portable_digest` hashes all non-machine-local keys. Behavior is consistent; the tuple is not the digest filter.
+3. Adapter staged at `/tmp/astrid-c5/...` because the pod had no Astrid worktree. Declared; not injection.
+4. Remote spool gone; pulled MP4 remains. Native `wgp.py` 5766/5811/5812 not locally mounted here; ABI receipt cites that evidence.
+5. First-run output SHA `590dccb1…` differs from ABI rerun `669901f4…` (expected: compile now includes the two keys). Same size 203484.
+
+No blocking reasons.
+EXIT:0

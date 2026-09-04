@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-execution-correction",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "corrected_file": "receipts/C-5-execution-abifix.json",
+  "before_sha": "051ae7bbe2a25570d3003361b3973e606a376faad65b7bb7b1c4da860b1529f0",
+  "after_sha": "166526b8f093e8687efb7d00ee48e3c352fa07a5ee2de1e1218359904a3a9617",
+  "before_head": "0a536582b89119c3aee7d4694910fb4a5741be8d",
+  "new_head": "2687365d4e19e3d8c0d129ee02f8bf86e2cbe0c0",
+  "correction": {
+    "recorded_at": "2026-09-03T21:44:13Z",
+    "executor_pid": 470764,
+    "launcher_pid": 470700,
+    "luna_pid": 470764,
+    "luna_session": "01a0692e-6f37-7000-bceb-aaf09939ca9a",
+    "agent_box_ssh_pid": 471422,
+    "pod_sshd_pid": 20079,
+    "pod_python_pid": 20096
+  },
+  "no_rerender": true,
+  "protected_pid": 12369,
+  "pod_lifecycle_touched": false,
+  "custody_refs_unchanged": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06"
+  }
+}

@@ -1,0 +1,38 @@
+schema_version: 2
+id: wan2gp
+name: Astrid Wan2GP
+version: 1.0.0
+status: active
+domain: generation
+stability: experimental
+support: core
+visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs Wan2GP native Python engine (shared.api / WanGPSession) for video generation.
+  - id: project_files
+    reason: Reads input images/videos and writes generated outputs to private spool.
+  - id: accelerator
+    reason: May use GPU for Wan2GP model inference when available.
+description: Native Wan2GP video generation via the in-process shared.api seam (Wan2GP 181bb71a, reigh-sprint-3). One-shot execution with private output spool.
+keywords:
+- wan2gp
+- wan
+- video
+- generation
+- gpu
+- reigh
+capabilities:
+- generate_video
+- validate_settings
+agent:
+  purpose: Choose this pack to generate video via the native Wan2GP engine (Wan2GP, not fal/cloud). Uses shared.api.init() / WanGPSession.submit_task() behind a private per-runner spool and one-shot runner.
+  do_not_use_for: Do not use for VibeComfy/ComfyUI workflows (use vibecomfy) or fal/cloud video (use generation); this is the native Wan2GP engine seam only.
+  normal_entrypoints:
+  - wan2gp.generate_video
+  - wan2gp.validate_settings
+content:
+  executors: executors
+documentation:
+  kind: skill
+  path: skill/SKILL.md

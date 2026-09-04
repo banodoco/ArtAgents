@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "receipt_type": "c5-commit-identity",
+  "operation_id": "astrid-reigh-gpu-meta-20260902-a1",
+  "lane": "C Wan2GP/VACE",
+  "status": "BLOCKED_ON_PROTECTED_POD_SSH_AUTH",
+  "parent_head": "e37391ab0188d19e5a154ca2d0e85488cf52c243",
+  "parent_tree": "be7d9386e01423927900d717d40fe52dcb237eaa",
+  "candidate_commit": {
+    "head": "23afc613b002f3958bb64831d74fb8acf35ce83f",
+    "tree": "80389317042e0f0fc3edde82e6487c0a862cc85e",
+    "message": "C-5: record protected pod SSH auth blocker"
+  },
+  "blocker_receipt": {
+    "path": "receipts/C-5-transport-auth-blocked.json",
+    "sha256": "416514b07d2492080fecaaee0416668b476781c502959ccc278300f01134442f"
+  },
+  "custody_refs": {
+    "manifest_correction_receipt_sha256": "515569f3bc82b62ca859159b6e57f481d034c9d5e37c8995d8149f31da997a47",
+    "custody_pass_receipt_sha256": "d1eb5a9e87b3b37d2e48fa7eeffee2f68daeb20f71a18d993b60eaac231ddae6",
+    "manifest_sha256": "f00edb1c9eb6f4e5f2fd42cf71bce0dee25979ba3d865bf1fc8235d7b990e513",
+    "asset14_sha256": "2413554bbec24215185662d009893cf4666b8e777efece2d895e03e1a6b63e06"
+  },
+  "protected_pod": {
+    "pod_id": "o0glkh8fjvogi6",
+    "protected_pid": 12369,
+    "pid_preserved": true,
+    "pod_lifecycle_touched": false
+  },
+  "execution": {
+    "one_shot_run_invoked": false,
+    "generated_output": null,
+    "reason": "SSH authentication rejected before remote one_shot_run execution; no model bytes, GPU queue, or protected pod lifecycle was touched."
+  },
+  "new_head": "23afc613b002f3958bb64831d74fb8acf35ce83f",
+  "new_tree": "80389317042e0f0fc3edde82e6487c0a862cc85e",
+  "recorded_at": "2026-09-03T20:53:48Z"
+}

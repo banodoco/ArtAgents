@@ -69,6 +69,10 @@ def _make_vibecomfy_entry(
                 backends={
                     "local": BackendSpec(
                         template=template,
+                        template_hash=(
+                            "sha256:"
+                            "1021529f44192360dd5ff1724a3a72697993d1bbe40c795e1f0bdb2afe24156a"
+                        ),
                         param_map=param_map if param_map is not None else {},
                     )
                 },

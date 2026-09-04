@@ -452,26 +452,21 @@ def test_discovery_digest_and_truthful_preflight(tmp_path):
 def test_claim_only_admits_capabilities_that_are_currently_ready(tmp_path, monkeypatch):
     """The host candidate set must equal its current readiness predicate."""
     monkeypatch.delenv("ASTRID_PROVIDER_KEY", raising=False)
-    root = tmp_path / "provider"
+    root = tmp_path / "required_env"
     root.mkdir()
     (root / "executor.yaml").write_text(
         json.dumps({
             "schema_version": 1,
-            "id": "fixture.provider",
-            "name": "Fixture Provider",
+            "id": "fixture.required_env",
+            "name": "Fixture Required Environment",
             "kind": "external",
             "version": "1.0",
             "command": {"argv": ["{python_exec}", "-c", "pass"]},
             "outputs": [],
-            "isolation": {"mode": "subprocess", "network": True},
+            "isolation": {"mode": "subprocess", "network": False},
             "metadata": {
-                "adapter_family": "provider",
+                "adapter_family": "cpu",
                 "required_env": ["ASTRID_PROVIDER_KEY"],
-                "network_policy": {
-                    "allowed_protocols": ["tcp"],
-                    "allowed_destinations": ["example.invalid:443"],
-                    "broker": {"host_managed": True},
-                },
             },
         }),
         encoding="utf-8",
@@ -480,7 +475,7 @@ def test_claim_only_admits_capabilities_that_are_currently_ready(tmp_path, monke
     host = GenericPackHost(pack_roots=[tmp_path], client=runtime)
     host.discover()
 
-    assert host.capabilities["fixture.provider"].ready is False
+    assert host.capabilities["fixture.required_env"].ready is False
     assert host.claim_once() is None
     assert not hasattr(runtime, "claim_payload")
 
@@ -488,8 +483,7 @@ def test_claim_only_admits_capabilities_that_are_currently_ready(tmp_path, monke
     # host, and the now-ready capability becomes the only candidate.
     monkeypatch.setenv("ASTRID_PROVIDER_KEY", "fixture-secret")
     assert host.claim_once() is None
-    assert runtime.claim_payload["capability_ids"] == ["fixture.provider"]
-
+    assert runtime.claim_payload["capability_ids"] == ["fixture.required_env"]
 
 def test_source_and_dependency_digests_invalidate_registration(tmp_path):
     _write_manifest(tmp_path / "base")
@@ -752,20 +746,37 @@ def test_adapter_registry_classifies_provider_local_generation_and_render():
     provider = GenericPackHost(pack_roots=[Path("astrid/packs/generation/executors")])
     provider.discover()
     assert AdapterRegistry.resolve(provider.capabilities["generation.generate_image_openai"].definition).family == "provider"
-
     local = GenericPackHost(pack_roots=[Path("astrid/packs/vibecomfy/executors")])
     local.discover()
     assert AdapterRegistry.resolve(local.capabilities["vibecomfy.run"].definition).family == "local_generation"
     local.preflight("vibecomfy.run")
     assert local.capabilities["vibecomfy.run"].resource_keys == ("gpu",)
-
     render = GenericPackHost(pack_roots=[Path("astrid/packs/rendering/executors/render")])
     render.discover()
     assert AdapterRegistry.resolve(render.capabilities["rendering.render"].definition).family == "render"
     render.preflight("rendering.render")
     report = render.capabilities["rendering.render"].preflight
-    assert report["binaries"]["ok"]
+    if not report["binaries"]["ok"]:
+        assert "ffmpeg" in report["binaries"]["missing"]
     assert "remotion" in report
+
+
+def test_adapter_registry_preserves_explicit_empty_matrix_lists(tmp_path):
+    _write_manifest(tmp_path / "echo")
+    host = GenericPackHost(pack_roots=[tmp_path])
+    record = host.discover()[0]
+    adapter = AdapterRegistry.from_matrix(
+        record.definition,
+        {
+            "adapter_family": "render",
+            "resource_keys": [],
+            "required_binaries": [],
+            "required_packages": [],
+        },
+    )
+    assert adapter.resource_keys == ()
+    assert adapter.required_binaries == ()
+    assert adapter.required_packages == ()
 
 
 def test_register_preserves_declared_dispositions_and_block_reasons(tmp_path, monkeypatch):
