@@ -18,6 +18,22 @@ from vibecomfy.lens import WorkflowLens
 from vibecomfy.workflow import NodeMode, VibeNode, VibeWorkflow
 
 
+PDD_PRESET = "pdd-ref2va-8plus2"
+PDD_FILE = "minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors"
+PDD_URL = (
+    "https://huggingface.co/aptech0081/MiniMax-H3-Acc-LoRAs-ComfyUI/resolve/main/"
+    + PDD_FILE
+)
+PDD_SHA256 = "5531fa0da887c24ec0083b0050ea9e4ff03c479cfbe21ef586d1c5c79bdc78a1"
+PDD_SIZE_BYTES = 1_658_719_592
+PDD_NODE_PACK = "ComfyUI-MiniMax-H3-PDD-Acc"
+PDD_NODE_PACK_REF = "311a65dd53832d8a5f8177a9d5fb923c09e35a90"
+PDD_WARMUP_STEPS = 8
+PDD_TAIL_STEPS = 2
+PDD_TOTAL_STEPS = PDD_WARMUP_STEPS + PDD_TAIL_STEPS
+PDD_HANDOFF_SIGMA = "0.800000"
+
+
 def _required_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -48,6 +64,13 @@ def _attention_backend_env() -> str:
     value = os.environ.get("H3_ATTENTION_BACKEND", "native").strip().lower()
     if value not in {"native", "sage2"}:
         raise RuntimeError("H3_ATTENTION_BACKEND must be native or sage2")
+    return value
+
+
+def _sampling_preset_env() -> str:
+    value = os.environ.get("H3_SAMPLING_PRESET", "native").strip().lower()
+    if value not in {"native", PDD_PRESET}:
+        raise RuntimeError(f"H3_SAMPLING_PRESET must be native or {PDD_PRESET}")
     return value
 
 
@@ -112,6 +135,7 @@ def _assert_compiled(
     delivery_end: int,
     source_start_time: float,
     sampling_steps: int,
+    sampling_preset: str,
     disable_turbo: bool,
     width: int,
     height: int,
@@ -119,9 +143,26 @@ def _assert_compiled(
 ) -> None:
     api = workflow.compile("api")
     samplers = [(node_id, body) for node_id, body in api.items() if body.get("class_type") == "SamplerCustomAdvanced"]
-    if len(samplers) != 1:
-        raise RuntimeError(f"compiled graph must contain one sampler, found {[node_id for node_id, _ in samplers]}")
-    sampler_id, sampler = samplers[0]
+    expected_sampler_count = 2 if sampling_preset == PDD_PRESET else 1
+    if len(samplers) != expected_sampler_count:
+        raise RuntimeError(
+            f"compiled {sampling_preset} graph must contain {expected_sampler_count} sampler(s), "
+            f"found {[node_id for node_id, _ in samplers]}"
+    )
+    if sampling_preset == PDD_PRESET:
+        sampler_id, sampler = next(
+            ((node_id, body) for node_id, body in samplers if node_id == "h3_pdd_tail_sampler"),
+            (None, None),
+        )
+        warm_sampler_id, warm_sampler = next(
+            ((node_id, body) for node_id, body in samplers if node_id != "h3_pdd_tail_sampler"),
+            (None, None),
+        )
+        if not warm_sampler or not sampler:
+            raise RuntimeError("PDD graph sampler ids are not the expected warmup/tail pair")
+    else:
+        warm_sampler_id, warm_sampler = samplers[0]
+        sampler_id, sampler = samplers[0]
     guider_ref = sampler.get("inputs", {}).get("guider")
     if not isinstance(guider_ref, list) or len(guider_ref) != 2:
         raise RuntimeError("compiled sampler guider input is not connected")
@@ -183,7 +224,10 @@ def _assert_compiled(
     if not reference_node or reference_node.get("inputs", {}).get("image") != destination:
         raise RuntimeError("compiled active conditioning uses the wrong destination reference image")
 
-    latent_ref = sampler.get("inputs", {}).get("latent_image")
+    # The warmup sampler consumes the masked H3 context.  The PDD tail sampler
+    # must consume warmup's *output* (not its denoised_output) through
+    # DisableNoise, as in the upstream warmup-split reference graph.
+    latent_ref = warm_sampler.get("inputs", {}).get("latent_image")
     if not isinstance(latent_ref, list) or len(latent_ref) != 2:
         raise RuntimeError("compiled sampler latent_image is not connected")
     latent_source = api.get(str(latent_ref[0]))
@@ -229,17 +273,112 @@ def _assert_compiled(
         raise RuntimeError(f"compiled graph must contain one extension assembler, found {assemblers}")
 
     schedulers = [body for body in api.values() if body.get("class_type") == "BasicScheduler"]
-    if len(schedulers) != 1:
-        raise RuntimeError(f"compiled graph must contain one scheduler, found {len(schedulers)}")
-    scheduler_inputs = schedulers[0].get("inputs", {})
-    if scheduler_inputs.get("steps") != sampling_steps:
-        raise RuntimeError("compiled scheduler does not use the requested sampling steps")
-    if scheduler_inputs.get("scheduler") != "simple":
-        raise RuntimeError("full-quality H3 comparison requires the native simple schedule")
-
     sampler_selectors = [body for body in api.values() if body.get("class_type") == "KSamplerSelect"]
-    if len(sampler_selectors) != 1 or sampler_selectors[0].get("inputs", {}).get("sampler_name") != "res_multistep":
-        raise RuntimeError("full-quality H3 comparison requires the native res_multistep sampler")
+    if sampling_preset == "native":
+        if len(schedulers) != 1:
+            raise RuntimeError(f"compiled native graph must contain one scheduler, found {len(schedulers)}")
+        scheduler_inputs = schedulers[0].get("inputs", {})
+        if scheduler_inputs.get("steps") != sampling_steps:
+            raise RuntimeError("compiled scheduler does not use the requested sampling steps")
+        if scheduler_inputs.get("scheduler") != "simple":
+            raise RuntimeError("full-quality H3 comparison requires the native simple schedule")
+        if len(sampler_selectors) != 1 or sampler_selectors[0].get("inputs", {}).get("sampler_name") != "res_multistep":
+            raise RuntimeError("full-quality H3 comparison requires the native res_multistep sampler")
+    else:
+        pdd_receipt = {
+            "node_pack": PDD_NODE_PACK,
+            "node_pack_ref": PDD_NODE_PACK_REF,
+            "pdd_file": PDD_FILE,
+            "warmup_steps": PDD_WARMUP_STEPS,
+            "tail_steps": PDD_TAIL_STEPS,
+            "total_evaluations": PDD_TOTAL_STEPS,
+            "handoff_sigma": PDD_HANDOFF_SIGMA,
+            "sampler": "euler",
+            "pdd_nfe": 8,
+            "lora_strength": 1.0,
+            "head_strength": 1.0,
+            "on_off_grid": "error",
+        }
+        if sampling_steps != PDD_TOTAL_STEPS:
+            raise RuntimeError(f"{PDD_PRESET} requires exactly {PDD_TOTAL_STEPS} total evaluations")
+        if schedulers:
+            raise RuntimeError("PDD graph must bypass the native BasicScheduler")
+        if len(sampler_selectors) != 1 or sampler_selectors[0].get("inputs", {}).get("sampler_name") != "euler":
+            raise RuntimeError("PDD graph must use one shared Euler sampler selector")
+
+        warmup_nodes = [body for body in api.values() if body.get("class_type") == "MiniMaxH3PDDAccWarmupScheduler"]
+        if len(warmup_nodes) != 1:
+            raise RuntimeError(f"PDD graph must contain one warmup scheduler, found {len(warmup_nodes)}")
+        warmup_inputs = warmup_nodes[0].get("inputs", {})
+        if warmup_inputs.get("warmup_steps") != PDD_WARMUP_STEPS:
+            raise RuntimeError("PDD warmup scheduler must use 8 warmup steps")
+        if warmup_inputs.get("handoff_sigma") != PDD_HANDOFF_SIGMA:
+            raise RuntimeError("PDD warmup scheduler must hand off at sigma 0.8")
+        warmup_id = next(node_id for node_id, body in api.items() if body is warmup_nodes[0])
+        split_nodes = [body for body in api.values() if body.get("class_type") == "SplitSigmas"]
+        if len(split_nodes) != 1:
+            raise RuntimeError(f"PDD graph must contain one SplitSigmas node, found {len(split_nodes)}")
+        split_id = next(node_id for node_id, body in api.items() if body is split_nodes[0])
+        split_inputs = split_nodes[0].get("inputs", {})
+        if split_inputs.get("sigmas") != [warmup_id, 0] or split_inputs.get("step") != [warmup_id, 1]:
+            raise RuntimeError("PDD SplitSigmas must consume warmup sigmas and phase2_start_step")
+        disable_noise_nodes = [body for body in api.values() if body.get("class_type") == "DisableNoise"]
+        if len(disable_noise_nodes) != 1:
+            raise RuntimeError(f"PDD graph must contain one DisableNoise node, found {len(disable_noise_nodes)}")
+        disable_noise_id = next(node_id for node_id, body in api.items() if body is disable_noise_nodes[0])
+
+        pdd_nodes = [body for body in api.values() if body.get("class_type") == "MiniMaxH3PDDAccApply"]
+        if len(pdd_nodes) != 1:
+            raise RuntimeError(f"PDD graph must contain one MiniMaxH3PDDAccApply node, found {len(pdd_nodes)}")
+        pdd_id = next(node_id for node_id, body in api.items() if body is pdd_nodes[0])
+        pdd_inputs = pdd_nodes[0].get("inputs", {})
+        expected_pdd = {
+            "pdd_file": PDD_FILE,
+            "nfe": "8",
+            "lora_strength": 1.0,
+            "head_strength": 1.0,
+            "on_off_grid": "error",
+        }
+        for input_name, expected in expected_pdd.items():
+            if pdd_inputs.get(input_name) != expected:
+                raise RuntimeError(f"PDD Apply {input_name} must be {expected!r}, got {pdd_inputs.get(input_name)!r}")
+        if pdd_inputs.get("enabled") is not True or pdd_inputs.get("partition_check") != "error":
+            raise RuntimeError("PDD Apply must be enabled with partition_check=error")
+        if pdd_inputs.get("partition") not in {None, ""}:
+            raise RuntimeError("PDD Apply must not force a partition")
+        pdd_model_ref = pdd_inputs.get("model")
+        if not isinstance(pdd_model_ref, list) or len(pdd_model_ref) != 2:
+            raise RuntimeError("PDD Apply model input is not connected")
+        if any(
+            value == [pdd_id, 1]
+            for body in api.values()
+            for value in body.get("inputs", {}).values()
+        ):
+            raise RuntimeError("PDD Apply sigmas output must remain unused")
+
+        tail_noise = sampler.get("inputs", {}).get("noise")
+        if tail_noise != [disable_noise_id, 0]:
+            raise RuntimeError("PDD tail sampler must consume DisableNoise output")
+        if sampler.get("inputs", {}).get("sigmas") != [split_id, 1]:
+            raise RuntimeError("PDD tail sampler must consume SplitSigmas low_sigmas")
+        if warm_sampler.get("inputs", {}).get("sigmas") != [split_id, 0]:
+            raise RuntimeError("PDD warmup sampler must consume SplitSigmas high_sigmas")
+        if sampler.get("inputs", {}).get("latent_image") != [warm_sampler_id, 0]:
+            raise RuntimeError("PDD tail sampler must chain warmup output, not denoised_output")
+        if guider.get("inputs", {}).get("model") != [pdd_id, 0]:
+            raise RuntimeError("PDD tail BasicGuider must consume MiniMaxH3PDDAccApply.model")
+        warm_guider_ref = warm_sampler.get("inputs", {}).get("guider")
+        if not isinstance(warm_guider_ref, list) or len(warm_guider_ref) != 2:
+            raise RuntimeError("PDD warmup sampler guider input is not connected")
+        warm_guider = api.get(str(warm_guider_ref[0]))
+        if not warm_guider or warm_guider.get("class_type") != "BasicGuider":
+            raise RuntimeError("PDD warmup sampler must use BasicGuider")
+        if warm_guider.get("inputs", {}).get("conditioning") != guider.get("inputs", {}).get("conditioning"):
+            raise RuntimeError("PDD warmup and tail guiders must share the active conditioning")
+        if warm_guider.get("inputs", {}).get("model") != pdd_model_ref:
+            raise RuntimeError("PDD warmup guider must consume the native sigma-shift model")
+    if sampling_preset == "native":
+        pdd_receipt = None
 
     length_ref = conditioning.get("inputs", {}).get("length")
     if not isinstance(length_ref, list) or len(length_ref) != 2:
@@ -343,18 +482,20 @@ def _assert_compiled(
         "delivery_generated_frames": max(0, delivery_end - max(delivery_start, context_frames)),
         "sampling": {
             "steps": sampling_steps,
-            "sampler": "res_multistep",
-            "scheduler": "simple",
+            "preset": sampling_preset,
+            "sampler": "euler" if sampling_preset == PDD_PRESET else "res_multistep",
+            "scheduler": "warmup_split" if sampling_preset == PDD_PRESET else "simple",
             "video_sigma_shift": 12,
             "audio_sigma_shift": 3,
         },
+        "pdd": pdd_receipt,
         "acceleration": {
             "turbo_lora": not disable_turbo,
             "cache_nodes": cache_nodes,
             "attention_backend": attention_backend,
             "sage_attention_mode": sage_attention_mode,
         },
-        "compiled_sampler_count": 1,
+        "compiled_sampler_count": expected_sampler_count,
         "compiled_extension_assembler_count": 1,
     }
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,8 +519,16 @@ def build() -> VibeWorkflow:
     delivery_start = int(os.environ.get("H3_DELIVERY_START", "19"))
     delivery_end = _int_env("H3_DELIVERY_END", 79)
     source_start_time = float(os.environ.get("H3_SOURCE_START_TIME", "0"))
-    sampling_steps = _int_env("H3_SAMPLING_STEPS", 8)
+    sampling_preset = _sampling_preset_env()
+    sampling_steps = _int_env(
+        "H3_SAMPLING_STEPS",
+        PDD_TOTAL_STEPS if sampling_preset == PDD_PRESET else 8,
+    )
+    if sampling_preset == PDD_PRESET and sampling_steps != PDD_TOTAL_STEPS:
+        raise RuntimeError(f"{PDD_PRESET} requires H3_SAMPLING_STEPS={PDD_TOTAL_STEPS}")
     disable_turbo = _bool_env("H3_DISABLE_TURBO", False)
+    if sampling_preset == PDD_PRESET and not disable_turbo:
+        raise RuntimeError(f"{PDD_PRESET} requires H3_DISABLE_TURBO=1; Turbo/cache acceleration is forbidden")
     attention_backend = _attention_backend_env()
     width = _int_env("H3_WIDTH", 960)
     height = _int_env("H3_HEIGHT", 544)
@@ -566,14 +715,78 @@ def build() -> VibeWorkflow:
             crop="center",
         )
 
+    delivery_sampler = sampler
+    if sampling_preset == PDD_PRESET:
+        # The existing active sampler is phase 1: native H3 model, uniform
+        # warmup sigmas, and the existing BasicGuider.  The second sampler is
+        # deliberately explicit so its latent edge cannot accidentally use
+        # denoised_output or a reference-only branch.
+        if _enabled(lens.nodes_by_class_type("MiniMaxH3PDDAccApply")):
+            raise RuntimeError("base graph already contains an enabled PDD Apply node; refusing duplicate patching")
+        if _enabled(lens.nodes_by_class_type("MiniMaxH3PDDAccWarmupScheduler")):
+            raise RuntimeError("base graph already contains an enabled PDD warmup scheduler; refusing duplicate scheduling")
+        old_sampler_targets = list(lens.edge_targets(sampler.id))
+        scheduler.mode = NodeMode.BYPASSED
+        sampler_selector.inputs["sampler_name"] = "euler"
+
+        pdd_apply = workflow.add_node(
+            "MiniMaxH3PDDAccApply",
+            _id="h3_pdd_apply",
+            pdd_file=PDD_FILE,
+            nfe="8",
+            lora_strength=1.0,
+            head_strength=1.0,
+            on_off_grid="error",
+            partition="",
+            enabled=True,
+            partition_check="error",
+        )
+        _set_output_defaults(pdd_apply, ["model", "sigmas", "info"])
+        workflow.connect(f"{sigma_shift.id}.0", f"{pdd_apply.id}.model")
+
+        pdd_guider = workflow.add_node(
+            "BasicGuider",
+            _id="h3_pdd_guider",
+        )
+        _set_output_defaults(pdd_guider, ["GUIDER"])
+        workflow.connect(f"{pdd_apply.id}.0", f"{pdd_guider.id}.model")
+        workflow.connect(f"{conditioning.id}.0", f"{pdd_guider.id}.conditioning")
+
+        warmup_scheduler = workflow.add_node(
+            "MiniMaxH3PDDAccWarmupScheduler",
+            _id="h3_pdd_warmup_scheduler",
+            warmup_steps=PDD_WARMUP_STEPS,
+            handoff_sigma=PDD_HANDOFF_SIGMA,
+        )
+        _set_output_defaults(warmup_scheduler, ["sigmas", "phase2_start_step", "info"])
+        split_sigmas = workflow.add_node("SplitSigmas", _id="h3_pdd_split_sigmas")
+        _set_output_defaults(split_sigmas, ["high_sigmas", "low_sigmas"])
+        workflow.connect(f"{warmup_scheduler.id}.0", f"{split_sigmas.id}.sigmas")
+        workflow.connect(f"{warmup_scheduler.id}.1", f"{split_sigmas.id}.step")
+        workflow.replace_edge(f"{sampler.id}.sigmas", f"{split_sigmas.id}.0")
+
+        disable_noise = workflow.add_node("DisableNoise", _id="h3_pdd_disable_noise")
+        _set_output_defaults(disable_noise, ["NOISE"])
+        tail_sampler = workflow.add_node("SamplerCustomAdvanced", _id="h3_pdd_tail_sampler")
+        _set_output_defaults(tail_sampler, ["output", "denoised_output"])
+        workflow.connect(f"{disable_noise.id}.0", f"{tail_sampler.id}.noise")
+        workflow.connect(f"{pdd_guider.id}.0", f"{tail_sampler.id}.guider")
+        workflow.connect(f"{sampler_selector.id}.0", f"{tail_sampler.id}.sampler")
+        workflow.connect(f"{split_sigmas.id}.1", f"{tail_sampler.id}.sigmas")
+        workflow.connect(f"{sampler.id}.0", f"{tail_sampler.id}.latent_image")
+        # Repoint every downstream consumer of the old sampler to the PDD tail.
+        # Keep the old sampler output as the tail's latent input above.
+        for target in old_sampler_targets:
+            workflow.replace_edge(f"{target.to_node}.{target.to_input}", f"{tail_sampler.id}.0")
+        delivery_sampler = tail_sampler
+
     saver_targets = [
-        workflow.nodes[target.to_node]
-        for target in lens.edge_targets(sampler.id)
-        if workflow.nodes[target.to_node].class_type == "MiniMaxH3MotionContextSaveLatent"
+        node for node in _enabled(lens.nodes_by_class_type("MiniMaxH3MotionContextSaveLatent"))
     ]
     if saver_targets:
-        saver = _only(_enabled(saver_targets), "enabled H3 latent saver")
+        saver = _only(saver_targets, "enabled H3 latent saver")
         saver.inputs.update(filename_prefix=f"{output_prefix}/extension_latent", clip_index=1)
+        workflow.replace_edge(f"{saver.id}.latent", f"{delivery_sampler.id}.0")
     else:
         saver = workflow.add_node(
             "MiniMaxH3MotionContextSaveLatent",
@@ -582,7 +795,7 @@ def build() -> VibeWorkflow:
             clip_index=1,
         )
         _set_output_defaults(saver, ["latent_path"])
-        workflow.connect(f"{sampler.id}.0", f"{saver.id}.latent")
+        workflow.connect(f"{delivery_sampler.id}.0", f"{saver.id}.latent")
 
     workflow.metadata["astrid_h3_poc"] = {
         "workflow_authority": "VibeWorkflow",
@@ -591,6 +804,7 @@ def build() -> VibeWorkflow:
         "working_frames": working_frames,
         "delivery_frame_slice_zero_based": f"[{delivery_start},{delivery_end})",
         "destination_mode": destination_mode,
+        "sampling_preset": sampling_preset,
         "sampling_steps": sampling_steps,
         "generation_canvas": {"width": width, "height": height, "fps": 24},
         "turbo_lora_enabled": not disable_turbo,
@@ -598,6 +812,49 @@ def build() -> VibeWorkflow:
         "sage_attention_mode": "sageattn_qk_int8_pv_fp16_cuda" if attention_backend == "sage2" else None,
         "terminal_frame_position_1_based": 69 if destination_mode == "masked_terminal" else None,
     }
+    if sampling_preset == PDD_PRESET:
+        model_assets = workflow.metadata.get("model_assets")
+        if not isinstance(model_assets, list):
+            model_assets = []
+        if not any(
+            isinstance(asset, dict)
+            and asset.get("name") == PDD_FILE
+            and asset.get("subdir") == "pdd_acc"
+            for asset in model_assets
+        ):
+            model_assets.append(
+                {
+                    "name": PDD_FILE,
+                    "url": PDD_URL,
+                    "subdir": "pdd_acc",
+                    "sha256": PDD_SHA256,
+                    "size_bytes": PDD_SIZE_BYTES,
+                }
+            )
+        workflow.metadata["model_assets"] = model_assets
+        workflow.metadata["astrid_h3_poc"]["pdd"] = {
+            "node_pack": PDD_NODE_PACK,
+            "node_pack_ref": PDD_NODE_PACK_REF,
+            "pdd_file": PDD_FILE,
+            "warmup_steps": PDD_WARMUP_STEPS,
+            "tail_steps": PDD_TAIL_STEPS,
+            "handoff_sigma": PDD_HANDOFF_SIGMA,
+            "sampler": "euler",
+            "nfe": "8",
+            "lora_strength": 1.0,
+            "head_strength": 1.0,
+            "on_off_grid": "error",
+            "turbo_lora": False,
+            "cache_nodes": False,
+        }
+        workflow.metadata["pdd_requirements"] = {
+            "node_pack": PDD_NODE_PACK,
+            "node_pack_ref": PDD_NODE_PACK_REF,
+            "classes": ["MiniMaxH3PDDAccApply", "MiniMaxH3PDDAccWarmupScheduler"],
+            "model_subdir": "pdd_acc",
+            "model_file": PDD_FILE,
+            "comfyui_minimum": "0.33.0",
+        }
     if attention_backend == "sage2":
         runtime_packages = workflow.metadata.get("runtime_packages")
         if not isinstance(runtime_packages, list):
@@ -634,6 +891,7 @@ def build() -> VibeWorkflow:
         delivery_end=delivery_end,
         source_start_time=source_start_time,
         sampling_steps=sampling_steps,
+        sampling_preset=sampling_preset,
         disable_turbo=disable_turbo,
         width=width,
         height=height,

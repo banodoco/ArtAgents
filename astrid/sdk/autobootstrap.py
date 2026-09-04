@@ -6,16 +6,27 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Mapping
 
 PROFILE = "astrid"
 RECONFIGURE_ACTION = "run `banodoco-local up --profile astrid`"
+INSTALL_RUNTIME_ACTION = (
+    "python3 -m pip install 'banodoco-workspace-runtime @ "
+    "git+https://github.com/banodoco/banodoco-workspace-runtime.git@"
+    "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de'"
+)
 
 
 class AutoBootstrapError(RuntimeError):
     """A bounded, secret-free failure while invoking neutral bootstrap."""
+
+    def __init__(self, message: str, *, next_action: str = RECONFIGURE_ACTION) -> None:
+        super().__init__(message)
+        self.next_action = next_action
 
 
 def _configured(name: str) -> str:
@@ -61,15 +72,26 @@ def _result(stdout: str) -> Mapping[str, Any]:
     return value
 
 
+def _launcher_command() -> list[str]:
+    """Resolve the neutral launcher without relying solely on shell ``PATH``."""
+    configured = _configured("BANODOCO_LOCAL_LAUNCHER")
+    if configured:
+        return [configured]
+    executable = shutil.which("banodoco-local")
+    if executable:
+        return [executable]
+    if find_spec("banodoco_local") is not None:
+        return [sys.executable, "-m", "banodoco_local"]
+    raise AutoBootstrapError(
+        "the Banodoco workspace runtime is not installed",
+        next_action=INSTALL_RUNTIME_ACTION,
+    )
+
+
 def ensure_runtime() -> Mapping[str, Any]:
     """Invoke the installed launcher once and return its bounded result."""
     manifest = _manifest_from_environment()
-    launcher = _configured("BANODOCO_LOCAL_LAUNCHER") or shutil.which("banodoco-local")
-    if not launcher:
-        raise AutoBootstrapError(
-            "installed banodoco-local is unavailable; run `banodoco-local up --profile astrid`"
-        )
-    command = [launcher, "up", "--profile", PROFILE]
+    command = [*_launcher_command(), "up", "--profile", PROFILE]
     if manifest is not None:
         command.extend(("--source-manifest", str(manifest)))
     command.append("--json")

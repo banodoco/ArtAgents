@@ -222,7 +222,7 @@ class AstridClient:
             result = ensure_runtime()
         except AutoBootstrapError as exc:
             raise ServiceUnavailableError(
-                str(exc), details={"next_action": "banodoco-local up --profile astrid"}
+                str(exc), details={"next_action": exc.next_action}
             ) from exc
         if credential is not None:
             credential_value: str | Path = credential

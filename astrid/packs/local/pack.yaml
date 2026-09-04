@@ -1,0 +1,26 @@
+schema_version: 2
+id: local
+name: Local Elements Pack
+version: 0.1.0
+description: Versioned render-time visual elements and their immutable assets for Remotion timelines.
+keywords:
+  - element
+  - effect
+  - remotion
+  - overlay
+  - text-card
+  - chart
+  - canvas
+capabilities:
+  - render_text_card
+  - render_neon_orbit_card
+  - render_model_trends_chart
+permissions:
+  - id: project_files
+    reason: Provides render-time visual element definitions consumed by the rendering pack.
+content:
+  elements: elements
+agent:
+  purpose: "Use when a Remotion timeline needs one of this pack's visual overlay elements — an anchored/faded text card, a DOM-to-canvas post-processed 'neon orbit' card, or an animated model-trends stacked-area chart."
+  do_not_use_for: "Not an executor pack — it provides effect elements only; the actual video render is done by the rendering pack, not here."
+  normal_entrypoints: []

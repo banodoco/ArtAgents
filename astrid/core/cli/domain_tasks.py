@@ -1,6 +1,6 @@
 """Product tasks family CLI (m4 plan step 28, task T31).
 
-This module is the product parser for the ``tasks`` family: every verb is
+This module is the product parser for the ``tasks`` family: ordinary verbs are
 **argument parsing plus exactly one SDK call** on the composed
 :class:`~astrid.sdk.client.AstridClient` (stamped onto every subparser by
 :func:`astrid.core.cli.registration.register_product_commands`), and every
@@ -9,7 +9,7 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these six, one SDK call each):
+Verbs (six one-call resource operations plus one durable observer):
 
 - ``create`` — one ``client.tasks.create`` call; accepts ``--project`` (the
   owning project id or immutable slug), ``--capability``, ``--spec`` (a JSON
@@ -27,6 +27,8 @@ Verbs (exactly these six, one SDK call each):
   idempotency-key contract;
 - ``events <task_id>`` — one ``client.tasks.events`` call returning the
   task's ordered ``core.task`` stream events (read, no key).
+- ``follow <task_id>`` — repeatedly reads ``client.tasks.show`` until the
+  task reaches a terminal state or the explicit timeout expires.
 
 Executor lifecycle verbs (``claim``, ``start``, ``heartbeat``) and
 plan/step semantics (``plan``, ``step``, ``next``, ``ack``, ``skip``,
@@ -43,10 +45,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import sys
 from typing import Any
 
 from astrid.core.cli.domain_output import print_result
 from astrid.core.cli.registration import CommandSpec, register_product_commands
+from astrid.core.cli.task_progress import follow_task, task_handoff
+from astrid.sdk.contracts import DomainResult
 
 __all__ = ["COMMANDS", "build_parser"]
 
@@ -76,6 +82,16 @@ def _parse_json_array(value: str) -> list[Any]:
         ) from exc
     if not isinstance(parsed, list):
         raise argparse.ArgumentTypeError("must be a JSON array")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
     return parsed
 
 
@@ -116,7 +132,37 @@ def _cmd_create(parsed: argparse.Namespace) -> int:
         input_manifest=parsed.input_manifest,
         idempotency_key=parsed.idempotency_key,
     )
-    return print_result(result, as_json=parsed.json)
+    if result.ok and isinstance(result.data, dict):
+        data = dict(result.data)
+        task_id = str(data.get("task_id") or data.get("id") or "")
+        run_id = str(data.get("run_id") or "") or None
+        if task_id:
+            data.setdefault("task_id", task_id)
+            data["handoff"] = task_handoff(
+                project=parsed.project,
+                task_id=task_id,
+                run_id=run_id,
+            )
+            result = DomainResult.success(
+                data,
+                receipt=result.receipt,
+                idempotency_key=result.idempotency_key,
+            )
+    if parsed.json or not result.ok:
+        return print_result(result, as_json=parsed.json)
+    data = result.data
+    if isinstance(data, dict) and isinstance(data.get("handoff"), dict):
+        print(f"task admitted: {data['task_id']}")
+        if data.get("run_id"):
+            print(f"run: {data['run_id']}")
+        print(f"follow: {data['handoff']['follow']}")
+        print(f"inspect: {data['handoff']['inspect']}")
+        print(f"events: {data['handoff']['events']}")
+        if data["handoff"].get("open"):
+            print(f"open: {data['handoff']['open']}")
+        print(f"recent: {data['handoff']['recent']}")
+        return 0
+    return print_result(result)
 
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
@@ -148,6 +194,44 @@ def _cmd_retry(parsed: argparse.Namespace) -> int:
 def _cmd_events(parsed: argparse.Namespace) -> int:
     result = parsed.client.tasks.events(parsed.task_id)
     return print_result(result, as_json=parsed.json)
+
+
+def _cmd_follow(parsed: argparse.Namespace) -> int:
+    if not parsed.json:
+        print(f"following task {parsed.task_id} in project {parsed.project}")
+    result = follow_task(
+        parsed.client,
+        parsed.task_id,
+        project=parsed.project,
+        poll_seconds=parsed.poll_seconds,
+        timeout_seconds=parsed.timeout_seconds,
+        stream=None if parsed.json else sys.stdout,
+    )
+    # Human mode has already shown the successful terminal observation.  A
+    # failed terminal state still needs one concise error line and JSON mode
+    # always preserves the exact one-document product contract.
+    if parsed.json:
+        return print_result(result, as_json=parsed.json)
+    if result.ok and isinstance(result.data, dict):
+        print("completed")
+        outputs = result.data.get("outputs")
+        if isinstance(outputs, list) and outputs:
+            for output in outputs:
+                if isinstance(output, dict) and output.get("location"):
+                    print(f"output: {output['location']}")
+        elif result.data.get("run_id"):
+            print(f"output: available through run {result.data['run_id']}")
+        handoff = result.data.get("handoff")
+        if isinstance(handoff, dict):
+            if handoff.get("open"):
+                print(f"open: {handoff['open']}")
+            print(f"inspect: {handoff['inspect']}")
+            print(f"events: {handoff['events']}")
+            print(f"recent: {handoff['recent']}")
+        return 0
+    # A failed terminal observation is already visible above.  Preserve the
+    # stable error exit and include the inspect path carried in error details.
+    return print_result(result)
 
 
 # -- parser ----------------------------------------------------------------
@@ -212,6 +296,25 @@ def _configure_events(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_events)
 
 
+def _configure_follow(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument("task_id", help="Exact durable task id to follow.")
+    subparser.add_argument(
+        "--poll-seconds",
+        type=_positive_float,
+        default=2.0,
+        help="Runtime task-read interval in seconds (default: 2).",
+    )
+    subparser.add_argument(
+        "--timeout-seconds",
+        type=_positive_float,
+        default=3600.0,
+        help="Stop following after this many seconds (default: 3600).",
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_follow)
+
+
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "create",
@@ -244,19 +347,24 @@ COMMANDS: tuple[CommandSpec, ...] = (
         help="Show one task's ordered core.task stream events.",
         configure=_configure_events,
     ),
+    CommandSpec(
+        "follow",
+        help="Follow durable task state to completion with quiet progress updates.",
+        configure=_configure_follow,
+    ),
 )
 
 
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the ``tasks`` product-family parser stamped with *client*.
 
-    Exactly the six product verbs above are registered; executor lifecycle
+    Exactly the seven product verbs above are registered; executor lifecycle
     and plan/step verbs are absent by construction.
     """
     parser = argparse.ArgumentParser(
         prog="astrid tasks",
         description=(
-            "Task create/list/show/cancel/retry/events (product family); "
+            "Task create/list/show/cancel/retry/events/follow (product family); "
             "executor lifecycle verbs are not exposed."
         ),
     )

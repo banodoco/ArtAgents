@@ -1,0 +1,47 @@
+schema_version: 1
+id: end-spanning-layer
+kind: effect
+pack_id: local
+short_description: One continuous, beat-centered ending timeline with in-place transforms.
+description: Transparent 29.781-second overlay spanning DeepSeek, Codex, Minimax, and Music. An eight-card amber timeline shuffles, grids, and reorders; shifts beneath three references; anchors a two-input-to-one-output video layout; then shares the centered composition with an animated audio waveform and playhead before the final fade.
+keywords:
+  - timeline
+  - overlay
+  - insert
+  - astrid-intro
+metadata:
+  label: Ending Spanning Layer
+  whenToUse: Use as a single fx-track overlay clip spanning the ending so motion continuity survives shot boundaries; base plates stay clean underneath.
+  clipTypeAliases:
+    - end-spanning-layer
+defaults:
+  duration: 29.781
+  deepSeekSeconds: 9.193
+  codexSeconds: 6.383
+  minimaxSeconds: 8.081
+  musicSeconds: 6.124
+schema:
+  type: object
+  additionalProperties: true
+  properties:
+    deepSeekSeconds:
+      type: number
+      exclusiveMinimum: 0
+    codexSeconds:
+      type: number
+      exclusiveMinimum: 0
+    minimaxSeconds:
+      type: number
+      exclusiveMinimum: 0
+    musicSeconds:
+      type: number
+      exclusiveMinimum: 0
+assets:
+  card0: assets/card-0.png
+  card1: assets/card-1.png
+  card2: assets/card-2.png
+  card3: assets/card-3.png
+  card4: assets/card-4.png
+  card5: assets/card-5.png
+  card6: assets/card-6.png
+  card7: assets/card-7.png

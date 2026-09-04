@@ -1098,11 +1098,23 @@ class GenericPackHost:
             # tree. Other rendering-pack executors are offline Python/FFmpeg
             # work; the matrix must opt into this requirement explicitly.
             if adapter.requires_remotion:
-                checkout = next((parent.parent for parent in (record.source_root, *record.source_root.parents) if parent.name == "astrid" and (parent.parent / "remotion").is_dir()), None)
-                package_json = checkout / "remotion" / "package.json" if checkout else None
-                lock_file = checkout / "remotion" / "package-lock.json" if checkout else None
-                node_modules = checkout / "remotion" / "node_modules" if checkout else None
-                checks["remotion"] = {"ok": bool(package_json and lock_file and node_modules and node_modules.is_dir()), "package_json": str(package_json) if package_json else None, "lock_file": str(lock_file) if lock_file else None, "dependencies": str(node_modules) if node_modules else None}
+                # Registration must prove the same strict, server-owned
+                # runtime contract that execution will consume. Checking a
+                # nearby package tree alone advertised rendering as ready even
+                # when Node or the Python timeline schema was unavailable.
+                from astrid.core.rendering.remotion_runtime import remotion_runtime_status
+
+                status = remotion_runtime_status(require_explicit_project=True)
+                checks["remotion"] = {
+                    "ok": status.available,
+                    "project_dir": str(status.project_dir) if status.project_dir else None,
+                    "node_executable": (
+                        str(status.node_executable) if status.node_executable else None
+                    ),
+                    "node_version": status.node_version,
+                    "remotion_cli": str(status.remotion_cli) if status.remotion_cli else None,
+                    "reason": status.reason,
+                }
             policy = _network_policy(record)
             if adapter.requires_network and not record.definition.isolation.network:
                 checks["network"] = {"ok": False, "reason": "adapter_requires_network"}
@@ -2427,14 +2439,44 @@ class GenericPackHost:
     def run(self, *, once: bool = False, poll_seconds: float = 1.0, max_tasks: int | None = None) -> list[Mapping[str, Any]]:
         """Run the bounded worker claim loop; ``once`` is the test-friendly form."""
         results: list[Mapping[str, Any]] = []
+        consecutive_claim_failures = 0
         while not self._shutdown.is_set() and (max_tasks is None or len(results) < max_tasks):
-            result = self.claim_once()
+            try:
+                result = self.claim_once()
+            except Exception as exc:
+                # ``--once`` is a diagnostic/test surface and must preserve the
+                # exact claim failure for its caller.  The registered daemon,
+                # however, is a durable worker: a transient coordinator fault
+                # must not tear down readiness and force every launcher-backed
+                # read to restart the host.  Back off exponentially, cap the
+                # delay, and log only the first and power-of-two failures so a
+                # sustained outage cannot fill the disk with traceback spam.
+                if once:
+                    raise
+                consecutive_claim_failures += 1
+                if consecutive_claim_failures == 1 or not (
+                    consecutive_claim_failures & (consecutive_claim_failures - 1)
+                ):
+                    print(
+                        "generic host claim failed "
+                        f"({consecutive_claim_failures} consecutive): "
+                        f"{type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                base_delay = max(0.05, float(poll_seconds))
+                delay = min(30.0, base_delay * (2 ** min(consecutive_claim_failures - 1, 10)))
+                self._shutdown.wait(delay)
+                continue
+            consecutive_claim_failures = 0
             if result is not None:
                 results.append(result)
                 if once:
                     break
                 continue
             if once:
+                break
+            if self._shutdown.is_set():
                 break
             self._shutdown.wait(max(0.0, float(poll_seconds)))
         return results

@@ -95,14 +95,16 @@ These decisions are locked and must not be re-litigated:
 
 The gateway families and their verbs:
 
-- **`projects`** — `create`, `list`, `show`, `update`, `select`, `current`.  `select`
-  persists a non-authoritative default-project preference (file-side only; no
-  receipt, no DB mutation).
+- **`projects`** — `create`, `list`, `show`, `update`, `select`, `current`.
+  `select` persists the runtime project-routing preference at workspace or user
+  scope; `current` reads the effective selection.
 - **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `recover`,
   `history`, `diff`, `visualize`, `render`.  `save` is a whole-document
   compare-and-swap; a stale `--expected-version` is the typed
   `stale_version` and changes nothing. `visualize` emits a run-owned evidence
-  pack, while `render` accepts a pinned canonical timeline.
+  pack, while `render` accepts a pinned canonical timeline and follows its
+  task to terminal completion by default. `--detach` is the explicit
+  admission-only mode and reports `state=admitted`.
 - **`media`** — `import`, `list`, `show`, `verify`, `relate`.
   The only supported realm is the runtime-managed `managed_local` CAS;
   reference-in-place (`external_local`), `remote`, and `relocate` are not
@@ -113,9 +115,13 @@ The gateway families and their verbs:
   `audio_for`).
 - **`tasks`** — `create`, `list`, `show`, `cancel`, `retry`, `events`.
   `create` admits one immutable task (`--capability` + JSON `--spec`).
-- **`runs`** — `list`, `show`, `cancel`, `retry`, `events`.
+- **`runs`** — `list`, `show`, `cancel`, `retry`, `events`, `open`.
   `retry` is the batch-retry surface (all-failed-children by default,
-  explicit repeatable `--task` subset otherwise).
+  explicit repeatable `--task` subset otherwise). `open` verifies,
+  materializes, and opens the latest successful `rendering.render` run in the
+  selected current project; an optional positional run id selects an exact
+  render, and `--project` overrides the current selection. It does not claim
+  editor-approved/current-deliverable semantics.
 - **`doctor`** — read-only health check (`schema_versions`, managed and
   runtime-managed media-byte integrity, SQLite quick-check, FK status, and
   bounded orphan-staging diagnostics).

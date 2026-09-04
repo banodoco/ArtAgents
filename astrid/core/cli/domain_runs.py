@@ -9,7 +9,7 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these five, one SDK call each):
+Verbs (exactly these six, one SDK call each):
 
 - ``list`` — one ``client.runs.list`` call (project-scoped read, no key);
 - ``show <run_id>`` — one ``client.runs.show`` call returning the run read
@@ -26,6 +26,9 @@ Verbs (exactly these five, one SDK call each):
 - ``events <run_id>`` — one ``client.runs.events`` call returning the run's
   ordered run-level ``core.run`` lifecycle events (read, no key). Child task
   transitions are separate; use ``tasks events <task_id>`` for those details.
+- ``open [run_id]`` — one ``client.runs.open`` call verifying, materializing,
+  and opening either an exact successful render run or, by default, the latest
+  successful render in the runtime-selected current project.
 
 The singular ``run`` alias is **not** a product family (frozen census,
 plan step 24) and is not registered here: the parser exposes exactly the
@@ -109,6 +112,11 @@ def _cmd_events(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
+def _cmd_open(parsed: argparse.Namespace) -> int:
+    result = parsed.client.runs.open(parsed.run_id, project=parsed.project)
+    return print_result(result, as_json=parsed.json)
+
+
 # -- parser ----------------------------------------------------------------
 
 
@@ -165,6 +173,22 @@ def _configure_events(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_events)
 
 
+def _configure_open(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "run_id",
+        nargs="?",
+        default=None,
+        help="Exact successful rendering.render run (default: latest).",
+    )
+    subparser.add_argument(
+        "--project",
+        default=None,
+        help="Project id or immutable slug (default: selected current project).",
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_open)
+
+
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "list",
@@ -196,19 +220,24 @@ COMMANDS: tuple[CommandSpec, ...] = (
         ),
         configure=_configure_events,
     ),
+    CommandSpec(
+        "open",
+        help="Open an exact render, or the latest render in the current project.",
+        configure=_configure_open,
+    ),
 )
 
 
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the ``runs`` product-family parser stamped with *client*.
 
-    Exactly the five plural verbs above are registered; the singular
+    Exactly the six plural verbs above are registered; the singular
     ``run`` alias is not a product family and is never registered here.
     """
     parser = argparse.ArgumentParser(
         prog="astrid runs",
         description=(
-            "Run list/show/cancel/retry/events (product family); "
+            "Run list/show/cancel/retry/events/open (product family); "
             "the singular 'run' alias is not a product family."
         ),
     )

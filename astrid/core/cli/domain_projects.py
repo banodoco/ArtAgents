@@ -22,7 +22,7 @@ Verbs (exactly these six):
 - ``select <ref>`` — one ``client.projects.select`` call persisting the
   resolved project as the workspace/user routing preference;
 - ``current`` — one ``client.projects.current`` call returning the selected
-  project, canonical path, and the scope that supplied the selection.
+  project and the scope that supplied the selection.
 
 This module contains **no SQL**, **no repository logic**, and **no
 domain rules**: it parses argv, makes one SDK call, and renders the
@@ -207,7 +207,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "current",
-        help="Show the selected project, canonical path, and preference scope.",
+        help="Show the selected project and preference scope.",
         configure=_configure_current,
     ),
 )

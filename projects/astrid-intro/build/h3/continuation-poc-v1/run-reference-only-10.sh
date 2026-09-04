@@ -11,7 +11,17 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 POC_ROOT="${ASTRID_H3_POC_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
-STEPS="${H3_SAMPLING_STEPS:-30}"
+SAMPLING_PRESET="${H3_SAMPLING_PRESET:-native}"
+[[ "$SAMPLING_PRESET" == "native" || "$SAMPLING_PRESET" == "pdd-ref2va-8plus2" ]] || { echo "[h3-ref10] ERROR: H3_SAMPLING_PRESET must be native or pdd-ref2va-8plus2" >&2; exit 1; }
+if [[ "$SAMPLING_PRESET" == "pdd-ref2va-8plus2" ]]; then
+  if [[ -n "${H3_SAMPLING_STEPS:-}" && "${H3_SAMPLING_STEPS}" != "10" ]]; then
+    echo "[h3-ref10] ERROR: pdd-ref2va-8plus2 requires H3_SAMPLING_STEPS=10" >&2
+    exit 1
+  fi
+  STEPS=10
+else
+  STEPS="${H3_SAMPLING_STEPS:-30}"
+fi
 [[ "$STEPS" =~ ^[1-9][0-9]*$ ]] || { echo "[h3-ref10] ERROR: H3_SAMPLING_STEPS must be a positive integer" >&2; exit 1; }
 ATTENTION_BACKEND="${H3_ATTENTION_BACKEND:-native}"
 [[ "$ATTENTION_BACKEND" == "native" || "$ATTENTION_BACKEND" == "sage2" ]] || { echo "[h3-ref10] ERROR: H3_ATTENTION_BACKEND must be native or sage2" >&2; exit 1; }
@@ -38,10 +48,11 @@ AUDIO_END="$(awk -v frames="$DELIVERY_END" 'BEGIN { printf "%.12f", frames / 24 
 PY="$POC_ROOT/runtime/venv/bin/python"
 COMFY_URL="${ASTRID_H3_COMFY_URL:-http://127.0.0.1:8189}"
 MODELS_ROOT="${VIBECOMFY_SHARED_MODELS_ROOT:-/workspace/vibecomfy-models}"
+PDD_FILE="minimax_h3_ref2va_pdd_acc_8step_comfyui.safetensors"
 SESSION_ID="${ASTRID_H3_SESSION_ID:-astrid-h3-poc}"
-RUN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$-ref10-new${NEW_FRAMES}-refs2-${PROMPT_VARIANT}-${STEPS}steps-noturbo-${ATTENTION_BACKEND}"
+RUN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$-ref10-new${NEW_FRAMES}-refs2-${PROMPT_VARIANT}-${SAMPLING_PRESET}-${STEPS}steps-noturbo-${ATTENTION_BACKEND}"
 RUN_ROOT="$POC_ROOT/runs/$RUN_TAG"
-OUTPUT_NAMESPACE="h3_poc_ref10_new${NEW_FRAMES}_refs2_${PROMPT_VARIANT}_noturbo_s${STEPS}_${ATTENTION_BACKEND}"
+OUTPUT_NAMESPACE="h3_poc_ref10_new${NEW_FRAMES}_refs2_${PROMPT_VARIANT}_${SAMPLING_PRESET}_noturbo_s${STEPS}_${ATTENTION_BACKEND}"
 RUN_COMFY_OUTPUT="$POC_ROOT/comfy-output/$OUTPUT_NAMESPACE/$RUN_TAG"
 SOURCE_39="$POC_ROOT/inputs/shot-04-v4-borderless-last-39-frames-av.mp4"
 SOURCE_FRAME="$POC_ROOT/inputs/shot-04-v4-borderless-last-frame.png"
@@ -83,6 +94,7 @@ export H3_DESTINATION_NAME="$(basename "$DESTINATION")"
 export H3_DESTINATION_MODE="reference_only"
 export H3_DISABLE_TURBO=1
 export H3_ATTENTION_BACKEND="$ATTENTION_BACKEND"
+export H3_SAMPLING_PRESET="$SAMPLING_PRESET"
 export H3_SAMPLING_STEPS="$STEPS"
 export H3_CONTEXT_FRAMES="$CONTEXT_FRAMES"
 export H3_WIDTH="$WIDTH"
@@ -105,8 +117,43 @@ run_cli() {
 }
 
 curl --fail --silent "$COMFY_URL/system_stats" > "$RUN_ROOT/system-stats.json"
-if [[ "$ATTENTION_BACKEND" == "sage2" ]]; then
+if [[ "$ATTENTION_BACKEND" == "sage2" || "$SAMPLING_PRESET" == "pdd-ref2va-8plus2" ]]; then
   curl --fail --silent "$COMFY_URL/object_info" > "$RUN_ROOT/object-info.json"
+fi
+if [[ "$SAMPLING_PRESET" == "pdd-ref2va-8plus2" ]]; then
+  [[ -f "$MODELS_ROOT/pdd_acc/$PDD_FILE" ]] || die "PDD preset requires $MODELS_ROOT/pdd_acc/$PDD_FILE"
+  "$PY" - "$RUN_ROOT/object-info.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+info = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+def required(class_name):
+    node = info.get(class_name)
+    if not node:
+        raise SystemExit(f"PDD preset requested but {class_name} is not installed")
+    return node.get("input", {}).get("required", {})
+
+apply_required = required("MiniMaxH3PDDAccApply")
+for name in ("model", "pdd_file", "nfe", "lora_strength", "head_strength", "on_off_grid"):
+    if name not in apply_required:
+        raise SystemExit(f"PDD Apply schema is missing required input {name}")
+if "8" not in apply_required["nfe"][0]:
+    raise SystemExit("PDD Apply schema does not expose nfe=8")
+if "error" not in apply_required["on_off_grid"][0]:
+    raise SystemExit("PDD Apply schema does not expose on_off_grid=error")
+warm_required = required("MiniMaxH3PDDAccWarmupScheduler")
+if "warmup_steps" not in warm_required or "handoff_sigma" not in warm_required:
+    raise SystemExit("PDD warmup scheduler schema is missing warmup_steps or handoff_sigma")
+if "0.800000" not in warm_required["handoff_sigma"][0]:
+    raise SystemExit("PDD warmup scheduler schema does not expose handoff_sigma=0.800000")
+for class_name in ("SplitSigmas", "DisableNoise"):
+    if class_name not in info:
+        raise SystemExit(f"PDD preset requested but core node {class_name} is unavailable")
+print("PDD node and core topology schemas verified")
+PY
+fi
+if [[ "$ATTENTION_BACKEND" == "sage2" ]]; then
   "$PY" - "$RUN_ROOT/object-info.json" <<'PY'
 import json
 import sys

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -154,6 +155,49 @@ def _dependency_pythonpath() -> tuple[str, ...]:
         if path.name in {"site-packages", "dist-packages"}:
             values.append(str(path))
     return tuple(dict.fromkeys(values))
+
+
+def _provision_render_runtime_env(
+    source_path: Path, child_env: dict[str, str]
+) -> None:
+    """Bind a trusted local source profile to its concrete render toolchain.
+
+    Packaged deployments may supply all three absolute settings themselves.
+    For a source checkout, the launcher turns its installed Remotion bundle,
+    schema package, and resolved Node executable into the same explicit
+    settings before strict host preflight runs.
+    """
+    from astrid.core.env_vars import (
+        ASTRID_NODE_EXECUTABLE,
+        ASTRID_REMOTION_PROJECT_DIR,
+        ASTRID_TIMELINE_SCHEMA_PYTHONPATH,
+    )
+
+    project_dir = (source_path / "remotion").resolve()
+    if (
+        ASTRID_REMOTION_PROJECT_DIR not in child_env
+        and (project_dir / "package.json").is_file()
+        and (project_dir / "node_modules").is_dir()
+    ):
+        child_env[ASTRID_REMOTION_PROJECT_DIR] = str(project_dir)
+
+    schema_root = (
+        project_dir
+        / "node_modules"
+        / "@banodoco"
+        / "timeline-schema"
+        / "python"
+    )
+    if (
+        ASTRID_TIMELINE_SCHEMA_PYTHONPATH not in child_env
+        and (schema_root / "banodoco_timeline_schema" / "__init__.py").is_file()
+    ):
+        child_env[ASTRID_TIMELINE_SCHEMA_PYTHONPATH] = str(schema_root.resolve())
+
+    if ASTRID_NODE_EXECUTABLE not in child_env:
+        node = shutil.which("node", path=child_env.get("PATH"))
+        if node:
+            child_env[ASTRID_NODE_EXECUTABLE] = str(Path(node).resolve())
 
 
 def _descendant_snapshot(pid: int) -> dict[int, tuple[str, int]]:
@@ -406,6 +450,7 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
         child_env["PYTHONPATH"] = os.pathsep.join(
             (str(source_path), *_dependency_pythonpath())
         )
+        _provision_render_runtime_env(source_path, child_env)
         try:
             log = log_path.open("ab")
             process = subprocess.Popen(

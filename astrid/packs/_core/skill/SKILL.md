@@ -48,8 +48,10 @@ actor as connection context. CLI commands use the installed
 `banodoco-local up --profile astrid` launcher with
 `BANODOCO_LOCAL_SOURCE_MANIFEST`; an optional
 `BANODOCO_RUNTIME_CREDENTIAL` supplies the owner credential. If the launcher
-context is unavailable, the typed recovery action is
-`banodoco-local up --profile astrid`.
+context is unavailable, the typed recovery action distinguishes a missing
+runtime install from a runtime that only needs configuration/startup. Launcher
+resolution prefers `BANODOCO_LOCAL_LAUNCHER`, then the `banodoco-local` script,
+then `python -m banodoco_local` in the current interpreter.
 
 `doctor --json` asks the runtime for health. `backup` routes create, restore,
 export, tombstone, recover, and purge through the runtime and supports
@@ -71,6 +73,8 @@ python3 -m astrid media import ./shot.png --project demo --json
 python3 -m astrid tasks create --project demo --capability rendering.timeline_visualize \
   --spec '{"timeline_slug": "primary"}' --json
 python3 -m astrid runs list --project demo --json
+python3 -m astrid projects select demo
+python3 -m astrid runs open
 ```
 
 `media import` accepts existing files and directories. Product and nested-mount
@@ -85,11 +89,11 @@ success, `1` typed SDK/runtime error, `2` usage/parse error.
 
 | Family | Verbs | Notes |
 | --- | --- | --- |
-| `projects` | `create`, `list`, `show`, `update` | Project selection is runtime-scoped; a sole runtime project may be selected implicitly, while multiple projects require `--project`. |
+| `projects` | `create`, `list`, `show`, `update`, `select`, `current` | `select` persists the runtime project-routing preference; `current` reads it. |
 | `timelines` | `create`, `list`, `show`, `save`, `archive`, `recover`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `recover` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
 | `media` | `import`, `list`, `show`, `verify` | Media is ingested and addressed as runtime-owned objects; reference-in-place repair is not a Stage1 user operation. |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
-| `runs` | `list`, `show`, `cancel`, `retry`, `events` | `retry` retries the selected run's eligible failed/expired children (all by default or an explicit `--task` subset) |
+| `runs` | `list`, `show`, `cancel`, `retry`, `events`, `open` | `open` defaults to the latest successful render in the current project; a positional run id selects an exact render. |
 
 The former file-side `projects select/current` preference is not Stage1
 authority. Runtime selection is resolved by the connected workspace service:
@@ -117,6 +121,19 @@ python3 -m astrid media references recover "Character Name" --project demo --jso
 Routes not exposed by the connected runtime return a typed `unavailable`
 result. Do not fall back to local files, a checkout database, or a second
 authority.
+
+To review a project's newest successfully settled render on macOS:
+
+```bash
+python3 -m astrid projects select demo
+python3 -m astrid runs open
+python3 -m astrid runs open <run-id>  # exact render
+python3 -m astrid runs open --project other-project  # selection override
+```
+
+This means the latest successful `rendering.render` run, not an editorially
+approved "current" deliverable; the runtime does not yet expose that separate
+promotion pointer.
 
 ## Runs & tasks
 
@@ -150,7 +167,7 @@ SQLite/CAS tree.
 
 ## The SDK is the pack surface
 
-The current capability catalog contains exactly 18 packs, 59 executors, 12
+The current capability catalog contains exactly 18 packs, 61 executors, 12
 orchestrators, and 10 rendering elements. The catalog includes
 `typed_timeline`; `references`, `shots`, and `timeline` are runtime-owned
 product mounts rather than local packs. `runaway`, `reigh`, and the retired
@@ -209,7 +226,9 @@ Rendering has two deliberately explicit contracts. `rendering.render` with
 `timeline` consumes a project-owned exported or pipeline JSON file; a value
 like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
 a canonical runtime slug/UUID/ULID and optionally enforces `expected_version`;
-use `astrid timelines render <ref> --project <project>` for the product CLI. Managed visualization
+use `astrid timelines render <ref> --project <project>` for the product CLI.
+That command follows the task to terminal completion by default; use
+`--detach` only when an admission receipt is intentionally sufficient. Managed visualization
 likewise resolves the canonical runtime timeline and pins its actual stream
 head. Visualization resolves only runtime-owned timeline references and frozen
 materializations; raw timeline paths and event-log files are not product
@@ -335,7 +354,8 @@ Built-in executors include `editorial.transcribe`, `video_editing.cut`,
 `rendering.render`, `editorial.validate`, `understanding.understand`
 (audio/visual/video dispatcher; pass `--mode {audio,visual,video}`), and
 `generation.generate_image_openai`. External executors include `moirae.moirae`
-and `vibecomfy.run` (executor only, not an orchestrator).
+and the `vibecomfy.inspect` → `vibecomfy.edit` → `vibecomfy.validate` →
+`vibecomfy.run` workflow (executors only, not orchestrators).
 
 Element sources are discovered from pack manifests in canonical discovery
 order. An editable project-local pack is ordinary source content; it does not
@@ -506,6 +526,7 @@ transitions `cross-fade`, `fade`.
    `remotion/node_modules/.cache` — Remotion's webpack caches aggressively
    across renders.
 
+
 ## Further Reading
 
 - [docs/getting-started.md](../../../../docs/getting-started.md) — the canonical human setup doc
@@ -580,6 +601,8 @@ orchestrator, or element manifests.
 | `understanding.understand` | Dispatch to the audio, visual, or video understanding executor based on --mode. |
 | `understanding.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
 | `understanding.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
+| `vibecomfy.edit` | Apply an atomic batch of typed VibeComfy edits to a ComfyUI UI graph. |
+| `vibecomfy.inspect` | Render a ComfyUI UI graph as readable Python-like VibeComfy IR. |
 | `vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
 | `vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
 | `video_editing.cut` | Build the hype timeline + assets + metadata JSON triple from arrangement. |

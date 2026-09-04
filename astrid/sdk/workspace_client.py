@@ -550,6 +550,7 @@ class WorkspaceClient:
         settlement_effect: Mapping[str, Any] | None = None,
         project_id: str | None = None,
         spec: Mapping[str, Any] | None = None,
+        storage_estimate: Mapping[str, int] | None = None,
     ) -> Any:
         return self._call_generated(
             "admit_task",
@@ -561,6 +562,7 @@ class WorkspaceClient:
             settlement_effect=settlement_effect,
             project_id=project_id,
             spec=spec,
+            storage_estimate=storage_estimate,
         )
 
     def get_task(self, task_id: str) -> Any:

@@ -122,9 +122,27 @@ Each value is a file path relative to the element root. During render, only
 declared assets for elements used by the timeline are staged under
 `remotion/public/astrid-effects/<render-hash>/<effect-id>/`, exposed to the
 component as `params.__astridAssets`, and cleaned up after Remotion exits.
-
 Requires Remotion ≥ 4.0.509 (pinned; 4.0.509+ replaces the extract-zip
 dependency that broke Chrome Headless Shell extraction on Node ≥ 26).
+
+### Custom Remotion motion — invariants
+
+Author custom motion as a registered element selected by `clip.clipType` on
+a dedicated visual track, normally `fx`; do not register one-off Root
+compositions for single inserts.
+
+Preview and export must use the same `TimelineComposition`, props, assets,
+and clip timing. Never render custom motion separately for chroma-key or
+ffmpeg overlay; offline assemblers may consume only an opaque shot or
+timeline render that already contains its base media and motion.
+
+List an overlay track before its source track because visual tracks render
+in reversed array order. Do not use literal `clipType: "effect-layer"` for
+an independent visual; use the registered element id.
+
+Before inventing an integration: inspect the sibling `reigh-app` sequence
+registry, timed component dispatch, preview, and export paths before
+introducing custom motion, and document any Astrid-specific deviation.
 
 ### `rendering.sprite_sheet`
 
@@ -145,7 +163,9 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
   explicit exported or pipeline-produced timeline JSON file and, only when
   needed, an asset registry. Use its mutually exclusive `timeline_ref` input
   (or `astrid timelines render <ref> --project <project>`) for a canonical kernel slug/UUID/ULID;
-  add `expected_version` when the observed stream head must not change.
+  add `expected_version` when the observed stream head must not change. The
+  product command waits for terminal completion by default; reserve
+  `--detach` for explicit queue-only workflows.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
   the service selects the supporting renderer from request-sensitive evidence.

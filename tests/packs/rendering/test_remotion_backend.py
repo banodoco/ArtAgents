@@ -777,11 +777,17 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
             calls: list[tuple[list[str], dict[str, object]]] = []
             props_payloads: list[dict[str, object]] = []
             props_paths: list[Path] = []
+            remotion_temp_roots: list[Path] = []
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
                 calls.append((command, kwargs))
                 if _is_remotion_render_command(command):
+                    child_env = kwargs["env"]
+                    remotion_temp_roots.append(Path(child_env["TMPDIR"]))
+                    self.assertEqual(child_env["TMP"], child_env["TMPDIR"])
+                    self.assertEqual(child_env["TEMP"], child_env["TMPDIR"])
+                    self.assertTrue(remotion_temp_roots[-1].is_dir())
                     props_path = Path(command[command.index("--props") + 1])
                     props_paths.append(props_path)
                     props_payloads.append(json.loads(props_path.read_text(encoding="utf-8")))
@@ -830,6 +836,10 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(remotion_output.parent.resolve(), out_path.parent.resolve())
         self.assertNotEqual(remotion_output, out_path.resolve())
         self.assertIn("--allow-html-in-canvas", remotion_cmd)
+        self.assertIn("--crf=18", remotion_cmd)
+        self.assertIn("--max-rate=15552K", remotion_cmd)
+        self.assertIn("--buffer-size=31104K", remotion_cmd)
+        self.assertIn("--audio-bitrate=320K", remotion_cmd)
         self.assertEqual(remotion_kwargs["cwd"], str(project_dir))
         self.assertFalse(remotion_kwargs["check"])
         self.assertTrue(remotion_kwargs["capture_output"])
@@ -844,6 +854,11 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(props["timeline"]["tracks"][0]["id"], "v1")
         self.assertEqual(len(props_paths), 1)
         self.assertFalse(props_paths[0].exists(), "render should remove the temporary props file")
+        self.assertEqual(len(remotion_temp_roots), 1)
+        self.assertFalse(
+            remotion_temp_roots[0].exists(),
+            "render should remove its attempt-local Remotion temp directory",
+        )
         self.assertEqual(provenance["registry_hash"], render_remotion._effective_registry_state(None)["hash"])
         self.assertEqual(provenance["resolved_effect_ids"], [])
 
@@ -1335,6 +1350,14 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
     for dead_flag in ("--codec=vp9", "--pixel-format=yuva420p"):
         assert dead_flag not in alpha_cmd
         assert dead_flag not in opaque_cmd
+    for opaque_only_flag in (
+        "--crf=18",
+        "--max-rate=15552K",
+        "--buffer-size=31104K",
+        "--audio-bitrate=320K",
+    ):
+        assert opaque_only_flag in opaque_cmd
+        assert opaque_only_flag not in alpha_cmd
     assert sum(part.startswith("--port=") for part in opaque_cmd) == 1
     assert sum(part.startswith("--port=") for part in alpha_cmd) == 1
     assert "--port=3001" in opaque_cmd

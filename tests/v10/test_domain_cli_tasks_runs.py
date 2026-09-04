@@ -93,6 +93,12 @@ class _Runs:
         self.owner.calls.append(("runs.events", {"run_id": run_id}))
         return DomainResult.success([{"seq": 1, "kind": "core.run.created", "run_id": run_id}])
 
+    def open(self, run_id=None, *, project=None):
+        self.owner.calls.append(("runs.open", {"project": project, "run_id": run_id}))
+        return DomainResult.success(
+            {"project_id": project or "P-current", "run_id": run_id or "R-latest", "opened": True}
+        )
+
 
 class _Client:
     def __init__(self) -> None:
@@ -112,10 +118,28 @@ def _choices(parser: argparse.ArgumentParser) -> set[str]:
 def test_tasks_and_runs_expose_only_canonical_verbs() -> None:
     from astrid.core.cli.domain_tasks import COMMANDS as TASK_COMMANDS, build_parser as task_parser
     from astrid.core.cli.domain_runs import COMMANDS as RUN_COMMANDS, build_parser as run_parser
-    assert tuple(c.name for c in TASK_COMMANDS) == ("create", "list", "show", "cancel", "retry", "events")
-    assert _choices(task_parser(_Client())) == {"create", "list", "show", "cancel", "retry", "events"}
-    assert tuple(c.name for c in RUN_COMMANDS) == ("list", "show", "cancel", "retry", "events")
-    assert _choices(run_parser(_Client())) == {"list", "show", "cancel", "retry", "events"}
+    assert tuple(c.name for c in TASK_COMMANDS) == ("create", "list", "show", "cancel", "retry", "events", "follow")
+    assert _choices(task_parser(_Client())) == {"create", "list", "show", "cancel", "retry", "events", "follow"}
+    assert tuple(c.name for c in RUN_COMMANDS) == ("list", "show", "cancel", "retry", "events", "open")
+    assert _choices(run_parser(_Client())) == {"list", "show", "cancel", "retry", "events", "open"}
+
+
+def test_runs_open_defaults_to_latest_in_current_project(capsys) -> None:
+    client = _Client()
+
+    assert _run("runs", ["open", "--json"], client) == 0
+
+    assert client.calls == [("runs.open", {"project": None, "run_id": None})]
+    assert json.loads(capsys.readouterr().out)["data"]["run_id"] == "R-latest"
+
+
+def test_runs_open_accepts_exact_run_and_project_override(capsys) -> None:
+    client = _Client()
+
+    assert _run("runs", ["open", "R-23", "--project", "demo", "--json"], client) == 0
+
+    assert client.calls == [("runs.open", {"project": "demo", "run_id": "R-23"})]
+    assert json.loads(capsys.readouterr().out)["data"]["run_id"] == "R-23"
 
 
 @pytest.mark.parametrize("family,verb,identifier,call", [
@@ -147,6 +171,131 @@ def test_tasks_create_forwards_generated_contract(capsys) -> None:
         "spec": {"x": 1}, "input_manifest": [{"media_id": "M-1"}], "idempotency_key": None})]
     envelope = json.loads(capsys.readouterr().out)
     assert set(envelope) == ENVELOPE_KEYS and envelope["receipt"] is not None
+    assert envelope["data"]["handoff"]["follow"] == (
+        "python3 -m astrid tasks follow T-1 --project P-1"
+    )
+
+
+def test_tasks_follow_prints_only_durable_changes_and_exits_on_success(capsys) -> None:
+    client = _Client()
+    snapshots = [
+        {"task_id": "T-1", "run_id": "R-1", "state": "queued", "version": 1,
+         "created_at": "2026-09-04T10:00:00Z", "updated_at": "2026-09-04T10:00:00Z"},
+        {"task_id": "T-1", "run_id": "R-1", "state": "queued", "version": 1,
+         "created_at": "2026-09-04T10:00:00Z", "updated_at": "2026-09-04T10:00:00Z"},
+        {"task_id": "T-1", "run_id": "R-1", "state": "running", "version": 2,
+         "attempt_id": "A-1", "created_at": "2026-09-04T10:00:00Z",
+         "updated_at": "2026-09-04T10:00:01Z"},
+        {"task_id": "T-1", "run_id": "R-1", "state": "succeeded", "version": 2,
+         "attempt_id": "A-1", "created_at": "2026-09-04T10:00:00Z",
+         "updated_at": "2026-09-04T10:00:02Z", "result": {"outputs": []}},
+    ]
+
+    def show(task_id):
+        client.calls.append(("tasks.show", {"task_id": task_id}))
+        return DomainResult.success(snapshots.pop(0))
+
+    client.tasks.show = show
+    assert _run(
+        "tasks",
+        ["follow", "T-1", "--project", "P-1", "--poll-seconds", "0.001"],
+        client,
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert output.count("phase=queued") == 1
+    assert output.count("phase=running") == 1
+    assert output.count("phase=succeeded") == 1
+    assert "heartbeat=" in output
+    assert "attempt=A-1" in output
+    assert "waiting=awaiting_execution" in output
+
+
+def test_tasks_follow_json_is_one_envelope_with_observation_history(capsys) -> None:
+    client = _Client()
+    snapshots = [
+        {"task_id": "T-1", "run_id": "R-1", "state": "queued", "version": 1,
+         "waiting_reason": "waiting_for_gpu", "updated_at": "2026-09-04T10:00:00Z"},
+        {"task_id": "T-1", "run_id": "R-1", "state": "succeeded", "version": 2,
+         "attempt_id": "A-2", "updated_at": "2026-09-04T10:00:01Z",
+         "result": {"outputs": [{"url": "https://example.test/render.mp4"}]}},
+    ]
+    client.tasks.show = lambda _task_id: DomainResult.success(snapshots.pop(0))
+
+    assert _run(
+        "tasks",
+        ["follow", "T-1", "--project", "P-1", "--poll-seconds", "0.001", "--json"],
+        client,
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 1
+    envelope = json.loads(captured.out)
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["data"]["state"] == "succeeded"
+    assert [row["state"] for row in envelope["data"]["observations"]] == [
+        "queued", "succeeded"
+    ]
+    assert envelope["data"]["observations"][0]["waiting_reason"] == "waiting_for_gpu"
+    assert envelope["data"]["outputs"][0]["location"] == "https://example.test/render.mp4"
+    assert envelope["data"]["handoff"]["open"] == (
+        "python3 -m astrid runs open R-1 --project P-1"
+    )
+
+
+def test_tasks_follow_reports_defensible_progress_speed_and_eta(capsys) -> None:
+    client = _Client()
+    client.tasks.show = lambda _task_id: DomainResult.success({
+        "task_id": "T-1", "run_id": "R-1", "state": "succeeded", "version": 2,
+        "attempt_id": "A-1", "progress": {
+            "phase": "encoding", "completed_units": 75, "total_units": 100,
+            "current_speed": 5, "speed_unit": "units/s",
+        },
+    })
+
+    assert _run("tasks", ["follow", "T-1", "--project", "P-1", "--json"], client) == 0
+    observation = json.loads(capsys.readouterr().out)["data"]["observations"][0]
+    assert observation["phase"] == "encoding"
+    assert observation["progress_percent"] == 75.0
+    assert observation["current_speed"] == 5.0
+    assert observation["eta_seconds"] == 5
+    assert observation["eta_source"] == "remaining/current_speed"
+
+
+def test_tasks_follow_does_not_invent_queue_progress_or_eta(capsys) -> None:
+    client = _Client()
+    client.tasks.show = lambda _task_id: DomainResult.success(
+        {"task_id": "T-1", "state": "succeeded", "version": 2}
+    )
+
+    assert _run("tasks", ["follow", "T-1", "--project", "P-1"], client) == 0
+    output = capsys.readouterr().out
+    assert "queue=unavailable" in output
+    assert "progress=unavailable" in output
+    assert "speed=unavailable" in output
+    assert "eta=unavailable" in output
+    assert "runtime did not report queue position" in output
+
+
+def test_tasks_follow_terminal_failure_is_exit_one(capsys) -> None:
+    client = _Client()
+    client.tasks.show = lambda _task_id: DomainResult.success(
+        {"task_id": "T-1", "state": "failed", "version": 3, "attempt_id": "A-2"}
+    )
+
+    assert _run("tasks", ["follow", "T-1", "--project", "P-1", "--json"], client) == 1
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["error"]["code"] == "task_failed"
+
+
+@pytest.mark.parametrize("flag,value", [("--poll-seconds", "0"), ("--timeout-seconds", "nan")])
+def test_tasks_follow_rejects_non_positive_or_non_finite_intervals(flag, value) -> None:
+    client = _Client()
+    with pytest.raises(SystemExit) as exc:
+        _run("tasks", ["follow", "T-1", "--project", "P-1", flag, value], client)
+    assert exc.value.code == 2
+    assert client.calls == []
 
 
 def test_tasks_create_does_not_advertise_unsupported_runtime_admission_fields() -> None:

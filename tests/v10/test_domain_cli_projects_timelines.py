@@ -120,7 +120,6 @@ class _RecordingProjects:
             }
         )
 
-
 class _RecordingTimelines:
     def __init__(self, owner: "_FakeClient") -> None:
         self._owner = owner
@@ -648,6 +647,86 @@ def test_timelines_render_help_includes_copyable_flat_profile(capsys) -> None:
     assert '"fps_rational": [30, 1]' in help_text
     assert '"time_base": [1, 90000]' in help_text
     assert '"audio_channel_layout": "stereo"' in help_text
+
+
+def test_timelines_render_translates_public_backend_to_executor_selector(capsys) -> None:
+    client = _FakeClient()
+    rc = _run(
+        "timelines",
+        [
+            "render",
+            "--project",
+            "demo",
+            "main",
+            "--expected-version",
+            "5",
+            "--backend",
+            "rendering.ffmpeg",
+            "--output-name",
+            "selected.mp4",
+            "--timeout-seconds",
+            "90",
+            "--json",
+        ],
+        client=client,
+    )
+
+    assert rc == 0
+    assert len(client.calls) == 1
+    verb, kwargs = client.calls[0]
+    assert verb == "invoke_result"
+    assert kwargs["capability_id"] == "rendering.render"
+    assert kwargs["kind"] == "executor"
+    assert kwargs["project"] == "demo"
+    assert kwargs["wait"] is True
+    assert kwargs["timeout_seconds"] == 90.0
+    assert kwargs["inputs"] == {
+        "timeline_ref": "main",
+        "expected_version": 5,
+        "selector": "rendering.ffmpeg",
+        "output_name": "selected.mp4",
+    }
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
+def test_timelines_render_detach_is_explicit_and_truthfully_labeled(capsys) -> None:
+    client = _FakeClient()
+
+    rc = _run(
+        "timelines",
+        ["render", "--project", "demo", "main", "--detach", "--json"],
+        client=client,
+    )
+
+    assert rc == 0
+    _, kwargs = client.calls[0]
+    assert kwargs["wait"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"]["state"] == "admitted"
+    assert payload["data"]["handoff"] == {
+        "events": "python3 -m astrid tasks events T-1 --project demo --json",
+        "follow": "python3 -m astrid tasks follow T-1 --project demo",
+        "inspect": "python3 -m astrid tasks show T-1 --project demo --json",
+        "open": "python3 -m astrid runs open R-1 --project demo",
+        "recent": "python3 -m astrid tasks list --project demo --json",
+    }
+
+
+def test_timelines_render_human_admission_prints_copyable_handoff(capsys) -> None:
+    client = _FakeClient()
+
+    assert _run(
+        "timelines", ["render", "--project", "demo", "main", "--detach"], client=client
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "render admitted" in output
+    assert "run: R-1" in output
+    assert "task: T-1" in output
+    assert "follow: python3 -m astrid tasks follow T-1 --project demo" in output
+    assert "inspect: python3 -m astrid tasks show T-1 --project demo --json" in output
+    assert "events: python3 -m astrid tasks events T-1 --project demo --json" in output
+    assert "open: python3 -m astrid runs open R-1 --project demo" in output
 
 
 def test_timelines_visualize_help_separates_legacy_input_from_manifest_compatibility(

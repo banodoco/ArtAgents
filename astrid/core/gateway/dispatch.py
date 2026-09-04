@@ -75,10 +75,13 @@ def _dispatch_doctor(args: list[str]) -> int:
         with AstridClient.open_from_launcher() as client:
             report = client.doctor()
     except (ServiceUnavailableError, WorkspaceClientError) as exc:
+        details = getattr(exc, "details", {})
         payload = {
             "ok": False,
             "state": "unavailable",
-            "next_action": "banodoco-local up --profile astrid",
+            "next_action": details.get(
+                "next_action", "banodoco-local up --profile astrid"
+            ),
             "error": str(exc),
         }
         if parsed.json:
@@ -168,7 +171,14 @@ def _dispatch_backup(args: list[str]) -> int:
             else:
                 result = client.purge_realm(parsed.confirmation)
     except ServiceUnavailableError as exc:
-        payload = {"ok": False, "state": "unavailable", "next_action": "banodoco-local up --profile astrid", "error": str(exc)}
+        payload = {
+            "ok": False,
+            "state": "unavailable",
+            "next_action": exc.details.get(
+                "next_action", "banodoco-local up --profile astrid"
+            ),
+            "error": str(exc),
+        }
         print(json.dumps(payload, indent=2, sort_keys=True) if json_mode else f"Astrid backup: {payload['error']}\nnext action: {payload['next_action']}", file=None if json_mode else sys.stderr)
         return 1
     except WorkspaceClientError as exc:

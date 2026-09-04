@@ -79,7 +79,14 @@ try:
         # An unconfigured clean workspace is a valid fail-closed product
         # result; it must still carry the typed launcher recovery contract.
         assert doctor_payload.get("state") == "unavailable", doctor_payload
-        assert doctor_payload.get("next_action") == "banodoco-local up --profile astrid", doctor_payload
+        assert doctor_payload.get("next_action") in {
+            "banodoco-local up --profile astrid",
+            (
+                "python3 -m pip install 'banodoco-workspace-runtime @ "
+                "git+https://github.com/banodoco/banodoco-workspace-runtime.git@"
+                "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de'"
+            ),
+        }, doctor_payload
 
     resource_probe = harness.run_lane(
         "resources",
