@@ -15,10 +15,18 @@ runtime through the neutral launcher; no separate database service is needed:
 
 ```bash
 pip install .
+python3 -m pip install 'banodoco-workspace-runtime @ git+https://github.com/banodoco/banodoco-workspace-runtime.git@4050394c5395206f1ec6bf0d905ffbfb7bb0e4de'
 export BANODOCO_LOCAL_SOURCE_MANIFEST=/path/to/astrid-source-profile.json
 python3 -m astrid --help
 python3 -m astrid projects list --json
 ```
+
+The pinned source install is temporary until the certified
+`banodoco-workspace-runtime==0.1.0` wheel is published. Astrid resolves the
+launcher from an explicit override, then the `banodoco-local` script, then the
+installed `banodoco_local` module through the current Python interpreter. An
+installed runtime therefore still works when its scripts directory is absent
+from `PATH`.
 
 An existing neutral source manifest can be used instead with
 `BANODOCO_LOCAL_SOURCE_MANIFEST`. The manifest records both editable
@@ -41,6 +49,18 @@ Other useful zero-secret commands:
 python3 -m astrid projects list --json
 python3 -m astrid projects show demo --json
 ```
+
+After a project has a successful timeline render, verify and open the newest
+runtime render on macOS with:
+
+```bash
+python3 -m astrid projects select demo
+python3 -m astrid runs open
+```
+
+Pass a run id positionally (`runs open <run-id>`) to open an exact successful
+render, or use `--project <project>` to override the current project. The
+command does not guess from checkout filenames or modification times.
 
 If using the SDK directly, pass the loopback runtime endpoint and credential to
 `AstridClient.open(...)` together with the runtime realm and actor identity.

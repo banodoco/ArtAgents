@@ -266,7 +266,7 @@ class RemoteTasks(_RemoteFamily):
         return self._typed("register_executor", {"executor_id": executor_id, "capabilities": capabilities}, key=idempotency_key, idempotency_key=idempotency_key)
     def register_capability(self, capability_id: str, definition_digest: str, *, idempotency_key=None):
         return self._typed("register_capability", capability_id, definition_digest, key=idempotency_key, idempotency_key=idempotency_key)
-    def create(self, *, project_id: str, capability: str, spec: Mapping[str, Any], input_manifest=None, idempotency_key=None, settlement_effect=None):
+    def create(self, *, project_id: str, capability: str, spec: Mapping[str, Any], input_manifest=None, idempotency_key=None, settlement_effect=None, storage_estimate: Mapping[str, int] | None = None):
         key = idempotency_key or uuid.uuid4().hex
         capabilities = paged_rows(self._client.list_capabilities, limit=50)
         if capabilities is None:
@@ -280,7 +280,7 @@ class RemoteTasks(_RemoteFamily):
             )
         match = next((item for item in capabilities if isinstance(item, Mapping) and item.get("capability_id") == capability), None)
         if match is None: return DomainResult.failure(ErrorObject("not_found", "capability is not registered", {"capability_id": capability}), idempotency_key=key)
-        return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec, settlement_effect=settlement_effect)
+        return self._typed("admit_task", key=key, capability_id=capability, capability_digest=str(match["definition_digest"]), input_object_ids=input_manifest or [], idempotency_key=key, project_id=project_id, spec=spec, settlement_effect=settlement_effect, storage_estimate=storage_estimate)
     def claim(self, *, executor_id: str, capability_ids: list[str], idempotency_key: str):
         return self._typed("claim_task", key=idempotency_key, executor_id=executor_id, capability_ids=capability_ids, idempotency_key=idempotency_key)
     def settle(
@@ -325,6 +325,11 @@ class RemoteRuns(_RemoteFamily):
     def events(self, run_id, *, cursor=None, limit=50):
         return self._typed(
             "list_events", cursor=cursor, limit=limit, aggregate_id=run_id
+        )
+    def open(self, run_id=None, *, project=None, cache_root=None):
+        from .project_render import open_project_render
+        return open_project_render(
+            self._client, project, run_id=run_id, cache_root=cache_root
         )
 
 

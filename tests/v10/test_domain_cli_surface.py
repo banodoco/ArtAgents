@@ -29,8 +29,8 @@ from astrid.core.cli.domain_output import (
 from astrid.core.cli.domain_product import (
     EXCLUDED_FROM_PRODUCT_CENSUS,
     PRODUCT_FAMILIES,
-    RuntimeMount,
     ProductRegistryError,
+    RuntimeMount,
     _validate_mounts,
     build_product_mounts,
     family_mount,
@@ -697,6 +697,7 @@ def test_product_help_documents_json_envelope_convention() -> None:
 def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> None:
     text = _product_help_text()
     assert "projects    [kernel] project create/list/show/update/select/current" in text
+    assert "runs        [kernel] run list/show/cancel/retry/events/open" in text
     assert "[pack: timeline] timelines create/list/show/save/archive/recover/history/diff/visualize/render" in text
 
 

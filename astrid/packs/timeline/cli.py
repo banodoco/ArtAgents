@@ -56,6 +56,7 @@ from typing import Any
 
 from astrid.core.cli.domain_output import print_result
 from astrid.core.cli.registration import CommandSpec, register_product_commands
+from astrid.core.cli.task_progress import task_handoff
 
 __all__ = ["COMMANDS", "build_parser"]
 
@@ -297,17 +298,32 @@ def _cmd_render(parsed: argparse.Namespace) -> int:
     from astrid.sdk.contracts import DomainResult, ErrorObject
 
     inputs: dict[str, Any] = {"timeline_ref": parsed.ref}
-    for name in ("expected_version", "backend", "output_name", "profile"):
+    for name in ("expected_version", "output_name", "profile"):
         value = getattr(parsed, name, None)
         if value not in (None, ""):
             inputs[name] = value
+    if parsed.backend not in (None, ""):
+        # ``--backend`` is the product-language spelling.  The rendering
+        # executor's stable input/CLI contract calls this value ``selector``;
+        # forwarding it as ``backend`` made the public option silently inert
+        # because the manifest has no such input port.
+        inputs["selector"] = parsed.backend
     result = parsed.client.invoke_result(
         "rendering.render",
         kind="executor",
         project=parsed.project,
         inputs=inputs,
+        wait=parsed.wait,
+        timeout_seconds=parsed.timeout_seconds,
     )
     if result.ok:
+        run_id = result.kernel_run_id or result.run_id
+        task_id = result.kernel_task_id
+        handoff = (
+            task_handoff(project=parsed.project, task_id=task_id, run_id=run_id)
+            if task_id
+            else {}
+        )
         envelope = DomainResult.success(
             {
                 "capability_id": result.capability_id,
@@ -315,6 +331,8 @@ def _cmd_render(parsed: argparse.Namespace) -> int:
                 "kernel_run_id": result.kernel_run_id,
                 "kernel_task_id": result.kernel_task_id,
                 "kernel_attempt_id": result.kernel_attempt_id,
+                "state": "completed" if parsed.wait else "admitted",
+                "handoff": handoff,
                 "outputs": result.outputs,
             }
         )
@@ -336,7 +354,43 @@ def _cmd_render(parsed: argparse.Namespace) -> int:
                 },
             )
         )
-    return print_result(envelope, as_json=parsed.json)
+    if parsed.json or not envelope.ok:
+        return print_result(envelope, as_json=parsed.json)
+    data = envelope.data
+    assert isinstance(data, Mapping)
+    print(f"render {data['state']}")
+    durable_run_id = data.get("kernel_run_id") or data.get("run_id")
+    if durable_run_id:
+        print(f"run: {durable_run_id}")
+    if data.get("kernel_task_id"):
+        print(f"task: {data['kernel_task_id']}")
+    handoff = data.get("handoff")
+    if isinstance(handoff, Mapping):
+        if handoff.get("follow"):
+            print(f"follow: {handoff['follow']}")
+        if handoff.get("inspect"):
+            print(f"inspect: {handoff['inspect']}")
+        if handoff.get("events"):
+            print(f"events: {handoff['events']}")
+        if handoff.get("open"):
+            print(f"open: {handoff['open']}")
+        if handoff.get("recent"):
+            print(f"recent: {handoff['recent']}")
+    outputs = data.get("outputs")
+    if data.get("state") == "completed" and isinstance(outputs, Mapping):
+        artifacts = outputs.get("artifacts")
+        if isinstance(artifacts, list):
+            for artifact in artifacts:
+                if isinstance(artifact, str):
+                    print(f"output: {artifact}")
+                elif isinstance(artifact, Mapping):
+                    location = next(
+                        (artifact.get(key) for key in ("url", "path", "locator", "object_id") if artifact.get(key)),
+                        None,
+                    )
+                    if location:
+                        print(f"output: {location}")
+    return 0
 
 
 # -- parser ----------------------------------------------------------------
@@ -540,6 +594,26 @@ def _configure_render(subparser: argparse.ArgumentParser) -> None:
             "Plain output filename (default hype.mp4). A canonical timeline stamped "
             "metadata.astrid_layer.alpha=true may request .mov for ProRes 4444/PCM output."
         ),
+    )
+    completion = subparser.add_mutually_exclusive_group()
+    completion.add_argument(
+        "--wait",
+        dest="wait",
+        action="store_true",
+        default=True,
+        help="Follow the render to completion and propagate terminal failure (default).",
+    )
+    completion.add_argument(
+        "--detach",
+        dest="wait",
+        action="store_false",
+        help="Return after admission with state=admitted; inspect the returned task/run later.",
+    )
+    subparser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=3600.0,
+        help="Maximum wait for --wait before returning a non-success result (default: 3600).",
     )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_render)

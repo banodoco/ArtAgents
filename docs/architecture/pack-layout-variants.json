@@ -206,13 +206,13 @@
       "id": "vibecomfy",
       "variant": "executor_pack",
       "has_pack_yaml": true,
-      "executor_count": 2,
+      "executor_count": 4,
       "orchestrator_count": 0,
       "element_count": 0,
-      "has_skill": false,
+      "has_skill": true,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Executor pack with 2 executors (run, validate) for VibeComfy integration."
+      "notes": "Executor pack with 4 executors (inspect, edit, validate, run) for authority-preserving VibeComfy integration."
     },
     {
       "id": "video_editing",

@@ -40,6 +40,9 @@ Timeline evidence:
   python3 -m astrid timelines visualize --project PROJECT [--timeline-slug REF]
       [--format FORMAT[,FORMAT...]] [--json]
 
+Latest project render:
+  python3 -m astrid runs open [RUN_ID] [--project PROJECT] [--json]
+
 Operational families:
   python3 -m astrid doctor [--json]
   python3 -m astrid backup {create,restore,export,tombstone,recover,purge} [--json]
@@ -61,7 +64,8 @@ Notes:
 
 Ownership handoff:
   Product commands connect to the selected runtime through the generated
-  client. If it is unavailable, run ``banodoco-local up --profile astrid``.
+  client. Follow the typed next_action: it distinguishes a missing runtime
+  install from a runtime that only needs configuration or startup.
 """
     )
 
@@ -93,7 +97,7 @@ Product families:
   projects    [kernel] project create/list/show/update/select/current
   media       [kernel] media import/list/show/verify/relate
   tasks       [kernel] task create/list/show/cancel/retry/events
-  runs        [kernel] run list/show/cancel/retry/events
+  runs        [kernel] run list/show/cancel/retry/events/open
   timelines   [pack: timeline] timelines create/list/show/save/archive/recover/history/diff/visualize/render
 
 Operational families:
@@ -117,7 +121,8 @@ Exit codes:
 
 Ownership handoff:
   Product commands connect to the selected runtime through the generated
-  client. If it is unavailable, run ``banodoco-local up --profile astrid``.
+  client. Follow the typed next_action: it distinguishes a missing runtime
+  install from a runtime that only needs configuration or startup.
 """
 
 

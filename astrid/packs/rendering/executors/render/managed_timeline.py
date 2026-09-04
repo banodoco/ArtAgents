@@ -465,7 +465,7 @@ def resolve_managed_render_snapshot(
         project_ref=project_ref,
         client=client,
     )
-    project_id = str(project["id"])
+    project_id = str(project.get("id") or project["project_id"])
     config_hash = _digest(config)
     registry_hash = _digest(stored_registry)
     head_event_id = f"timeline:{timeline_data['timeline_id']}:{version}"
@@ -488,7 +488,7 @@ def resolve_managed_render_snapshot(
         project_id=project_id,
         project_slug=str(project["slug"]),
         timeline_id=str(timeline_data["timeline_id"]),
-        timeline_ulid=str(timeline_data["timeline_ulid"]),
+        timeline_ulid=str(timeline_data.get("timeline_ulid") or timeline_data["timeline_id"]),
         timeline_slug=str(timeline_data["slug"]),
         config_version=version,
         head_event_id=head_event_id,

@@ -13,13 +13,11 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME = ROOT.parent / "banodoco-workspace-runtime-stage1-convergence"
 SCHEMA_ROOT = ROOT.parent / "reigh-app" / "vendor" / "timeline-schema" / "python"
 DEPENDENCY_ROOT = Path(
     os.environ.get(
@@ -28,16 +26,12 @@ DEPENDENCY_ROOT = Path(
     )
 ).expanduser()
 
-if not RUNTIME.is_dir():
-    pytest.skip("workspace runtime checkout is unavailable", allow_module_level=True)
 if not DEPENDENCY_ROOT.is_dir():
     pytest.skip(
         "provisioned Remotion dependency root is unavailable; set "
         "ASTRID_TEST_REMOTION_DEPENDENCY_ROOT",
         allow_module_level=True,
     )
-
-sys.path.insert(0, str(RUNTIME))
 
 from banodoco_workspace_client import WorkspaceClient  # noqa: E402
 from runtime_protocol.daemon import RuntimeDaemon  # noqa: E402
@@ -170,7 +164,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         "PYTHONPATH",
         os.pathsep.join(
             str(path)
-            for path in (ROOT, RUNTIME, SCHEMA_ROOT)
+            for path in (ROOT, SCHEMA_ROOT)
         ),
     )
 
@@ -187,7 +181,13 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
         remotion,
         ignore=shutil.ignore_patterns("node_modules"),
     )
-    shutil.copytree(DEPENDENCY_ROOT, remotion / "node_modules", symlinks=True)
+    shutil.copytree(
+        DEPENDENCY_ROOT,
+        remotion / "node_modules",
+        symlinks=True,
+        copy_function=os.link,
+    )
+    monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(remotion.resolve()))
     timeline_path, assets_path = _make_media(workspace)
 
     daemon = RuntimeDaemon(
@@ -233,7 +233,7 @@ def test_generic_host_remotion_register_claim_execute_settle_and_cas(
             assert isinstance(object_id, str) and isinstance(digest, str)
             input_object_ids.append(object_id)
             registry["assets"][key]["media_id"] = object_id
-            registry["assets"][key]["content_sha256"] = digest.removeprefix("sha256:")
+        registry["assets"][key]["content_sha256"] = digest.removeprefix("sha256:")
         assets_path.write_text(json.dumps(registry), encoding="utf-8")
         pack = workspace / "astrid" / "packs" / "rendering" / "executors" / "render"
         host = GenericPackHost(

@@ -56,6 +56,7 @@ from astrid.core.rendering.remotion_runtime import (
     RemotionRuntimeTools,
     resolve_remotion_runtime_tools,
 )
+from astrid.core.rendering.storage import h264_encoder_bitrates
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.packs.rendering.backends import _shared as _shared
 from astrid.packs.rendering.backends._shared import (
@@ -632,6 +633,13 @@ def _execute_remotion_locked(
     staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
     with ExitStack() as asset_lifecycle:
         try:
+            temp_parent = (staging_parent or provenance_out_path.parent).resolve()
+            temp_parent.mkdir(parents=True, exist_ok=True)
+            remotion_temp_root = Path(
+                asset_lifecycle.enter_context(
+                    TemporaryDirectory(prefix=".remotion-runtime-", dir=str(temp_parent))
+                )
+            )
             materializer = asset_lifecycle.enter_context(
                 AssetMaterializer(
                     assets_path,
@@ -693,7 +701,13 @@ def _execute_remotion_locked(
             )
             staged_video.parent.mkdir(parents=True, exist_ok=True)
             props_path.write_text(json.dumps(merged_props), encoding="utf-8")
-            remotion_env_additions: dict[str, str] = {}
+            remotion_env_additions: dict[str, str] = {
+                # Keep Remotion's pre-encode files on the admitted attempt
+                # filesystem and let the lifecycle remove them on every exit.
+                "TMPDIR": str(remotion_temp_root),
+                "TMP": str(remotion_temp_root),
+                "TEMP": str(remotion_temp_root),
+            }
             schema_pythonpath = os.environ.get(TIMELINE_SCHEMA_PYTHONPATH_ENV)
             if schema_pythonpath:
                 # The renderer receives only the validated server-owned schema
@@ -726,6 +740,23 @@ def _execute_remotion_locked(
                     "--pixel-format=yuva444p10le",
                     "--codec=prores",
                     "--prores-profile=4444",
+                ]
+            else:
+                profile = _canonical_profile(
+                    timeline_path,
+                    _load_registry_mapping(assets_path),
+                    theme_path,
+                )
+                max_rate_bps, buffer_size_bps = h264_encoder_bitrates(
+                    width=profile.width,
+                    height=profile.height,
+                    fps_rational=profile.fps_rational,
+                )
+                remotion_args += [
+                    "--crf=18",
+                    f"--max-rate={max_rate_bps // 1000}K",
+                    f"--buffer-size={buffer_size_bps // 1000}K",
+                    "--audio-bitrate=320K",
                 ]
             completed = subprocess.run(
                 remotion_args,

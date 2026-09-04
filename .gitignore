@@ -94,9 +94,6 @@ mgt-*/
 !.megaplan/initiatives/
 .megaplan/initiatives/*
 
-# Local scratch pack (gitignored)
-/astrid/packs/local/
-
 # Generated orchestrator build artifacts (compiled DSL JSON)
 astrid/packs/*/build/
 examples/packs/*/build/

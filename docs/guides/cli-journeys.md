@@ -124,13 +124,13 @@ python3 -m astrid projects update demo --name "Demo Renamed" --json
 # select — persist a workspace/user project-routing preference
 python3 -m astrid projects select demo --scope workspace --json
 
-# current — inspect the selected project, canonical path, and supplying scope
+# current — inspect the selected project and supplying preference scope
 python3 -m astrid projects current --json
 ```
 
-Pass `--project` explicitly to project-scoped commands. The former file-side
-`select/current` preference and `ASTRID_PROJECTS_ROOT` routing are historical;
-they are not Stage1 runtime authority.
+Pass `--project` explicitly to ordinary project-scoped commands. `runs open`
+can instead consume the runtime `select/current` preference;
+`ASTRID_PROJECTS_ROOT` routing is historical and is not Stage1 authority.
 
 ---
 
@@ -244,9 +244,72 @@ python3 -m astrid tasks events --project demo T_01ABC --json
 `tasks retry` retries a single task. Batch retry over a run group is the
 `runs retry` surface (next section), not a `tasks` flag.
 
+### VibeComfy: inspect → typed edit → validate → run
+
+VibeComfy graph work stays inside the `tasks` family. The original ComfyUI UI
+JSON remains authoritative; `vibecomfy.inspect` produces a readable projection,
+and `vibecomfy.edit` applies typed deltas to a fresh output workflow. Neither is
+a top-level CLI family, and the projection is never accepted as mutation input.
+
+First import the UI workflow and this operations document with `media import`.
+Record each returned managed-object SHA-256 digest:
+
+```json
+{
+  "schema_version": 1,
+  "expected_revision": 0,
+  "ops": [
+    {"op": "edit_node", "target": "ksampler", "field": "steps", "value": 24},
+    {"op": "set_node_mode", "target": "preview", "mode": "bypassed"}
+  ]
+}
+```
+
+```bash
+python3 -m astrid media import ./workflow.ui.json --project demo --json
+python3 -m astrid media import ./operations.json --project demo --json
+
+# Inspect. Substitute the exact digest returned for workflow.ui.json.
+python3 -m astrid tasks create --project demo \
+  --capability vibecomfy.inspect \
+  --spec '{"inputs":{},"input_digests":[{"name":"workflow","digest":"sha256:<WORKFLOW_SHA256>"}]}' \
+  --input-manifest '["sha256:<WORKFLOW_SHA256>"]' --json
+python3 -m astrid tasks show --project demo <INSPECT_TASK_ID> --json
+
+# Apply all leaf operations as one atomic VibeComfy edit_batch.
+python3 -m astrid tasks create --project demo \
+  --capability vibecomfy.edit \
+  --spec '{"inputs":{},"input_digests":[{"name":"workflow","digest":"sha256:<WORKFLOW_SHA256>"},{"name":"operations","digest":"sha256:<OPERATIONS_SHA256>"}]}' \
+  --input-manifest '["sha256:<WORKFLOW_SHA256>","sha256:<OPERATIONS_SHA256>"]' --json
+python3 -m astrid tasks show --project demo <EDIT_TASK_ID> --json
+
+# Copy the edit task's workflow output digest; validate that exact object.
+python3 -m astrid tasks create --project demo \
+  --capability vibecomfy.validate \
+  --spec '{"inputs":{},"input_digests":[{"name":"workflow","digest":"sha256:<EDITED_WORKFLOW_SHA256>"}]}' \
+  --input-manifest '["sha256:<EDITED_WORKFLOW_SHA256>"]' --json
+python3 -m astrid tasks show --project demo <VALIDATE_TASK_ID> --json
+
+# After validation succeeds, run the same immutable workflow object.
+python3 -m astrid tasks create --project demo \
+  --capability vibecomfy.run \
+  --spec '{"inputs":{},"input_digests":[{"name":"workflow","digest":"sha256:<EDITED_WORKFLOW_SHA256>"}]}' \
+  --input-manifest '["sha256:<EDITED_WORKFLOW_SHA256>"]' --json
+python3 -m astrid tasks show --project demo <RUN_TASK_ID> --json
+```
+
+The inspect task emits `workflow-ir.py` and `inspection.json`. The edit task
+emits `workflow.ui.json`, a fresh `workflow-ir.py`, and `edit-report.json` with
+the input/output hashes, accepted revision, delta id, canonical typed delta,
+and diagnostics. Accepted leaf operation names are `edit_node`, `add_node`,
+`remove_node`, `upsert_link`, `remove_link`, and `set_node_mode`; the executor
+supplies the outer atomic `edit_batch`. The task input manifest is the runtime's
+authorization fence, so every digest in `spec.input_digests` must also appear
+in `--input-manifest`.
+
 ---
 
-## 5. `runs` — list / show / cancel / retry / events
+## 5. `runs` — list / show / cancel / retry / events / open
 
 ```bash
 # list — project-scoped (started_at, then id)
@@ -270,7 +333,22 @@ python3 -m astrid runs retry --project demo RUN_01ABC \
 
 # events — the run's ordered core.run stream events
 python3 -m astrid runs events --project demo RUN_01ABC --json
+
+# open — latest successful render in the selected current project
+python3 -m astrid runs open
+
+# open one exact render; --project overrides the selected current project
+python3 -m astrid runs open RUN_01ABC
+python3 -m astrid runs open --project demo
 ```
+
+`runs open` uses runtime run/task records and managed object bytes only. It
+never scans checkout files or sorts filenames by modification time. "Latest"
+means the newest successfully settled `rendering.render` run; Astrid does not
+yet expose a separate editor-approved/current-deliverable promotion pointer.
+Downloaded bytes are checked against their runtime SHA-256 and size before the
+video is opened from a content-addressed local cache. Opening is currently
+supported on macOS.
 
 ### Batch retry semantics (frozen)
 
@@ -320,10 +398,13 @@ python3 -m astrid timelines diff --project demo primary --json
 python3 -m astrid timelines visualize primary --project demo \
   --format md --filmstrip off --json
 
-# render — version-pinned canonical render
+# render — version-pinned canonical render; waits for completion by default
 python3 -m astrid timelines render primary --project demo \
   --expected-version 1 --backend rendering.remotion \
   --output-name primary.mp4 --json
+
+# queue only — explicit admission semantics, returned state is "admitted"
+python3 -m astrid timelines render primary --project demo --detach --json
 ```
 
 ---

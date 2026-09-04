@@ -742,6 +742,38 @@ def test_claim_loop_fails_explicitly_without_canonical_claim_operation(tmp_path)
         host.run(once=True)
 
 
+def test_long_running_claim_loop_survives_and_backs_off_after_runtime_failure(
+    tmp_path, monkeypatch, capsys
+):
+    """One failed queue poll must not terminate the registered pack host."""
+
+    _write_manifest(tmp_path / "echo")
+    host = GenericPackHost(pack_roots=[tmp_path], client=FakeRuntime())
+    host.discover()
+    calls = 0
+    waits: list[float] = []
+
+    def claim_once():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("coordinator temporarily unavailable")
+        host._shutdown.set()
+        return None
+
+    def wait(delay: float) -> bool:
+        waits.append(delay)
+        return False
+
+    monkeypatch.setattr(host, "claim_once", claim_once)
+    monkeypatch.setattr(host._shutdown, "wait", wait)
+
+    assert host.run(poll_seconds=0.25) == []
+    assert calls == 2
+    assert waits == [0.25]
+    assert "generic host claim failed (1 consecutive)" in capsys.readouterr().err
+
+
 def test_adapter_registry_classifies_provider_local_generation_and_render():
     provider = GenericPackHost(pack_roots=[Path("astrid/packs/generation/executors")])
     provider.discover()
@@ -759,6 +791,25 @@ def test_adapter_registry_classifies_provider_local_generation_and_render():
     if not report["binaries"]["ok"]:
         assert "ffmpeg" in report["binaries"]["missing"]
     assert "remotion" in report
+    assert render.capabilities["rendering.render"].estimated_scratch_bytes == 0
+    assert render.capabilities["rendering.render"].estimated_output_bytes == 0
+
+
+def test_render_preflight_requires_the_explicit_execution_runtime(monkeypatch):
+    monkeypatch.delenv("ASTRID_REMOTION_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("ASTRID_NODE_EXECUTABLE", raising=False)
+    monkeypatch.delenv("ASTRID_TIMELINE_SCHEMA_PYTHONPATH", raising=False)
+    host = GenericPackHost(
+        pack_roots=[Path("astrid/packs/rendering/executors/render")]
+    )
+    host.discover()
+
+    host.preflight("rendering.render")
+
+    record = host.capabilities["rendering.render"]
+    assert not record.ready
+    assert not record.preflight["remotion"]["ok"]
+    assert "ASTRID_REMOTION_PROJECT_DIR" in record.preflight["remotion"]["reason"]
 
 
 def test_adapter_registry_preserves_explicit_empty_matrix_lists(tmp_path):

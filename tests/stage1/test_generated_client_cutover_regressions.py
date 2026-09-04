@@ -87,6 +87,7 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
             capability="capability-1",
             spec=spec,
             input_manifest=["sha256:input"],
+            storage_estimate={"scratch_bytes": 100, "output_bytes": 23},
             idempotency_key="task-key",
         )
 
@@ -95,6 +96,10 @@ class GeneratedClientCutoverRegressionTest(unittest.TestCase):
         self.assertEqual(client.task_call["spec"], spec)
         self.assertEqual(client.task_call["capability_id"], "capability-1")
         self.assertEqual(client.task_call["input_object_ids"], ["sha256:input"])
+        self.assertEqual(
+            client.task_call["storage_estimate"],
+            {"scratch_bytes": 100, "output_bytes": 23},
+        )
 
     def test_generic_invoke_forwards_server_receipt(self) -> None:
         result = RemoteAstridClient(_ReceiptClient()).invoke(

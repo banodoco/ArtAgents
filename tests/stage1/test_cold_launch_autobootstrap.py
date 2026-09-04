@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from astrid.sdk import autobootstrap
 from astrid.sdk.client import AstridClient
+from astrid.sdk.exceptions import ServiceUnavailableError
+from astrid.sdk.host_bootstrap import _provision_render_runtime_env
 from astrid.sdk.workspace_client import WorkspaceClientError
 from banodoco_workspace_client.contract_metadata import SCHEMA_DIGEST
 
@@ -45,6 +48,33 @@ def _persisted_profile(home: Path, runtime: Path, source: Path) -> Path:
     return profile
 
 
+def test_source_profile_provisions_explicit_render_runtime(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    remotion = source / "remotion"
+    schema = (
+        remotion
+        / "node_modules"
+        / "@banodoco"
+        / "timeline-schema"
+        / "python"
+        / "banodoco_timeline_schema"
+    )
+    schema.mkdir(parents=True)
+    (schema / "__init__.py").write_text("", encoding="utf-8")
+    (remotion / "package.json").write_text("{}", encoding="utf-8")
+    node = tmp_path / "node"
+    node.write_text("", encoding="utf-8")
+    node.chmod(0o700)
+    monkeypatch.setattr("astrid.sdk.host_bootstrap.shutil.which", lambda *_args, **_kwargs: str(node))
+
+    child_env = {"PATH": "/usr/bin"}
+    _provision_render_runtime_env(source, child_env)
+
+    assert child_env["ASTRID_REMOTION_PROJECT_DIR"] == str(remotion.resolve())
+    assert child_env["ASTRID_NODE_EXECUTABLE"] == str(node.resolve())
+    assert child_env["ASTRID_TIMELINE_SCHEMA_PYTHONPATH"] == str(schema.parent.resolve())
+
+
 def test_neutral_launcher_is_invoked_with_ephemeral_profile(monkeypatch, tmp_path):
     runtime = _runtime_checkout(tmp_path)
     source = tmp_path / "source"
@@ -71,6 +101,66 @@ def test_neutral_launcher_is_invoked_with_ephemeral_profile(monkeypatch, tmp_pat
     assert "serve" not in command
     assert seen["manifest"] == {"profile": "astrid", "runtime_checkout": str(runtime), "source_checkout": str(source)}
     assert command[-1] == "--json"
+
+
+def test_installed_runtime_module_is_used_when_console_script_is_off_path(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("BANODOCO_LOCAL_LAUNCHER", raising=False)
+    monkeypatch.delenv("BANODOCO_LOCAL_SOURCE_MANIFEST", raising=False)
+    monkeypatch.setattr(autobootstrap.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(autobootstrap, "find_spec", lambda name: object())
+    seen: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            '{"status":"started","realm_id":"realm-1",'
+            '"endpoint":"http://127.0.0.1:1","actor_id":"owner"}',
+            "",
+        )
+
+    monkeypatch.setattr(autobootstrap.subprocess, "run", fake_run)
+
+    assert autobootstrap.ensure_runtime()["status"] == "started"
+    assert seen["command"] == [
+        sys.executable,
+        "-m",
+        "banodoco_local",
+        "up",
+        "--profile",
+        "astrid",
+        "--json",
+    ]
+
+
+def test_missing_runtime_package_returns_install_action(monkeypatch):
+    monkeypatch.delenv("BANODOCO_LOCAL_LAUNCHER", raising=False)
+    monkeypatch.setattr(autobootstrap.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(autobootstrap, "find_spec", lambda name: None)
+
+    with pytest.raises(autobootstrap.AutoBootstrapError) as caught:
+        autobootstrap.ensure_runtime()
+
+    assert "not installed" in str(caught.value)
+    assert caught.value.next_action == autobootstrap.INSTALL_RUNTIME_ACTION
+
+
+def test_launcher_bootstrap_preserves_typed_install_action(monkeypatch):
+    def missing_runtime():
+        raise autobootstrap.AutoBootstrapError(
+            "runtime missing",
+            next_action=autobootstrap.INSTALL_RUNTIME_ACTION,
+        )
+
+    monkeypatch.setattr(autobootstrap, "ensure_runtime", missing_runtime)
+
+    with pytest.raises(ServiceUnavailableError) as caught:
+        AstridClient.open_from_launcher()
+
+    assert caught.value.details["next_action"] == autobootstrap.INSTALL_RUNTIME_ACTION
 
 
 def test_configured_manifest_does_not_require_editable_source_inference(monkeypatch, tmp_path):

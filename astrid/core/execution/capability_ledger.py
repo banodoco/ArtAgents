@@ -349,9 +349,14 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         if row.get("discovery_status") != "discovered":
             row.setdefault("executable", False)
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
+    # Blessed census baseline. Advance these counts only when new source
+    # labels are real, implemented, and matrix-covered: 2026-09-04 adds the
+    # local/discord_local/seedance_local packs (6 labels) and vibecomfy
+    # inspect/edit (2 labels); all implemented, pack tests passing, matrix
+    # entries present in config/astrid-beta-capabilities.json.
     coverage = {
-        "source_labels": {"source": 76, "ledger": len(labels), "missing": [], "complete": len(labels) == 76},
-        "historical_source_labels": {"source": 81, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 81},
+        "source_labels": {"source": 84, "ledger": len(labels), "missing": [], "complete": len(labels) == 84},
+        "historical_source_labels": {"source": 89, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 89},
         "executor_inventory": {"source": 74, "ledger": len(executors), "missing": [], "complete": len(executors) == 74},
         "legacy_ids": {"source": 19, "ledger": len(legacy), "missing": [], "complete": len(legacy) == 19},
     }

@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -51,6 +52,7 @@ __all__ = [
     "_termination_status",
     "_detached_exec_result",
     "_host_hf_token_env_vars",
+    "_resolve_compute_profile",
     "_storage_required",
     "_preflight_storage",
     "_build_pod_handle",
@@ -254,10 +256,102 @@ def _detached_exec_result(
     return payload
 
 
-def _host_hf_token_env_vars() -> dict[str, str]:
-    """Return pod env vars sourced from the host process without inventing defaults."""
-    token = os.environ.get("HF_TOKEN")
-    return {"HF_TOKEN": token} if token else {}
+def _host_hf_token_env_vars(profile: Mapping[str, Any] | None = None) -> dict[str, str]:
+    """Return pod credential env vars sourced from the host, never literals from disk."""
+    from astrid.core.compute_profile import credential_env_ref
+
+    token_ref = credential_env_ref(profile or {}, "hf_token", "HF_TOKEN")
+    token = os.environ.get(token_ref) if token_ref else None
+    return {token_ref: token} if token and token_ref else {}
+
+
+_RUNPOD_COMPUTE_DEFAULTS: dict[str, Any] = {
+    "gpu_type": "NVIDIA GeForce RTX 4090",
+    "name_prefix": "pod",
+    "image": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+    "container_disk_gb": 200,
+    "max_runtime_seconds": 7200,
+    "remote_root": "/workspace",
+    "timeout": 3600,
+    "upload_mode": "sftp_walk",
+    "ports": "8888/http,22/tcp",
+    "credentials": {
+        "runpod_api_key": "RUNPOD_API_KEY",
+        "hf_token": "HF_TOKEN",
+    },
+}
+
+
+def _resolve_compute_profile(args: argparse.Namespace, produces_dir: Path) -> dict[str, Any]:
+    """Resolve RunPod settings and persist a secret-free execution snapshot.
+
+    Existing ``RUNPOD_*`` environment settings remain supported as legacy
+    executor defaults.  A user profile selected through
+    ``ASTRID_COMPUTE_PROFILE`` (or ``--compute-profile``/``default.json``)
+    takes precedence over those settings, while explicit command inputs win
+    over the profile.
+    """
+
+    from astrid.core.compute_profile import resolve_compute_profile, write_resolved_snapshot
+
+    env = os.environ
+    explicit: dict[str, Any] = {}
+    profile_fields = (
+        "gpu_type", "storage_name", "max_runtime_seconds", "name_prefix", "image",
+        "container_disk_gb", "datacenter_id", "ports", "local_root", "remote_root",
+        "remote_script", "timeout", "upload_mode", "excludes", "require_storage",
+    )
+    for field in profile_fields:
+        value = getattr(args, field, None)
+        if value is not None and not (field == "require_storage" and value is False):
+            explicit[field] = value
+    profile_arg = getattr(args, "compute_profile", None)
+    if isinstance(profile_arg, str) and profile_arg.strip():
+        explicit["compute_profile"] = profile_arg.strip()
+
+    # Preserve the long-standing RUNPOD_* knobs, but classify them as the
+    # lowest executor-default tier so they cannot override a profile.
+    defaults = dict(_RUNPOD_COMPUTE_DEFAULTS)
+    defaults["credentials"] = dict(_RUNPOD_COMPUTE_DEFAULTS["credentials"])
+    env_fields = {
+        "gpu_type": "RUNPOD_GPU_TYPE",
+        "storage_name": "RUNPOD_STORAGE_NAME",
+        "name_prefix": "RUNPOD_NAME_PREFIX",
+        "image": "RUNPOD_WORKER_IMAGE",
+        "datacenter_id": "RUNPOD_DATACENTER_ID",
+        "ports": "RUNPOD_PORTS",
+        "remote_root": "RUNPOD_REMOTE_ROOT",
+        "remote_script": "RUNPOD_REMOTE_SCRIPT",
+        "upload_mode": "RUNPOD_UPLOAD_MODE",
+        "excludes": "RUNPOD_EXCLUDES",
+    }
+    for field, env_name in env_fields.items():
+        if env.get(env_name):
+            defaults[field] = env[env_name]
+    for field, env_name in (
+        ("max_runtime_seconds", "RUNPOD_MAX_RUNTIME_SECONDS"),
+        ("container_disk_gb", "RUNPOD_CONTAINER_DISK_GB"),
+        ("timeout", "RUNPOD_TIMEOUT"),
+    ):
+        if env.get(env_name):
+            try:
+                defaults[field] = int(env[env_name])
+            except ValueError as exc:
+                raise AstridError(
+                    f"{env_name} must be an integer",
+                    recovery_command=f"set {env_name} to a valid integer and retry",
+                ) from exc
+    if env.get("RUNPOD_REQUIRE_STORAGE", "").lower() in {"1", "true", "yes", "on"}:
+        defaults["require_storage"] = True
+
+    resolved = resolve_compute_profile(
+        explicit=explicit,
+        env=env,
+        profile_id=profile_arg if isinstance(profile_arg, str) and profile_arg.strip() else None,
+        executor_defaults=defaults,
+    )
+    write_resolved_snapshot(produces_dir, resolved)
+    return resolved
 
 
 def _storage_required(args: argparse.Namespace) -> bool:
@@ -298,6 +392,7 @@ def _build_pod_handle(
     storage_name: str | None,
     network_volume_id: Any,
     ports: str | None,
+    api_key_ref: str = "RUNPOD_API_KEY",
 ) -> dict[str, Any]:
     return {
         "pod_id": pod.id,
@@ -309,7 +404,7 @@ def _build_pod_handle(
         "hourly_rate": hourly_rate,
         "provisioned_at": provisioned_at,
         "config_snapshot": {
-            "api_key_ref": "RUNPOD_API_KEY",
+            "api_key_ref": api_key_ref,
             "datacenter_id": datacenter_id,
             "image": image,
             "container_disk_in_gb": container_disk_gb,
@@ -416,24 +511,29 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
     """Provision a RunPod GPU pod → pod_handle.json + cost.json."""
     from runpod_lifecycle import RunPodConfig, launch
 
-    api_key = os.environ.get("RUNPOD_API_KEY")
+    from astrid.core.compute_profile import credential_env_ref
+
+    resolved = _resolve_compute_profile(args, produces_dir)
+    api_key_ref = credential_env_ref(resolved, "runpod_api_key", "RUNPOD_API_KEY")
+
+    api_key = os.environ.get(api_key_ref) if api_key_ref else None
     if not api_key:
         raise AstridError(
-            "RUNPOD_API_KEY environment variable is required",
-            recovery_command="set the RUNPOD_API_KEY environment variable and retry",
+            f"{api_key_ref or 'RunPod API key'} environment variable is required",
+            recovery_command=f"set the {api_key_ref or 'RUNPOD_API_KEY'} environment variable and retry",
         )
 
-    gpu_type = args.gpu_type or os.environ.get("RUNPOD_GPU_TYPE", "NVIDIA GeForce RTX 4090")
+    gpu_type = resolved["gpu_type"]
     if isinstance(gpu_type, str) and "," in gpu_type:
         gpu_type = [g.strip() for g in gpu_type.split(",") if g.strip()]
-    name_prefix = args.name_prefix or os.environ.get("RUNPOD_NAME_PREFIX", "pod")
-    image = args.image or os.environ.get("RUNPOD_WORKER_IMAGE", "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04")
-    container_disk_gb = args.container_disk_gb or int(os.environ.get("RUNPOD_CONTAINER_DISK_GB", "200"))
-    datacenter_id = args.datacenter_id or os.environ.get("RUNPOD_DATACENTER_ID")
-    storage_name = args.storage_name or os.environ.get("RUNPOD_STORAGE_NAME")
-    storage_required = _storage_required(args)
-    max_runtime = args.max_runtime_seconds or int(os.environ.get("RUNPOD_MAX_RUNTIME_SECONDS", "7200"))
-    ports = getattr(args, "ports", None) or os.environ.get("RUNPOD_PORTS")
+    name_prefix = resolved.get("name_prefix")
+    image = resolved.get("image")
+    container_disk_gb = int(resolved["container_disk_gb"])
+    datacenter_id = resolved.get("datacenter_id")
+    storage_name = resolved.get("storage_name")
+    storage_required = bool(resolved.get("require_storage"))
+    max_runtime = int(resolved["max_runtime_seconds"])
+    ports = resolved.get("ports")
 
     _preflight_storage(storage_name, required=storage_required, context="RunPod provision")
 
@@ -453,7 +553,7 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
         ssh_private_key=os.environ.get("RUNPOD_SSH_PRIVATE_KEY"),
         ssh_public_key_path=os.environ.get("RUNPOD_SSH_PUBLIC_KEY_PATH"),
         ssh_private_key_path=os.environ.get("RUNPOD_SSH_PRIVATE_KEY_PATH"),
-        env_vars=_host_hf_token_env_vars(),
+        env_vars=_host_hf_token_env_vars(resolved),
     )
 
     async def _provision() -> tuple[Any, dict[str, Any]]:
@@ -488,6 +588,7 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
         storage_name=storage_name,
         network_volume_id=pod._storage_volume,
         ports=ports,
+        api_key_ref=api_key_ref or "RUNPOD_API_KEY",
     )
 
     _write_json(produces_dir / "pod_handle.json", handle)
@@ -715,34 +816,39 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
     """
     from runpod_lifecycle import RunPodConfig, launch
 
-    api_key = os.environ.get("RUNPOD_API_KEY")
+    from astrid.core.compute_profile import credential_env_ref
+
+    resolved = _resolve_compute_profile(args, produces_dir)
+    api_key_ref = credential_env_ref(resolved, "runpod_api_key", "RUNPOD_API_KEY")
+
+    api_key = os.environ.get(api_key_ref) if api_key_ref else None
     if not api_key:
         raise AstridError(
-            "RUNPOD_API_KEY environment variable is required",
-            recovery_command="set the RUNPOD_API_KEY environment variable and retry",
+            f"{api_key_ref or 'RunPod API key'} environment variable is required",
+            recovery_command=f"set the {api_key_ref or 'RUNPOD_API_KEY'} environment variable and retry",
         )
 
-    gpu_type = args.gpu_type or os.environ.get("RUNPOD_GPU_TYPE", "NVIDIA GeForce RTX 4090")
+    gpu_type = resolved["gpu_type"]
     if isinstance(gpu_type, str) and "," in gpu_type:
         gpu_type = [g.strip() for g in gpu_type.split(",") if g.strip()]
-    name_prefix = args.name_prefix or os.environ.get("RUNPOD_NAME_PREFIX", "pod")
-    image = args.image or os.environ.get("RUNPOD_WORKER_IMAGE", "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04")
-    container_disk_gb = args.container_disk_gb or int(os.environ.get("RUNPOD_CONTAINER_DISK_GB", "200"))
-    datacenter_id = args.datacenter_id or os.environ.get("RUNPOD_DATACENTER_ID")
-    storage_name = args.storage_name or os.environ.get("RUNPOD_STORAGE_NAME")
-    storage_required = _storage_required(args)
-    max_runtime = args.max_runtime_seconds or int(os.environ.get("RUNPOD_MAX_RUNTIME_SECONDS", "7200"))
-    ports = getattr(args, "ports", None) or os.environ.get("RUNPOD_PORTS")
-    remote_root = args.remote_root or "/workspace"
-    remote_script = args.remote_script or ""
-    local_root = Path(args.local_root) if args.local_root else Path.cwd()
-    timeout = args.timeout or 3600
+    name_prefix = resolved.get("name_prefix")
+    image = resolved.get("image")
+    container_disk_gb = int(resolved["container_disk_gb"])
+    datacenter_id = resolved.get("datacenter_id")
+    storage_name = resolved.get("storage_name")
+    storage_required = bool(resolved.get("require_storage"))
+    max_runtime = int(resolved["max_runtime_seconds"])
+    ports = resolved.get("ports")
+    remote_root = resolved.get("remote_root") or "/workspace"
+    remote_script = resolved.get("remote_script") or ""
+    local_root = Path(resolved["local_root"]) if resolved.get("local_root") else Path.cwd()
+    timeout = int(resolved["timeout"])
     upload_mode: Literal["sftp_walk", "tarball"] = (
-        cast(Literal["sftp_walk", "tarball"], args.upload_mode)
-        if args.upload_mode in ("sftp_walk", "tarball")
+        cast(Literal["sftp_walk", "tarball"], resolved["upload_mode"])
+        if resolved.get("upload_mode") in ("sftp_walk", "tarball")
         else "sftp_walk"
     )
-    excludes = set(args.excludes.split(",")) if args.excludes else set()
+    excludes = set(str(resolved["excludes"]).split(",")) if resolved.get("excludes") else set()
 
     _preflight_storage(storage_name, required=storage_required, context="RunPod session")
 
@@ -761,7 +867,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
         ssh_private_key=os.environ.get("RUNPOD_SSH_PRIVATE_KEY"),
         ssh_public_key_path=os.environ.get("RUNPOD_SSH_PUBLIC_KEY_PATH"),
         ssh_private_key_path=os.environ.get("RUNPOD_SSH_PRIVATE_KEY_PATH"),
-        env_vars=_host_hf_token_env_vars(),
+        env_vars=_host_hf_token_env_vars(resolved),
     )
 
     t0 = time.monotonic()
@@ -798,6 +904,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
             storage_name=storage_name,
             network_volume_id=pod._storage_volume,
             ports=ports,
+            api_key_ref=api_key_ref or "RUNPOD_API_KEY",
         )
 
         # *** Write pod_handle.json IMMEDIATELY (sweeper breadcrumb) ***
@@ -904,6 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- provision ---
     p_prov = sub.add_parser("provision", help="Provision a RunPod GPU pod.")
     p_prov.add_argument("--produces-dir", type=Path, required=True, help="Produces output directory.")
+    p_prov.add_argument("--compute-profile", help="Named user compute profile (ASTRID_COMPUTE_PROFILE takes precedence).")
     p_prov.add_argument("--gpu-type", help="GPU type (e.g. 'NVIDIA GeForce RTX 4090').")
     p_prov.add_argument("--storage-name", help="Network storage volume name.")
     p_prov.add_argument("--max-runtime-seconds", type=int, help="Maximum pod lifetime in seconds.")
@@ -941,6 +1049,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- session ---
     p_sess = sub.add_parser("session", help="Provision → exec → teardown composite session.")
     p_sess.add_argument("--produces-dir", type=Path, required=True, help="Produces output directory.")
+    p_sess.add_argument("--compute-profile", help="Named user compute profile (ASTRID_COMPUTE_PROFILE takes precedence).")
     p_sess.add_argument("--gpu-type", help="GPU type.")
     p_sess.add_argument("--storage-name", help="Network storage volume name.")
     p_sess.add_argument("--max-runtime-seconds", type=int, help="Maximum pod lifetime in seconds.")

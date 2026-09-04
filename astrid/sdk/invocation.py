@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -1241,6 +1242,8 @@ def _kernel_invoke(
     outputs: Mapping[str, Any] | None,
     extra_pack_roots: tuple[str, ...] = (),
     idempotency_context: Mapping[str, Any] | None = None,
+    admission_metadata: Mapping[str, Any] | None = None,
+    storage_estimate: Mapping[str, int] | None = None,
     registry: Any | None = None,
     _client: Any | None = None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
@@ -1263,10 +1266,62 @@ def _kernel_invoke(
     }
     if idempotency_context:
         spec["authority_context"] = _json_safe_mapping(dict(idempotency_context))
+    if admission_metadata:
+        # Keep the transparent estimate out of capability inputs: it is task
+        # admission evidence, not an executor-authored input.
+        spec["admission_metadata"] = _json_safe_mapping(dict(admission_metadata))
+    # Managed renders authorize their snapshot registry media at admission:
+    # derive task input_object_ids from the immutable timeline snapshot so
+    # the generic host can materialize registry assets below the attempt.
+    input_manifest: list[str] = []
+    raw_snapshot = (inputs or {}).get("timeline_snapshot")
+    if isinstance(raw_snapshot, Mapping):
+        raw_registry = raw_snapshot.get("registry")
+        raw_assets = raw_registry.get("assets") if isinstance(raw_registry, Mapping) else None
+        if isinstance(raw_assets, Mapping):
+            seen: set[str] = set()
+            for entry in raw_assets.values():
+                if not isinstance(entry, Mapping):
+                    continue
+                candidate = next(
+                    (
+                        value
+                        for value in (
+                            entry.get("object_id"),
+                            entry.get("media_id"),
+                            entry.get("content_sha256"),
+                            entry.get("digest"),
+                            entry.get("sha256"),
+                            entry.get("hash"),
+                        )
+                        if isinstance(value, str)
+                        and len(value.removeprefix("sha256:")) == 64
+                        and all(
+                            ch in "0123456789abcdef"
+                            for ch in value.removeprefix("sha256:")
+                        )
+                    ),
+                    None,
+                )
+                if candidate is None:
+                    continue
+                normalized = candidate.removeprefix("sha256:")
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                input_manifest.append(candidate)
+
     idempotency_key = hashlib.sha256(
-        json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
+        json.dumps(
+            {
+                "spec": spec,
+                "input_object_ids": sorted(input_manifest),
+                "storage_estimate": dict(storage_estimate or {}),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
     ).hexdigest()
 
     if _client is None:
@@ -1284,8 +1339,9 @@ def _kernel_invoke(
         project_id=project,
         capability=str(capability.id),
         spec=spec,
-        input_manifest=[],
+        input_manifest=input_manifest,
         idempotency_key=idempotency_key,
+        storage_estimate=dict(storage_estimate) if storage_estimate is not None else None,
     )
     result_ok = bool(getattr(result, "ok", isinstance(result, Mapping)))
     data = getattr(result, "data", result if isinstance(result, Mapping) else None)
@@ -1323,6 +1379,114 @@ def _kernel_invoke(
     return run_id, task_id, attempt_id, None, raw_result, True, None
 
 
+def _wait_for_kernel_task(
+    client: Any,
+    *,
+    task_id: str,
+    run_id: str,
+    timeout_seconds: float,
+    poll_seconds: float,
+) -> tuple[dict[str, Any], bool, str]:
+    """Follow one admitted task to a terminal runtime-owned result."""
+    if not math.isfinite(float(timeout_seconds)) or timeout_seconds <= 0:
+        raise CapabilityValidationError("wait timeout_seconds must be positive")
+    if not math.isfinite(float(poll_seconds)) or poll_seconds <= 0:
+        raise CapabilityValidationError("wait poll_seconds must be positive")
+    tasks = getattr(client, "tasks", None)
+    show = getattr(tasks, "show", None)
+    if not callable(show):
+        raise CapabilityInvocationError(
+            "runtime client does not expose task status for synchronous invocation"
+        )
+
+    deadline = time.monotonic() + float(timeout_seconds)
+    while True:
+        observed = show(task_id)
+        observed_ok = bool(getattr(observed, "ok", isinstance(observed, Mapping)))
+        data = getattr(observed, "data", observed if isinstance(observed, Mapping) else None)
+        if not observed_ok or not isinstance(data, Mapping):
+            error = getattr(observed, "error", None)
+            if hasattr(error, "as_dict"):
+                error = error.as_dict()
+            return {
+                "ok": False,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "error": {
+                    "code": "task_status_unavailable",
+                    "message": "render task status could not be read",
+                    "details": dict(error) if isinstance(error, Mapping) else {},
+                },
+            }, False, ""
+
+        task = dict(data)
+        state = str(task.get("state") or task.get("status") or "").lower()
+        attempt_id = str(task.get("attempt_id") or "")
+        if state in {"succeeded", "completed"}:
+            settled = task.get("result")
+            settled = dict(settled) if isinstance(settled, Mapping) else {}
+            output_rows = settled.get("outputs")
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": attempt_id,
+                "state": "completed",
+                "task": task,
+                "result": settled,
+                "outputs": {
+                    "artifacts": list(output_rows)
+                    if isinstance(output_rows, list)
+                    else []
+                },
+            }, True, attempt_id
+        if state in {"failed", "cancelled"}:
+            settled = task.get("result")
+            settled = dict(settled) if isinstance(settled, Mapping) else {}
+            failure = settled.get("error")
+            if isinstance(failure, Mapping):
+                message = str(failure.get("message") or f"render task {state}")
+            else:
+                message = str(failure or f"render task {state}")
+            return {
+                "ok": False,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": attempt_id,
+                "state": state,
+                "task": task,
+                "error": {
+                    "code": f"task_{state}",
+                    "message": message,
+                    "details": {"state": state, "result": settled},
+                },
+            }, False, attempt_id
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {
+                "ok": False,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": attempt_id,
+                "state": state or "unknown",
+                "task": task,
+                "error": {
+                    "code": "task_wait_timeout",
+                    "message": "render task did not reach a terminal state before the wait timeout",
+                    "details": {
+                        "state": state or "unknown",
+                        "timeout_seconds": float(timeout_seconds),
+                    },
+                },
+            }, False, attempt_id
+        time.sleep(min(float(poll_seconds), remaining))
+
+
 def invoke(
     capability_id: str,
     *,
@@ -1345,6 +1509,9 @@ def invoke(
     orchestrator_args: tuple[str, ...] = (),
     registry: Any | None = None,
     client: Any | None = None,
+    wait: bool = False,
+    timeout_seconds: float = 3600.0,
+    poll_seconds: float = 1.0,
 ) -> InvocationResult:
     _client = client
     sdk_module = _sdk_module()
@@ -1384,6 +1551,8 @@ def invoke(
     # checks for direct CLI callers, but SDK callers should get the same
     # actionable typed error at admission time.
     invocation_authority_context: dict[str, Any] | None = None
+    invocation_admission_metadata: dict[str, Any] | None = None
+    invocation_storage_estimate: dict[str, int] | None = None
     # These are managed-authority checks, not manifest checks.  A dry-run is
     # intentionally limited to the source ledger and therefore cannot inspect
     # a project tree or materialize a render snapshot.
@@ -1401,6 +1570,46 @@ def invoke(
                 project=project,
                 _client=_client,
             )
+            snapshot = (inputs or {}).get("timeline_snapshot")
+            snapshot_config = snapshot.get("config") if isinstance(snapshot, Mapping) else None
+            snapshot_registry = snapshot.get("registry") if isinstance(snapshot, Mapping) else None
+            if not isinstance(snapshot_config, Mapping) or not isinstance(snapshot_registry, Mapping):
+                raise CapabilityInvocationError(
+                    "managed render storage estimation requires the expanded canonical snapshot"
+                )
+            from astrid.core.rendering.storage import (
+                StorageEstimateError,
+                estimate_managed_render_storage,
+                managed_object_sizes,
+                used_effect_asset_sizes,
+            )
+            from astrid.sdk.pagination import paged_rows
+
+            media_rows = paged_rows(_client.media.list, str(project), limit=50)
+            if media_rows is None:
+                raise CapabilityInvocationError(
+                    "runtime media listing is unavailable for exact render storage estimation"
+                )
+            try:
+                exact_object_sizes = managed_object_sizes(snapshot_registry, media_rows)
+                effect_sizes = used_effect_asset_sizes(snapshot_config)
+                storage_estimate = estimate_managed_render_storage(
+                    timeline=snapshot_config,
+                    registry=snapshot_registry,
+                    object_sizes=exact_object_sizes,
+                    effect_asset_sizes=effect_sizes,
+                    requested_profile=(inputs or {}).get("profile"),
+                )
+            except StorageEstimateError as exc:
+                raise CapabilityValidationError(str(exc)) from exc
+            invocation_admission_metadata = {
+                "storage_estimate": storage_estimate,
+                "runtime_enforced": True,
+            }
+            invocation_storage_estimate = {
+                "scratch_bytes": int(storage_estimate["estimated_scratch_bytes"]),
+                "output_bytes": int(storage_estimate["estimated_output_bytes"]),
+            }
 
     # Generation requests have a single read-only preflight for both dry-run
     # and live invocation.  This keeps generic ``sdk.invoke`` from accepting
@@ -1539,6 +1748,8 @@ def invoke(
             "outputs": outputs,
             "extra_pack_roots": extra_pack_roots,
             "idempotency_context": invocation_authority_context,
+            "admission_metadata": invocation_admission_metadata,
+            "storage_estimate": invocation_storage_estimate,
         }
         if registry is not None:
             kernel_kwargs["registry"] = registry
@@ -1547,6 +1758,16 @@ def invoke(
             **kernel_kwargs,
             _client=_client,
         )
+        if wait and ok:
+            raw_result, ok, waited_attempt_id = _wait_for_kernel_task(
+                _client,
+                task_id=kt,
+                run_id=kr,
+                timeout_seconds=timeout_seconds,
+                poll_seconds=poll_seconds,
+            )
+            if waited_attempt_id:
+                ka = waited_attempt_id
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
         run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
         raw_result = dict(raw_result) if isinstance(raw_result, dict) else {}
