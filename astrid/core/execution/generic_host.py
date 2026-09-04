@@ -928,7 +928,9 @@ class GenericPackHost:
         # The application composition root owns emission.  The host only reads
         # this derived stamp when it prepares completion provenance.
         self.boot_manifest_path = (
-            Path(boot_manifest_path).expanduser().resolve()
+            # Preserve lexical components until boot-manifest validation.  In
+            # particular, resolving here would hide a symlinked parent.
+            Path(boot_manifest_path).expanduser()
             if boot_manifest_path is not None
             else None
         )

@@ -289,7 +289,8 @@ def validate_manifest_path(
     require_existing: bool = True,
 ) -> Path:
     """Validate a manifest location contained by the explicit support root."""
-    root = validate_support_root(support_root)
+    raw_root = Path(support_root).expanduser()
+    root = validate_support_root(raw_root)
     path = Path(manifest_path).expanduser()
     if path.name != BOOT_MANIFEST_FILENAME:
         raise BootManifestError(
@@ -305,6 +306,28 @@ def validate_manifest_path(
             "boot manifest must be an existing absolute regular non-symlink "
             f"file: {path}"
         )
+    # Check the lexical path before resolving it.  Resolving first would hide
+    # a symlinked parent that happens to point back inside the support root.
+    lexical_root = Path(os.path.abspath(raw_root))
+    lexical_path = Path(os.path.abspath(path))
+    try:
+        lexical_path.relative_to(lexical_root)
+    except ValueError as exc:
+        raise BootManifestError(
+            f"boot manifest must be contained by explicit support root: {lexical_path}"
+        ) from exc
+    cursor = lexical_path
+    while True:
+        if cursor.is_symlink():
+            raise BootManifestError(
+                f"boot manifest path contains a symlink component: {cursor}"
+            )
+        if cursor == lexical_root:
+            break
+        parent = cursor.parent
+        if parent == cursor:
+            break
+        cursor = parent
     resolved = path.resolve()
     try:
         resolved.relative_to(root)

@@ -75,10 +75,24 @@ def test_manifest_validation_preserves_out_of_root_and_symlink_guards(tmp_path: 
     symlink.symlink_to(manifest)
     with pytest.raises(BootManifestError, match="named"):
         validate_manifest_path(symlink, support)
+    intermediate = support / "linked-host"
+    intermediate.symlink_to(manifest.parent, target_is_directory=True)
+    with pytest.raises(BootManifestError, match="symlink component"):
+        validate_manifest_path(intermediate / "boot-manifest.json", support)
     manifest.unlink()
     manifest.symlink_to(outside)
     with pytest.raises(BootManifestError, match="regular"):
         validate_manifest_path(manifest, support)
+
+
+def test_generic_host_preserves_lexical_symlink_parent_for_validation(tmp_path: Path) -> None:
+    support, manifest = _paths(tmp_path)
+    compose_profile_handoff(manifest, support_root=support)
+    linked = tmp_path / "linked-host"
+    linked.symlink_to(manifest.parent, target_is_directory=True)
+    host = GenericPackHost(pack_roots=[tmp_path], boot_manifest_path=linked / manifest.name)
+    with pytest.raises(BootManifestError, match="symlink component"):
+        host.boot_manifest_provenance()
 
 
 def test_generic_host_cli_requires_existing_manifest_and_never_writes(
