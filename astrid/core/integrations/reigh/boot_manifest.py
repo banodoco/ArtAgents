@@ -1,9 +1,9 @@
 """Deterministic, secret-free B-6 profile boot manifest.
 
 The manifest is a derived handoff, not an authority.  It is stamped by the
-application composition root beside the runtime's ``astrid.sqlite3`` state.
-The generic host only reads its hash for completion provenance; it never emits
-or discovers profiles.
+application composition root under an explicit runtime support root.  The
+generic host only reads its hash for completion provenance; it never emits or
+discovers profiles.
 """
 
 from __future__ import annotations
@@ -271,44 +271,48 @@ def assert_secret_free(manifest: Mapping[str, Any]) -> None:
                     f"boot manifest field {field!r} contains an invalid digest"
                 )
 
-def validate_state_path(state_path: str | Path) -> Path:
-    """Require an explicit, existing Astrid SQLite state file."""
-    path = Path(state_path).expanduser()
-    if path.name != "astrid.sqlite3":
-        raise BootManifestError(f"Astrid state must be named astrid.sqlite3: {path}")
-    if path.is_symlink() or not path.is_file():
+def validate_support_root(support_root: str | Path) -> Path:
+    """Require an explicit, existing non-symlink support directory."""
+    root = Path(support_root).expanduser()
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise BootManifestError(
-            f"Astrid state must be an existing regular, non-symlink file: {path}"
+            "boot manifest support root must be an existing absolute "
+            f"non-symlink directory: {root}"
         )
-    return path.resolve()
+    return root.resolve()
 
 
-def validate_explicit_boot_manifest(path: str | Path) -> tuple[Path, Path]:
-    """Validate an existing manifest and return it with its sibling state."""
-    manifest = Path(path).expanduser()
-    if manifest.name != BOOT_MANIFEST_FILENAME:
+def validate_manifest_path(
+    manifest_path: str | Path,
+    support_root: str | Path,
+    *,
+    require_existing: bool = True,
+) -> Path:
+    """Validate a manifest location contained by the explicit support root."""
+    root = validate_support_root(support_root)
+    path = Path(manifest_path).expanduser()
+    if path.name != BOOT_MANIFEST_FILENAME:
         raise BootManifestError(
-            f"boot manifest must be named {BOOT_MANIFEST_FILENAME}: {manifest}"
+            f"boot manifest must be named {BOOT_MANIFEST_FILENAME}: {path}"
         )
-    if manifest.is_symlink() or not manifest.is_file():
+    if (
+        not path.is_absolute()
+        or path.is_symlink()
+        or (require_existing and not path.is_file())
+        or (not require_existing and path.exists() and not path.is_file())
+    ):
         raise BootManifestError(
-            f"boot manifest must be an existing regular, non-symlink file: {manifest}"
+            "boot manifest must be an existing absolute regular non-symlink "
+            f"file: {path}"
         )
-    parent = manifest.parent
-    if parent.name != ".astrid" or parent.is_symlink() or not parent.is_dir():
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
         raise BootManifestError(
-            f"boot manifest must be in an existing non-symlink .astrid directory: {manifest}"
-        )
-    state = validate_state_path(parent / "astrid.sqlite3")
-    return manifest.resolve(), state
-
-
-def boot_manifest_path(state_path_or_root: str | Path) -> Path:
-    """Resolve the manifest path from a validated state file."""
-    path = Path(state_path_or_root).expanduser().resolve()
-    if path.name != "astrid.sqlite3":
-        raise BootManifestError(f"Astrid state must be named astrid.sqlite3: {path}")
-    return path.with_name(BOOT_MANIFEST_FILENAME)
+            f"boot manifest must be contained by explicit support root: {resolved}"
+        ) from exc
+    return resolved
 
 
 def _load_stored(path: Path) -> dict[str, Any]:
@@ -326,19 +330,21 @@ def _load_stored(path: Path) -> dict[str, Any]:
 
 
 def stamp_boot_manifest(
-    state_path_or_root: str | Path,
+    manifest_path: str | Path,
     *,
+    support_root: str | Path,
     registry: Mapping[str, Any] | None = None,
     fixtures: Iterable[Any] | None = None,
     profile_order: Iterable[str] = _DEFAULT_PROFILE_ORDER,
 ) -> dict[str, Any]:
-    state_path = validate_state_path(state_path_or_root)
+    path = validate_manifest_path(
+        manifest_path, support_root, require_existing=False
+    )
     current = build_manifest(
         registry=registry,
         fixtures=fixtures,
         profile_order=profile_order,
     )
-    path = boot_manifest_path(state_path)
     if path.is_symlink():
         raise BootManifestCorrupt(
             f"stamped boot manifest must be a non-symlink regular file: {path}"
@@ -354,6 +360,7 @@ def stamp_boot_manifest(
             details = "; ".join(f"key={key} stamped={stored.get(key)!r} live={current.get(key)!r}" for key in drift if stored.get(key) != current.get(key))
             raise BootManifestDrift(f"boot manifest disagrees with live registry/fixtures at {path}: {details}")
         return current
+    path.parent.mkdir(parents=True, exist_ok=True)
     handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=".boot-manifest-", suffix=".tmp", delete=False)
     try:
         json.dump(current, handle, sort_keys=True, indent=2)
@@ -370,15 +377,11 @@ def stamp_boot_manifest(
         raise
     return current
 
-def load_boot_manifest_hash(state_path_or_root: str | Path) -> str | None:
-    raw_path = Path(state_path_or_root).expanduser()
-    path = (
-        raw_path.resolve()
-        if raw_path.name == BOOT_MANIFEST_FILENAME
-        else boot_manifest_path(raw_path)
-    )
-    if not path.exists():
-        return None
+def load_boot_manifest_hash(
+    manifest_path: str | Path, *, support_root: str | Path
+) -> str:
+    """Read and hash an existing explicit manifest without writing it."""
+    path = validate_manifest_path(manifest_path, support_root)
     if path.is_symlink() or not path.is_file():
         raise BootManifestCorrupt(
             f"stamped boot manifest must be a non-symlink regular file: {path}"
@@ -393,9 +396,8 @@ __all__ = [
     "BootManifestDrift",
     "BootManifestError",
     "assert_secret_free",
-    "validate_explicit_boot_manifest",
-    "validate_state_path",
-    "boot_manifest_path",
+    "validate_manifest_path",
+    "validate_support_root",
     "build_manifest",
     "compute_conformance_digest",
     "compute_registry_digest",

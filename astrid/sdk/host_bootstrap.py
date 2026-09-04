@@ -120,6 +120,8 @@ def _host_identity_matches(state: Mapping[str, Any]) -> bool:
         str(state.get("credential_file") or ""),
         str(state.get("support_root") or ""),
         str(state.get("endpoint") or ""),
+        str(state.get("boot_manifest_path") or ""),
+        str(state.get("boot_manifest_hash") or ""),
     )
     return all(value and value in command for value in required)
 
@@ -376,6 +378,18 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
         )
 
     runtime_support = worker_path.parent.parent
+    host_root = runtime_support / "astrid-host"
+    boot_manifest_path = host_root / "boot-manifest.json"
+    from astrid.core.gateway.dispatch import compose_profile_handoff
+    try:
+        boot_handoff = compose_profile_handoff(
+            boot_manifest_path, support_root=runtime_support
+        )
+    except Exception as exc:
+        raise PackHostBootstrapError(
+            f"generic Astrid pack boot manifest could not be composed; {reconfigure_action}"
+        ) from exc
+    boot_manifest_hash = str(boot_handoff["sha256"])
     state_path = runtime_support / "generic-host.json"
     ready_path = runtime_support / "generic-host.ready.json"
     lock_path = runtime_support / "generic-host.lock"
@@ -404,6 +418,8 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
             "runtime_instance_id": str(runtime_instance_id),
             "runtime_epoch": runtime_epoch,
             "schema_digest": schema_digest,
+            "boot_manifest_path": str(boot_manifest_path),
+            "boot_manifest_hash": boot_manifest_hash,
         }
         if (current and ready
                 and all(current.get(key) == expected_value for key, expected_value in expected.items())
@@ -421,6 +437,8 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
                 "host_runtime_instance_id": str(runtime_instance_id),
                 "host_runtime_epoch": runtime_epoch,
                 "host_source_checkout_digest": source_digest,
+                "host_boot_manifest_path": str(boot_manifest_path),
+                "host_boot_manifest_hash": boot_manifest_hash,
             }
         if current:
             _terminate_old_host(current)
@@ -439,6 +457,8 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
             "--source-checkout", str(source_path),
             "--runtime-instance-id", str(runtime_instance_id),
             "--register",
+            "--boot-manifest-path", str(boot_manifest_path),
+            "--boot-manifest-hash", boot_manifest_hash,
         ]
         if matrix.is_file():
             argv.extend(("--capability-matrix", str(matrix)))
@@ -505,6 +525,8 @@ def ensure_pack_host(value: Mapping[str, Any], *, reconfigure_action: str) -> Ma
             "host_runtime_instance_id": str(runtime_instance_id),
             "host_runtime_epoch": runtime_epoch,
             "host_source_checkout_digest": source_digest,
+            "host_boot_manifest_path": str(boot_manifest_path),
+            "host_boot_manifest_hash": boot_manifest_hash,
         }
     finally:
         try:

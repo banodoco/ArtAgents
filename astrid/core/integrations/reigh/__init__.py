@@ -9,6 +9,8 @@ from .boot_manifest import (
     load_boot_manifest_hash,
     manifest_hash,
     stamp_boot_manifest,
+    validate_manifest_path,
+    validate_support_root,
 )
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "load_boot_manifest_hash",
     "manifest_hash",
     "stamp_boot_manifest",
+    "validate_manifest_path",
+    "validate_support_root",
 ]

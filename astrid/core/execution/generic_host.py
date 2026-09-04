@@ -899,6 +899,7 @@ class GenericPackHost:
         capability_matrix: str | Path | None = None,
         credential_source: Mapping[str, str] | None = None,
         boot_manifest_path: str | Path | None = None,
+        boot_manifest_hash: str | None = None,
     ):
         configured_roots = [Path(root).expanduser().resolve() for root in pack_roots]
         # ASTRID_PACKS_PATH is an explicit discovery input, never an implicit
@@ -931,6 +932,7 @@ class GenericPackHost:
             if boot_manifest_path is not None
             else None
         )
+        self.boot_manifest_hash = boot_manifest_hash
         # Provider route grants are intentionally scoped to this host process;
         # their signing key never crosses into a child or runtime payload.
         self._provider_grants = ProviderRouteGrantAuthority()
@@ -970,11 +972,12 @@ class GenericPackHost:
             return None
         from astrid.core.integrations.reigh.boot_manifest import load_boot_manifest_hash
 
-        stamped_manifest_hash = load_boot_manifest_hash(self.boot_manifest_path)
-        if stamped_manifest_hash is None:
-            raise HostError(
-                "boot manifest is required for completion provenance but is absent"
-            )
+        stamped_manifest_hash = load_boot_manifest_hash(
+            self.boot_manifest_path,
+            support_root=self.boot_manifest_path.parents[1],
+        )
+        if self.boot_manifest_hash and stamped_manifest_hash != self.boot_manifest_hash:
+            raise HostError("boot manifest changed after host startup")
         return {
             "kind": "astrid.boot_manifest",
             "sha256": stamped_manifest_hash,
@@ -2638,39 +2641,28 @@ class GenericPackHost:
         )
 
 
-def _compose_cli_boot_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Path:
-    """Verify or stamp the manifest only for explicitly bound real state."""
-    if args.state_path is not None and args.boot_manifest_path is not None:
-        parser.error("--state-path and --boot-manifest-path are mutually exclusive")
+def _compose_cli_boot_manifest(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> tuple[Path, str]:
+    """Read an existing manifest bound to the explicit support root."""
+    if args.boot_manifest_path is None:
+        parser.error("generic host requires explicit --boot-manifest-path")
+    if args.support_root is None:
+        parser.error("generic host requires explicit --support-root")
     try:
         from astrid.core.integrations.reigh.boot_manifest import (
-            validate_explicit_boot_manifest,
-            validate_state_path,
+            load_boot_manifest_hash,
+            validate_manifest_path,
         )
-
-        explicit_manifest_path: Path | None = None
-        if args.state_path is not None:
-            state_path = validate_state_path(args.state_path)
-        elif args.boot_manifest_path is not None:
-            explicit_manifest_path, state_path = validate_explicit_boot_manifest(
-                args.boot_manifest_path
-            )
-        else:
-            parser.error(
-                "generic host requires explicit --state-path or --boot-manifest-path"
-            )
-
-        from astrid.core.gateway.dispatch import compose_profile_handoff
-
-        handoff = compose_profile_handoff(state_path)
-        manifest_path = Path(str(handoff["path"])).resolve()
-        if explicit_manifest_path is not None and manifest_path != explicit_manifest_path:
-            raise RuntimeError(
-                "explicit boot manifest is not the sibling of the bound state"
-            )
+        manifest_path = validate_manifest_path(args.boot_manifest_path, args.support_root)
+        digest = load_boot_manifest_hash(
+            manifest_path, support_root=args.support_root
+        )
+        if args.boot_manifest_hash is not None and args.boot_manifest_hash != digest:
+            raise RuntimeError("boot manifest hash does not match the existing manifest")
     except (OSError, RuntimeError) as exc:
         parser.error(f"boot manifest composition failed: {exc}")
-    return manifest_path
+    return manifest_path, digest
 
 
 def _cli() -> int:
@@ -2697,8 +2689,8 @@ def _cli() -> int:
     parser.add_argument("--source-checkout", help="absolute source checkout bound to this host")
     parser.add_argument("--support-root", help="absolute runtime support directory bound to this host")
     parser.add_argument("--runtime-instance-id", help="runtime instance identity bound to this host")
-    parser.add_argument("--state-path", help="Astrid SQLite state path for boot-manifest composition")
-    parser.add_argument("--boot-manifest-path", help="explicit boot-manifest path for composition")
+    parser.add_argument("--boot-manifest-path", help="existing explicit boot-manifest path")
+    parser.add_argument("--boot-manifest-hash", help="expected SHA-256 hash of the boot manifest")
     args = parser.parse_args()
     credential = None
     credential_path = None
@@ -2714,7 +2706,7 @@ def _cli() -> int:
             parser.error(str(exc))
         if not credential:
             parser.error("credential file is empty")
-    boot_manifest = _compose_cli_boot_manifest(args, parser)
+    boot_manifest, boot_manifest_hash = _compose_cli_boot_manifest(args, parser)
     client = RuntimeProtocolClient(args.runtime_endpoint, credential) if args.runtime_endpoint else None
     host = GenericPackHost(
         pack_roots=args.pack_root,
@@ -2724,6 +2716,7 @@ def _cli() -> int:
         attempt_root=args.attempt_root,
         capability_matrix=args.capability_matrix,
         boot_manifest_path=boot_manifest,
+        boot_manifest_hash=boot_manifest_hash,
     )
     host.discover()
     host.preflight()
@@ -2769,6 +2762,8 @@ def _cli() -> int:
             "support_root": str(support_root) if support_root else None,
             "source_checkout": str(source_checkout) if source_checkout else None,
             "source_checkout_digest": source_checkout_digest(source_checkout) if source_checkout else None,
+            "boot_manifest_path": str(boot_manifest),
+            "boot_manifest_hash": boot_manifest_hash,
             "source_epoch": host.source_epoch,
             "runtime_instance_id": args.runtime_instance_id,
             "runtime_epoch": host.runtime_state.get("runtime_epoch"),

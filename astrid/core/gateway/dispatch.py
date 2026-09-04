@@ -251,8 +251,9 @@ _TOP_LEVEL_HANDLERS = {
 
 
 def compose_profile_handoff(
-    state_path: str | "Path",
+    manifest_path: str | "Path",
     *,
+    support_root: str | "Path",
     registry: "Mapping[str, Any] | None" = None,
     fixtures: "Iterable[Any] | None" = None,
 ) -> dict[str, Any]:
@@ -263,36 +264,44 @@ def compose_profile_handoff(
     """
 
     from astrid.core.integrations.reigh.boot_manifest import (
-        boot_manifest_path,
         manifest_hash,
         stamp_boot_manifest,
-        validate_state_path,
+        validate_manifest_path,
     )
     from astrid.packs.shots.conformance import (
         VIBE_PROFILE_REGISTRY,
         vibe_profile_specs,
     )
-    validated_state_path = validate_state_path(state_path)
+    validated_manifest_path = validate_manifest_path(
+        manifest_path, support_root, require_existing=False
+    )
 
     active_registry = VIBE_PROFILE_REGISTRY if registry is None else registry
     active_fixtures = vibe_profile_specs() if fixtures is None else fixtures
     manifest = stamp_boot_manifest(
-        validated_state_path,
+        validated_manifest_path,
+        support_root=support_root,
         registry=active_registry,
         fixtures=active_fixtures,
     )
     return {
-        "path": str(boot_manifest_path(validated_state_path)),
+        "path": str(validated_manifest_path),
         "sha256": manifest_hash(manifest),
         "manifest": manifest,
     }
 
 
 def emit_boot_manifest(
-    state_path: str | "Path",
+    manifest_path: str | "Path",
     *,
+    support_root: str | "Path",
     registry: "Mapping[str, Any] | None" = None,
     fixtures: "Iterable[Any] | None" = None,
 ) -> dict[str, Any]:
     """Explicit composition-root name for callers that do not need routing."""
-    return compose_profile_handoff(state_path, registry=registry, fixtures=fixtures)
+    return compose_profile_handoff(
+        manifest_path,
+        support_root=support_root,
+        registry=registry,
+        fixtures=fixtures,
+    )
