@@ -95,6 +95,25 @@ def test_generic_host_preserves_lexical_symlink_parent_for_validation(tmp_path: 
         host.boot_manifest_provenance()
 
 
+def test_symlinked_support_root_ancestor_is_rejected_by_host_provenance(
+    tmp_path: Path,
+) -> None:
+    real_base = tmp_path / "real-base"
+    support = real_base / "support"
+    support.mkdir(parents=True)
+    manifest = support / "astrid-host" / "boot-manifest.json"
+    compose_profile_handoff(manifest, support_root=support)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real_base, target_is_directory=True)
+    aliased_support = alias / "support"
+    aliased_manifest = aliased_support / "astrid-host" / "boot-manifest.json"
+    with pytest.raises(BootManifestError, match="symlink component"):
+        validate_manifest_path(aliased_manifest, aliased_support)
+    host = GenericPackHost(pack_roots=[tmp_path], boot_manifest_path=aliased_manifest)
+    with pytest.raises(BootManifestError, match="symlink component"):
+        host.boot_manifest_provenance()
+
+
 def test_generic_host_cli_requires_existing_manifest_and_never_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

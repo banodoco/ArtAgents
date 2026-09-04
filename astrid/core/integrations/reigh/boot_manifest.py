@@ -271,6 +271,20 @@ def assert_secret_free(manifest: Mapping[str, Any]) -> None:
                     f"boot manifest field {field!r} contains an invalid digest"
                 )
 
+def _reject_lexical_symlinks(path: Path, *, label: str) -> None:
+    """Reject symlinks in a lexical path before any resolution occurs."""
+    cursor = path
+    while True:
+        if cursor.is_symlink():
+            raise BootManifestError(
+                f"{label} contains a symlink component: {cursor}"
+            )
+        parent = cursor.parent
+        if parent == cursor:
+            break
+        cursor = parent
+
+
 def validate_support_root(support_root: str | Path) -> Path:
     """Require an explicit, existing non-symlink support directory."""
     root = Path(support_root).expanduser()
@@ -290,6 +304,7 @@ def validate_manifest_path(
 ) -> Path:
     """Validate a manifest location contained by the explicit support root."""
     raw_root = Path(support_root).expanduser()
+    _reject_lexical_symlinks(raw_root, label="boot manifest support root")
     root = validate_support_root(raw_root)
     path = Path(manifest_path).expanduser()
     if path.name != BOOT_MANIFEST_FILENAME:
@@ -316,18 +331,7 @@ def validate_manifest_path(
         raise BootManifestError(
             f"boot manifest must be contained by explicit support root: {lexical_path}"
         ) from exc
-    cursor = lexical_path
-    while True:
-        if cursor.is_symlink():
-            raise BootManifestError(
-                f"boot manifest path contains a symlink component: {cursor}"
-            )
-        if cursor == lexical_root:
-            break
-        parent = cursor.parent
-        if parent == cursor:
-            break
-        cursor = parent
+    _reject_lexical_symlinks(lexical_path, label="boot manifest path")
     resolved = path.resolve()
     try:
         resolved.relative_to(root)
