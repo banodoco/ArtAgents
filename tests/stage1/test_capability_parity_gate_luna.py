@@ -14,6 +14,7 @@ without making generated evidence part of the source checkout.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -26,6 +27,8 @@ from astrid.core.execution.generic_host import GenericPackHost
 ROOT = Path(__file__).resolve().parents[2]
 PACKS = ROOT / "astrid" / "packs"
 MATRIX = ROOT / "config" / "astrid-beta-capabilities.json"
+RUNTIME_CHECKOUT = ROOT.parent / "banodoco-workspace-runtime-fi6-identity-20260905"
+RUNTIME_PYTHON = RUNTIME_CHECKOUT / "packages" / "python"
 
 # These selectors are the durable proofs for the shared host boundary.  A
 # family proof is intentionally not claimed as business-level proof for every
@@ -107,10 +110,17 @@ def _run_proofs(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if row["ready"] and isinstance(row.get("proof"), dict)
     }
     results: dict[str, dict[str, Any]] = {}
+    proof_env = os.environ.copy()
+    proof_env["PYTHONPATH"] = os.pathsep.join(
+        part
+        for part in (str(ROOT), str(RUNTIME_CHECKOUT), str(RUNTIME_PYTHON), proof_env.get("PYTHONPATH", ""))
+        if part
+    )
     for selector in sorted(selectors):
         completed = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", selector],
             cwd=ROOT,
+            env=proof_env,
             text=True,
             capture_output=True,
             check=False,
@@ -139,7 +149,7 @@ def test_stage1_capability_parity_is_explicit_and_family_proven(tmp_path: Path) 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     assert report["schema"] == "astrid.stage1.capability_parity.v1"
-    assert report["discovered_count"] == 59
+    assert report["discovered_count"] == 63
     assert len(records) == len(host.matrix)
     assert {record.id for record in records} == set(host.matrix)
 

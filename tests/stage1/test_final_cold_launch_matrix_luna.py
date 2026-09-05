@@ -47,7 +47,7 @@ ASTRID_SOURCE = Path(
     ).stdout.strip()
 ).parent
 RUNTIME_CHECKOUT = ASTRID_SOURCE.parent / "banodoco-workspace-runtime"
-RUNTIME_COMMIT = "4050394c5395206f1ec6bf0d905ffbfb7bb0e4de"
+RUNTIME_COMMIT = "d12135253046bcb92efa94fd27892071507684dc"
 
 
 def _archive_runtime(destination: Path) -> Path:
@@ -179,6 +179,27 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
     )
 
     runtime_pid: int | None = None
+    host_pids: set[int] = set()
+    initial_host_state: dict[str, Any] = {}
+    restarted_host_state: dict[str, Any] = {}
+
+    def remember_host_state() -> dict[str, Any]:
+        state_path = support / "runtime" / "generic-host.json"
+        if not state_path.is_file():
+            return {}
+        state = _json(state_path)
+        ready_path = support / "runtime" / "generic-host.ready.json"
+        manifest_path = support / "runtime" / "astrid-host" / "boot-manifest.json"
+        if (
+            state.get("source_checkout") != str(ROOT)
+            or state.get("ready_file") != str(ready_path)
+            or state.get("boot_manifest_path") != str(manifest_path)
+            or not state.get("boot_manifest_hash")
+        ):
+            return {}
+        host_pids.add(int(state["pid"]))
+        return state
+
     try:
         # Fresh trusted bootstrap through the real neutral launcher.
         first = _run(
@@ -307,6 +328,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             client_version="stage1",
             protocol_version="workspace.v1",
         )
+        initial_host_state = remember_host_state()
+        assert initial_host_state, "validated generic-host marker was not created for this test"
         with explicit as client:
             assert client.media.verify(project_id, object_id).ok
             timeline = client.timelines.create(
@@ -355,6 +378,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
                 client=RuntimeProtocolClient(started["endpoint"], worker_token),
                 executor_id="astrid-pack-host",
                 attempt_root=tmp_path / "attempt",
+                boot_manifest_path=initial_host_state["boot_manifest_path"],
+                boot_manifest_hash=initial_host_state["boot_manifest_hash"],
             )
             record = host.discover()[0]
             assert host.preflight(record.id)[0].ready is True
@@ -422,6 +447,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert restarted["realm_id"] == started["realm_id"]
         new_discovery = _json(discovery_path)
         runtime_pid = int(new_discovery["pid"])
+        restarted_host_state = remember_host_state()
+        assert restarted_host_state, "validated restarted generic-host marker was not created for this test"
         new_worker_credential_file = Path(new_discovery["worker_credential_file"])
         assert stat.S_IMODE(new_worker_credential_file.stat().st_mode) == 0o600
         new_token = new_worker_credential_file.read_text(encoding="utf-8").strip()
@@ -451,6 +478,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             client=RuntimeProtocolClient(restarted["endpoint"], new_token),
             executor_id="astrid-pack-host",
             attempt_root=tmp_path / "attempt-restarted",
+            boot_manifest_path=restarted_host_state["boot_manifest_path"],
+            boot_manifest_hash=restarted_host_state["boot_manifest_hash"],
         )
         restarted_host.discover()
         restarted_host.register(deliberate=True)
@@ -496,6 +525,8 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
             client=RuntimeProtocolClient(restarted["endpoint"], new_token),
             executor_id="astrid-pack-host",
             attempt_root=render_attempt,
+            boot_manifest_path=restarted_host_state["boot_manifest_path"],
+            boot_manifest_hash=restarted_host_state["boot_manifest_hash"],
         )
         render_record = render_host.discover()[0]
         assert render_host.preflight(render_record.id)[0].ready is True
@@ -526,7 +557,19 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert json.loads(provenance.read_text(encoding="utf-8"))["renderer"] == "ffmpeg"
         shutil.rmtree(render_attempt)
         assert not render_attempt.exists()
-        assert generated.get_task(render_task.task_id).state in {"succeeded", "completed"}
+        completed_render = generated.get_task(render_task.task_id)
+        assert completed_render.state in {"succeeded", "completed"}
+        completion = completed_render.result
+        assert isinstance(completion, Mapping)
+        assert completion["adapter_family"] == "cpu"
+        assert completion["capability_digest"] == render_record.capability_digest
+        assert completion["source_digest"] == render_record.source_digest
+        assert completion["dependency_digest"] == render_record.dependency_digest
+        assert completion["provenance"]["kind"] == "astrid.boot_manifest"
+        assert completion["provenance"]["sha256"] == restarted_host_state["boot_manifest_hash"]
+        assert completion["process_evidence"]["child_boundary"] == "subprocess"
+        assert completion["process_evidence"]["attempt_id"]
+        assert completion["process_evidence"]["returncode"] == 0
 
         # The neutral doctor path must remain healthy after all mutations.
         doctor = _run(
@@ -554,6 +597,11 @@ def test_final_cold_launch_matrix_no_mocks(tmp_path: Path) -> None:
         assert actor_payload["realm_id"] == started["realm_id"]
         assert "claim-heartbeat-fenced-settlement-cas-output" in actor_payload["steps"]
     finally:
+        for host_pid in host_pids:
+            try:
+                os.kill(host_pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         if runtime_pid is not None:
             try:
                 os.kill(runtime_pid, signal.SIGTERM)

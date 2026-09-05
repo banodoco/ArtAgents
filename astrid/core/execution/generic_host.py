@@ -709,6 +709,11 @@ class RuntimeProtocolClient:
         return int(epoch)
 
     def register_executor(self, executor_id: str, *, capabilities: list[Mapping[str, Any]], max_concurrency: int, resource_keys: list[str], source_digest: str | None, dependency_digest: str | None = None, source_epoch: str | None = None, protocol_version: str = "workspace.v1", schema_digest: str | None = None, runtime_epoch: int | None = None):
+        # Runtime schema identity is negotiated through health/compatibility;
+        # source, dependency, and source-epoch identity remain part of the
+        # executor registration admission envelope.  ``schema_digest`` is
+        # intentionally not sent until the generated runtime client contract
+        # exposes that field.
         payload = {
             "executor_id": executor_id,
             "capabilities": capabilities,
@@ -718,7 +723,6 @@ class RuntimeProtocolClient:
             "source_digest": source_digest,
             "source_epoch": source_epoch,
             "dependency_digest": dependency_digest,
-            "schema_digest": schema_digest,
             "runtime_epoch": runtime_epoch,
         }
         return self.generated.register_executor(
@@ -2359,7 +2363,17 @@ class GenericPackHost:
             if cancelled():
                 cancelled_attempt = True
                 return {"task_id": task_id, "status": "cancelled", "cancelled": True}
-            payload = {"adapter_family": record.adapter.family, **(getattr(result, "payload", {}) or {})}
+            # Completion provenance is host-owned.  Keep any backend/B6/model
+            # evidence returned by the child, then stamp the exact admitted
+            # capability/source/dependency identities over it so a child
+            # cannot replace the admission evidence in the settlement result.
+            payload = {
+                "adapter_family": record.adapter.family,
+                **(getattr(result, "payload", {}) or {}),
+                "capability_digest": record.capability_digest,
+                "source_digest": record.source_digest,
+                "dependency_digest": record.dependency_digest,
+            }
             network_evidence = self._network_evidence(
                 root,
                 admission=worker_admission if record.definition.command is None else network_admission,
@@ -2375,13 +2389,22 @@ class GenericPackHost:
             provenance = self.boot_manifest_provenance()
             if provenance is not None:
                 payload["provenance"] = provenance
+            result_payload = getattr(result, "payload", None)
+            if not isinstance(result_payload, Mapping):
+                result_payload = {}
+            process_id = getattr(result, "process_id", None)
+            if process_id is None:
+                process_id = result_payload.get("process_id")
+            returncode = getattr(result, "returncode", None)
+            if returncode is None:
+                returncode = result_payload.get("returncode")
             payload["process_evidence"] = {
                 "capability_id": capability_id,
                 "attempt_id": attempt_id,
                 "fence": fence,
                 "child_boundary": "subprocess",
-                "process_id": getattr(result, "process_id", None),
-                "returncode": getattr(result, "returncode", None),
+                "process_id": process_id,
+                "returncode": returncode,
             }
             effect = task_data.get("expected_effect")
             if isinstance(effect, list):

@@ -9,8 +9,8 @@ def test_shipped_ledger_reconciles_historical_capability_sets():
     ledger = load_capability_ledger(Path("config/astrid-beta-capabilities.json"))
     sources = ledger["sources"]
 
-    assert sources["counts"]["pack_labels"] == 76
-    assert sources["counts"]["historical_pack_labels"] == 81
+    assert sources["counts"]["pack_labels"] == 83
+    assert sources["counts"]["historical_pack_labels"] == 88
     assert sources["counts"]["executor_inventory"] == 74
     assert sources["counts"]["legacy_ids"] == 19
     assert all(section["complete"] for section in sources["coverage"].values())
@@ -35,8 +35,8 @@ def test_host_consumes_the_reconciled_ledger_before_readiness_matrix():
     from astrid.core.execution.generic_host import GenericPackHost
 
     host = GenericPackHost(pack_roots=[Path("astrid/packs")])
-    assert host.ledger["sources"]["counts"]["pack_labels"] == 76
-    assert len(host.matrix) == 59
+    assert host.ledger["sources"]["counts"]["pack_labels"] == 83
+    assert len(host.matrix) == 63
 
 
 def test_historical_external_executor_rows_are_explicitly_not_installed():

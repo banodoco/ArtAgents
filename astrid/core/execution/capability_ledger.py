@@ -331,10 +331,11 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         row["canonical_id"] = candidate if candidate in current_ids else None
         row["disposition"] = "advertised" if row["canonical_id"] else "unmapped_source_label"
     for row in executors:
-        if row["id"] in current_ids:
-            row["disposition"] = "advertised"
-            row["discovery_status"] = "discovered"
-        elif row["id"].startswith(("hivemind.", "discord_local.", "seedance_local.")):
+        # Matrix rows for optional external packs are historical contract
+        # records, not source manifests.  They remain unavailable until an
+        # admitted external pack supplies their definitions; a matrix entry
+        # alone must never make one look discovered.
+        if row["id"].startswith(("hivemind.", "discord_local.", "seedance_local.")):
             # These IDs remain in the historical result-contract inventory,
             # but their source packs are optional and are not shipped in the
             # current checkout.  Keep them visible for reconciliation without
@@ -342,6 +343,9 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
             row["disposition"] = "unavailable_external"
             row["discovery_status"] = "not_installed"
             row["reason"] = "optional external pack is not installed in this checkout"
+        elif row["id"] in current_ids:
+            row["disposition"] = "advertised"
+            row["discovery_status"] = "discovered"
         elif row["disposition"] == "historical":
             row["reason"] = row.get("reason") or "retained in historical executor snapshot; no current executor manifest"
             row["discovery_status"] = "historical_only"
@@ -349,14 +353,16 @@ def _reconcile_sources(repo_root: Path, capabilities: list[Mapping[str, Any]]) -
         if row.get("discovery_status") != "discovered":
             row.setdefault("executable", False)
     expected_hivemind = sorted(row["id"] for row in executors if row["id"].startswith("hivemind."))
-    # Blessed census baseline. Advance these counts only when new source
-    # labels are real, implemented, and matrix-covered: 2026-09-04 adds the
-    # local/discord_local/seedance_local packs (6 labels) and vibecomfy
-    # inspect/edit (2 labels); all implemented, pack tests passing, matrix
-    # entries present in config/astrid-beta-capabilities.json.
+    # Blessed census baseline for this accepted source tree.  The reviewed
+    # integration contains the tracked local element pack (3 labels), the
+    # tracked VibeComfy inspect/edit additions (2), and the accepted Wan2GP
+    # pack (2), for 83 current labels.  Discord-local and Seedance-local are
+    # optional external rows in the frozen matrix/output-contract snapshot;
+    # their gitignored source packs are not part of this reviewed tree and
+    # must remain unavailable rather than being counted as shipped source.
     coverage = {
-        "source_labels": {"source": 84, "ledger": len(labels), "missing": [], "complete": len(labels) == 84},
-        "historical_source_labels": {"source": 89, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 89},
+        "source_labels": {"source": 83, "ledger": len(labels), "missing": [], "complete": len(labels) == 83},
+        "historical_source_labels": {"source": 88, "ledger": len(historical_labels), "missing": [], "complete": len(historical_labels) == 88},
         "executor_inventory": {"source": 74, "ledger": len(executors), "missing": [], "complete": len(executors) == 74},
         "legacy_ids": {"source": 19, "ledger": len(legacy), "missing": [], "complete": len(legacy) == 19},
     }

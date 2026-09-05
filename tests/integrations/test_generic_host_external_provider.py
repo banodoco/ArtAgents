@@ -20,7 +20,7 @@ import pytest
 from astrid.core.execution.generic_host import GenericPackHost, HostError, RuntimeProtocolClient
 from astrid.core.execution.network_broker import ObservableNetworkBroker
 
-RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-stage1-convergence")
+RUNTIME = Path("/Users/peteromalley/Documents/reigh-workspace/banodoco-workspace-runtime-fi6-identity-20260905")
 if RUNTIME.is_dir():
     sys.path.insert(0, str(RUNTIME))
 from banodoco_workspace_client import ApiError, WorkspaceClient
