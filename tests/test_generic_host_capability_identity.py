@@ -59,4 +59,3 @@ def test_capability_semantics_change_portable_identity(tmp_path):
     after = GenericPackHost(pack_roots=[pack]).discover()[0]
 
     assert after.capability_digest != before.capability_digest
-
